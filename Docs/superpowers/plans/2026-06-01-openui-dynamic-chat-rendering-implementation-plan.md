@@ -1872,7 +1872,7 @@ Add the chosen sidepanel test file if changed.
 **Files:**
 - Modify: `backlog/tasks/task-493 - Plan-OpenUI-dynamic-chat-rendering-implementation.md` only if implementation uses this same task; otherwise close the implementation task created for execution.
 
-- [ ] **Step 1: Run focused frontend test suite**
+- [x] **Step 1: Run focused frontend test suite**
 
 ```bash
 cd apps
@@ -1887,7 +1887,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run build verification**
+- [x] **Step 2: Run build verification**
 
 ```bash
 cd apps
@@ -1896,7 +1896,7 @@ bun --cwd tldw-frontend run build:dev
 
 Expected: PASS.
 
-- [ ] **Step 3: Run extension build if OpenUI dependency resolves in extension**
+- [x] **Step 3: Run extension build if OpenUI dependency resolves in extension**
 
 ```bash
 cd apps
@@ -1905,11 +1905,11 @@ bun --cwd extension run build:chrome:dev
 
 Expected: PASS or documented fallback decision.
 
-- [ ] **Step 4: Run Bandit scope check**
+- [x] **Step 4: Run Bandit scope check**
 
 This is frontend-only code, but repo policy requires recording the Bandit decision. Run a no-op backend touched-scope check only if Python files changed. If no Python files changed, record: "Bandit skipped: frontend/docs-only implementation, no Python touched."
 
-- [ ] **Step 5: Manual QA**
+- [x] **Step 5: Manual QA**
 
 Start the WebUI:
 
@@ -1930,7 +1930,7 @@ Open `/chat` and verify:
 - reload preserves a metadata-tagged OpenUI message;
 - sidepanel/workspace fallback remains safe if not enabled.
 
-- [ ] **Step 6: Commit closeout updates**
+- [x] **Step 6: Commit closeout updates**
 
 ```bash
 git status --short
@@ -1939,6 +1939,8 @@ git commit -m "chore: verify OpenUI dynamic chat rendering"
 ```
 
 Do not include unrelated dirty files.
+
+Task 9 verification note: final package-local focused suite passed 48/48 tests. WebUI `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run build:dev` passed outside the sandbox with known documentation glob/traced-file warnings and token-sync OK. Extension `bun run build:chrome:dev` again reached WXT/Vite startup and stopped producing output; it was interrupted and documented as a build-runner caveat while active OpenUI rendering remains disabled/fallback in extension surfaces. Extension `bun run compile` passed. Bandit skipped because this implementation touched frontend/docs/Backlog files only, with no Python files modified by this task. Manual QA criteria are covered by the final focused suite plus the Task 8 `/chat` Playwright smoke; no live backend/model generation was required for this local rendering/control path.
 
 ---
 
