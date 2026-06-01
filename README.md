@@ -93,7 +93,7 @@ Good fit for:
 
 `make quickstart` remains the shortest Docker single-user + WebUI alias. It runs setup, start, and verification for the first profile.
 
-For a user-facing map of everything available in the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
+For a user-facing map of key workflows across the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
 
 1. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 

@@ -2,7 +2,7 @@
 
 tldw Assistant is a browser extension frontend for tldw_server — your unified AI assistant. Use a side panel or full web UI to chat with models configured on your server, run RAG search with citations, ingest/process media, and access STT/TTS features.
 
-For the complete tldw_server documentation map across the server API, WebUI, browser extension, and admin/operator workflows, use the [tldw_server User Guides](https://rmusser01.github.io/tldw_server/User_Guides/). This extension guide stays focused on extension-specific setup and browser behavior.
+For the shared tldw_server documentation map across the server API, WebUI, browser extension, and admin/operator workflows, use the [tldw_server User Guides](https://rmusser01.github.io/tldw_server/User_Guides/). This extension guide stays focused on extension-specific setup and browser behavior.
 
 ## What is tldw_server integration?
 

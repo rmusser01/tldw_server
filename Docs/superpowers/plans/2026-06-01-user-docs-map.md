@@ -360,7 +360,7 @@ nav:
 In `README.md`, after the paragraph that says ``make quickstart`` remains the shortest Docker single-user + WebUI alias, add:
 
 ```markdown
-For a user-facing map of everything available in the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
+For a user-facing map of key workflows across the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
 ```
 
 - [ ] **Step 3: Update README Documentation & Resources**
@@ -376,7 +376,7 @@ In `README.md`, under `**Getting Started Guides:**`, add this as the first bulle
 In `apps/extension/docs/index.md`, after the opening paragraph, add:
 
 ```markdown
-For the complete tldw_server documentation map across the server API, WebUI, browser extension, and admin/operator workflows, use the [tldw_server User Guides](https://rmusser01.github.io/tldw_server/User_Guides/). This extension guide stays focused on extension-specific setup and browser behavior.
+For the shared tldw_server documentation map across the server API, WebUI, browser extension, and admin/operator workflows, use the [tldw_server User Guides](https://rmusser01.github.io/tldw_server/User_Guides/). This extension guide stays focused on extension-specific setup and browser behavior.
 ```
 
 - [ ] **Step 5: Verify entry point text exists**
