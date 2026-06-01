@@ -19,7 +19,7 @@ The shared settings UI already has an LLM provider key management component and 
 
 - [ProviderKeysSettings.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Settings/ProviderKeysSettings.tsx)
 - [settings-nav-config.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Layouts/settings-nav-config.ts)
-- shared route entry in [option-settings-route-registry.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/routes/option-settings-route-registry.tsx)
+- settings-specific shared route entry in [option-settings-route-registry.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/routes/option-settings-route-registry.tsx)
 
 The route is not wired consistently across the actual app shells that can expose the settings navigation. In particular, the hosted Next.js WebUI has no `pages/settings/provider-keys.tsx`, and the extension route registry does not define `/settings/provider-keys`. Links to that path can therefore fall through to a 404 even though the page component exists.
 
@@ -62,7 +62,9 @@ The page should render the existing `ProviderKeysSettings` component inside the 
 
 - Hosted WebUI: create `apps/tldw-frontend/pages/settings/provider-keys.tsx` following the same dynamic import pattern used by nearby settings pages.
 - Extension/options: add the lazy settings route for `ProviderKeysSettings` and a `/settings/provider-keys` route definition in `apps/tldw-frontend/extension/routes/route-registry.tsx`.
-- Shared route registry already contains the route; keep it as the canonical pattern for hosted/shared parity.
+- Shared package shell: keep `apps/packages/ui/src/routes/option-settings-route-registry.tsx` as the canonical settings-registry entry. The shared options shell resolves settings deep links by importing this smaller registry through `DeferredOptionsRoute`.
+
+The main shared `apps/packages/ui/src/routes/route-registry.tsx` is not the primary settings deep-link registry in the shared package shell. Do not add `/settings/provider-keys` there unless implementation testing proves a separate consumer needs it.
 
 No new provider-key storage, API contract, encryption behavior, or settings layout is part of this change.
 
@@ -88,9 +90,9 @@ The route fix should not convert API failures into navigation errors.
 
 Add route coverage for:
 
-- Hosted WebUI has a `/settings/provider-keys` page that imports `ProviderKeysSettings`.
-- Extension route registry defines `/settings/provider-keys`.
-- Existing shared route registry remains covered for `/settings/provider-keys`.
+- Hosted WebUI has a `/settings/provider-keys` page that imports `ProviderKeysSettings`; follow the page-shim test style in `apps/tldw-frontend/__tests__/pages/settings-mcp-hub-route.test.tsx`.
+- Extension route registry defines `/settings/provider-keys`; follow the extension route-registry contract test style in `apps/tldw-frontend/__tests__/extension/route-registry.stability.test.ts` or add a focused provider-keys route test.
+- Existing shared settings registry remains covered for `/settings/provider-keys`; a targeted assertion in `apps/packages/ui/src/routes/__tests__/deferred-options-route.test.tsx` can verify settings deep links are resolved through `option-settings-route-registry`.
 
 Manual/browser verification after implementation should open `/settings/provider-keys` in the WebUI and extension/options shell and confirm it renders the provider key manager instead of a 404.
 
