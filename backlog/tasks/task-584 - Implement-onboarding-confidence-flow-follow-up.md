@@ -19,6 +19,8 @@ modified_files:
 - apps/packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx
 - apps/packages/ui/src/components/Option/Onboarding/UnifiedSetupWizard.tsx
 - apps/packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx
+- apps/packages/ui/src/components/Option/Onboarding/steps/FirstChatStep.tsx
+- apps/packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx
 ---
 
 ## Description
@@ -31,7 +33,7 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
 <!-- AC:BEGIN -->
 - [x] #1 Default first-chat provider requires manual validation and save before continuing; non-default providers can be saved unverified.
 - [x] #2 Setup readiness panel uses existing readiness APIs/types and remains non-blocking for optional lanes.
-- [ ] #3 First-chat failures render inline recovery actions: retry, edit provider, switch provider, skip setup, and endpoint recovery where relevant.
+- [x] #3 First-chat failures render inline recovery actions: retry, edit provider, switch provider, skip setup, and endpoint recovery where relevant.
 - [ ] #4 Post-onboarding first-source milestone offers Web URL, File upload, and Paste text, and only offers grounded chat after source readiness is confirmed.
 - [ ] #5 Focused backend, frontend, E2E, Bandit, and diff verification are recorded before PR closeout.
 <!-- AC:END -->
@@ -221,4 +223,37 @@ Task 2 StrictMode quality fix:
 - GREEN focused frontend: same hook command passed, 1 file / 7 tests.
 - Required frontend suite: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` passed, 3 files / 35 tests.
 - Backend files were not touched; Bandit not required.
+
+Task 3 first-chat recovery actions:
+- FirstChatStep now normalizes first-chat failure aliases into recovery categories and renders inline category-specific recovery copy without navigating away on failure.
+- Failure responses keep the failed attempt visible while retrying until a new result replaces it.
+- Recovery actions are explicit and compact: Retry, Edit provider, Switch provider, Skip setup, and Check endpoint for endpoint/API-shape failures when available.
+- Completion-state errors after a successful model response now use separate copy so they do not imply the model response failed.
+- UnifiedSetupWizard wires Edit provider, Switch provider, and Check endpoint back to provider setup while preserving the current provider selection; Skip setup uses the existing skip handler.
+- RED frontend: `bun run test:run ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` failed on missing categorized recovery copy/buttons, retry persistence, endpoint action, and completion-state copy.
+- GREEN frontend: same focused command passed, 2 files / 28 tests.
+- Task 2/3 adjacency frontend: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` passed, 4 files / 42 tests.
+- Backend files were not touched; Bandit not required for Task 3.
+Task 3 spec-fix worker:
+- Added backend `auth_failed` first-chat failure category to the FirstChatStep auth recovery normalization path.
+- Updated first-chat recovery coverage so backend `failure_category: "auth_failed"` shows credential-specific auth copy and recovery actions.
+- Added alias coverage preserving `auth`, `authentication_failed`, and `provider_api_key_invalid` auth recovery behavior.
+- Focused frontend verification: `bun run test:run ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` passed, 2 files / 31 tests.
+- `git diff --check` passed before staging. Backend files were not touched; Bandit not required.
+Task 3 backend-category spec fix:
+- Added explicit recovery mappings for backend first-chat failure categories `rate_limited`, `network_error`, `provider_error`, `request_invalid`, and `configuration_error`.
+- `request_invalid` now lands in the endpoint/API-shape recovery path so the Check endpoint action remains available for compatible endpoint diagnostics.
+- Added regressions proving backend categories render specific recovery copy instead of falling through to unknown.
+- RED frontend: `bun run test:run ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx --reporter=dot` from `apps/tldw-frontend` failed, 5 failed / 8 passed, because the backend categories rendered `Category: unknown`.
+- GREEN frontend: same focused command passed, 1 file / 13 tests.
+Task 3 quality fix:
+- Added recovery handling for backend `empty_response` so the UI gives specific empty-response guidance instead of unknown fallback.
+- Added request-exception failure state so a retry that throws before receiving a backend response does not keep stale recovery category/copy from the previous failed response.
+- RED frontend: `bun run test:run ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx --reporter=dot` from `apps/tldw-frontend` failed, 2 failed / 13 passed, on `empty_response` unknown fallback and stale auth copy after retry exception.
+- GREEN frontend: same focused command passed, 1 file / 15 tests.
+Task 3 duplicate skip quality fix:
+- Added wizard-level skip pending state and a synchronous ref guard so recovery Skip setup and header Skip for now cannot submit duplicate skip mutations while the backend request is in flight.
+- FirstChatStep now receives skip pending state and disables/renames the recovery skip button while skipping.
+- RED frontend: `bun run test:run ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx -t "prevents duplicate first-chat recovery skip submissions while skip is pending" --reporter=dot` from `apps/tldw-frontend` failed because skip was called twice and the second call threw on undefined `.then`.
+- GREEN frontend: same targeted command passed, 1 passed / 23 skipped.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

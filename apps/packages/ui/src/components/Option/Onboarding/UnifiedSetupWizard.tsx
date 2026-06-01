@@ -139,6 +139,8 @@ export function UnifiedSetupWizard({
     Record<string, number>
   >({});
   const [savingStep, setSavingStep] = React.useState(false);
+  const [skipPending, setSkipPending] = React.useState(false);
+  const skipPendingRef = React.useRef(false);
   const [stepError, setStepError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -322,6 +324,9 @@ export function UnifiedSetupWizard({
   );
 
   const handleSkip = React.useCallback(() => {
+    if (skipPendingRef.current) return;
+    skipPendingRef.current = true;
+    setSkipPending(true);
     setStepError(null);
     void skip({ reason: "user_skip" })
       .then((nextState) => {
@@ -332,6 +337,8 @@ export function UnifiedSetupWizard({
         setStepError("Setup skip could not be saved. Try again.");
       })
       .finally(() => {
+        skipPendingRef.current = false;
+        setSkipPending(false);
         void refreshSetupReadiness();
       });
   }, [onStateChange, refreshSetupReadiness, skip]);
@@ -367,9 +374,10 @@ export function UnifiedSetupWizard({
           <button
             type="button"
             onClick={handleSkip}
-            className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2"
+            disabled={skipPending}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
           >
-            Skip for now
+            {skipPending ? "Skipping..." : "Skip for now"}
           </button>
         </div>
       </header>
@@ -471,6 +479,11 @@ export function UnifiedSetupWizard({
               void refreshParentState();
             }}
             onBack={() => setStep("provider_setup")}
+            onEditProvider={() => setStep("provider_setup")}
+            onSwitchProvider={() => setStep("provider_setup")}
+            onCheckEndpoint={() => setStep("provider_setup")}
+            onSkip={handleSkip}
+            skipPending={skipPending}
           />
         ) : null}
       </div>

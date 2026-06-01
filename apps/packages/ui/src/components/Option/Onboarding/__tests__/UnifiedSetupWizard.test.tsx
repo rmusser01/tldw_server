@@ -892,6 +892,161 @@ describe("UnifiedSetupWizard", () => {
     ).toBeInTheDocument();
   });
 
+  it("routes first-chat recovery actions through provider setup and skip", async () => {
+    setupHookMocks.verifyFirstChat.mockResolvedValue({
+      status: "failed",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      failure_category: "auth",
+      message: "Invalid API key",
+    });
+    setupHookMocks.skip.mockResolvedValueOnce({
+      status: "skipped",
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: false },
+      skip_reason: "user_skip",
+    });
+    const onStateChange = vi.fn();
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    const renderFirstChat = () =>
+      render(
+        <UnifiedSetupWizard
+          initialState={initialStateForCompletedSteps([
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ])}
+          onStateChange={onStateChange}
+        />,
+      );
+
+    const firstRender = renderFirstChat();
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/invalid api key/i);
+    fireEvent.click(screen.getByRole("button", { name: /edit provider/i }));
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    firstRender.unmount();
+
+    const secondRender = renderFirstChat();
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/invalid api key/i);
+    fireEvent.click(screen.getByRole("button", { name: /switch provider/i }));
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    secondRender.unmount();
+
+    renderFirstChat();
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/invalid api key/i);
+    fireEvent.click(screen.getByRole("button", { name: /skip setup/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.skip).toHaveBeenCalledWith({
+        reason: "user_skip",
+      });
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "skipped" }),
+      );
+    });
+  });
+
+  it("prevents duplicate first-chat recovery skip submissions while skip is pending", async () => {
+    setupHookMocks.verifyFirstChat.mockResolvedValue({
+      status: "failed",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      failure_category: "auth_failed",
+      message: "Invalid API key",
+    });
+    const deferredSkip = createDeferred<FirstRunState>();
+    setupHookMocks.skip.mockReturnValueOnce(deferredSkip.promise);
+    const onStateChange = vi.fn();
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+        ])}
+        onStateChange={onStateChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/invalid api key/i);
+
+    const skipButton = screen.getByRole("button", { name: /skip setup/i });
+    fireEvent.click(skipButton);
+    fireEvent.click(skipButton);
+
+    expect(setupHookMocks.skip).toHaveBeenCalledTimes(1);
+    expect(skipButton).toBeDisabled();
+
+    deferredSkip.resolve({
+      status: "skipped",
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: false },
+      skip_reason: "user_skip",
+    });
+
+    await waitFor(() => {
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "skipped" }),
+      );
+    });
+  });
+
+  it("routes first-chat endpoint diagnostics back to provider setup", async () => {
+    setupHookMocks.verifyFirstChat.mockResolvedValueOnce({
+      status: "failed",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      failure_category: "unsupported_api_shape",
+      message: "The endpoint does not look OpenAI-compatible.",
+    });
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/does not look openai-compatible/i);
+    fireEvent.click(screen.getByRole("button", { name: /check endpoint/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/select openai/i)).toBeChecked();
+  });
+
   it("does not infer saved hosted credentials when resumed state lacks the marker", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
     setupHookMocks.validateProvider.mockImplementation(async (payload) => {
