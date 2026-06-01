@@ -63,7 +63,7 @@ Start with the guide that matches the failing surface:
 
 - Setup and profile issues: [self-hosting profiles](../Getting_Started/README.md) and [troubleshooting](../Getting_Started/TROUBLESHOOTING.md).
 - Authentication and access issues: [Authentication setup](Server/Authentication_Setup.md), [Multi-user Postgres setup](Server/Multi-User_Postgres_Setup.md), and [Multi-user SQLite setup](Server/Multi-User_SQLite_Setup.md).
-- Provider and model issues: [BYOK user guide](Server/BYOK_User_Guide.md), [OpenAI OAuth first-time setup](Server/OpenAI_OAuth_First_Time_Setup.md), and [Providers API documentation](../API-related/Providers_API_Documentation.md).
+- Provider and model issues: [BYOK user guide](Server/BYOK_User_Guide.md), [OpenAI OAuth first-time setup](Server/OpenAI_OAuth_First_Time_Setup.md), [local LLM setup](Integrations_Experiments/Setting_up_a_local_LLM.md), and [Providers API documentation](../API-related/Providers_API_Documentation.md).
 - Media and ingestion issues: [Web scraping and ingestion](Server/Web_Scraping_Ingestion_Guide.md), [Media ingest jobs API](../API-related/Media_Ingest_Jobs_API.md), and [Chunking templates user guide](Server/Chunking_Templates_User_Guide.md).
 - Audio issues: [CPU audio setup](../Getting_Started/First_Time_Audio_Setup_CPU.md), [GPU or accelerated audio setup](../Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md), and [TTS setup guide](WebUI_Extension/TTS-SETUP-GUIDE.md).
 - Production and operations issues: [Production hardening checklist](Server/Production_Hardening_Checklist.md), [Backups using Litestream](Server/Backups_Using_Litestream.md), and [Long-term admin guide](../Deployment/Long_Term_Admin_Guide.md).
