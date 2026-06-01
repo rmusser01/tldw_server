@@ -1,9 +1,10 @@
 ---
 id: TASK-256
 title: ACP commercial CLI live certification for issue 1564
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-11 05:01'
+updated_date: '2026-05-31 17:04'
 labels:
   - ACP
   - compatibility
@@ -56,6 +57,7 @@ Track GitHub issue #1564: run or explicitly block live ACP certification for the
 - Validation: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run` refused without required live env, exit 2.
 - Validation: `git diff --check` passed.
 - Bandit: skipped because this task touched only Markdown, YAML, and Backlog task metadata; no Python scope changed.
+- Closeout refresh on 2026-05-31: the task evidence, acceptance criteria, DoD, and final summary were already complete on `origin/dev`; this update marks the Backlog task Done. GitHub issue #1564 remains open as the live commercial-agent certification parent tracker for future recertification attempts.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
