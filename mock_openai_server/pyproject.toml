@@ -36,7 +36,7 @@ dependencies = [
     "uvicorn[standard]>=0.23.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
-    "python-multipart>=0.0.6",
+    "python-multipart>=0.0.27",
 ]
 
 [project.optional-dependencies]
