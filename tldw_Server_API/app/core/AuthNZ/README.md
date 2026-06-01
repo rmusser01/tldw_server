@@ -18,7 +18,7 @@ Note: This README follows the project-wide template to help contributors quickly
   - Outputs: token responses, user/session info, success messages for reset/verify flows.
 - Related Endpoints (mounted under `/api/v1`):
   - Core auth + enhanced flows (reset, verify, MFA): `tldw_Server_API/app/api/v1/endpoints/auth.py:1`
-  - Admin (RBAC, orgs/teams, users): `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py:1` plus split modules in `tldw_Server_API/app/api/v1/endpoints/admin/` (`admin_user.py`, `admin_api_keys.py`, `admin_profiles.py`, `admin_sessions_mfa.py`, `admin_byok.py`, `admin_llm_providers.py`, `admin_orgs.py`, `admin_settings.py`, `admin_registration.py`, `admin_system.py`, `admin_usage.py`, `admin_budgets.py`, `admin_tools.py`, `admin_personalization.py`, `admin_network.py`), and `tldw_Server_API/app/api/v1/endpoints/users.py:1`, `tldw_Server_API/app/api/v1/endpoints/privileges.py:1`, `tldw_Server_API/app/api/v1/endpoints/register.py:1`
+  - Admin (RBAC, orgs/teams, users): `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py:1` plus split modules in `tldw_Server_API/app/api/v1/endpoints/admin/` (`admin_user.py`, `admin_api_keys.py`, `admin_profiles.py`, `admin_sessions_mfa.py`, `admin_byok.py`, `admin_llm_providers.py`, `admin_orgs.py`, `admin_settings.py`, `admin_registration.py`, `admin_system.py`, `admin_usage.py`, `admin_budgets.py`, `admin_tools.py`, `admin_personalization.py`, `admin_network.py`), and `tldw_Server_API/app/api/v1/endpoints/users.py:1`, `tldw_Server_API/app/api/v1/endpoints/privileges.py:1`
   - Debug helpers: `tldw_Server_API/app/api/v1/endpoints/authnz_debug.py:1`
   - Dependencies used by endpoints: `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py:1`
 - Related Schemas (requests/responses and admin/RBAC):

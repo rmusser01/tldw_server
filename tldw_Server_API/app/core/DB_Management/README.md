@@ -24,10 +24,10 @@ Central data stores and database abstractions for content, prompts, notes, evalu
   - Inputs: SQL queries via backend adapters, Pydantic-validated payloads at endpoints.
   - Outputs: dict-like row results, higher-level DTOs from module methods, exported artifacts (e.g., backups, chatbooks).
 - Related Endpoints (selected; all under `/api/v1`):
-  - Media/RAG: `tldw_Server_API/app/api/v1/endpoints/media.py:1`, `.../rag_unified.py:1`, `.../chunking.py:1`, `.../chunking_templates.py:1`, `.../paper_search.py:1`, `.../media_embeddings.py:1`, `.../sync.py:1`, `.../vector_stores_openai.py:1`, `.../claims.py:1`
+  - Media/RAG: `tldw_Server_API/app/api/v1/endpoints/media/`, `.../rag_unified.py:1`, `.../chunking.py:1`, `.../chunking_templates.py:1`, `.../paper_search.py:1`, `.../media_embeddings.py:1`, `.../sync.py:1`, `.../vector_stores_openai.py:1`, `.../claims.py:1`
   - Notes/Characters/Chat: `.../chat.py:1`, `.../characters_endpoint.py:1`, `.../character_chat_sessions.py:1`, `.../character_messages.py:1`, `.../notes.py:1`, `.../flashcards.py:1`
   - Prompts/Prompt Studio: `.../prompts.py:1`, `.../prompt_studio_projects.py:1`, `.../prompt_studio_prompts.py:1`, `.../prompt_studio_test_cases.py:1`, `.../prompt_studio_optimization.py:1`, `.../prompt_studio_status.py:1`
-  - Evaluations/Workflows/Other: `.../evaluations_unified.py:1`, `.../workflows.py:1`, `.../health.py:1`, `.../watchlists.py:1`, `.../items.py:1`, `.../reading.py:1`, `.../outputs_templates.py:1`
+  - Evaluations/Workflows/Other: `.../evaluations/evaluations_unified.py:1`, `.../workflows.py:1`, `.../health.py:1`, `.../watchlists.py:1`, `.../items.py:1`, `.../reading.py:1`, `.../outputs_templates.py:1`
 - Related Schemas (selected):
   - Media: `tldw_Server_API/app/api/v1/schemas/media_request_models.py:1`, `tldw_Server_API/app/api/v1/schemas/media_response_models.py:1`, `tldw_Server_API/app/api/v1/schemas/chunking_schema.py:1`, `tldw_Server_API/app/api/v1/schemas/chunking_templates_schemas.py:1`
   - Notes/Prompts: `tldw_Server_API/app/api/v1/schemas/notes_schemas.py:1`, `tldw_Server_API/app/api/v1/schemas/prompt_studio_base.py:1`, `.../prompt_studio_project.py:1`, `.../prompt_studio_schemas.py:1`

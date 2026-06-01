@@ -62,7 +62,7 @@ Security egress policy.
   `tests/Watchlists/test_filters_api.py`, and
   `tests/Watchlists/test_filters_matching.py`.
 - OPML/WebSub/templates: `tests/Watchlists/test_opml_api.py`,
-  `tests/Watchlists/test_websub.py`, and
+  `tests/Collections/test_websub.py`, and
   `tests/Watchlists/test_watchlists_template_store.py`.
 - Delivery/reports/audio: `tests/Watchlists/test_delivery_integrations.py`,
   `tests/Watchlists/test_watchlist_reports_api.py`, and

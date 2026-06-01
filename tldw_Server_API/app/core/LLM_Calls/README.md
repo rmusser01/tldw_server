@@ -18,7 +18,7 @@
 - Related Endpoints:
   - POST `/api/v1/chat/completions` — tldw_Server_API/app/api/v1/endpoints/chat.py:592
   - Chat message formatting helpers for completions — tldw_Server_API/app/api/v1/endpoints/character_messages.py:295
-  - Media summarization uses general/local summarizers — tldw_Server_API/app/api/v1/endpoints/media.py:540
+  - Media summarization routes call general/local summarizers from the `tldw_Server_API/app/api/v1/endpoints/media/` package.
 - Related Schemas:
   - `ChatCompletionRequest` — tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py:274
   - Chat validators/utilities — tldw_Server_API/app/api/v1/schemas/chat_validators.py:1

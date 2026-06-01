@@ -15,7 +15,8 @@ allowed.
 - Taxonomy and matching: `category_taxonomy.py` and `semantic_matcher.py`.
 - API endpoint: `app/api/v1/endpoints/moderation.py`; family setup endpoint:
   `app/api/v1/endpoints/family_wizard.py`.
-- Tests: `tests/Moderation/`, moderation tests under `tests/unit/`, and
+- Tests: moderation tests under `tests/unit/`, chat integration moderation tests,
+  Guardian family-wizard tests, and
   `tests/AuthNZ_Unit/test_moderation_permissions_claims.py`.
 
 ## Responsibilities
@@ -58,8 +59,11 @@ allowed.
   `tests/Chat_NEW/integration/test_moderation.py`.
 - Endpoint and permission coverage: `tests/AuthNZ_Unit/test_moderation_permissions_claims.py`
   and `tests/unit/test_moderation_test_endpoint_sample.py`.
-- Family/governance behavior: moderation and family wizard tests under
-  `tests/Moderation/` and `tests/Family/` when present.
+- Family/governance behavior: `tests/Guardian/test_family_wizard_endpoints.py`,
+  `tests/Guardian/test_family_wizard_materialization.py`, and related Guardian
+  family-wizard tests. There is no direct
+  `tests/Moderation/` directory in this tree; use the adjacent unit and chat
+  integration moderation tests listed above.
 
 ## Gotchas
 

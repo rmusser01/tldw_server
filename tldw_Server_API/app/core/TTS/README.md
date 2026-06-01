@@ -13,13 +13,8 @@
   - Input: Text and optional voice reference metadata; OpenAI-compatible JSON (see schema).
   - Output: Streaming or buffered audio bytes in mp3, opus, aac, flac, wav, or raw pcm.
 - Related Endpoints:
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:249 — POST /api/v1/audio/speech
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:1131 — GET /api/v1/audio/voices/catalog
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:1957 — POST /api/v1/audio/voices/upload
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2031 — GET /api/v1/audio/voices
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2066 — GET /api/v1/audio/voices/{voice_id}
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2103 — DELETE /api/v1/audio/voices/{voice_id}
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2142 — POST /api/v1/audio/voices/{voice_id}/preview
+  - `tldw_Server_API/app/api/v1/endpoints/audio/audio_tts.py` - POST `/api/v1/audio/speech`, GET `/api/v1/audio/voices/catalog`
+  - `tldw_Server_API/app/api/v1/endpoints/audio/audio_voices.py` - POST `/api/v1/audio/voices/upload`, GET/DELETE `/api/v1/audio/voices/{voice_id}`, and POST `/api/v1/audio/voices/{voice_id}/preview`
 - Related Schemas:
   - tldw_Server_API/app/api/v1/schemas/audio_schemas.py:44 — OpenAISpeechRequest
   - tldw_Server_API/app/core/TTS/voice_manager.py:74 — VoiceUploadRequest
