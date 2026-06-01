@@ -9,6 +9,10 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from mcp_unified.federation.process_policy import (
+    StdioProcessPolicy,
+    coerce_stdio_process_policy,
+)
 from mcp_unified.interfaces.storage import (
     AuditStore,
     CredentialGrantStore,
@@ -78,6 +82,8 @@ class GatewayExternalRuntimeBootstrapConfig:
     transport_factory: GatewayExternalRuntimeFactoryKind = "stdio"
     reconcile_on_startup: bool = False
     stop_on_shutdown: bool = False
+    process_policy: StdioProcessPolicy | Mapping[str, Any] | None = None
+    process_policy_configured: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         """Validate and normalize the configured runtime factory selector."""
@@ -103,6 +109,17 @@ class GatewayExternalRuntimeBootstrapConfig:
             self,
             "transport_factory",
             cast(GatewayExternalRuntimeFactoryKind, normalized_factory),
+        )
+        process_policy_configured = self.process_policy is not None
+        object.__setattr__(
+            self,
+            "process_policy",
+            coerce_stdio_process_policy(self.process_policy),
+        )
+        object.__setattr__(
+            self,
+            "process_policy_configured",
+            process_policy_configured,
         )
 
     def lifecycle_config(self) -> GatewayExternalRuntimeLifecycleConfig:
@@ -237,6 +254,8 @@ async def bootstrap_profile_gateway_from_config(
         resolved_external_runtime_manager = external_runtime_manager_from_storage(
             external_storage,
             transport_factory=external_transport_factory,
+            process_policy=resolved_config.external_runtime.process_policy,
+            process_policy_configured=resolved_config.external_runtime.process_policy_configured,
             credential_broker=credential_broker,
             installer=external_installer,
         )
@@ -388,6 +407,8 @@ def external_runtime_manager_from_storage(
         ExternalFederationTransport,
     ]
     | None = None,
+    process_policy: StdioProcessPolicy | None = None,
+    process_policy_configured: bool = False,
     credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
     installer: ExternalServerInstaller | None = None,
 ) -> GatewayExternalRuntimeManager:
@@ -397,9 +418,25 @@ def external_runtime_manager_from_storage(
 
     from .external_runtime import GatewayExternalRuntimeManager
 
+    resolved_transport_factory = transport_factory
+    if resolved_transport_factory is None:
+        if process_policy_configured:
+
+            def _policy_transport_factory(
+                server: ExternalServerDefinition,
+            ) -> ExternalFederationTransport:
+                return create_external_transport(
+                    server,
+                    process_policy=process_policy,
+                )
+
+            resolved_transport_factory = _policy_transport_factory
+        else:
+            resolved_transport_factory = create_external_transport
+
     return GatewayExternalRuntimeManager(
         external_registry_store=bundle.external_registry_store,
-        transport_factory=transport_factory or create_external_transport,
+        transport_factory=resolved_transport_factory,
         audit_store=bundle.audit_store,
         credential_broker=credential_broker,
         installer=installer,

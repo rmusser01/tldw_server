@@ -10,6 +10,17 @@ priority: High
 documentation:
 - Docs/superpowers/specs/2026-06-01-mcp-stdio-process-policy-design.md
 - Docs/superpowers/plans/2026-06-01-mcp-stdio-process-policy-implementation-plan.md
+modified_files:
+- mcp_unified/federation/process_policy.py
+- mcp_unified/federation/stdio_transport.py
+- mcp_unified/federation/__init__.py
+- mcp_unified/federation/transports.py
+- mcp_unified/gateway/config.py
+- mcp_unified/gateway/cli.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_stdio_external_transport.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 ---
 
 ## Description
@@ -37,7 +48,7 @@ Implementation plan saved at Docs/superpowers/plans/2026-06-01-mcp-stdio-process
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Added and verified MCP external stdio process-policy hardening. The package now has explicit, tested controls for command execution, cwd boundaries, PATH lookup, env inheritance, and safe error/status reporting before real upstream stdio processes are launched. Verification recorded: targeted pytest for stdio transport, gateway FastAPI package, gateway CLI package, and runtime package boundary passed (245 passed); Bandit on mcp_unified/federation and mcp_unified/gateway completed with no findings at /tmp/bandit_mcp_stdio_process_policy.json; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

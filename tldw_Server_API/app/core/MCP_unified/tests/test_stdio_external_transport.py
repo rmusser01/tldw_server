@@ -11,6 +11,10 @@ from time import monotonic
 
 import pytest
 from mcp_unified.federation.models import BrokeredExternalCredential
+from mcp_unified.federation.process_policy import (
+    StdioProcessPolicy,
+    coerce_stdio_process_policy,
+)
 from mcp_unified.federation.stdio_transport import (
     StdioExternalTransport,
     StdioExternalTransportError,
@@ -284,6 +288,141 @@ def test_stdio_transport_rejects_bare_command_without_path_allowlist() -> None:
 
     assert exc_info.value.reason_code == "invalid_command"
     assert "PATH" in str(exc_info.value)
+
+
+def test_stdio_process_policy_rejects_invalid_mapping_values() -> None:
+    """Policy config rejects ambiguous values before runtime bootstrap."""
+    with pytest.raises(ValueError, match="allowed_executables"):
+        coerce_stdio_process_policy({"allowed_executables": ["python", ""]})
+
+    with pytest.raises(ValueError, match="allow_path_lookup"):
+        coerce_stdio_process_policy({"allow_path_lookup": "false"})
+
+    with pytest.raises(ValueError, match="allowed_env_names"):
+        coerce_stdio_process_policy({"allowed_env_names": ["TOKEN", 7]})
+
+
+def test_stdio_process_policy_defaults_block_shell_wrappers() -> None:
+    """Default process policy blocks direct shell-wrapper launches."""
+    secret_arg = "do-not-leak-shell-argument"
+    server = _server(command=["/bin/bash", "-lc", secret_arg])
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(server)
+
+    assert exc_info.value.reason_code == "process_policy_shell_denied"
+    assert secret_arg not in str(exc_info.value)
+    assert secret_arg not in repr(exc_info.value.details)
+
+
+def test_stdio_process_policy_allows_explicit_shell_executable() -> None:
+    """Hosts can deliberately allow a shell executable through allowlisting."""
+    policy = StdioProcessPolicy(allowed_executables=("/bin/bash",))
+    transport = StdioExternalTransport(
+        _server(command=["/bin/bash", "--version"]),
+        process_policy=policy,
+    )
+
+    assert transport.server_id == "docs"
+
+
+def test_stdio_process_policy_path_lookup_can_be_disabled() -> None:
+    """Strict deployments can reject bare executables even when PATH is allowlisted."""
+    server = _server(command=["python"], env_allowlist=["PATH"])
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            server,
+            process_policy=StdioProcessPolicy(allow_path_lookup=False),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_path_lookup_denied"
+
+
+def test_stdio_process_policy_env_allowlist_must_allow_path_for_bare_command() -> None:
+    """Policy env allowlists also gate PATH inheritance for bare executable lookup."""
+    server = _server(command=["python"], env_allowlist=["PATH"])
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            server,
+            process_policy=StdioProcessPolicy(allowed_env_names=("OTHER",)),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_env_denied"
+    assert exc_info.value.details["env_name"] == "PATH"
+
+
+def test_stdio_process_policy_rejects_cwd_outside_allowed_roots(tmp_path: Path) -> None:
+    """Configured cwd values must stay inside deployment-approved roots."""
+    allowed_root = tmp_path / "allowed"
+    denied_root = tmp_path / "denied"
+    allowed_root.mkdir()
+    denied_root.mkdir()
+    server = _server(command=[sys.executable, "-c", "pass"], cwd=str(denied_root))
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            server,
+            process_policy=StdioProcessPolicy(allowed_cwd_roots=(allowed_root,)),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_cwd_denied"
+
+
+def test_stdio_process_policy_uses_default_cwd_inside_allowed_root(tmp_path: Path) -> None:
+    """Policy default cwd is used when a server does not configure one."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    transport = StdioExternalTransport(
+        _server(command=[sys.executable, "-c", "pass"]),
+        process_policy=StdioProcessPolicy(
+            allowed_cwd_roots=(workspace,),
+            default_cwd=workspace,
+        ),
+    )
+
+    assert transport._cwd == str(workspace.resolve())
+
+
+def test_stdio_process_policy_rejects_disallowed_environment_names() -> None:
+    """Policy env allowlists reject server-requested environment names outside policy."""
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            _server(
+                command=[sys.executable, "-c", "pass"],
+                env_allowlist=["MCP_ALLOWED", "MCP_BLOCKED"],
+            ),
+            process_policy=StdioProcessPolicy(allowed_env_names=("MCP_ALLOWED",)),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_env_denied"
+    assert exc_info.value.details["env_name"] == "MCP_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_stdio_process_policy_allows_policy_approved_environment_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approved policy env names still inherit only values present in os.environ."""
+    script_path = _write_stub_server(tmp_path)
+    monkeypatch.setenv("MCP_ALLOWED", "yes")
+    transport = StdioExternalTransport(
+        _server(
+            command=[sys.executable, "-u", script_path],
+            env_allowlist=["MCP_ALLOWED"],
+        ),
+        process_policy=StdioProcessPolicy(allowed_env_names=("MCP_ALLOWED",)),
+    )
+
+    try:
+        result = await transport.call_tool("docs.env", {})
+
+        assert result.is_error is False
+        assert result.content == {"allowed": "yes", "blocked": None}
+    finally:
+        await transport.close()
 
 
 @pytest.mark.parametrize("timeout", [0, -1, "bad", float("nan"), float("inf")])

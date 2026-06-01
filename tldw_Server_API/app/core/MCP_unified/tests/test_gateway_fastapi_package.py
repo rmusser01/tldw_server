@@ -2658,6 +2658,170 @@ def test_gateway_config_bootstrap_external_runtime_uses_injected_transport_facto
         asyncio.run(bootstrap.profile_store.aclose())
 
 
+def test_gateway_config_bootstrap_accepts_process_policy_mapping() -> None:
+    """External runtime config validates and stores stdio process policy mappings."""
+
+    from mcp_unified.gateway.config import GatewayExternalRuntimeBootstrapConfig
+
+    config = GatewayExternalRuntimeBootstrapConfig(
+        enabled=True,
+        process_policy={"allow_path_lookup": False, "allowed_env_names": ["PATH"]},
+    )
+
+    assert config.process_policy is not None
+    assert config.process_policy.allow_path_lookup is False
+    assert config.process_policy.allowed_env_names == ("PATH",)
+    assert config.process_policy_configured is True
+
+
+def test_gateway_config_bootstrap_rejects_invalid_process_policy_mapping() -> None:
+    """External runtime config rejects invalid process-policy mappings early."""
+
+    from mcp_unified.gateway.config import GatewayExternalRuntimeBootstrapConfig
+
+    with pytest.raises(ValueError, match="allowed_executables"):
+        GatewayExternalRuntimeBootstrapConfig(
+            enabled=True,
+            process_policy={"allowed_executables": ["python", ""]},
+        )
+
+
+def test_gateway_config_bootstrap_wraps_default_factory_when_policy_configured(
+    tmp_path: Path,
+) -> None:
+    """Configured process policy should wrap only the package stdio factory."""
+
+    from mcp_unified.federation import create_external_transport
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(
+                    enabled=True,
+                    process_policy={"allow_path_lookup": False},
+                ),
+            ),
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        assert manager._transport_factory is not create_external_transport
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_config_bootstrap_custom_factory_ignores_config_process_policy(
+    tmp_path: Path,
+) -> None:
+    """Caller-injected factories own their own process-policy boundary."""
+
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    def factory(server: ExternalServerDefinition) -> Any:
+        return server.id
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(
+                    enabled=True,
+                    process_policy={"allow_path_lookup": False},
+                ),
+            ),
+            external_transport_factory=factory,
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        assert manager._transport_factory is factory
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_external_runtime_process_policy_start_failure_is_redacted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime status should expose policy-denied starts without command/env secrets."""
+
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeError
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    secret_arg = "do-not-leak-command-argument"
+    secret_env_value = "do-not-leak-env-value"
+    monkeypatch.setenv("MCP_POLICY_SECRET", secret_env_value)
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(
+                    enabled=True,
+                    process_policy={"allow_path_lookup": False},
+                ),
+            ),
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        asyncio.run(
+            bootstrap.profile_store.create_server(
+                ExternalServerDefinition(
+                    id="research",
+                    name="Research",
+                    transport="stdio",
+                    command=["python", secret_arg],
+                    env_allowlist=["PATH", "MCP_POLICY_SECRET"],
+                )
+            )
+        )
+
+        with pytest.raises(GatewayExternalRuntimeError) as exc_info:
+            asyncio.run(manager.start_server("research"))
+
+        status = asyncio.run(manager.list_runtime_servers())
+        status_json = json.dumps(status, sort_keys=True)
+        assert exc_info.value.reason_code == "external_server_start_failed"
+        assert "process_policy_path_lookup_denied" in status_json
+        assert secret_arg not in str(exc_info.value)
+        assert secret_arg not in status_json
+        assert secret_env_value not in str(exc_info.value)
+        assert secret_env_value not in status_json
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
 def test_gateway_config_bootstrap_rejects_unsupported_external_runtime_factory() -> None:
     """Reject unsupported transport factory selectors instead of silently degrading."""
 

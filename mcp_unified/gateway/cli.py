@@ -902,6 +902,7 @@ def _validated_config_payload(
         "default_profile_id": config.default_profile_id,
         "external_runtime": {
             "enabled": config.external_runtime.enabled,
+            "process_policy": _process_policy_summary(config.external_runtime),
             "reconcile_on_startup": config.external_runtime.reconcile_on_startup,
             "stop_on_shutdown": config.external_runtime.stop_on_shutdown,
             "transport_factory": config.external_runtime.transport_factory,
@@ -913,6 +914,26 @@ def _validated_config_payload(
             "kind": config.store.kind,
             "sqlite_path": str(sqlite_path) if sqlite_path is not None else None,
         },
+    }
+
+
+def _process_policy_summary(
+    external_runtime: Any,
+) -> dict[str, Any]:
+    """Return a compact process-policy summary without path or command values."""
+
+    policy = external_runtime.process_policy
+    allowed_env_names = policy.allowed_env_names
+    return {
+        "allow_path_lookup": policy.allow_path_lookup,
+        "allowed_cwd_roots": len(policy.allowed_cwd_roots),
+        "allowed_env_names": (
+            None if allowed_env_names is None else len(allowed_env_names)
+        ),
+        "allowed_executables": len(policy.allowed_executables),
+        "configured": external_runtime.process_policy_configured,
+        "default_cwd": policy.default_cwd is not None,
+        "reject_shell_executables": policy.reject_shell_executables,
     }
 
 
