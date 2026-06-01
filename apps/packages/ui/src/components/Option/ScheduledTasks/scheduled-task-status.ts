@@ -63,9 +63,7 @@ const RESULT_COUNT_KEYS = [
   "result_count",
   "results_count",
   "output_count",
-  "outputs_count",
-  "latest_output_id",
-  "output_id"
+  "outputs_count"
 ] as const
 
 const emptyWatchlistTaskLinks = (settingsUrl: string | null): WatchlistTaskLinks => ({
@@ -78,11 +76,16 @@ const emptyWatchlistTaskLinks = (settingsUrl: string | null): WatchlistTaskLinks
 
 const statusIncludes = (status: string, tokens: readonly string[]): boolean => {
   const normalized = status.toLowerCase()
-  return tokens.some((token) => normalized.includes(token))
+  return tokens.some((token) => {
+    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return new RegExp(`(^|[^a-z0-9])${escapedToken}($|[^a-z0-9])`).test(
+      normalized
+    )
+  })
 }
 
 const toPositiveInteger = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
     return value
   }
   if (typeof value !== "string") {
@@ -112,7 +115,8 @@ const firstPositiveInteger = (
 }
 
 const hasPositiveResultSignal = (sourceRef: Record<string, unknown>): boolean =>
-  firstPositiveInteger(sourceRef, RESULT_COUNT_KEYS) !== null
+  firstPositiveInteger(sourceRef, RESULT_COUNT_KEYS) !== null ||
+  firstPositiveInteger(sourceRef, OUTPUT_ID_KEYS) !== null
 
 export const getScheduledTaskProductStatus = (
   task: ScheduledTaskStatusInput
@@ -155,21 +159,33 @@ export const getScheduledTaskProductStatus = (
   }
 
   if (
-    statusIncludes(status, ["found", "match", "matched", "result", "output"]) ||
+    statusIncludes(status, ["fail", "failed", "failing", "failure", "error", "missed"])
+  ) {
+    return {
+      label: "Needs attention",
+      tone: "error",
+      description: "This task hit a problem during its latest run."
+    }
+  }
+
+  if (
+    statusIncludes(status, [
+      "found",
+      "match",
+      "matched",
+      "matches",
+      "matching",
+      "result",
+      "results",
+      "output",
+      "outputs"
+    ]) ||
     hasPositiveResultSignal(sourceRef)
   ) {
     return {
       label: "Found results",
       tone: "success",
       description: "This task has produced results that are ready to review."
-    }
-  }
-
-  if (statusIncludes(status, ["fail", "error", "missed"])) {
-    return {
-      label: "Needs attention",
-      tone: "error",
-      description: "This task hit a problem during its latest run."
     }
   }
 
@@ -181,7 +197,9 @@ export const getScheduledTaskProductStatus = (
     }
   }
 
-  if (statusIncludes(status, ["complete", "success", "done", "finished"])) {
+  if (
+    statusIncludes(status, ["complete", "completed", "success", "done", "finished"])
+  ) {
     return {
       label: "Completed last run",
       tone: "success",

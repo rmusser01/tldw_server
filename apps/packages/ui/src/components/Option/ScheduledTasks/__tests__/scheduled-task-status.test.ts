@@ -115,6 +115,68 @@ describe("scheduled task status helpers", () => {
     })
   })
 
+  it("treats accepted output id aliases as result signals", () => {
+    const task = {
+      id: "watchlist_job:43",
+      primitive: "watchlist_job" as const,
+      title: "Alias output monitor",
+      status: "scheduled",
+      enabled: true,
+      edit_mode: "external" as const,
+      source_ref: { latestOutputId: 202 }
+    }
+
+    expect(getScheduledTaskProductStatus(task).label).toBe("Found results")
+    expect(buildWatchlistTaskLinks(task).latestOutputUrl).toBe(
+      "/watchlists?tab=outputs&output_id=202&open_output=1"
+    )
+  })
+
+  it("uses token-aware status matching to avoid misleading substring matches", () => {
+    const baseTask = {
+      id: "watchlist_job:44",
+      primitive: "watchlist_job" as const,
+      title: "Boundary monitor",
+      enabled: true,
+      edit_mode: "external" as const,
+      source_ref: {}
+    }
+
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "inactive" }).label).toBe(
+      "Waiting for next run"
+    )
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "unmatched" }).label).toBe(
+      "Waiting for next run"
+    )
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "output_error" }).label).toBe(
+      "Needs attention"
+    )
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "in_progress" }).label).toBe(
+      "Running now"
+    )
+  })
+
+  it("rejects unsafe numeric ids when building Watchlists links", () => {
+    expect(
+      buildWatchlistTaskLinks({
+        id: "watchlist_job:45",
+        primitive: "watchlist_job",
+        title: "Unsafe id monitor",
+        status: "scheduled",
+        enabled: true,
+        edit_mode: "external",
+        source_ref: {
+          job_id: Number.MAX_SAFE_INTEGER + 1,
+          latest_output_id: Number.MAX_SAFE_INTEGER + 1
+        }
+      })
+    ).toMatchObject({
+      activityUrl: null,
+      reportsUrl: null,
+      latestOutputUrl: null
+    })
+  })
+
   it("maps scheduled task type labels", () => {
     expect(getScheduledTaskTypeLabel({ primitive: "reminder_task" })).toBe("Reminder")
     expect(getScheduledTaskTypeLabel({ primitive: "watchlist_job" })).toBe(
