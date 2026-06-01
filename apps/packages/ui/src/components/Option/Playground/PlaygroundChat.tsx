@@ -91,6 +91,7 @@ type PlaygroundChatProps = {
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void
   returnedResearchRunId?: string | null
   onDismissReturnedResearchRun?: () => void
+  onDynamicUIAction?: (payload: unknown) => void
 }
 
 const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
@@ -143,7 +144,8 @@ export const PlaygroundChat = ({
   onAttachResearchContext,
   onPrepareResearchFollowUp,
   returnedResearchRunId = null,
-  onDismissReturnedResearchRun
+  onDismissReturnedResearchRun,
+  onDynamicUIAction
 }: PlaygroundChatProps) => {
   const { t } = useTranslation(["playground", "common"])
   const notification = useAntdNotification()
@@ -1290,6 +1292,8 @@ export const PlaygroundChat = ({
                 messageId={message.id}
                 pinned={Boolean(message.pinned)}
                 metadataExtra={message.metadataExtra}
+                dynamicUISurface="web-chat"
+                onDynamicUIAction={onDynamicUIAction}
                 researchActions={buildMessageResearchActions(message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
