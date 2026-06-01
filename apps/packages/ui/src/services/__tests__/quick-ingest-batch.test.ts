@@ -939,6 +939,111 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it("routes persisted ordinary web URLs through process-web-scraping", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      status: "persist-ok",
+      media_ids: [123],
+      total_articles: 1
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-web-persist",
+          url: "https://example.com/article",
+          type: "auto"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: false,
+        perform_chunking: true,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/process-web-scraping",
+        method: "POST",
+        body: expect.objectContaining({
+          url_input: "https://example.com/article",
+          scrape_method: "Individual URLs",
+          mode: "persist"
+        })
+      })
+    )
+    expect(
+      mocks.bgUpload.mock.calls.some(
+        ([request]) => request?.path === "/api/v1/media/ingest/jobs"
+      )
+    ).toBe(false)
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-web-persist",
+      status: "ok",
+      type: "html",
+      mediaId: 123,
+      persisted: true
+    })
+  })
+
+  it("keeps direct Markdown URLs on the document ingest job route", async () => {
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-markdown-url",
+      jobs: [{ id: 778 }]
+    })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "completed",
+        result: { media_id: "m-markdown-url" }
+      }
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-markdown-url",
+          url: "https://example.com/source.md",
+          type: "auto"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: false,
+        perform_chunking: true,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(mocks.bgUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs",
+        method: "POST",
+        fields: expect.objectContaining({
+          media_type: "document",
+          urls: ["https://example.com/source.md"]
+        })
+      })
+    )
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) => request?.path === "/api/v1/media/process-web-scraping"
+      )
+    ).toBe(false)
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-markdown-url",
+      status: "ok",
+      type: "document"
+    })
+  })
+
   it("passes auto chunking fields to process-web-scraping JSON requests", async () => {
     mocks.bgRequest.mockResolvedValue({ content: "processed" })
 
@@ -1089,7 +1194,7 @@ describe("submitQuickIngestBatch", () => {
       entries: [
         {
           id: "entry-queue-limit",
-          url: "https://example.com/article",
+          url: "https://example.com/article.md",
           type: "auto"
         }
       ],
@@ -1117,7 +1222,7 @@ describe("submitQuickIngestBatch", () => {
         path: "/api/v1/media/add",
         method: "POST",
         fields: expect.objectContaining({
-          urls: ["https://example.com/article"]
+          urls: ["https://example.com/article.md"]
         })
       })
     )

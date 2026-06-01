@@ -103,6 +103,10 @@ describe("frontend quickstart networking", () => {
     expect(rewrites).toEqual(
       expect.arrayContaining([
         {
+          source: "/api/v1/media",
+          destination: "http://app:8000/api/v1/media/",
+        },
+        {
           source: "/api/:path*/",
           destination: "http://app:8000/api/:path*/",
         },
@@ -238,5 +242,34 @@ describe("frontend quickstart networking", () => {
       "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE ?= quickstart"
     )
     expect(makefile).toContain("TLDW_INTERNAL_API_ORIGIN ?= http://app:8000")
+  })
+
+  it("passes the generated single-user key into the WebUI quickstart compose command", () => {
+    const makefile = readFileSync(makefilePath, "utf8")
+
+    expect(makefile).toMatch(
+      /grep '\^SINGLE_USER_API_KEY=' "\$\(TLDW_ENV_FILE\)"/
+    )
+    expect(makefile).toContain(
+      "NEXT_PUBLIC_X_API_KEY=\"$${NEXT_PUBLIC_X_API_KEY:-$$api_key}\""
+    )
+    expect(makefile).toContain(
+      "docker compose --env-file \"$(TLDW_ENV_FILE)\" -f \"$(DOCKER_SINGLE_COMPOSE)\" -f \"$(DOCKER_WEBUI_COMPOSE)\""
+    )
+  })
+
+  it("keeps the resolved WebUI quickstart key out of echoed Make output", () => {
+    const makefile = readFileSync(makefilePath, "utf8")
+    const startTarget = makefile.match(
+      /start-docker-single:\n(?<recipe>[\s\S]*?)\n\nverify-docker-single:/
+    )
+
+    expect(startTarget?.groups?.recipe).toBeTruthy()
+    expect(startTarget?.groups?.recipe).toContain(
+      "@api_key=\"$$("
+    )
+    expect(startTarget?.groups?.recipe).not.toContain(
+      "NEXT_PUBLIC_X_API_KEY=\"$$(grep"
+    )
   })
 })

@@ -85,7 +85,15 @@ def resolve_audio_pack_path(pack_name: str) -> Path:
     return candidate
 
 
-def _display_audio_pack_path(pack_name: str) -> str:
+def _resolve_audio_pack_read_path(pack_name: str | Path) -> Path:
+    if isinstance(pack_name, Path):
+        return pack_name.expanduser().resolve()
+    return resolve_audio_pack_path(pack_name)
+
+
+def _display_audio_pack_path(pack_name: str | Path) -> str:
+    if isinstance(pack_name, Path):
+        return str(pack_name.expanduser().resolve())
     return str(Path(AUDIO_PACKS_DIRNAME) / normalize_audio_pack_name(pack_name))
 
 
@@ -200,14 +208,14 @@ def write_audio_pack_manifest(
     return manifest
 
 
-def load_audio_pack_manifest(pack_name: str) -> dict[str, Any]:
+def load_audio_pack_manifest(pack_name: str | Path) -> dict[str, Any]:
     """Load an audio pack manifest from disk."""
 
-    return json.loads(resolve_audio_pack_path(pack_name).read_text(encoding="utf-8"))
+    return json.loads(_resolve_audio_pack_read_path(pack_name).read_text(encoding="utf-8"))
 
 
 def validate_audio_pack_manifest(
-    pack_name: str,
+    pack_name: str | Path,
     *,
     machine_profile: dict[str, Any] | None = None,
     python_version: str | None = None,
@@ -364,7 +372,7 @@ def validate_audio_pack_manifest(
 
 
 def register_imported_audio_pack(
-    pack_name: str,
+    pack_name: str | Path,
     *,
     readiness_store: AudioReadinessStore,
     machine_profile: dict[str, Any] | None = None,

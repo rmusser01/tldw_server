@@ -7,7 +7,13 @@
     "title": "Setup Wizard",
     "panelTitle": "Connect your server",
     "panelMessage": "Guided connection setup for production use.",
-    "startAction": "Start setup"
+    "startAction": "Start setup",
+    "recoveryTitle": "Setup operator recovery",
+    "recoveryMessage": "Use this surface when first-run setup needs local operator recovery.",
+    "continueAction": "Continue setup",
+    "returnHomeAction": "Return home",
+    "loadingLabel": "Loading setup...",
+    "loadingDescription": "Reading first-run readiness from the server"
   },
   "setupReadiness": {
     "title": "Setup readiness",

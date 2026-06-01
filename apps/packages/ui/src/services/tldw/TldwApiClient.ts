@@ -1358,9 +1358,12 @@ export class TldwApiClientBase {
   private getEnvApiKey(): string | null {
     try {
       const env: any = (import.meta as any)?.env || {}
+      const processEnv: Record<string, string | undefined> =
+        typeof process === "undefined" ? {} : process.env || {}
       const raw =
         (env?.VITE_TLDW_API_KEY as string | undefined) ??
-        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined)
+        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined) ??
+        processEnv.NEXT_PUBLIC_X_API_KEY
       const key = (raw || "").trim()
       return key || null
     } catch {
@@ -1612,10 +1615,20 @@ export class TldwApiClientBase {
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
 
     if (!stored) {
-      // True first-run: leave config null so callers (like the connection
-      // store) can distinguish an unconfigured state from a misconfigured
-      // or unreachable server.
-      this.config = null
+      if (quickstartWebUiServerUrl && envApiKey) {
+        const hydrated: TldwConfig = {
+          authMode: "single-user",
+          serverUrl: quickstartWebUiServerUrl,
+          apiKey: envApiKey
+        }
+        this.config = hydrated
+        await this.storage.set("tldwConfig", hydrated)
+        await this.syncConnectionServerUrl(hydrated.serverUrl)
+      } else {
+        // True first-run without quickstart auth material: leave config null so
+        // callers can distinguish unconfigured from misconfigured/unreachable.
+        this.config = null
+      }
     } else {
       const hydrated: TldwConfig = {
         ...stored,
@@ -7789,6 +7802,7 @@ import { collectionsMethods } from "./domains/collections"
 import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"
 import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
+import { setupOnboardingMethods } from "./domains/setup-onboarding"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
 
@@ -7814,6 +7828,7 @@ export interface TldwApiClient
     TldwDomainMethods<typeof modelsAudioMethods>,
     TldwDomainMethods<typeof presentationsMethods>,
     TldwDomainMethods<typeof prototypeWorkspaceMethods>,
+    TldwDomainMethods<typeof setupOnboardingMethods>,
     TldwDomainMethods<typeof workspaceApiMethods>,
     TldwDomainMethods<typeof webClipperMethods> {}
 
@@ -7828,6 +7843,7 @@ Object.assign(
   modelsAudioMethods,
   presentationsMethods,
   prototypeWorkspaceMethods,
+  setupOnboardingMethods,
   workspaceApiMethods,
   webClipperMethods
 )

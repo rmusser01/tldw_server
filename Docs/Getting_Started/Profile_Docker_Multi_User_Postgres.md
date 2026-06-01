@@ -1,6 +1,6 @@
 # Docker Multi-User + Postgres Setup
 
-Use this profile for team-style deployments with JWT auth mode, a first admin account, and bundled PostgreSQL.
+Use this profile for team-style deployments with JWT auth mode, a first admin account, and bundled PostgreSQL. This is the shared server/operator path: the solo wizard is not the multi-user path. If you select multi-user from first-time setup, follow the multi-user setup guide and operator checklist before exposing the server to users.
 
 > **Windows:** Use WSL2 for the documented make commands. If you prefer PowerShell, run the equivalent tldw-setup command shown under each step and start Docker Desktop before Docker profiles.
 
@@ -120,3 +120,4 @@ After this profile is running, continue with one of:
   TLDW_JOBS_DB_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_jobs
   ```
 - Follow `Docs/User_Guides/Server/Multi-User_Postgres_Setup.md` for production hardening, account policy, and operational details.
+- Treat `Docs/User_Guides/Server/Multi-User_Postgres_Setup.md` as the multi-user setup guide and `Docs/Deployment/Long_Term_Admin_Guide.md` as the operator checklist for ongoing operation.

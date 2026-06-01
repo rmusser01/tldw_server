@@ -107,6 +107,7 @@ type QuickIngestBatchResult = {
   error?: string;
   message?: string;
   persisted?: boolean;
+  mediaId?: string | number | null;
   collectionItemId?: string | number | null;
   retryAttempt?: number | null;
   idempotencyKey?: string | null;
@@ -507,6 +508,7 @@ const processWebScrape = async ({
   advancedValues,
   chunkingTemplateName,
   autoApplyTemplate,
+  persist = false,
 }: {
   url: string;
   entry?: QuickIngestEntry;
@@ -514,6 +516,7 @@ const processWebScrape = async ({
   advancedValues?: Record<string, any>;
   chunkingTemplateName?: string;
   autoApplyTemplate?: boolean;
+  persist?: boolean;
 }): Promise<any> => {
   const nestedBody: Record<string, any> = {};
   for (const [key, value] of Object.entries(advancedValues || {})) {
@@ -532,7 +535,7 @@ const processWebScrape = async ({
   const body: Record<string, any> = {
     scrape_method: "Individual URLs",
     url_input: url,
-    mode: "ephemeral",
+    mode: persist ? "persist" : "ephemeral",
     summarize_checkbox: Boolean(common?.perform_analysis),
     ...normalizedBody,
   };
@@ -557,6 +560,29 @@ const processWebScrape = async ({
     timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
     ...DIRECT_QUICK_INGEST_TRANSPORT,
   });
+};
+
+const extractWebScrapeMediaId = (value: unknown): string | number | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const mediaIds = Array.isArray(record.media_ids) ? record.media_ids : [];
+  const candidate = mediaIds.length > 0 ? mediaIds[0] : record.media_id;
+  return typeof candidate === "string" || typeof candidate === "number"
+    ? candidate
+    : null;
+};
+
+const webScrapeResponseIndicatesPersisted = (
+  value: unknown,
+  mediaId: string | number | null,
+): boolean => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return mediaId != null;
+  }
+  const status = String((value as Record<string, unknown>).status || "")
+    .trim()
+    .toLowerCase();
+  return mediaId != null || status === "persist-ok";
 };
 
 type PlannedConferenceCollectionItem = {
@@ -801,7 +827,28 @@ const runDirectQuickIngestBatch = async (
         let data: unknown;
         let resultOutcome: QuickIngestBatchResult["outcome"];
         let resultMessage: string | undefined;
-        if (shouldStoreRemote) {
+        let resultMediaId: string | number | null = null;
+        let resultPersisted = false;
+        if (resolvedType === "html") {
+          localProcessingAttempted = true;
+          data = await processWebScrape({
+            url,
+            entry,
+            common: input.common,
+            advancedValues: input.advancedValues,
+            chunkingTemplateName: input.chunkingTemplateName,
+            autoApplyTemplate: input.autoApplyTemplate,
+            persist: shouldStoreRemote,
+          });
+          resultMediaId = shouldStoreRemote ? extractWebScrapeMediaId(data) : null;
+          resultPersisted =
+            shouldStoreRemote &&
+            webScrapeResponseIndicatesPersisted(data, resultMediaId);
+          await patchConferenceCollectionItem(plannedConferenceItem, {
+            status: "completed",
+            media_id: resultMediaId,
+          });
+        } else if (shouldStoreRemote) {
           const fields = buildFields({
             rawType: resolvedType,
             entry,
@@ -871,6 +918,7 @@ const runDirectQuickIngestBatch = async (
               throw new Error(String(pollResult.error || "Ingest failed"));
             }
             data = pollResult.data;
+            resultMediaId = extractCompletedIngestJobMediaId(pollResult.data);
             const completedDuplicate = completedIngestJobIndicatesSkipped(
               pollResult.data,
             );
@@ -881,7 +929,7 @@ const runDirectQuickIngestBatch = async (
             await patchConferenceCollectionItem(plannedConferenceItem, {
               status: completedDuplicate ? "skipped_existing" : "completed",
               latest_job_id: String(latestJobId),
-              media_id: extractCompletedIngestJobMediaId(pollResult.data),
+              media_id: resultMediaId,
             });
           } catch (error) {
             if (!shouldFallbackToPersistentAdd(error)) {
@@ -899,6 +947,7 @@ const runDirectQuickIngestBatch = async (
             }
             localProcessingAttempted = true;
             data = await submitPersistentAdd({ fields });
+            resultMediaId = extractCompletedIngestJobMediaId(data);
             const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
             if (fallbackDuplicate) {
               resultOutcome = "skipped";
@@ -908,19 +957,9 @@ const runDirectQuickIngestBatch = async (
               status: fallbackDuplicate ? "skipped_existing" : "completed",
               latest_job_id:
                 typeof latestJobId === "number" ? String(latestJobId) : undefined,
-              media_id: extractCompletedIngestJobMediaId(data),
+              media_id: resultMediaId,
             });
           }
-        } else if (resolvedType === "html") {
-          localProcessingAttempted = true;
-          data = await processWebScrape({
-            url,
-            entry,
-            common: input.common,
-            advancedValues: input.advancedValues,
-            chunkingTemplateName: input.chunkingTemplateName,
-            autoApplyTemplate: input.autoApplyTemplate,
-          });
         } else {
           const fields = buildFields({
             rawType: resolvedType,
@@ -954,7 +993,8 @@ const runDirectQuickIngestBatch = async (
           type: resolvedType,
           data,
           message: resultMessage,
-          persisted: false,
+          persisted: resultPersisted,
+          mediaId: resultMediaId,
           collectionItemId: plannedConferenceItem?.itemId ?? null,
           retryAttempt: plannedConferenceItem ? 0 : null,
           idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,

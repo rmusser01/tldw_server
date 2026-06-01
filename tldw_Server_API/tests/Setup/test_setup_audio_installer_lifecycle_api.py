@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import get_audio_bundle_catalog
 from tldw_Server_API.app.core.Setup.audio_profile_service import MachineProfile
+from tldw_Server_API.app.core.Setup.first_run_state import FirstRunStateStore
 import tldw_Server_API.app.api.v1.endpoints.setup as setup_endpoint
 
 
@@ -20,6 +21,37 @@ def _make_client():
 def _request(method: str, path: str, **kwargs):
     with _make_client() as client:
         return getattr(client, method)(path, **kwargs)
+
+
+def _seed_completion_ready_first_run_state(state_path):
+    store = FirstRunStateStore(state_path)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-audio-install-plan",
+    )
+    for step, payload in {
+        "setup_path": {"acknowledged": True, "setup_path_key": "local"},
+        "privacy_security": {"acknowledged": True, "local_only": True},
+        "providers": {
+            "acknowledged": True,
+            "default_provider": "openai",
+            "default_model": "gpt-4.1-mini",
+        },
+        "ingest_defaults": {
+            "acknowledged": True,
+            "allow_local_file_ingest": False,
+            "chunking_profile": "balanced",
+            "metadata_mode": "automatic",
+        },
+        "audio_defaults": {"acknowledged": True, "mode": "skip"},
+        "optional_advanced": {
+            "acknowledged": True,
+            "rag": "defer",
+            "storage_paths": "defer",
+        },
+    }.items():
+        store.update_step(step, payload)
 
 
 class _BundleCatalogStub:
@@ -269,9 +301,11 @@ def test_admin_audio_provision_and_verify_accept_tts_choice(
     assert captured["verify_tts_choice"] == "kitten_tts"
 
 
-def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
+def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch, tmp_path):
     install_calls = []
+    state_path = tmp_path / "first_run_state.json"
 
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     monkeypatch.setattr(
         setup_endpoint.setup_manager,
         "get_status_snapshot",
@@ -284,6 +318,7 @@ def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
         "execute_install_plan",
         lambda payload: install_calls.append(payload),
     )
+    _seed_completion_ready_first_run_state(state_path)
 
     response = _request(
         "post",

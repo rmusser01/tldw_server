@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -8,8 +9,13 @@ from tldw_Server_API.app.main import app
 import tldw_Server_API.app.api.v1.endpoints.setup as setup_endpoint
 
 
+@contextmanager
 def _make_client():
-    return TestClient(app)
+    client = TestClient(app)
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 class _BundleCatalogStub:

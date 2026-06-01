@@ -1,3 +1,13 @@
+import {
+  DEFAULT_PRESETS,
+  FIRST_SOURCE_PREFERRED_PRESET,
+  FIRST_SOURCE_QUICK_PRESET_CONFIG
+} from "@/components/Common/QuickIngest/presets"
+import type {
+  IngestPreset,
+  PresetConfig
+} from "@/components/Common/QuickIngest/types"
+
 export type QuickIngestPendingOpenMode = "normal" | "intro"
 
 export type QuickIngestPlaylistSourceKind =
@@ -11,6 +21,12 @@ export type QuickIngestOpenDetail =
       action?: "normal"
     }
   | {
+      source: "first_source_milestone"
+      preferredPreset?: Exclude<IngestPreset, "custom">
+      firstSource?: boolean
+      action?: string
+    }
+  | {
       source: "extension_active_tab"
       url: string
       sourceKind?: QuickIngestPlaylistSourceKind
@@ -20,6 +36,8 @@ export type QuickIngestOpenDetail =
       source?: string
       action?: string
       url?: string
+      preferredPreset?: Exclude<IngestPreset, "custom">
+      firstSource?: boolean
       [key: string]: unknown
     }
 
@@ -33,6 +51,13 @@ export type QuickIngestPendingOpenRequest = {
   at: number
   detail?: QuickIngestOpenDetail
   options?: QuickIngestPendingOpenOptions
+}
+
+export type QuickIngestSessionSeed = {
+  openDetail: QuickIngestOpenDetail
+  selectedPreset?: Exclude<IngestPreset, "custom">
+  customBasePreset?: Exclude<IngestPreset, "custom">
+  presetConfig?: PresetConfig
 }
 
 type QuickIngestWindow = Window & {
@@ -54,7 +79,7 @@ const buildPendingOpenRequest = (
   mode,
   at: Date.now(),
   detail,
-  options,
+  options
 })
 
 const normalizeQuickIngestOpenDetail = (
@@ -71,9 +96,7 @@ const dispatchQuickIngestOpenEvent = (
   const scope = getQuickIngestWindow()
   if (!scope) return
   const eventName =
-    mode === "intro"
-      ? "tldw:open-quick-ingest-intro"
-      : "tldw:open-quick-ingest"
+    mode === "intro" ? "tldw:open-quick-ingest-intro" : "tldw:open-quick-ingest"
   scope.dispatchEvent(new CustomEvent(eventName, { detail }))
 }
 
@@ -98,7 +121,11 @@ export const requestQuickIngestOpen = (
   options?: QuickIngestPendingOpenOptions
 ): QuickIngestPendingOpenRequest | null => {
   const normalizedDetail = normalizeQuickIngestOpenDetail(detail)
-  const request = rememberQuickIngestOpenRequest("normal", normalizedDetail, options)
+  const request = rememberQuickIngestOpenRequest(
+    "normal",
+    normalizedDetail,
+    options
+  )
   dispatchQuickIngestOpenEvent("normal", normalizedDetail)
   return request
 }
@@ -108,19 +135,24 @@ export const requestQuickIngestIntro = (
   options?: QuickIngestPendingOpenOptions
 ): QuickIngestPendingOpenRequest | null => {
   const normalizedDetail = normalizeQuickIngestOpenDetail(detail)
-  const request = rememberQuickIngestOpenRequest("intro", normalizedDetail, options)
+  const request = rememberQuickIngestOpenRequest(
+    "intro",
+    normalizedDetail,
+    options
+  )
   dispatchQuickIngestOpenEvent("intro", normalizedDetail)
   return request
 }
 
-export const consumePendingQuickIngestOpen = (): QuickIngestPendingOpenRequest | null => {
-  const scope = getQuickIngestWindow()
-  const request = scope?.__tldwPendingQuickIngestOpen || null
-  if (scope) {
-    delete scope.__tldwPendingQuickIngestOpen
+export const consumePendingQuickIngestOpen =
+  (): QuickIngestPendingOpenRequest | null => {
+    const scope = getQuickIngestWindow()
+    const request = scope?.__tldwPendingQuickIngestOpen || null
+    if (scope) {
+      delete scope.__tldwPendingQuickIngestOpen
+    }
+    return request
   }
-  return request
-}
 
 const hostnameMatches = (hostname: string, allowedHost: string): boolean =>
   hostname === allowedHost || hostname.endsWith(`.${allowedHost}`)
@@ -131,7 +163,10 @@ export const getQuickIngestPlaylistSourceKind = (
   try {
     const parsed = new URL(rawUrl.trim())
     const hostname = parsed.hostname.toLowerCase()
-    if (!hostnameMatches(hostname, "youtube.com") && !hostnameMatches(hostname, "youtu.be")) {
+    if (
+      !hostnameMatches(hostname, "youtube.com") &&
+      !hostnameMatches(hostname, "youtu.be")
+    ) {
       return null
     }
     const playlistId = parsed.searchParams.get("list")?.trim()
@@ -157,7 +192,7 @@ export const buildQuickIngestOpenDetailFromUrl = (
     source: "extension_active_tab",
     url,
     sourceKind,
-    action: "playlist_preflight",
+    action: "playlist_preflight"
   }
 }
 
@@ -169,15 +204,50 @@ export const isQuickIngestPlaylistPreflightDetail = (
 > =>
   Boolean(
     detail &&
-      detail.source === "extension_active_tab" &&
-      detail.action === "playlist_preflight" &&
-      typeof detail.url === "string" &&
-      detail.url.trim().length > 0
+    detail.source === "extension_active_tab" &&
+    detail.action === "playlist_preflight" &&
+    typeof detail.url === "string" &&
+    detail.url.trim().length > 0
+  )
+
+const isPreferredPreset = (
+  value: unknown
+): value is Exclude<IngestPreset, "custom"> =>
+  typeof value === "string" &&
+  Object.prototype.hasOwnProperty.call(DEFAULT_PRESETS, value)
+
+const isFirstSourceOpenDetail = (
+  detail: QuickIngestOpenDetail | null | undefined
+): detail is Extract<
+  QuickIngestOpenDetail,
+  { source: "first_source_milestone" }
+> =>
+  Boolean(
+    detail &&
+    (detail.source === "first_source_milestone" || detail.firstSource === true)
   )
 
 export const createQuickIngestSessionSeedFromOpenDetail = (
   detail: QuickIngestOpenDetail | null | undefined
-): { openDetail: QuickIngestOpenDetail } | null =>
-  isQuickIngestPlaylistPreflightDetail(detail)
-    ? { openDetail: detail }
-    : null
+): QuickIngestSessionSeed | null => {
+  if (isFirstSourceOpenDetail(detail)) {
+    const preferredPreset = isPreferredPreset(detail.preferredPreset)
+      ? detail.preferredPreset
+      : FIRST_SOURCE_PREFERRED_PRESET
+    return {
+      openDetail: detail,
+      selectedPreset: preferredPreset,
+      customBasePreset: preferredPreset,
+      presetConfig:
+        preferredPreset === "quick"
+          ? FIRST_SOURCE_QUICK_PRESET_CONFIG
+          : DEFAULT_PRESETS[preferredPreset]
+    }
+  }
+
+  if (isQuickIngestPlaylistPreflightDetail(detail)) {
+    return { openDetail: detail }
+  }
+
+  return null
+}

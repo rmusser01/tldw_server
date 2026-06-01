@@ -3,6 +3,7 @@
 Tests for GET /config/providers and POST /config/validate-provider endpoints.
 """
 import asyncio
+import configparser
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,8 +12,8 @@ import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import config_info as config_info_mod
 from tldw_Server_API.app.api.v1.endpoints.config_info import (
-    ProviderValidateRequest,
     _PROVIDER_VALIDATION_INFO,
+    ProviderValidateRequest,
     _check_validate_rate_limit,
     _key_hint,
     _resolve_provider_key,
@@ -26,6 +27,54 @@ from tldw_Server_API.app.api.v1.endpoints.config_info import (
 _VALIDATE_HTTP_TARGET = (
     "tldw_Server_API.app.api.v1.endpoints.config_info._validate_provider_http"
 )
+
+
+def test_setup_saved_moonshot_and_zai_fields_load_into_runtime_adapter_config(monkeypatch):
+    from tldw_Server_API.app.core import config as cfg
+
+    parser = configparser.ConfigParser()
+    parser["API"] = {
+        "moonshot_api_key": "moonshot-secret",
+        "moonshot_model": "moonshot-v1-32k",
+        "moonshot_api_base_url": "https://moonshot.example/v1",
+        "zai_api_key": "zai-secret",
+        "zai_model": "glm-4.5",
+        "zai_api_base_url": "https://zai.example/api/paas/v4",
+    }
+    for env_var in ("MOONSHOT_API_KEY", "ZAI_API_KEY"):
+        monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.setattr(cfg, "load_comprehensive_config", lambda: parser)
+
+    data = cfg.load_and_log_configs()
+
+    assert data["moonshot_api"]["api_key"] == "moonshot-secret"
+    assert data["moonshot_api"]["model"] == "moonshot-v1-32k"
+    assert data["moonshot_api"]["api_base_url"] == "https://moonshot.example/v1"
+    assert data["zai_api"]["api_key"] == "zai-secret"
+    assert data["zai_api"]["model"] == "glm-4.5"
+    assert data["zai_api"]["api_base_url"] == "https://zai.example/api/paas/v4"
+
+
+def test_setup_saved_kobold_and_tabby_fields_load_into_runtime_adapter_config(monkeypatch):
+    from tldw_Server_API.app.core import config as cfg
+
+    parser = configparser.ConfigParser()
+    parser["Local-API"] = {
+        "kobold_api_IP": "http://127.0.0.1:5001/api/v1/generate",
+        "kobold_api_key": "kobold-secret",
+        "tabby_api_IP": "http://127.0.0.1:5000/v1",
+        "tabby_api_key": "tabby-secret",
+        "tabby_model": "tabby-local-model",
+    }
+    monkeypatch.setattr(cfg, "load_comprehensive_config", lambda: parser)
+
+    data = cfg.load_and_log_configs()
+
+    assert data["kobold_api"]["api_ip"] == "http://127.0.0.1:5001/api/v1/generate"
+    assert data["kobold_api"]["api_key"] == "kobold-secret"
+    assert data["tabby_api"]["api_ip"] == "http://127.0.0.1:5000/v1"
+    assert data["tabby_api"]["api_key"] == "tabby-secret"
+    assert data["tabby_api"]["model"] == "tabby-local-model"
 
 
 def _make_mock_request(client_host: str = "127.0.0.1") -> MagicMock:

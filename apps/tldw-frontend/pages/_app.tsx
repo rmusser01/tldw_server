@@ -49,7 +49,6 @@ const SECONDARY_WARM_PREFETCH_ROUTES = [
 ] as const
 
 const DEGRADED_READINESS_ROUTES = new Set(["/chat", "/research-workspace"])
-const FIRST_RUN_OVERLAY_BYPASS_ROUTES = new Set(["/chat"])
 
 const PREFETCH_STEP_DELAY_MS = 250
 const PREFETCH_IDLE_TIMEOUT_MS = 2000
@@ -84,7 +83,7 @@ const buildFirstRunSetupRoute = (asPath: string): string => {
   const entryIntent = resolveOnboardingEntryIntent(routeParts)
 
   if (entryIntent !== CHARACTER_CHAT_ONBOARDING_INTENT) {
-    return "/persona"
+    return "/"
   }
 
   if (routeParts.pathname === "/") {
@@ -300,14 +299,22 @@ export default function App({ Component, pageProps }: AppProps) {
   const hideShellNav = !authResolved || !isAuthenticated
   const shouldBypassGates = isPublicAuthRoute || isSettingsRoute || isSetupRoute
   const shouldAllowDegradedReadiness = DEGRADED_READINESS_ROUTES.has(routePath)
+  const firstRunRouteParts = React.useMemo(
+    () => splitRouteAsPath(router.asPath || routePath || "/"),
+    [routePath, router.asPath]
+  )
+  const firstRunEntryIntent = React.useMemo(
+    () => resolveOnboardingEntryIntent(firstRunRouteParts),
+    [firstRunRouteParts]
+  )
   const firstRunSetupRoute = React.useMemo(
     () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
     [routePath, router.asPath]
   )
   const shouldBypassFirstRunOverlay =
     !shouldBypassGates &&
-    (firstRunSetupRoute !== "/persona" ||
-      FIRST_RUN_OVERLAY_BYPASS_ROUTES.has(routePath))
+    (routePath === "/" ||
+      firstRunEntryIntent === CHARACTER_CHAT_ONBOARDING_INTENT)
 
   const handleStartSetup = React.useCallback(() => {
     void router.push(firstRunSetupRoute)

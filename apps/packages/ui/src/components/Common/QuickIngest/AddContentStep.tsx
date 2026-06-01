@@ -112,6 +112,7 @@ export const detectTypeFromUrl = (url: string): DetectedMediaType => {
     if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) return "video"
     if (ext === "pdf") return "pdf"
     if (["epub", "mobi"].includes(ext)) return "ebook"
+    if (["doc", "docx", "txt", "rtf", "md", "markdown"].includes(ext)) return "document"
     // YouTube and common video platforms
     if (hostnameMatches(hostname, "youtube.com") || hostnameMatches(hostname, "youtu.be")) return "video"
     if (hostnameMatches(hostname, "vimeo.com")) return "video"

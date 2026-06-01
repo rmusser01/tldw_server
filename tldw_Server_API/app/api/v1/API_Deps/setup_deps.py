@@ -32,6 +32,17 @@ _CONFIG_REMOTE_CACHE_TTL = 30.0  # seconds
 _config_remote_cached: bool | None = None
 _config_remote_cached_at = 0.0
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_SETUP_PROXY_HEADERS = (
+    "x-forwarded-for",
+    "forwarded",
+    "x-real-ip",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+)
+_SETUP_PROXY_CLIENT_IP_HEADERS = ("x-forwarded-for", "x-real-ip")
+_REMOTE_SETUP_WRITE_DENIED_DETAIL = (
+    "Setup writes are only available from localhost unless remote setup access is explicitly enabled."
+)
 
 
 def _principal_has_admin_claims(principal) -> bool:
@@ -115,20 +126,145 @@ def _should_trust_proxy() -> bool:
     return raw.strip().lower() not in _FALSEY_ENV_VALUES
 
 
-def _first_forwarded_ip(request: Request) -> str | None:
-    """Return the left-most IP from X-Forwarded-For when proxy trust enabled."""
+def _parse_proxy_client_ip(value: str | None) -> str | None:
+    """Parse one proxy-supplied client IP candidate."""
 
-    if not _should_trust_proxy():
+    if not value:
         return None
+    candidate = value.strip().strip('"')
+    if not candidate:
+        return None
+    if candidate.startswith("["):
+        end = candidate.find("]")
+        if end == -1:
+            return None
+        candidate = candidate[1:end]
+    elif candidate.count(":") == 1 and "." in candidate:
+        candidate = candidate.rsplit(":", 1)[0]
+    candidate = candidate.lower().strip("[]").split("%", 1)[0]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
+def _effective_forwarded_chain_ip(candidates: list[str]) -> str | None:
+    parsed_candidates = []
+    for candidate in candidates:
+        if not candidate.strip():
+            return None
+        parsed_candidate = _parse_proxy_client_ip(candidate)
+        if not parsed_candidate:
+            return None
+        parsed_candidates.append(parsed_candidate)
+    if not parsed_candidates:
+        return None
+
+    for parsed_candidate in parsed_candidates:
+        if not ipaddress.ip_address(parsed_candidate).is_loopback:
+            return parsed_candidate
+    return parsed_candidates[0]
+
+
+def _forwarded_for_chain_ip(request: Request) -> str | None:
     raw = request.headers.get("x-forwarded-for")
     if not raw:
         return None
-    try:
-        # header can be comma-separated list of IPs; take the first hop
-        first = raw.split(",", 1)[0].strip()
-    except Exception:  # noqa: BLE001
+    return _effective_forwarded_chain_ip(raw.split(","))
+
+
+def _forwarded_header_chain_ip(request: Request) -> str | None:
+    raw = request.headers.get("forwarded")
+    if not raw:
         return None
-    return first or None
+    candidates: list[str] = []
+    for forwarded_entry in raw.split(","):
+        if not forwarded_entry.strip():
+            return None
+        entry_candidates: list[str] = []
+        for parameter in forwarded_entry.split(";"):
+            if "=" not in parameter:
+                continue
+            key, value = parameter.split("=", 1)
+            if key.strip().lower() == "for":
+                entry_candidates.append(value)
+        if len(entry_candidates) != 1:
+            return None
+        candidates.append(entry_candidates[0])
+    return _effective_forwarded_chain_ip(candidates)
+
+
+def effective_setup_proxy_client_ip(request: Request) -> str | None:
+    """Return conservative effective client IP from trusted setup proxy headers."""
+
+    if not _should_trust_proxy():
+        return None
+
+    candidates: list[str] = []
+    if request.headers.get("x-forwarded-for"):
+        xff_ip = _forwarded_for_chain_ip(request)
+        if not xff_ip:
+            return None
+        candidates.append(xff_ip)
+    if request.headers.get("forwarded"):
+        forwarded_ip = _forwarded_header_chain_ip(request)
+        if not forwarded_ip:
+            return None
+        candidates.append(forwarded_ip)
+    if request.headers.get("x-real-ip"):
+        real_ip = _parse_proxy_client_ip(request.headers.get("x-real-ip"))
+        if not real_ip:
+            return None
+        candidates.append(real_ip)
+    if not candidates:
+        return None
+
+    for candidate in candidates:
+        if not ipaddress.ip_address(candidate).is_loopback:
+            return candidate
+    return candidates[0]
+
+
+def _first_forwarded_ip(request: Request) -> str | None:
+    """Return the effective trusted proxy client IP for setup locality checks."""
+
+    return effective_setup_proxy_client_ip(request)
+
+
+def should_trust_setup_proxy_headers(request: Request) -> bool:
+    """Return True when setup code may honor proxy-supplied client headers."""
+
+    client_host = request.client.host if request.client else None
+    return _should_trust_proxy() and _is_loopback_host(client_host)
+
+
+def has_setup_proxy_headers(request: Request) -> bool:
+    """Return True when a request includes setup-relevant proxy headers."""
+
+    headers = request.headers
+    return any(key in headers for key in _SETUP_PROXY_HEADERS)
+
+
+def has_setup_proxy_client_ip_headers(request: Request) -> bool:
+    """Return True when proxy headers claim to identify the original client."""
+
+    headers = request.headers
+    if any(key in headers for key in _SETUP_PROXY_CLIENT_IP_HEADERS):
+        return True
+
+    forwarded = headers.get("forwarded")
+    if not forwarded:
+        return False
+
+    for forwarded_entry in forwarded.split(","):
+        for parameter in forwarded_entry.split(";"):
+            if "=" not in parameter:
+                continue
+            key, _value = parameter.split("=", 1)
+            if key.strip().lower() == "for":
+                return True
+
+    return False
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -153,15 +289,7 @@ def _is_loopback_host(host: str | None) -> bool:
 
 def _has_proxy_headers(request: Request) -> bool:
     # Treat any of these headers as evidence of a proxy hop; block by default.
-    proxy_headers = (
-        "x-forwarded-for",
-        "forwarded",
-        "x-real-ip",
-        "x-forwarded-host",
-        "x-forwarded-proto",
-    )
-    headers = request.headers
-    return any(key in headers for key in proxy_headers)
+    return has_setup_proxy_headers(request)
 
 
 def _host_header_is_local(request: Request) -> bool:
@@ -193,6 +321,7 @@ def _is_local_setup_request(
     method: str,
     path: str,
     has_proxy_headers: bool,
+    has_proxy_client_ip_headers: bool,
     client_is_local: bool,
     forwarded_is_local: bool,
     host_header_is_local: bool,
@@ -203,9 +332,13 @@ def _is_local_setup_request(
             return False
         if not has_proxy_headers and client_is_local:
             return True
+        if has_proxy_headers and not has_proxy_client_ip_headers:
+            return client_is_local
         return bool(has_proxy_headers and client_is_local and forwarded_is_local)
 
     if has_proxy_headers:
+        if not has_proxy_client_ip_headers:
+            return client_is_local and host_header_is_local
         return client_is_local and forwarded_is_local and host_header_is_local
 
     return client_is_local and host_header_is_local
@@ -229,6 +362,7 @@ async def require_local_setup_access(request: Request) -> None:
     method = (request.method or "").upper()
 
     has_proxy_headers = _has_proxy_headers(request)
+    has_proxy_client_ip_headers = has_setup_proxy_client_ip_headers(request)
     client_host = request.client.host if request.client else None
     forwarded_ip = _first_forwarded_ip(request)
     client_is_local = _is_loopback_host(client_host)
@@ -238,6 +372,7 @@ async def require_local_setup_access(request: Request) -> None:
         method=method,
         path=path,
         has_proxy_headers=has_proxy_headers,
+        has_proxy_client_ip_headers=has_proxy_client_ip_headers,
         client_is_local=client_is_local,
         forwarded_is_local=forwarded_is_local,
         host_header_is_local=host_header_is_local,
@@ -265,6 +400,8 @@ async def require_local_setup_access(request: Request) -> None:
             )
         if not has_proxy_headers and client_is_local:
             return
+        if has_proxy_headers and not has_proxy_client_ip_headers and client_is_local:
+            return
         if has_proxy_headers and client_is_local and forwarded_is_local:
             logger.debug("Allowing proxied localhost GET to /api/v1/setup/config with loopback client and forwarded IP")
             return
@@ -284,6 +421,8 @@ async def require_local_setup_access(request: Request) -> None:
         )
 
     if has_proxy_headers:
+        if not has_proxy_client_ip_headers and client_is_local and host_header_is_local:
+            return
         if not (client_is_local and forwarded_is_local and host_header_is_local):
             logger.warning(
                 "Blocked setup access via proxy (client={}, forwarded={}, host_local={})",
@@ -293,10 +432,7 @@ async def require_local_setup_access(request: Request) -> None:
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Setup changes are restricted to local requests. Forwarded client is not local. "
-                    "Set TLDW_SETUP_ALLOW_REMOTE=1 or enable allow_remote_setup_access in config.txt to bypass."
-                ),
+                detail=_REMOTE_SETUP_WRITE_DENIED_DETAIL,
             )
         return
 
@@ -306,10 +442,7 @@ async def require_local_setup_access(request: Request) -> None:
     logger.warning("Blocked remote setup access from host={}", client_host)
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=(
-            "Setup changes are restricted to local requests. Set TLDW_SETUP_ALLOW_REMOTE=1 "
-            "or enable allow_remote_setup_access in config.txt to permit remote access temporarily."
-        ),
+        detail=_REMOTE_SETUP_WRITE_DENIED_DETAIL,
     )
 
 

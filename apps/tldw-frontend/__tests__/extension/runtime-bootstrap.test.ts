@@ -12,6 +12,7 @@ const chromeDescriptor = Object.getOwnPropertyDescriptor(globalThis, "chrome")
 const browserDescriptor = Object.getOwnPropertyDescriptor(globalThis, "browser")
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+const originalPublicApiKey = process.env.NEXT_PUBLIC_X_API_KEY
 
 const setGlobal = (key: "chrome" | "browser", value: unknown) => {
   Object.defineProperty(globalThis, key, {
@@ -66,6 +67,11 @@ describe("runtime-bootstrap chrome shim", () => {
       delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     } else {
       process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+    }
+    if (originalPublicApiKey === undefined) {
+      delete process.env.NEXT_PUBLIC_X_API_KEY
+    } else {
+      process.env.NEXT_PUBLIC_X_API_KEY = originalPublicApiKey
     }
     localStorage.clear()
   })
@@ -170,6 +176,26 @@ describe("runtime-bootstrap chrome shim", () => {
       const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
       expect(nextConfig.serverUrl).toBe(window.location.origin)
       expect(nextConfig.apiKey).toBe("frontend-key")
+    })
+  })
+
+  it("seeds first-run quickstart config from the public single-user API key", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_X_API_KEY = "quickstart-api-key"
+    delete process.env.NEXT_PUBLIC_API_URL
+
+    await import("@web/extension/shims/runtime-bootstrap")
+
+    expect(localStorage.getItem("tldw-api-host")).toBe(window.location.origin)
+    await vi.waitFor(() => {
+      expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
+
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      expect(nextConfig).toMatchObject({
+        authMode: "single-user",
+        apiKey: "quickstart-api-key",
+        serverUrl: window.location.origin
+      })
     })
   })
 

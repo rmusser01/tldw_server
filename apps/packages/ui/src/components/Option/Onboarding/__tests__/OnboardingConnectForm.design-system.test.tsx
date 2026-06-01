@@ -35,6 +35,40 @@ vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
   )
 }))
 
+vi.mock("@/hooks/useSetupOnboarding", () => ({
+  useSetupOnboarding: () => ({
+    state: {
+      status: "not_started",
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: false }
+    },
+    metadata: {
+      auth_mode: "single_user",
+      bundled_single_user_auth_available: true,
+      manual_auth_required: false,
+      setup_required: true,
+      setup_completed: false,
+      remote_setup_enabled: false,
+      connection: { browser_access: "local" },
+      setup_paths: [],
+      multi_user_exit: { guide_path: "/docs/multi-user" }
+    },
+    loading: false,
+    error: null
+  })
+}))
+
+vi.mock("@/components/Option/Onboarding/UnifiedSetupWizard", () => ({
+  UnifiedSetupWizard: () => (
+    <div data-testid="unified-setup-shell" tabIndex={-1}>
+      <button type="button">Mock unified setup</button>
+    </div>
+  )
+}))
+
 type MockConnectionState = {
   phase: "idle" | "connected"
   isConnected: boolean
@@ -56,6 +90,46 @@ type RenderConnectionFormOptions = {
   validationResult?: MockValidationResult
   connectedState?: Partial<MockConnectionState>
   testConnectionRejects?: Error
+}
+
+type MockButtonProps = Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "onClick" | "type"
+> & {
+  children?: React.ReactNode
+  onClick?: () => void
+  disabled?: boolean
+  loading?: boolean
+  block?: boolean
+  icon?: React.ReactNode
+  size?: string
+  type?: string
+}
+
+type MockInputChangeEvent = {
+  target: { value: string }
+}
+
+type MockInputProps = Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "onChange" | "size" | "value"
+> & {
+  value?: string
+  onChange?: (event: MockInputChangeEvent) => void
+  disabled?: boolean
+  suffix?: React.ReactNode
+  status?: string
+  size?: string
+}
+
+type MockSelectProps = Omit<
+  React.SelectHTMLAttributes<HTMLSelectElement>,
+  "onChange" | "value"
+> & {
+  value?: string
+  onChange?: (value: string) => void
+  options?: Array<{ value: string; label: string }>
+  disabled?: boolean
 }
 
 const createIdleConnectionState = (): MockConnectionState => ({
@@ -133,17 +207,7 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       size: _size,
       type: _type,
       ...props
-    }: {
-      children?: React.ReactNode
-      onClick?: () => void
-      disabled?: boolean
-      loading?: boolean
-      block?: boolean
-      icon?: React.ReactNode
-      size?: string
-      type?: string
-      [key: string]: unknown
-    }) => (
+    }: MockButtonProps) => (
       <button
         type="button"
         onClick={onClick}
@@ -154,17 +218,15 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       </button>
     ),
     Input: Object.assign(
-      React.forwardRef<HTMLInputElement, Omit<
-        React.InputHTMLAttributes<HTMLInputElement>,
-        "onChange" | "size"
-      > & {
-        value?: string
-        onChange?: (event: { target: { value: string } }) => void
-        disabled?: boolean
-        suffix?: React.ReactNode
-        status?: string
-        size?: string
-      }>(({ value, onChange, disabled, suffix: _suffix, status: _status, size: _size, ...props }, ref) => (
+      React.forwardRef<HTMLInputElement, MockInputProps>(({
+        value,
+        onChange,
+        disabled,
+        suffix: _suffix,
+        status: _status,
+        size: _size,
+        ...props
+      }, ref) => (
         <input
           ref={ref}
           value={value}
@@ -176,16 +238,14 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
         />
       )),
       {
-        Password: React.forwardRef<HTMLInputElement, Omit<
-          React.InputHTMLAttributes<HTMLInputElement>,
-          "onChange" | "size"
-        > & {
-          value?: string
-          onChange?: (event: { target: { value: string } }) => void
-          disabled?: boolean
-          status?: string
-          size?: string
-        }>(({ value, onChange, disabled, status: _status, size: _size, ...props }, ref) => (
+        Password: React.forwardRef<HTMLInputElement, MockInputProps>(({
+          value,
+          onChange,
+          disabled,
+          status: _status,
+          size: _size,
+          ...props
+        }, ref) => (
           <input
             ref={ref}
             value={value}
@@ -204,13 +264,7 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       options = [],
       disabled,
       ...props
-    }: {
-      value?: string
-      onChange?: (value: string) => void
-      options?: Array<{ value: string; label: string }>
-      disabled?: boolean
-      [key: string]: unknown
-    }) => (
+    }: MockSelectProps) => (
       <select
         value={value ?? ""}
         onChange={(event) => onChange?.(event.currentTarget.value)}
@@ -426,7 +480,7 @@ describe("setup onboarding design-system state wiring", () => {
     setupRouteMocks.optionLayout.mockClear()
   })
 
-  it("frames setup in a setup-only shell with one page heading and primary action", async () => {
+  it("frames setup in a setup-only shell with the canonical setup-required action", async () => {
     const { default: OptionSetup } = await import("@/routes/option-setup")
 
     render(
@@ -439,19 +493,17 @@ describe("setup onboarding design-system state wiring", () => {
       hideHeader: true,
       hideSidebar: true
     })
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
-    expect(screen.getByRole("heading", { level: 1, name: "Setup Wizard" })).toBeInTheDocument()
     expect(
       screen.getByText(getDesignSystemState("setup_required").label)
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: /start setup|connect/i })
+      screen.getByRole("button", { name: /continue setup/i })
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Mock wizard" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Mock unified setup" })).toBeInTheDocument()
 
-    const serverUrlInput = screen.getByTestId("onboarding-server-url")
-    fireEvent.click(screen.getByRole("button", { name: "Start setup" }))
-    expect(serverUrlInput).toHaveFocus()
+    const setupShell = screen.getByTestId("unified-setup-shell")
+    fireEvent.click(screen.getByRole("button", { name: "Continue setup" }))
+    expect(setupShell).toHaveFocus()
     expect(screen.queryByTestId("chat-header-theme-toggle")).not.toBeInTheDocument()
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument()
   })

@@ -37,6 +37,10 @@ const nextConfig = {
 
     return [
       {
+        source: '/api/v1/media',
+        destination: `${internalApiOrigin}/api/v1/media/`,
+      },
+      {
         source: '/api/:path*/',
         destination: `${internalApiOrigin}/api/:path*/`,
       },

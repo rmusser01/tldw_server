@@ -1,6 +1,6 @@
 # Docker Single-User + WebUI Setup
 
-Use this profile when you want the quickest self-hosted path: one operator, single-user API-key auth, Docker-managed persistence, and the Next.js WebUI.
+Use this profile when you want the quickest self-hosted path: one operator, single-user API-key auth, Docker-managed persistence, and the Next.js WebUI. It is one of the two peer solo choices; the local single-user profile follows the same WebUI first-chat completion gate once its WebUI is reachable.
 
 > **Windows:** Use WSL2 for the documented make commands. If you prefer PowerShell, run the equivalent tldw-setup command shown under each step and start Docker Desktop before Docker profiles.
 
@@ -44,7 +44,7 @@ PowerShell / no-`make` equivalent:
 docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --wait
 ```
 
-The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The WebUI uses the same-origin proxy by default, so browser requests stay on the WebUI origin unless you intentionally configure advanced LAN/custom-host access.
+The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The default browser path uses same-origin browser API requests through the WebUI proxy. Treat LAN/custom-host browser access as advanced configuration; if you intentionally need that path, set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL`.
 
 Default persistence uses Docker named volumes:
 
@@ -85,13 +85,15 @@ curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 
 ## First Value
 
-Open the WebUI at http://127.0.0.1:8080, or run the provider-independent first-value ingest/search verification. The verify command posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
+Open http://127.0.0.1:8080 to open the WebUI and complete first-time setup there. The setup completion gate is the first successful chat response from your selected hosted API key or local OpenAI-compatible provider. Immediately after that, add your first source so chat can use your own material.
+
+The CLI verify command still runs a provider-independent first-value ingest/search verification. It posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
 
 ```bash
 make verify-docker-single
 ```
 
-This does not require an LLM provider key. Add provider keys to `tldw_Server_API/Config_Files/.env` later when you are ready to use chat or hosted model features.
+This runtime check does not require an LLM provider key. Normal first-time chat/provider setup happens in the WebUI wizard; no manual config-file changes are required for the standard solo path.
 
 ## Audio Path
 
@@ -109,10 +111,11 @@ After this profile is running, continue with one of:
 - If the API is unavailable, verify no other process is using port `8000`.
 - If the WebUI is unavailable, verify no other process is using port `8080`.
 - If direct API calls return `401`, confirm `SINGLE_USER_API_KEY` in `tldw_Server_API/Config_Files/.env` and use it as `X-API-KEY`.
+- If WebUI setup cannot save provider settings, use `/setup` as the backend/operator recovery surface and inspect `tldw_Server_API/Config_Files/.env` only as a troubleshooting step.
 - If you need a full reset, stop the stack and remove volumes with `docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml down -v`.
 
 ## Optional Add-ons
 
-- Add provider API keys to `tldw_Server_API/Config_Files/.env`, then restart the stack.
+- Keep provider setup in the WebUI first-run wizard for the normal path; use file-based configuration only for recovery, automation, or advanced deployments.
 - Use `Dockerfiles/docker-compose.host-storage.yml` for host-visible data under `docker-data/`.
 - Use the advanced WebUI environment variables only when browsers must reach a LAN host, reverse proxy, or custom domain.

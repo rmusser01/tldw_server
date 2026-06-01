@@ -1,6 +1,6 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import OptionIndex from "../option-index"
 import OptionSetup from "../option-setup"
 import OptionOnboardingTest from "../option-onboarding-test"
@@ -8,6 +8,9 @@ import { ConnectionPhase } from "@/types/connection"
 
 const state = {
   hasCompletedFirstRun: false
+}
+const firstRunState = {
+  status: "not_started"
 }
 let phase: ConnectionPhase | null = null
 const toggleDarkModeMock = vi.fn()
@@ -93,6 +96,41 @@ vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
   )
 }))
 
+vi.mock("@/components/Option/Onboarding/UnifiedSetupWizard", () => ({
+  UnifiedSetupWizard: () => (
+    <div data-testid="unified-setup-shell">
+      <h1>First-time setup</h1>
+      <button type="button">Mock unified setup</button>
+    </div>
+  )
+}))
+
+vi.mock("@/hooks/useSetupOnboarding", () => ({
+  useSetupOnboarding: () => ({
+    state: {
+      status: firstRunState.status,
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: firstRunState.status === "completed" }
+    },
+    metadata: {
+      auth_mode: "single_user",
+      bundled_single_user_auth_available: true,
+      manual_auth_required: false,
+      setup_required: firstRunState.status !== "completed",
+      setup_completed: firstRunState.status === "completed",
+      remote_setup_enabled: false,
+      connection: { browser_access: "local" },
+      setup_paths: [],
+      multi_user_exit: { guide_path: "/docs/multi-user" }
+    },
+    loading: false,
+    error: null
+  })
+}))
+
 vi.mock("~/components/Option/LandingHub", () => ({
   LandingHub: () => <div data-testid="landing-hub">Hub</div>
 }))
@@ -112,6 +150,7 @@ describe("core route identity guardrails", () => {
     markFirstRunCompleteMock.mockReset().mockResolvedValue(undefined)
     toggleDarkModeMock.mockReset()
     state.hasCompletedFirstRun = false
+    firstRunState.status = "not_started"
     phase = null
     currentLocation = {
       pathname: "/",
@@ -123,8 +162,8 @@ describe("core route identity guardrails", () => {
 
   it("provides unique route-intent headings for home/setup/onboarding-test", async () => {
     const firstRender = render(<OptionIndex />)
-    expect(screen.getByText("Home Onboarding")).toBeInTheDocument()
-    expect(await screen.findByTestId("onboarding-wizard")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "First-time setup" })).toBeInTheDocument()
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
     expect(optionLayoutMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         hideHeader: true,
@@ -134,8 +173,8 @@ describe("core route identity guardrails", () => {
     firstRender.unmount()
 
     const secondRender = render(<OptionSetup />)
-    expect(screen.getByText("Setup Wizard")).toBeInTheDocument()
-    expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
+    expect(screen.getByText("Setup operator recovery")).toBeInTheDocument()
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
     expect(optionLayoutMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         hideHeader: true,
@@ -156,33 +195,26 @@ describe("core route identity guardrails", () => {
     )
   })
 
-  it("completes onboarding immediately without waiting for connection recheck", async () => {
+  it("does not use local first-run completion as the home resolver", async () => {
     optionLayoutMock.mockClear()
-    state.hasCompletedFirstRun = false
-
-    let resolveCheck: (() => void) | null = null
-    checkOnceMock.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveCheck = resolve
-        })
-    )
+    state.hasCompletedFirstRun = true
+    firstRunState.status = "not_started"
 
     render(<OptionIndex />)
-    expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
 
-    checkOnceMock.mockClear()
-    markFirstRunCompleteMock.mockClear()
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(screen.queryByTestId("companion-home-shell")).not.toBeInTheDocument()
+    expect(markFirstRunCompleteMock).not.toHaveBeenCalled()
+  })
 
-    fireEvent.click(screen.getByTestId("onboarding-finish"))
+  it("renders Companion Home when backend first-run state is complete", async () => {
+    firstRunState.status = "completed"
 
-    await waitFor(() => {
-      expect(markFirstRunCompleteMock).toHaveBeenCalledTimes(1)
-    })
-    expect(checkOnceMock).toHaveBeenCalledTimes(1)
+    render(<OptionIndex />)
 
-    // Prevent unresolved Promise leakage in this test process.
-    resolveCheck?.()
+    expect(await screen.findByTestId("companion-home-shell")).toBeInTheDocument()
+    expect(screen.getByText("options")).toBeInTheDocument()
+    expect(screen.queryByTestId("landing-hub")).not.toBeInTheDocument()
   })
 
   it("does not auto-restart onboarding after hydration when the connection is already resolved", async () => {
@@ -208,18 +240,19 @@ describe("core route identity guardrails", () => {
     expect(beginOnboardingMock).not.toHaveBeenCalled()
   })
 
-  it("keeps an explicit theme toggle available on the home onboarding shell", () => {
+  it("renders setup in the focused shell while backend setup is required", () => {
     render(<OptionIndex />)
 
-    const toggle = screen.getByTestId("chat-header-theme-toggle")
-    expect(toggle).toBeInTheDocument()
-
-    fireEvent.click(toggle)
-
-    expect(toggleDarkModeMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(optionLayoutMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        hideHeader: true,
+        hideSidebar: true
+      })
+    )
   })
 
-  it("preserves character-chat first-run context without pre-auth action lane", async () => {
+  it("uses unified setup for character-chat first-run entry without pre-auth action lane", async () => {
     currentLocation = {
       pathname: "/",
       search:
@@ -230,10 +263,7 @@ describe("core route identity guardrails", () => {
 
     render(<OptionIndex />)
 
-    expect(screen.getByText("Character Chat Onboarding")).toBeInTheDocument()
-    expect(
-      screen.getByText("Finish setup, then continue creating and chatting with characters.")
-    ).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "First-time setup" })).toBeInTheDocument()
     expect(
       screen.queryByTestId("character-chat-onboarding-lane")
     ).not.toBeInTheDocument()
@@ -249,37 +279,6 @@ describe("core route identity guardrails", () => {
     expect(
       screen.queryByRole("button", { name: "Start character chat" })
     ).not.toBeInTheDocument()
-    expect(await screen.findByTestId("onboarding-wizard")).toBeInTheDocument()
-  })
-
-  it("returns character-chat users to their interrupted route after onboarding finishes", async () => {
-    currentLocation = {
-      pathname: "/",
-      search:
-        "?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue",
-      hash: "",
-      state: null
-    }
-
-    render(<OptionIndex />)
-
-    fireEvent.click(await screen.findByTestId("onboarding-finish"))
-
-    await waitFor(() => {
-      expect(markFirstRunCompleteMock).toHaveBeenCalledTimes(1)
-    })
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/characters?from=header-select&create=true"
-    )
-  })
-
-  it("renders Companion Home from / after onboarding", async () => {
-    state.hasCompletedFirstRun = true
-
-    render(<OptionIndex />)
-
-    expect(await screen.findByTestId("companion-home-shell")).toBeInTheDocument()
-    expect(screen.getByText("options")).toBeInTheDocument()
-    expect(screen.queryByTestId("landing-hub")).not.toBeInTheDocument()
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
   })
 })

@@ -179,7 +179,7 @@ describe("App layout routing", () => {
     )
   })
 
-  it("lets /chat bypass the global assistant setup overlay", () => {
+  it("routes first-time chat setup through the unified setup shell", () => {
     renderApp("/chat")
 
     expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
@@ -188,12 +188,34 @@ describe("App layout routing", () => {
     )
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
       "data-bypass",
-      "true"
+      "false"
     )
 
     fireEvent.click(screen.getByTestId("first-run-gate-start"))
 
-    expect(mockRouter.push).toHaveBeenCalledWith("/persona")
+    expect(mockRouter.push).toHaveBeenCalledWith("/")
+  })
+
+  it("routes first-time media setup through the unified setup shell", () => {
+    renderApp("/media")
+
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "false"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith("/")
+  })
+
+  it("lets the unified setup host route bypass the generic first-run overlay", () => {
+    renderApp("/")
+
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
   })
 
   it("bypasses the generic first-run splash for character-chat route intent", async () => {

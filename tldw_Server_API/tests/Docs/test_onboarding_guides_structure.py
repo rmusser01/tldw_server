@@ -44,6 +44,68 @@ def test_each_profile_has_required_sections() -> None:
         )
 
 
+def test_getting_started_presents_peer_solo_paths_and_first_chat_journey() -> None:
+    text = Path("Docs/Getting_Started/README.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "Solo setup chooser",
+        "Docker single-user",
+        "Local single-user",
+        "shared server/operator path",
+        "open the WebUI",
+        "first successful chat",
+        "add your first source",
+    ):
+        _require(phrase in text, f"Getting Started should mention: {phrase}")
+
+    docker_idx = text.index("Docker single-user")
+    local_idx = text.index("Local single-user")
+    _require(
+        abs(docker_idx - local_idx) < 2000,
+        "Docker and local single-user paths should be presented as peer solo choices",
+    )
+
+
+def test_single_user_profiles_handoff_to_webui_first_chat_and_first_source() -> None:
+    for guide in (
+        "Docs/Getting_Started/Profile_Docker_Single_User.md",
+        "Docs/Getting_Started/Profile_Local_Single_User.md",
+    ):
+        text = Path(guide).read_text(encoding="utf-8")
+        for phrase in (
+            "open the WebUI",
+            "first successful chat",
+            "add your first source",
+        ):
+            _require(phrase in text, f"{guide} should mention: {phrase}")
+        before_troubleshoot, _, _ = text.partition("## Troubleshoot")
+        forbidden = (
+            "Add provider API keys to",
+            "edit `.env`",
+            "edit `tldw_Server_API/Config_Files/.env`",
+            "edit `Config_Files/config.txt`",
+        )
+        for phrase in forbidden:
+            _require(
+                phrase not in before_troubleshoot,
+                f"{guide} should not require manual config editing before troubleshooting: {phrase}",
+            )
+
+
+def test_multi_user_profile_routes_operators_out_of_solo_wizard() -> None:
+    text = Path("Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md").read_text(
+        encoding="utf-8"
+    )
+
+    for phrase in (
+        "shared server/operator path",
+        "solo wizard is not the multi-user path",
+        "multi-user setup guide",
+        "operator checklist",
+    ):
+        _require(phrase in text, f"Multi-user profile should mention: {phrase}")
+
+
 def test_gpu_addon_is_legacy_pointer_to_hardware_guides() -> None:
     text = Path("Docs/Getting_Started/GPU_STT_Addon.md").read_text(encoding="utf-8")
     _require("legacy pointer" in text, "GPU_STT_Addon should be marked as a legacy pointer")
