@@ -4,6 +4,10 @@ import type { ConversationState } from "@/services/tldw/TldwApiClient"
 import type { RagPinnedResult } from "@/utils/rag-format"
 import type { ToolCall, ToolCallResult } from "@/types/tool-calls"
 import type { DiscoSkillComment } from "@/types/disco-skills"
+import type {
+  DynamicUIActionUserMetadata,
+  DynamicUIEnvelope
+} from "@/types/dynamic-ui"
 import type { MessageSteeringMode } from "@/types/message-steering"
 import type {
   QueuedRequest,
@@ -30,6 +34,11 @@ export type WebSearch = {
 export type ToolChoice = "auto" | "none" | "required"
 export type CompareContinuationMode = "winner" | "compare"
 
+export type MessageMetadataExtra = Record<string, unknown> & {
+  dynamic_ui?: DynamicUIEnvelope
+  dynamic_ui_action?: DynamicUIActionUserMetadata
+}
+
 export type ReplyTarget = {
   id: string
   preview: string
@@ -47,6 +56,7 @@ export type MessageVariant = {
   createdAt?: number
   serverMessageId?: string
   serverMessageVersion?: number
+  metadataExtra?: MessageMetadataExtra
 }
 
 export type Message = {
@@ -81,7 +91,7 @@ export type Message = {
   // Character message pin state (server metadata-backed)
   pinned?: boolean
   // Full metadata payload (if provided by server)
-  metadataExtra?: Record<string, unknown>
+  metadataExtra?: MessageMetadataExtra
   // Character turn metadata (multi-character + mood scaffolding)
   speakerCharacterId?: number | null
   speakerCharacterName?: string

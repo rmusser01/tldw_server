@@ -65,6 +65,7 @@ export type Message = {
   clusterId?: string;
   modelId?: string;
   generationInfo?: any;
+  metadataExtra?: Record<string, unknown>;
   modelName?: string;
   modelImage?: string;
   documents?: ChatDocuments;

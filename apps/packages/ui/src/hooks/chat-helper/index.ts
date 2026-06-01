@@ -329,6 +329,8 @@ export const saveMessageOnSuccess = async ({
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
+  userMetadataExtra,
+  assistantMetadataExtra,
   prompt_id,
   prompt_content,
   reasoning_time_taken = 0,
@@ -359,6 +361,8 @@ export const saveMessageOnSuccess = async ({
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   generationInfo?: any
+  userMetadataExtra?: Record<string, unknown>
+  assistantMetadataExtra?: Record<string, unknown>
   prompt_id?: string
   prompt_content?: string
   reasoning_time_taken?: number
@@ -380,6 +384,7 @@ export const saveMessageOnSuccess = async ({
         modelId: userModelId,
         parent_message_id: userParentMessageId ?? null,
         generationInfo,
+        metadataExtra: userMetadataExtra,
         reasoning_time_taken,
         documents
       })
@@ -406,6 +411,7 @@ export const saveMessageOnSuccess = async ({
           modelId,
           parent_message_id: assistantParentMessageId ?? null,
           generationInfo,
+          metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
         }
         // historyId,
@@ -451,6 +457,7 @@ export const saveMessageOnSuccess = async ({
         modelId: userModelId,
         parent_message_id: userParentMessageId ?? null,
         generationInfo,
+        metadataExtra: userMetadataExtra,
         reasoning_time_taken,
         documents
       }
@@ -481,6 +488,7 @@ export const saveMessageOnSuccess = async ({
         modelId,
         parent_message_id: assistantParentMessageId ?? null,
         generationInfo,
+        metadataExtra: assistantMetadataExtra,
         reasoning_time_taken
       }
       // newHistoryId.id,
