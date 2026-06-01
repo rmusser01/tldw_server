@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -117,6 +118,8 @@ class RecordingExternalTransport:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.runtime_auth_seen: BrokeredExternalCredential | None = None
         self.fail_list = False
+        self.fail_health = False
+        self.fail_call = False
         self.tools = [tool.copy() for tool in tools or ()]
         self.result = result or ExternalToolCallResult(content={"ok": True})
 
@@ -132,6 +135,8 @@ class RecordingExternalTransport:
 
     async def health_check(self) -> dict[str, bool]:
         """Return deterministic fake health."""
+        if self.fail_health:
+            raise RuntimeError("health failed")
         return {
             "configured": True,
             "connected": self.connected,
@@ -155,9 +160,32 @@ class RecordingExternalTransport:
     ) -> ExternalToolCallResult:
         """Record and return the configured call result."""
         del context
+        if self.fail_call:
+            raise RuntimeError("call failed")
         self.calls.append((tool_name, dict(arguments or {})))
         self.runtime_auth_seen = None if runtime_auth is None else runtime_auth.copy()
         return self.result.copy()
+
+
+class BlockingConnectTransport(RecordingExternalTransport):
+    """Fake transport that pauses connection until the test releases it."""
+
+    def __init__(
+        self,
+        *,
+        server_id: str,
+        tools: list[ExternalToolDefinition] | None = None,
+    ) -> None:
+        super().__init__(server_id=server_id, tools=tools)
+        self.connect_started = asyncio.Event()
+        self.allow_connect = asyncio.Event()
+
+    async def connect(self) -> None:
+        """Wait for the test to allow connection completion."""
+        self.connect_count += 1
+        self.connect_started.set()
+        await self.allow_connect.wait()
+        self.connected = True
 
 
 class RecordingCredentialBroker:
@@ -262,6 +290,54 @@ async def test_external_runtime_start_discovers_tools_and_reports_healthy_status
         "external_server_started",
         "external_server_discovered",
     ]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_start_does_not_block_status_snapshot_during_connect() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = BlockingConnectTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+
+    start_task = asyncio.create_task(manager.start_server("research"))
+    try:
+        await asyncio.wait_for(transport.connect_started.wait(), timeout=1.0)
+        rows = await asyncio.wait_for(manager.list_runtime_servers(), timeout=0.2)
+    finally:
+        transport.allow_connect.set()
+        await start_task
+
+    assert rows["servers"][0]["id"] == "research"
+    assert rows["servers"][0]["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_list_status_handles_health_check_failure() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+
+    transport.fail_health = True
+    rows = await manager.list_runtime_servers()
+
+    row = rows["servers"][0]
+    assert row["id"] == "research"
+    assert row["status"] == "unhealthy"
+    assert row["checks"]["error"] is True
+    assert row["checks"]["error_type"] == "RuntimeError"
+    assert row["last_error"] == "RuntimeError: health failed"
 
 
 @pytest.mark.asyncio
@@ -526,6 +602,172 @@ async def test_external_runtime_execution_uses_brokered_credentials_without_leak
     assert secret_header not in serialized_public_data
     assert secret_env not in serialized_public_data
     assert (await store.get_server("research")).credential_slots == ["api_key"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("effective_policy", "reason_code"),
+    [
+        ({"profile_id": "project-researcher"}, "external_server_not_granted"),
+        (
+            {
+                "profile_id": "project-researcher",
+                "external_server_grants": [{"server_id": "research"}],
+                "denied_tools": ["ext.research.search"],
+            },
+            "tool_denied",
+        ),
+        (
+            {
+                "profile_id": "project-researcher",
+                "external_server_grants": [{"server_id": "research"}],
+                "allowed_tools": ["ext.research.lookup"],
+            },
+            "tool_not_allowed",
+        ),
+    ],
+)
+async def test_external_runtime_execution_enforces_policy_before_transport_call(
+    effective_policy: dict[str, Any],
+    reason_code: str,
+) -> None:
+    audit = RecordingAuditStore()
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+        audit_store=audit,
+    )
+    await manager.start_server("research")
+
+    with pytest.raises(FederationPolicyDenied) as exc_info:
+        await manager.execute_virtual_tool(
+            "ext.research.search",
+            {"query": "MCP"},
+            effective_policy=effective_policy,
+            actor_id="user-1",
+        )
+
+    assert exc_info.value.reason_code == reason_code
+    assert transport.calls == []
+    denied = audit.events[-1]
+    assert denied.event_type == "external_tool.denied"
+    assert denied.actor_id == "user-1"
+    assert denied.profile_id == "project-researcher"
+    assert denied.payload["reason_code"] == reason_code
+    assert denied.payload["virtual_tool_name"] == "ext.research.search"
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_unknown_virtual_tool_reports_not_found() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+
+    with pytest.raises(GatewayExternalRuntimeError) as exc_info:
+        await manager.execute_virtual_tool(
+            "ext.research.missing",
+            {"query": "MCP"},
+            effective_policy={"external_server_grants": [{"server_id": "research"}]},
+        )
+
+    assert exc_info.value.reason_code == "external_virtual_tool_not_found"
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_execution_wraps_transport_call_errors() -> None:
+    audit = RecordingAuditStore()
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+        audit_store=audit,
+    )
+    await manager.start_server("research")
+
+    transport.fail_call = True
+    with pytest.raises(GatewayExternalRuntimeError) as exc_info:
+        await manager.execute_virtual_tool(
+            "ext.research.search",
+            {"query": "MCP"},
+            effective_policy={"external_server_grants": [{"server_id": "research"}]},
+            actor_id="user-1",
+        )
+
+    assert exc_info.value.reason_code == "external_tool_call_failed"
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    failed = audit.events[-1]
+    assert failed.event_type == "external_tool.failed"
+    assert failed.actor_id == "user-1"
+    assert failed.payload["reason_code"] == "external_tool_call_failed"
+    assert failed.payload["error_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_credential_broker_accepts_noncopyable_policy_and_context() -> None:
+    class NonCopyablePolicy:
+        profile_id = "project-researcher"
+        external_server_grants = [{"server_id": "research"}]
+        credential_grants = [
+            {
+                "external_server_id": "research",
+                "credential_slot": "api_key",
+            }
+        ]
+        allowed_tools: list[str] = []
+        denied_tools: list[str] = []
+
+        def __deepcopy__(self, memo: dict[int, Any]) -> NonCopyablePolicy:
+            raise RuntimeError("policy cannot be copied")
+
+    class NonCopyableContext:
+        def __deepcopy__(self, memo: dict[int, Any]) -> NonCopyableContext:
+            raise RuntimeError("context cannot be copied")
+
+    policy = NonCopyablePolicy()
+    context = NonCopyableContext()
+    store = InMemoryExternalRegistryStore([_server(credential_slots=["api_key"])])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    broker = RecordingCredentialBroker(
+        BrokeredExternalCredential(headers={"Authorization": "Bearer test"})
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+        credential_broker=broker,
+    )
+    await manager.start_server("research")
+
+    result = await manager.execute_virtual_tool(
+        "ext.research.search",
+        {"query": "MCP"},
+        effective_policy=policy,
+        context=context,
+    )
+
+    assert result.content == {"ok": True}
+    assert broker.calls[0]["effective_policy"] is policy
+    assert broker.calls[0]["context"] is context
+    assert transport.runtime_auth_seen is not None
 
 
 @pytest.mark.asyncio

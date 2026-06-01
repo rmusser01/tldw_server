@@ -95,177 +95,215 @@ class GatewayExternalRuntimeManager:
 
     async def start_server(self, server_id: str) -> dict[str, Any]:
         """Start one configured external server and discover its virtual tools."""
+        server = await self._load_server(server_id)
+        self._require_enabled(server)
+
         async with self._lock:
-            server = await self._load_server(server_id)
-            self._require_enabled(server)
-            if server.id in self._transports:
-                await self._stop_server_unlocked(server.id)
-            return await self._start_server_unlocked(server)
+            previous = self._pop_runtime_unlocked(server.id)
+        if previous is not None:
+            await self._close_stopped_transport(server.id, previous)
+
+        transport, tools = await self._connect_and_discover_server(server)
+        async with self._lock:
+            replaced = self._pop_runtime_unlocked(server.id)
+            self._commit_started_runtime_unlocked(server, transport, tools)
+        if replaced is not None:
+            await self._close_stopped_transport(server.id, replaced)
+
+        await self._audit(
+            "external_server.lifecycle",
+            payload={
+                "reason_code": "external_server_started",
+                "server_id": server.id,
+                "transport": server.transport,
+            },
+            target_type="external_server",
+            target_id=server.id,
+        )
+        await self._audit(
+            "external_server.discovery",
+            payload={
+                "reason_code": "external_server_discovered",
+                "server_id": server.id,
+                "tool_count": len(tools),
+            },
+            target_type="external_server",
+            target_id=server.id,
+        )
+        return {
+            "ok": True,
+            "reason_code": "external_server_started",
+            "server_id": server.id,
+            "tool_count": len(tools),
+        }
 
     async def stop_server(self, server_id: str) -> dict[str, Any]:
         """Stop one external server and clear its discovered virtual tools."""
+        server = await self._find_server(server_id)
         async with self._lock:
-            server = await self._find_server(server_id)
-            if server is None:
-                raise GatewayExternalRuntimeError(
-                    f"External server '{server_id}' was not found",
-                    reason_code="external_server_not_found",
-                    server_id=server_id,
-                )
-            if server_id not in self._transports:
-                self._clear_server_tools(server_id)
-                self._servers.pop(server_id, None)
-                self._last_errors.pop(server_id, None)
-                return {
-                    "ok": True,
-                    "reason_code": "external_server_already_stopped",
-                    "server_id": server_id,
-                }
-            await self._stop_server_unlocked(server_id)
+            known_active = server_id in self._transports or server_id in self._servers
+            transport = self._pop_runtime_unlocked(server_id)
+        if server is None and not known_active:
+            raise GatewayExternalRuntimeError(
+                f"External server '{server_id}' was not found",
+                reason_code="external_server_not_found",
+                server_id=server_id,
+            )
+        if transport is None:
             return {
                 "ok": True,
-                "reason_code": "external_server_stopped",
+                "reason_code": "external_server_already_stopped",
                 "server_id": server_id,
             }
+        await self._close_stopped_transport(server_id, transport)
+        return {
+            "ok": True,
+            "reason_code": "external_server_stopped",
+            "server_id": server_id,
+        }
 
     async def restart_server(self, server_id: str) -> dict[str, Any]:
         """Reload one server definition and replace its active transport."""
-        async with self._lock:
-            stop_reason = "external_server_already_stopped"
-            if server_id in self._transports:
-                await self._stop_server_unlocked(server_id)
-                stop_reason = "external_server_stopped"
-            server = await self._load_server(server_id)
-            self._require_enabled(server)
-            started = await self._start_server_unlocked(server)
-            return {
-                "ok": True,
-                "reason_code": "external_server_restarted",
-                "server_id": server.id,
-                "stop_reason_code": stop_reason,
-                "start_reason_code": started["reason_code"],
-                "tool_count": started["tool_count"],
-            }
+        stopped = await self.stop_server(server_id)
+        server = await self._load_server(server_id)
+        self._require_enabled(server)
+        started = await self.start_server(server.id)
+        return {
+            "ok": True,
+            "reason_code": "external_server_restarted",
+            "server_id": server.id,
+            "stop_reason_code": stopped["reason_code"],
+            "start_reason_code": started["reason_code"],
+            "tool_count": started["tool_count"],
+        }
 
     async def refresh_server(self, server_id: str | None = None) -> dict[str, Any]:
         """Refresh discovered tools for one active server or every active server."""
         async with self._lock:
             if server_id is not None:
-                if server_id not in self._transports:
-                    await self._load_server(server_id)
-                    target_ids = [server_id]
-                else:
-                    target_ids = [server_id]
+                running = server_id in self._transports
+                target_ids = [server_id]
             else:
                 target_ids = sorted(self._transports)
+                running = True
 
-            refreshed = 0
-            errors: dict[str, str] = {}
-            for target_id in target_ids:
-                if target_id not in self._transports:
-                    errors[target_id] = "external_server_not_running"
-                    continue
-                ok = await self._refresh_server_tools_unlocked(target_id)
-                if ok:
-                    refreshed += 1
-                else:
-                    errors[target_id] = "external_server_discovery_failed"
+        if server_id is not None and not running:
+            await self._load_server(server_id)
 
-            payload: dict[str, Any] = {
-                "ok": not errors,
-                "reason_code": "external_server_refreshed",
-                "refreshed_servers": refreshed,
-                "total_servers": len(target_ids),
-                "virtual_tools": len(self._virtual_tools),
-                "errors": errors,
-            }
-            if server_id is not None:
-                payload["server_id"] = server_id
-            return payload
+        refreshed = 0
+        errors: dict[str, str] = {}
+        for target_id in target_ids:
+            async with self._lock:
+                transport = self._transports.get(target_id)
+            if transport is None:
+                errors[target_id] = "external_server_not_running"
+                continue
+            ok = await self._refresh_server_tools(target_id, transport)
+            if ok:
+                refreshed += 1
+            else:
+                errors[target_id] = "external_server_discovery_failed"
+
+        async with self._lock:
+            virtual_tool_count = len(self._virtual_tools)
+        payload: dict[str, Any] = {
+            "ok": not errors,
+            "reason_code": "external_server_refreshed",
+            "refreshed_servers": refreshed,
+            "total_servers": len(target_ids),
+            "virtual_tools": virtual_tool_count,
+            "errors": errors,
+        }
+        if server_id is not None:
+            payload["server_id"] = server_id
+        return payload
 
     async def reconcile(self, server_id: str | None = None) -> dict[str, Any]:
         """Reconcile active transports against current registry definitions."""
+        definitions = {
+            server.id: server
+            for server in await self._list_server_definitions()
+        }
         async with self._lock:
-            definitions = {
-                server.id: server
-                for server in await self._list_server_definitions()
+            active_ids = set(self._transports)
+            current_definitions = {
+                target_id: server.model_copy(deep=True)
+                for target_id, server in self._servers.items()
             }
-            if server_id is not None:
-                if server_id not in definitions and server_id not in self._transports:
-                    raise GatewayExternalRuntimeError(
-                        f"External server '{server_id}' was not found",
-                        reason_code="external_server_not_found",
-                        server_id=server_id,
-                    )
-                target_ids = [server_id]
-            else:
-                target_ids = sorted(set(definitions) | set(self._transports))
+        if server_id is not None:
+            if server_id not in definitions and server_id not in active_ids:
+                raise GatewayExternalRuntimeError(
+                    f"External server '{server_id}' was not found",
+                    reason_code="external_server_not_found",
+                    server_id=server_id,
+                )
+            target_ids = [server_id]
+        else:
+            target_ids = sorted(set(definitions) | active_ids)
 
-            started = 0
-            stopped = 0
-            restarted = 0
-            refreshed = 0
-            errors: dict[str, str] = {}
+        started = 0
+        stopped = 0
+        restarted = 0
+        refreshed = 0
+        errors: dict[str, str] = {}
 
-            for target_id in target_ids:
-                server = definitions.get(target_id)
+        for target_id in target_ids:
+            server = definitions.get(target_id)
+            async with self._lock:
                 is_active = target_id in self._transports
-                if server is None:
-                    if is_active:
-                        await self._stop_server_unlocked(target_id)
-                        stopped += 1
-                    continue
-                if not server.enabled:
-                    if is_active:
-                        await self._stop_server_unlocked(target_id)
-                        stopped += 1
-                    continue
-                if not is_active:
-                    if server.auto_start:
-                        try:
-                            await self._start_server_unlocked(server)
-                        except GatewayExternalRuntimeError as exc:
-                            errors[target_id] = exc.reason_code
-                        else:
-                            started += 1
-                    continue
-
-                current = self._servers.get(target_id)
-                if current is None or self._definition_changed(current, server):
-                    await self._stop_server_unlocked(target_id)
+                current = current_definitions.get(target_id)
+            if server is None:
+                if is_active:
+                    await self.stop_server(target_id)
+                    stopped += 1
+                continue
+            if not server.enabled:
+                if is_active:
+                    await self.stop_server(target_id)
+                    stopped += 1
+                continue
+            if not is_active:
+                if server.auto_start:
                     try:
-                        await self._start_server_unlocked(server)
+                        await self.start_server(target_id)
                     except GatewayExternalRuntimeError as exc:
                         errors[target_id] = exc.reason_code
                     else:
-                        restarted += 1
-                    continue
+                        started += 1
+                continue
 
-                ok = await self._refresh_server_tools_unlocked(target_id)
-                if ok:
-                    refreshed += 1
+            if current is None or self._definition_changed(current, server):
+                try:
+                    await self.restart_server(target_id)
+                except GatewayExternalRuntimeError as exc:
+                    errors[target_id] = exc.reason_code
                 else:
-                    errors[target_id] = "external_server_discovery_failed"
+                    restarted += 1
+                continue
 
-            return {
-                "ok": not errors,
-                "reason_code": "external_server_reconciled",
-                "server_id": server_id,
-                "started_servers": started,
-                "stopped_servers": stopped,
-                "restarted_servers": restarted,
-                "refreshed_servers": refreshed,
-                "total_servers": len(target_ids),
-                "errors": errors,
-            }
+            payload = await self.refresh_server(target_id)
+            if payload["ok"]:
+                refreshed += 1
+            else:
+                errors[target_id] = "external_server_discovery_failed"
+
+        return {
+            "ok": not errors,
+            "reason_code": "external_server_reconciled",
+            "server_id": server_id,
+            "started_servers": started,
+            "stopped_servers": stopped,
+            "restarted_servers": restarted,
+            "refreshed_servers": refreshed,
+            "total_servers": len(target_ids),
+            "errors": errors,
+        }
 
     async def list_runtime_servers(self) -> dict[str, Any]:
         """Return runtime status rows for configured external servers."""
+        definitions = await self._list_server_definitions()
         async with self._lock:
-            configured = {
-                server.id: server
-                for server in await self._list_server_definitions()
-            }
+            configured = {server.id: server for server in definitions}
             for server_id, server in self._servers.items():
                 configured.setdefault(server_id, server.model_copy(deep=True))
             snapshots = [
@@ -287,7 +325,21 @@ class GatewayExternalRuntimeManager:
                 "initialized": False,
             }
             if transport is not None:
-                checks.update(await transport.health_check())
+                try:
+                    checks.update(await transport.health_check())
+                except Exception as exc:  # noqa: BLE001 - status must not break.
+                    last_error = self._exception_summary(exc)
+                    checks.update(
+                        {
+                            "connected": False,
+                            "initialized": False,
+                            "error": True,
+                            "error_type": type(exc).__name__,
+                        }
+                    )
+                    async with self._lock:
+                        if self._transports.get(server_id) is transport:
+                            self._last_errors[server_id] = last_error
             rows.append(
                 {
                     "id": server_id,
@@ -322,18 +374,17 @@ class GatewayExternalRuntimeManager:
         context: Any = None,
     ) -> dict[str, Any]:
         """Delegate optional install work to the configured installer adapter."""
-        async with self._lock:
-            server = await self._load_server(server_id)
-            self._require_enabled(server)
-            payload = await self._installer.install_server(
-                server.model_copy(deep=True),
-                context=context,
-            )
-            return self._installer_payload(
-                payload,
-                server=server,
-                fallback_reason_code="external_server_install_not_configured",
-            )
+        server = await self._load_server(server_id)
+        self._require_enabled(server)
+        payload = await self._installer.install_server(
+            server.model_copy(deep=True),
+            context=context,
+        )
+        return self._installer_payload(
+            payload,
+            server=server,
+            fallback_reason_code="external_server_install_not_configured",
+        )
 
     async def update_server(
         self,
@@ -342,18 +393,17 @@ class GatewayExternalRuntimeManager:
         context: Any = None,
     ) -> dict[str, Any]:
         """Delegate optional update work to the configured installer adapter."""
-        async with self._lock:
-            server = await self._load_server(server_id)
-            self._require_enabled(server)
-            payload = await self._installer.update_server(
-                server.model_copy(deep=True),
-                context=context,
-            )
-            return self._installer_payload(
-                payload,
-                server=server,
-                fallback_reason_code="external_server_update_not_configured",
-            )
+        server = await self._load_server(server_id)
+        self._require_enabled(server)
+        payload = await self._installer.update_server(
+            server.model_copy(deep=True),
+            context=context,
+        )
+        return self._installer_payload(
+            payload,
+            server=server,
+            fallback_reason_code="external_server_update_not_configured",
+        )
 
     async def execute_virtual_tool(
         self,
@@ -370,8 +420,9 @@ class GatewayExternalRuntimeManager:
             if virtual_tool is None:
                 raise GatewayExternalRuntimeError(
                     f"External virtual tool '{virtual_tool_name}' was not found",
-                    reason_code="external_server_transport_unavailable",
+                    reason_code="external_virtual_tool_not_found",
                 )
+            virtual_tool = virtual_tool.copy()
             server = self._servers.get(virtual_tool.server_id)
             transport = self._transports.get(virtual_tool.server_id)
             if server is None or transport is None:
@@ -380,53 +431,107 @@ class GatewayExternalRuntimeManager:
                     reason_code="external_server_transport_unavailable",
                     server_id=virtual_tool.server_id,
                 )
-            runtime_auth = await self._resolve_runtime_auth(
-                server=server,
+            server = server.model_copy(deep=True)
+
+        deny_reason = self._deny_reason(
+            server=server,
+            virtual_tool=virtual_tool,
+            effective_policy=effective_policy,
+        )
+        if deny_reason is not None:
+            profile_id = self._policy_profile_id(effective_policy)
+            await self._audit_execution(
+                event_type="external_tool.denied",
+                reason_code=deny_reason,
                 virtual_tool=virtual_tool,
-                effective_policy=effective_policy,
                 actor_id=actor_id,
-                context=context,
+                profile_id=profile_id,
             )
+            raise FederationPolicyDenied(
+                deny_reason,
+                f"External virtual tool '{virtual_tool.virtual_name}' is not allowed",
+                payload={
+                    "reason_code": deny_reason,
+                    "server_id": virtual_tool.server_id,
+                    "virtual_tool_name": virtual_tool.virtual_name,
+                },
+            )
+
+        runtime_auth = await self._resolve_runtime_auth(
+            server=server,
+            virtual_tool=virtual_tool,
+            effective_policy=effective_policy,
+            actor_id=actor_id,
+            context=context,
+        )
+        try:
             result = await transport.call_tool(
                 virtual_tool.upstream_tool_name,
                 deepcopy(arguments or {}),
                 context=context,
                 runtime_auth=runtime_auth,
             )
-            if runtime_auth is not None:
-                metadata = deepcopy(result.metadata or {})
-                metadata.update(self._public_runtime_auth_metadata(runtime_auth))
-                metadata["credential_injection"] = self._summarize_runtime_auth(runtime_auth)
-                result = ExternalToolCallResult(
-                    content=deepcopy(result.content),
-                    is_error=result.is_error,
-                    metadata=metadata,
-                )
+        except Exception as exc:  # noqa: BLE001 - transport adapters define call errors.
             await self._audit_execution(
-                event_type="external_tool.allowed",
-                reason_code="allowed",
+                event_type="external_tool.failed",
+                reason_code="external_tool_call_failed",
                 virtual_tool=virtual_tool,
                 actor_id=actor_id,
                 profile_id=self._policy_profile_id(effective_policy),
-                credential_injection=(
-                    self._summarize_runtime_auth(runtime_auth)
-                    if runtime_auth is not None
-                    else None
-                ),
+                extra_payload={
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
             )
-            return self._federated_result(virtual_tool, result)
+            raise GatewayExternalRuntimeError(
+                f"External tool '{virtual_tool.virtual_name}' failed during execution",
+                reason_code="external_tool_call_failed",
+                server_id=virtual_tool.server_id,
+            ) from exc
 
-    async def _stop_server_unlocked(self, server_id: str) -> None:
+        if runtime_auth is not None:
+            metadata = deepcopy(result.metadata or {})
+            metadata.update(self._public_runtime_auth_metadata(runtime_auth))
+            metadata["credential_injection"] = self._summarize_runtime_auth(runtime_auth)
+            result = ExternalToolCallResult(
+                content=deepcopy(result.content),
+                is_error=result.is_error,
+                metadata=metadata,
+            )
+        await self._audit_execution(
+            event_type="external_tool.allowed",
+            reason_code="allowed",
+            virtual_tool=virtual_tool,
+            actor_id=actor_id,
+            profile_id=self._policy_profile_id(effective_policy),
+            credential_injection=(
+                self._summarize_runtime_auth(runtime_auth)
+                if runtime_auth is not None
+                else None
+            ),
+        )
+        return self._federated_result(virtual_tool, result)
+
+    def _pop_runtime_unlocked(
+        self,
+        server_id: str,
+    ) -> ExternalFederationTransport | None:
         transport = self._transports.pop(server_id, None)
-        close_error: str | None = None
-        if transport is not None:
-            try:
-                await transport.close()
-            except Exception as exc:  # noqa: BLE001 - stop must still clear state.
-                close_error = self._exception_summary(exc)
         self._servers.pop(server_id, None)
         self._last_errors.pop(server_id, None)
         self._clear_server_tools(server_id)
+        return transport
+
+    async def _close_stopped_transport(
+        self,
+        server_id: str,
+        transport: ExternalFederationTransport,
+    ) -> None:
+        close_error: str | None = None
+        try:
+            await transport.close()
+        except Exception as exc:  # noqa: BLE001 - stop must still clear state.
+            close_error = self._exception_summary(exc)
         payload: dict[str, Any] = {
             "reason_code": "external_server_stopped",
             "server_id": server_id,
@@ -440,16 +545,17 @@ class GatewayExternalRuntimeManager:
             target_id=server_id,
         )
 
-    async def _start_server_unlocked(
+    async def _connect_and_discover_server(
         self,
         server: ExternalServerDefinition,
-    ) -> dict[str, Any]:
+    ) -> tuple[ExternalFederationTransport, list[ExternalToolDefinition]]:
         transport = self._transport_factory(server.model_copy(deep=True))
         try:
             await transport.connect()
             tools = await transport.list_tools()
         except Exception as exc:  # noqa: BLE001 - transport adapters define their own errors.
-            self._last_errors[server.id] = self._exception_summary(exc)
+            async with self._lock:
+                self._last_errors[server.id] = self._exception_summary(exc)
             await self._close_best_effort(transport)
             await self._audit_best_effort(
                 "external_server.lifecycle",
@@ -467,45 +573,31 @@ class GatewayExternalRuntimeManager:
                 reason_code="external_server_start_failed",
                 server_id=server.id,
             ) from exc
+        return transport, tools
 
+    def _commit_started_runtime_unlocked(
+        self,
+        server: ExternalServerDefinition,
+        transport: ExternalFederationTransport,
+        tools: list[ExternalToolDefinition],
+    ) -> None:
         self._servers[server.id] = server.model_copy(deep=True)
         self._transports[server.id] = transport
         self._last_errors[server.id] = None
         self._replace_server_tools(server.id, tools)
-        await self._audit(
-            "external_server.lifecycle",
-            payload={
-                "reason_code": "external_server_started",
-                "server_id": server.id,
-                "transport": server.transport,
-            },
-            target_type="external_server",
-            target_id=server.id,
-        )
-        await self._audit(
-            "external_server.discovery",
-            payload={
-                "reason_code": "external_server_discovered",
-                "server_id": server.id,
-                "tool_count": len(tools),
-            },
-            target_type="external_server",
-            target_id=server.id,
-        )
-        return {
-            "ok": True,
-            "reason_code": "external_server_started",
-            "server_id": server.id,
-            "tool_count": len(tools),
-        }
 
-    async def _refresh_server_tools_unlocked(self, server_id: str) -> bool:
-        transport = self._transports[server_id]
+    async def _refresh_server_tools(
+        self,
+        server_id: str,
+        transport: ExternalFederationTransport,
+    ) -> bool:
         try:
             tools = await transport.list_tools()
         except Exception as exc:  # noqa: BLE001 - discovery adapters define their own errors.
-            self._last_errors[server_id] = self._exception_summary(exc)
-            self._clear_server_tools(server_id)
+            async with self._lock:
+                if self._transports.get(server_id) is transport:
+                    self._last_errors[server_id] = self._exception_summary(exc)
+                    self._clear_server_tools(server_id)
             await self._audit_best_effort(
                 "external_server.discovery",
                 payload={
@@ -519,8 +611,11 @@ class GatewayExternalRuntimeManager:
             )
             return False
 
-        self._last_errors[server_id] = None
-        self._replace_server_tools(server_id, tools)
+        async with self._lock:
+            if self._transports.get(server_id) is not transport:
+                return True
+            self._last_errors[server_id] = None
+            self._replace_server_tools(server_id, tools)
         await self._audit(
             "external_server.discovery",
             payload={
@@ -622,6 +717,44 @@ class GatewayExternalRuntimeManager:
         result.setdefault("server_id", server.id)
         return result
 
+    def _deny_reason(
+        self,
+        *,
+        server: ExternalServerDefinition,
+        virtual_tool: VirtualExternalTool,
+        effective_policy: Any,
+    ) -> str | None:
+        if self._tool_matches_any(
+            virtual_tool,
+            self._policy_list(effective_policy, "denied_tools"),
+        ):
+            return "tool_denied"
+        if not self._has_server_grant(effective_policy, virtual_tool):
+            return "external_server_not_granted"
+        allowed_tools = self._policy_list(effective_policy, "allowed_tools")
+        if allowed_tools and not self._tool_matches_any(virtual_tool, allowed_tools):
+            return "tool_not_allowed"
+        if self._missing_credential_slots(
+            server=server,
+            effective_policy=effective_policy,
+        ):
+            return "required_credential_grant_missing"
+        return None
+
+    def _has_server_grant(
+        self,
+        effective_policy: Any,
+        virtual_tool: VirtualExternalTool,
+    ) -> bool:
+        for grant in self._policy_dicts(effective_policy, "external_server_grants"):
+            if not self._grant_matches_server(grant, virtual_tool.server_id):
+                continue
+            tool_patterns = self._grant_tool_patterns(grant)
+            if tool_patterns and not self._tool_matches_any(virtual_tool, tool_patterns):
+                continue
+            return True
+        return False
+
     async def _resolve_runtime_auth(
         self,
         *,
@@ -694,9 +827,9 @@ class GatewayExternalRuntimeManager:
             "server": server.model_copy(deep=True),
             "virtual_tool": virtual_tool.copy(),
             "credential_slots": list(credential_slots),
-            "effective_policy": deepcopy(effective_policy),
+            "effective_policy": effective_policy,
             "actor_id": actor_id,
-            "context": deepcopy(context),
+            "context": context,
         }
         if hasattr(broker, "resolve_external_credential"):
             result = broker.resolve_external_credential(**kwargs)
@@ -771,16 +904,67 @@ class GatewayExternalRuntimeManager:
         return str(raw_server_id or "").strip() == server_id
 
     @staticmethod
+    def _grant_tool_patterns(grant: dict[str, Any]) -> list[str]:
+        patterns: list[str] = []
+        for key in ("tools", "tool_names", "allowed_tools"):
+            raw = grant.get(key)
+            if isinstance(raw, str):
+                patterns.append(raw)
+            elif isinstance(raw, Iterable) and not isinstance(raw, (bytes, dict)):
+                patterns.extend(str(item) for item in raw)
+        return [pattern for pattern in patterns if pattern.strip()]
+
+    @classmethod
+    def _tool_matches_any(
+        cls,
+        virtual_tool: VirtualExternalTool,
+        patterns: list[str],
+    ) -> bool:
+        return any(cls._tool_matches_pattern(virtual_tool, pattern) for pattern in patterns)
+
+    @staticmethod
+    def _tool_matches_pattern(
+        virtual_tool: VirtualExternalTool,
+        pattern: str,
+    ) -> bool:
+        candidate = str(pattern or "").strip()
+        if candidate in {"*", "ext.*"}:
+            return True
+        if candidate.endswith("*"):
+            prefix = candidate[:-1]
+            return (
+                virtual_tool.virtual_name.startswith(prefix)
+                or virtual_tool.upstream_tool_name.startswith(prefix)
+            )
+        return candidate in {
+            virtual_tool.virtual_name,
+            virtual_tool.upstream_tool_name,
+        }
+
+    @staticmethod
     def _policy_dicts(effective_policy: Any, field_name: str) -> list[dict[str, Any]]:
         values = GatewayExternalRuntimeManager._policy_value(effective_policy, field_name, [])
         if isinstance(values, dict):
-            return [deepcopy(values)]
+            return [dict(values)]
         if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
             return []
         return [
-            deepcopy(value)
+            dict(value)
             for value in values
             if isinstance(value, dict)
+        ]
+
+    @staticmethod
+    def _policy_list(effective_policy: Any, field_name: str) -> list[str]:
+        values = GatewayExternalRuntimeManager._policy_value(effective_policy, field_name, [])
+        if isinstance(values, str):
+            return [values] if values.strip() else []
+        if not isinstance(values, Iterable) or isinstance(values, (bytes, dict)):
+            return []
+        return [
+            str(value)
+            for value in values
+            if str(value).strip()
         ]
 
     @staticmethod
@@ -807,6 +991,7 @@ class GatewayExternalRuntimeManager:
         actor_id: str | None,
         profile_id: str | None,
         credential_injection: dict[str, Any] | None = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "reason_code": reason_code,
@@ -816,6 +1001,8 @@ class GatewayExternalRuntimeManager:
         }
         if credential_injection is not None:
             payload["credential_injection"] = deepcopy(credential_injection)
+        if extra_payload is not None:
+            payload.update(deepcopy(extra_payload))
         await self._audit(
             event_type,
             actor_id=actor_id,

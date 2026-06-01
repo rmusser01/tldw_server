@@ -1350,6 +1350,41 @@ def test_gateway_external_registry_management_routes_have_pydantic_response_mode
     }
 
 
+@pytest.mark.parametrize("server_id", ["runtime", "refresh", "reconcile"])
+def test_gateway_external_registry_management_rejects_reserved_server_ids(
+    server_id: str,
+) -> None:
+    manager = _ExternalRegistryManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/mcp/external-servers",
+            json={
+                "id": server_id,
+                "name": "Reserved",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+            },
+        )
+        shown = client.get(f"/mcp/external-servers/{server_id}")
+        patched = client.patch(
+            f"/mcp/external-servers/{server_id}",
+            json={"name": "Reserved v2"},
+        )
+        deleted = client.delete(f"/mcp/external-servers/{server_id}")
+
+    for response in (created, shown, patched, deleted):
+        assert response.status_code == 422
+        assert response.json()["reason_code"] == "invalid_external_server_request"
+        assert response.json()["server_id"] == server_id
+    assert manager.calls == []
+
+
 @pytest.mark.parametrize(
     ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
     [
@@ -1604,6 +1639,62 @@ def test_gateway_external_runtime_management_routes_mount_with_bootstrap() -> No
     assert manager.calls == [("list_runtime_servers", (), {})]
 
 
+def test_gateway_external_runtime_routes_have_pydantic_response_models() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=_ExternalRuntimeManagerDouble(),
+    )
+
+    paths = app.openapi()["paths"]
+    expected_refs = {
+        (
+            "/mcp/external-servers/runtime",
+            "get",
+        ): "#/components/schemas/ExternalRuntimeServerListResponse",
+        (
+            "/mcp/external-servers/{server_id}/start",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/{server_id}/stop",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/{server_id}/restart",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/refresh",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/{server_id}/refresh",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/reconcile",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/{server_id}/reconcile",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/{server_id}/install",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+        (
+            "/mcp/external-servers/{server_id}/update",
+            "post",
+        ): "#/components/schemas/ExternalRuntimeOperationResponse",
+    }
+
+    for (path, method), expected_ref in expected_refs.items():
+        schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": expected_ref}
+
+
 def test_gateway_external_runtime_management_enabled_without_manager_raises() -> None:
     with pytest.raises(ValueError, match="external runtime management requires"):
         gateway_fastapi.create_gateway_router(
@@ -1626,6 +1717,8 @@ def test_gateway_external_runtime_management_enabled_without_manager_raises() ->
         ("external_server_disabled", 409),
         ("credential_broker_unavailable", 503),
         ("external_server_transport_unavailable", 503),
+        ("external_virtual_tool_not_found", 404),
+        ("external_tool_call_failed", 503),
         ("invalid_external_runtime_request", 422),
         ("unexpected_external_runtime_reason", 500),
     ],

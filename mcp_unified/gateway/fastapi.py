@@ -79,14 +79,17 @@ _EXTERNAL_REGISTRY_STATUS_CODES = {
 }
 _EXTERNAL_RUNTIME_STATUS_CODES = {
     "external_server_not_found": 404,
+    "external_virtual_tool_not_found": 404,
     "external_server_disabled": 409,
     "external_server_start_failed": 503,
     "external_server_stop_failed": 503,
     "external_server_discovery_failed": 503,
     "external_server_transport_unavailable": 503,
+    "external_tool_call_failed": 503,
     "credential_broker_unavailable": 503,
     "invalid_external_runtime_request": 422,
 }
+_EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
 
 
 class DuplicatePresetRequest(BaseModel):
@@ -215,6 +218,43 @@ class DeleteExternalServerResponse(BaseModel):
     store: StoreMetadataResponse
 
 
+class ExternalRuntimeServerStatusResponse(BaseModel):
+    """Response row for one external MCP server runtime."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    status: str
+    name: str | None = None
+    transport: str | None = None
+    enabled: bool | None = None
+    tool_count: int | None = None
+    checks: dict[str, Any] | None = None
+    last_error: str | None = None
+
+
+class ExternalRuntimeServerListResponse(BaseModel):
+    """Response body for listing external MCP server runtime status."""
+
+    model_config = ConfigDict(extra="allow")
+
+    servers: list[ExternalRuntimeServerStatusResponse]
+    ok: bool | None = None
+    total_servers: int | None = None
+
+
+class ExternalRuntimeOperationResponse(BaseModel):
+    """Response body for external MCP server lifecycle operations."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    reason_code: str
+    server_id: str | None = None
+    error: str | None = None
+    errors: dict[str, Any] | None = None
+
+
 async def _parse_json_body(request: Request) -> Any:
     """Parse raw JSON so malformed bodies return JSON-RPC parse errors."""
 
@@ -338,6 +378,24 @@ def _external_registry_store_unavailable_response(
         GatewayExternalRegistryManagementError(
             "External registry store unavailable",
             reason_code="external_registry_store_unavailable",
+            server_id=server_id,
+        )
+    )
+
+
+def _is_reserved_external_server_id(server_id: str) -> bool:
+    """Return true when a server id would collide with gateway routes."""
+
+    return server_id.strip().lower() in _EXTERNAL_SERVER_RESERVED_IDS
+
+
+def _reserved_external_server_id_response(server_id: str) -> JSONResponse:
+    """Return a registry error for route-reserved external server ids."""
+
+    return _external_registry_error_response(
+        GatewayExternalRegistryManagementError(
+            f"External server id '{server_id}' is reserved",
+            reason_code="invalid_external_server_request",
             server_id=server_id,
         )
     )
@@ -525,6 +583,8 @@ def _mount_external_registry_routes(
         server_id: str,
     ) -> ExternalServerResponse | JSONResponse:
         """Return a single stored external MCP server by id."""
+        if _is_reserved_external_server_id(server_id):
+            return _reserved_external_server_id_response(server_id)
         try:
             return await manager.show_server(server_id)
         except GatewayExternalRegistryManagementError as exc:
@@ -537,6 +597,8 @@ def _mount_external_registry_routes(
         request: CreateExternalServerRequest,
     ) -> ExternalServerResponse | JSONResponse:
         """Create a stored external MCP server definition."""
+        if _is_reserved_external_server_id(request.id):
+            return _reserved_external_server_id_response(request.id)
         try:
             return await manager.create_server(
                 request.model_dump(mode="json", exclude_unset=True)
@@ -552,6 +614,8 @@ def _mount_external_registry_routes(
         request: PatchExternalServerRequest,
     ) -> ExternalServerResponse | JSONResponse:
         """Apply an allowed patch to a stored external MCP server definition."""
+        if _is_reserved_external_server_id(server_id):
+            return _reserved_external_server_id_response(server_id)
         try:
             return await manager.patch_server(
                 server_id,
@@ -570,6 +634,8 @@ def _mount_external_registry_routes(
         server_id: str,
     ) -> DeleteExternalServerResponse | JSONResponse:
         """Delete a stored external MCP server definition."""
+        if _is_reserved_external_server_id(server_id):
+            return _reserved_external_server_id_response(server_id)
         try:
             return await manager.delete_server(server_id)
         except GatewayExternalRegistryManagementError as exc:
@@ -584,94 +650,125 @@ def _mount_external_runtime_routes(
 ) -> None:
     """Mount external runtime lifecycle endpoints on the package gateway router."""
 
-    @router.get("/external-servers/runtime", response_model=None)
-    async def list_external_runtime_servers() -> dict[str, Any] | JSONResponse:
+    @router.get(
+        "/external-servers/runtime",
+        response_model=ExternalRuntimeServerListResponse,
+        response_model_exclude_none=True,
+    )
+    async def list_external_runtime_servers() -> ExternalRuntimeServerListResponse | JSONResponse:
         """Return external server runtime status rows."""
         try:
             return await manager.list_runtime_servers()
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/start", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/start",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def start_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Start one configured external MCP server runtime."""
         try:
             return await manager.start_server(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/stop", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/stop",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def stop_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Stop one configured external MCP server runtime."""
         try:
             return await manager.stop_server(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/restart", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/restart",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def restart_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Restart one configured external MCP server runtime."""
         try:
             return await manager.restart_server(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/refresh", response_model=None)
-    async def refresh_external_runtime_servers() -> dict[str, Any] | JSONResponse:
+    @router.post(
+        "/external-servers/refresh",
+        response_model=ExternalRuntimeOperationResponse,
+    )
+    async def refresh_external_runtime_servers() -> ExternalRuntimeOperationResponse | JSONResponse:
         """Refresh discovery for all active external MCP server runtimes."""
         try:
             return await manager.refresh_server(None)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/refresh", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/refresh",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def refresh_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Refresh discovery for one active external MCP server runtime."""
         try:
             return await manager.refresh_server(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/reconcile", response_model=None)
-    async def reconcile_external_runtime_servers() -> dict[str, Any] | JSONResponse:
+    @router.post(
+        "/external-servers/reconcile",
+        response_model=ExternalRuntimeOperationResponse,
+    )
+    async def reconcile_external_runtime_servers() -> ExternalRuntimeOperationResponse | JSONResponse:
         """Reconcile all configured external MCP server runtimes."""
         try:
             return await manager.reconcile(None)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/reconcile", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/reconcile",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def reconcile_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Reconcile one configured external MCP server runtime."""
         try:
             return await manager.reconcile(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/install", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/install",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def install_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Run the configured install contract for one external MCP server."""
         try:
             return await manager.install_server(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
 
-    @router.post("/external-servers/{server_id}/update", response_model=None)
+    @router.post(
+        "/external-servers/{server_id}/update",
+        response_model=ExternalRuntimeOperationResponse,
+    )
     async def update_external_runtime_server(
         server_id: str,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> ExternalRuntimeOperationResponse | JSONResponse:
         """Run the configured update contract for one external MCP server."""
         try:
             return await manager.update_server(server_id)
