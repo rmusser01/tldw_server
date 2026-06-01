@@ -4,6 +4,7 @@ import { Tooltip, Input } from "antd"
 import {
   Bell,
   CogIcon,
+  House,
   Menu,
   Moon,
   Search,
@@ -27,6 +28,7 @@ type ChatHeaderProps = {
   onTitleCommit: (value: string) => void | Promise<void>
   onToggleSidebar?: () => void
   sidebarCollapsed?: boolean
+  onOpenCompanionHome: () => void
   onOpenCommandPalette: () => void
   onOpenShortcutsModal: () => void
   onOpenSettings: () => void
@@ -64,6 +66,7 @@ export function ChatHeader({
   onTitleCommit,
   onToggleSidebar,
   sidebarCollapsed = false,
+  onOpenCompanionHome,
   onOpenCommandPalette,
   onOpenShortcutsModal,
   onOpenSettings,
@@ -95,6 +98,9 @@ export function ChatHeader({
   const shortcutsToggleLabel = shortcutsExpanded
     ? toText(t("option:header.hideShortcuts", "Hide shortcuts"))
     : toText(t("option:header.showShortcuts", "Show shortcuts"))
+  const companionHomeLabel = toText(
+    t("option:header.companionHome", "Companion Home")
+  )
   const canEditTitle =
     showChatTitle && !temporaryChat && historyId && historyId !== "temp"
   const isDarkTheme = themeMode !== "light"
@@ -145,6 +151,18 @@ export function ChatHeader({
             <span className="text-sm font-medium">
               {toText(t("common:pageAssist", "tldw Assistant"))}
             </span>
+            <Tooltip title={companionHomeLabel}>
+              <button
+                type="button"
+                onClick={onOpenCompanionHome}
+                aria-label={companionHomeLabel}
+                className={`inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
+                title={companionHomeLabel}
+                data-testid="chat-header-companion-home"
+              >
+                <House className="size-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
             <Tooltip title={shortcutsToggleLabel}>
               <button
                 type="button"

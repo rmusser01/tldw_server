@@ -2,6 +2,10 @@
 id: TASK-499
 title: Implement Companion Home header and launcher shortcuts
 status: In Progress
+modified_files:
+- apps/packages/ui/src/components/Layouts/ChatHeader.tsx
+- apps/packages/ui/src/components/Layouts/Header.tsx
+- apps/packages/ui/src/components/Layouts/__tests__/ChatHeader.test.tsx
 ---
 
 ## Description
@@ -31,7 +35,16 @@ Verification:
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 1 (Header Button Contract) complete:
+- Added ChatHeader onOpenCompanionHome callback contract.
+- Rendered a Companion Home House icon button immediately before the signpost shortcut toggle with the same header icon focus-ring treatment.
+- Wired Header to navigate to `/` through useNavigate.
+- Added focused ChatHeader coverage for accessible name, DOM/tab order, callback invocation, and focus-ring classes.
 
+Verification:
+- `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx` from `apps/packages/ui`: 11 tests passed.
+- `git diff --check`: passed with no output.
+- Bandit: not applicable for this Task 1 frontend-only TypeScript/TSX touched scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

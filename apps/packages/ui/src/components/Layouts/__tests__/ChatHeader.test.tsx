@@ -53,6 +53,7 @@ const createProps = (overrides: Partial<React.ComponentProps<typeof ChatHeader>>
   onTitleCommit: vi.fn(),
   onToggleSidebar: vi.fn(),
   sidebarCollapsed: false,
+  onOpenCompanionHome: vi.fn(),
   onOpenCommandPalette: vi.fn(),
   onOpenShortcutsModal: vi.fn(),
   onOpenSettings: vi.fn(),
@@ -103,12 +104,33 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
+  it("shows a Companion Home button immediately before the signpost shortcut toggle", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const homeButton = screen.getByRole("button", { name: "Companion Home" })
+    const signpostButton = screen.getByRole("button", { name: "Show shortcuts" })
+    const headerBrand = homeButton.closest(".flex.items-center.gap-2.text-text")
+    const headerButtons = Array.from(headerBrand?.querySelectorAll("button") ?? [])
+
+    expect(headerBrand).toBeTruthy()
+    expect(headerBrand).toContainElement(homeButton)
+    expect(headerBrand).toContainElement(signpostButton)
+    expect(headerButtons.indexOf(signpostButton)).toBe(
+      headerButtons.indexOf(homeButton) + 1
+    )
+
+    fireEvent.click(homeButton)
+    expect(props.onOpenCompanionHome).toHaveBeenCalledTimes(1)
+  })
+
   it("applies focus-visible ring classes to key header controls", () => {
     const props = createProps()
     render(<ChatHeader {...props} />)
 
     const controls = [
       screen.getByRole("button", { name: "Collapse sidebar" }),
+      screen.getByRole("button", { name: "Companion Home" }),
       screen.getByRole("button", { name: "Show shortcuts" }),
       screen.getByRole("button", { name: "New saved chat" }),
       screen.getByRole("button", { name: "Temporary chat (not saved)" }),

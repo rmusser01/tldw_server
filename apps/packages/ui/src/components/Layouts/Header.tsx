@@ -114,6 +114,10 @@ export const Header: React.FC<Props> = ({
     window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
   }, [])
 
+  const openCompanionHome = React.useCallback(() => {
+    navigate("/")
+  }, [navigate])
+
   const toggleHeaderShortcuts = React.useCallback((next?: boolean) => {
     void setHeaderShortcutsExpanded((prev) =>
       typeof next === "boolean" ? next : !prev
@@ -355,6 +359,7 @@ export const Header: React.FC<Props> = ({
         onTitleCommit={handleTitleCommit}
         onToggleSidebar={onToggleSidebar}
         sidebarCollapsed={sidebarCollapsed}
+        onOpenCompanionHome={openCompanionHome}
         onOpenCommandPalette={openCommandPalette}
         onOpenShortcutsModal={openShortcutsModal}
         onOpenShareModal={
