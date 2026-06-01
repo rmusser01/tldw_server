@@ -49,6 +49,16 @@ export const ReminderScheduleControls: React.FC = () => {
   const [minute, setMinute] = useState(parsedCron?.minute ?? 0)
   const [weekday, setWeekday] = useState<ReminderWeekdayToken>(parsedCron?.weekday || "MON")
 
+  const setPresetCron = (
+    nextPreset: ReminderRecurrencePreset,
+    nextWeekday: ReminderWeekdayToken,
+    nextHour: number,
+    nextMinute: number,
+    customCron: string | null | undefined = normalizedCron
+  ) => {
+    form.setFieldValue("cron", buildReminderCron(nextPreset, nextWeekday, nextHour, nextMinute, customCron))
+  }
+
   useEffect(() => {
     const enteredRecurring =
       previousScheduleKind.current !== "recurring" && scheduleKind === "recurring"
@@ -56,14 +66,10 @@ export const ReminderScheduleControls: React.FC = () => {
     if (enteredRecurring && (!timezone || !timezone.trim())) {
       form.setFieldValue("timezone", localTimezone)
     }
-  }, [form, localTimezone, scheduleKind, timezone])
-
-  useEffect(() => {
-    if (scheduleKind !== "recurring") return
-    if (preset === "custom") return
-
-    form.setFieldValue("cron", buildReminderCron(preset, weekday, hour, minute, cron))
-  }, [cron, form, hour, minute, preset, scheduleKind, weekday])
+    if (enteredRecurring && (!cron || !cron.trim())) {
+      form.setFieldValue("cron", buildReminderCron(preset, weekday, hour, minute, cron))
+    }
+  }, [cron, form, hour, localTimezone, minute, preset, scheduleKind, timezone, weekday])
 
   useEffect(() => {
     if (scheduleKind !== "recurring") return
@@ -130,7 +136,7 @@ export const ReminderScheduleControls: React.FC = () => {
                 onChange={(value) => {
                   setPreset(value)
                   if (value !== "custom") {
-                    form.setFieldValue("cron", buildReminderCron(value, weekday, hour, minute, normalizedCron))
+                    setPresetCron(value, weekday, hour, minute, normalizedCron)
                   }
                 }}
               />
@@ -142,7 +148,11 @@ export const ReminderScheduleControls: React.FC = () => {
                     min={0}
                     max={23}
                     value={hour}
-                    onChange={(value) => setHour(Number(value ?? 0))}
+                    onChange={(value) => {
+                      const nextHour = Number(value ?? 0)
+                      setHour(nextHour)
+                      setPresetCron(preset, weekday, nextHour, minute, normalizedCron)
+                    }}
                   />
                 </Form.Item>
                 <Form.Item label="Minute">
@@ -150,7 +160,11 @@ export const ReminderScheduleControls: React.FC = () => {
                     min={0}
                     max={59}
                     value={minute}
-                    onChange={(value) => setMinute(Number(value ?? 0))}
+                    onChange={(value) => {
+                      const nextMinute = Number(value ?? 0)
+                      setMinute(nextMinute)
+                      setPresetCron(preset, weekday, hour, nextMinute, normalizedCron)
+                    }}
                   />
                 </Form.Item>
               </>
@@ -162,7 +176,10 @@ export const ReminderScheduleControls: React.FC = () => {
                   style={{ minWidth: 150 }}
                   value={weekday}
                   options={weekdayOptions}
-                  onChange={setWeekday}
+                  onChange={(value) => {
+                    setWeekday(value)
+                    setPresetCron(preset, value, hour, minute, normalizedCron)
+                  }}
                 />
               </Form.Item>
             ) : null}

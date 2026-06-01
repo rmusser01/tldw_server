@@ -35,6 +35,20 @@ describe("reminder schedule utilities", () => {
     })
   })
 
+  it("allows APScheduler nth-weekday cron tokens", () => {
+    expect(validateCronExpression("0 9 * * mon#2")).toEqual({
+      valid: true,
+      error: null
+    })
+  })
+
+  it("rejects unsupported question-mark cron tokens", () => {
+    expect(validateCronExpression("0 9 * * ?")).toEqual({
+      valid: false,
+      error: "Cron field '?' is not supported by the scheduler."
+    })
+  })
+
   it("describes daily recurring preview as a next-run oriented cadence instead of raw cron output", () => {
     const preview = getRecurringPreviewCopy("daily", "0 9 * * *", "America/Los_Angeles")
 

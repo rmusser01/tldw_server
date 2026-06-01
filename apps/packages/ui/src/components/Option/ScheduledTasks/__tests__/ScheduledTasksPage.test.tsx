@@ -789,6 +789,69 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
   }, 10000)
 
+  it("preserves an existing recurring custom cron when editing unrelated fields", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:custom",
+          primitive: "reminder_task",
+          title: "Second Monday report",
+          description: "Review generated digest",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Second Monday at 09:00",
+          timezone: "America/Los_Angeles",
+          next_run_at: "2026-03-09T16:00:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: {
+            task_id: "custom",
+            schedule_kind: "recurring",
+            cron: "0 9 * * mon#2",
+            timezone: "America/Los_Angeles"
+          }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.updateScheduledTaskReminder.mockResolvedValue({
+      id: "reminder_task:custom",
+      primitive: "reminder_task",
+      title: "Updated second Monday report",
+      description: "Review generated digest",
+      status: "scheduled",
+      enabled: true,
+      edit_mode: "native",
+      manage_url: null,
+      source_ref: { task_id: "custom" }
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(await screen.findByText("Second Monday report")).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Second Monday report" }))
+    expect(await screen.findByText("Edit reminder")).toBeInTheDocument()
+    fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+      target: { value: "Updated second Monday report" }
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Save reminder" }))
+
+    await waitFor(() => {
+      expect(mocks.updateScheduledTaskReminder).toHaveBeenCalledWith(
+        "reminder_task:custom",
+        expect.objectContaining({
+          title: "Updated second Monday report",
+          schedule_kind: "recurring",
+          cron: "0 9 * * mon#2",
+          timezone: "America/Los_Angeles"
+        })
+      )
+    })
+  })
+
   it("edits and deletes a reminder task from the table", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [

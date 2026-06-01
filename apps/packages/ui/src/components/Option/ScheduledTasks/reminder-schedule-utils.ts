@@ -24,7 +24,7 @@ const WEEKDAY_MAP: Record<string, ReminderWeekdayToken> = {
   SAT: "SAT"
 }
 
-const CRON_TOKEN_PATTERN = /^[A-Za-z0-9*?/,\-]+$/
+const CRON_TOKEN_PATTERN = /^[A-Za-z0-9*#/,\-]+$/
 const WEEKDAY_LABELS: Record<ReminderWeekdayToken, string> = {
   SUN: "Sunday",
   MON: "Monday",
@@ -100,10 +100,13 @@ export const validateCronExpression = (
   if (fields.length !== 5) {
     return { valid: false, error: "Cron must have exactly 5 fields" }
   }
+  if (fields.some((field) => field.includes("?"))) {
+    return { valid: false, error: "Cron field '?' is not supported by the scheduler." }
+  }
   if (fields.some((field) => !CRON_TOKEN_PATTERN.test(field))) {
     return {
       valid: false,
-      error: "Cron tokens can only include letters, numbers, *, /, -, ?, and comma."
+      error: "Cron tokens can only include letters, numbers, *, /, -, #, and comma."
     }
   }
   return { valid: true, error: null }
