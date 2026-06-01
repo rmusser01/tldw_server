@@ -35,6 +35,7 @@ export type ComposerToolbarProps = {
   sendControlPlacement?: "toolbar" | "external"
   modeLauncherButton?: React.ReactNode
   compareControl?: React.ReactNode
+  openUIRequestButton?: React.ReactNode
   // Row 1: primary selectors (pre-rendered by parent)
   modelSelectButton: React.ReactNode
   mcpControl: React.ReactNode
@@ -132,6 +133,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     attachmentButton,
     toolsButton,
     voiceChatButton,
+    openUIRequestButton,
     modelUsageBadge,
     selectedSystemPrompt,
     systemPrompt,
@@ -753,6 +755,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         {promptSelectControl}
         {characterSelectControl}
         {compareControl}
+        {openUIRequestButton}
       </div>
       <div
         data-playground-toolbar-row="actions"
@@ -809,6 +812,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         </div>
         <div className="ml-auto flex flex-nowrap items-center gap-2">
           {compareControl}
+          {openUIRequestButton}
           {dictationButton}
           {researchLaunchButton}
           {voiceChatButton}
@@ -851,6 +855,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             className="flex flex-wrap items-center gap-2">
             {modeLauncherButton}
             {compareControl}
+            {openUIRequestButton}
             {ephemeralToggle}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-text-muted">

@@ -132,6 +132,7 @@ import {
   CornerUpLeft,
   Headphones,
   ImageIcon,
+  LayoutTemplate,
   X,
 } from "lucide-react";
 import React from "react";
@@ -833,6 +834,7 @@ export const PlaygroundForm = ({
   const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] =
     React.useState(false);
   const [modeLauncherOpen, setModeLauncherOpen] = React.useState(false);
+  const [openUIRequestMode, setOpenUIRequestMode] = React.useState(false);
   const [modeAnnouncement, setModeAnnouncement] = React.useState<string | null>(
     null,
   );
@@ -2651,8 +2653,10 @@ export const PlaygroundForm = ({
     pinnedSourceTokenEstimate,
     resolvedMaxContext,
     jsonMode: Boolean(currentChatModelSettings.jsonMode),
+    openUIRequestMode,
     researchContext,
     sendMessage,
+    clearOpenUIRequestMode: () => setOpenUIRequestMode(false),
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
@@ -3948,6 +3952,34 @@ export const PlaygroundForm = ({
     />
   );
 
+  const openUIRequestButton = (
+    <Tooltip
+      title={
+        t(
+          "playground:composer.openuiModeTooltip",
+          "Answer with an OpenUI interface for the next message.",
+        ) as string
+      }
+    >
+      <button
+        type="button"
+        onClick={() => setOpenUIRequestMode((current) => !current)}
+        disabled={isSending}
+        aria-pressed={openUIRequestMode}
+        aria-label={t("playground:composer.openuiMode", "OpenUI") as string}
+        data-testid="openui-request-mode-toggle"
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50 ${
+          openUIRequestMode
+            ? "bg-primary/10 text-primaryStrong"
+            : "text-text-muted"
+        }`}
+      >
+        <LayoutTemplate className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>{t("playground:composer.openuiMode", "OpenUI")}</span>
+      </button>
+    </Tooltip>
+  );
+
   const voiceChatButton = voiceChatAvailable ? (
     <Tooltip
       title={
@@ -4975,6 +5007,7 @@ export const PlaygroundForm = ({
                                 optionsExpanded={composerOptionsExpanded}
                                 modeLauncherButton={modeLauncherButton}
                                 compareControl={compareControl}
+                                openUIRequestButton={openUIRequestButton}
                                 modelSelectButton={modelSelectButton}
                                 mcpControl={mcpControl}
                                 sendControl={sendControl}

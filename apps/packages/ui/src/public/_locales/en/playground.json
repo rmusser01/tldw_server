@@ -458,6 +458,12 @@
   "composer_moreTools": {
     "message": "More tools"
   },
+  "composer_openuiMode": {
+    "message": "OpenUI"
+  },
+  "composer_openuiModeTooltip": {
+    "message": "Answer with an OpenUI interface for the next message."
+  },
   "composer_scrollToLatest": {
     "message": "Scroll to latest messages"
   },

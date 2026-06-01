@@ -42,6 +42,11 @@ modified_files:
 - apps/packages/ui/src/hooks/chat/__tests__/useChatActions.dynamic-ui-action.integration.test.tsx
 - apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx
 - apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundChat.dynamic-ui-action.guard.test.ts
+- apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx
+- apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx
+- apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundSubmit.ts
+- apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx
+- apps/packages/ui/src/public/_locales/en/playground.json
 - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
@@ -60,6 +65,12 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 - [ ] #5 Extension sidepanel and workspace render source fallback unless explicitly enabled later
 - [ ] #6 Focused unit/build/browser/security verification completed or documented
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+2026-06-01 Task 7: added the one-send /chat OpenUI request-mode control, passed Dynamic UI request overrides through Playground submit, and reset the mode after resolved dispatch. Red command: `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx` failed for the expected missing accessible OpenUI button. Green focused command passed 3/3 tests: `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx src/components/Option/Playground/__tests__/PlaygroundForm.signals.guard.test.ts`. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors; no Task 7 implementation files or the new OpenUI-mode test appear in the output. `git diff --cached --check` passed. Bandit not applicable because Task 7 touched TypeScript/TSX, locale JSON, and markdown only.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
