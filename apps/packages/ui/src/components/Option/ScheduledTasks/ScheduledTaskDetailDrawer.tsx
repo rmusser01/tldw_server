@@ -3,9 +3,11 @@ import { Button, Descriptions, Drawer, Space, Tag, Typography } from "antd"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import {
   buildWatchlistTaskLinks,
+  formatScheduledTaskTimestamp,
   getScheduledTaskProductStatus,
   getScheduledTaskTypeLabel,
-  type ScheduledTaskProductStatus
+  isNativeReminderTask,
+  scheduledTaskStatusToneToTagColor
 } from "./scheduled-task-status"
 
 export interface ScheduledTaskDetailDrawerProps {
@@ -19,40 +21,7 @@ export interface ScheduledTaskDetailDrawerProps {
 const WATCHLISTS_WORKSPACE_COPY =
   "Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
 
-const isNativeReminder = (task: ScheduledTask): boolean =>
-  task.primitive === "reminder_task" && task.edit_mode === "native"
-
-const statusToneToTagColor = (status: ScheduledTaskProductStatus): string => {
-  switch (status.tone) {
-    case "success":
-      return "green"
-    case "processing":
-      return "processing"
-    case "warning":
-      return "gold"
-    case "error":
-      return "red"
-    default:
-      return "default"
-  }
-}
-
-const formatTimestamp = (
-  timestamp: string | null | undefined,
-  fallback: string
-): string => {
-  if (!timestamp) return fallback
-
-  const parsed = new Date(timestamp)
-  if (Number.isNaN(parsed.getTime())) {
-    return timestamp
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(parsed)
-}
+const SOURCE_VALUE_MAX_LENGTH = 96
 
 const sourceValueToText = (value: unknown): string | null => {
   if (value === null || value === undefined) return null
@@ -69,16 +38,22 @@ const sourceValueToText = (value: unknown): string | null => {
   return null
 }
 
+const truncateSourceValue = (value: string): string =>
+  value.length > SOURCE_VALUE_MAX_LENGTH
+    ? `${value.slice(0, SOURCE_VALUE_MAX_LENGTH - 3)}...`
+    : value
+
 const renderOptionalDescriptionItem = (
   label: string,
   value: unknown
 ): React.ReactNode => {
   const text = sourceValueToText(value)
   if (!text) return null
+  const displayText = truncateSourceValue(text)
 
   return (
     <Descriptions.Item key={label} label={label}>
-      {text}
+      <Typography.Text title={text}>{displayText}</Typography.Text>
     </Descriptions.Item>
   )
 }
@@ -114,7 +89,7 @@ const renderTaskActions = ({
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
 }): React.ReactNode => {
-  if (isNativeReminder(task)) {
+  if (isNativeReminderTask(task)) {
     return (
       <Space wrap>
         <Button type="primary" onClick={() => onEditReminder(task)}>
@@ -187,7 +162,7 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="Product status">
               <Space orientation="vertical" size={2}>
-                <Tag color={statusToneToTagColor(productStatus)}>
+                <Tag color={scheduledTaskStatusToneToTagColor(productStatus)}>
                   {productStatus.label}
                 </Tag>
                 <Typography.Text type="secondary">
@@ -199,7 +174,7 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
               {getScheduledTaskTypeLabel(task)}
             </Descriptions.Item>
             <Descriptions.Item label="Management owner">
-              {isNativeReminder(task) ? "Managed here" : "Managed in Watchlists"}
+              {isNativeReminderTask(task) ? "Managed here" : "Managed in Watchlists"}
             </Descriptions.Item>
             <Descriptions.Item label="Schedule summary">
               {task.schedule_summary || "Manual"}
@@ -208,10 +183,10 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
               {task.timezone || "No timezone"}
             </Descriptions.Item>
             <Descriptions.Item label="Last run">
-              {formatTimestamp(task.last_run_at, "No completed runs yet")}
+              {formatScheduledTaskTimestamp(task.last_run_at, "No completed runs yet")}
             </Descriptions.Item>
             <Descriptions.Item label="Next run">
-              {formatTimestamp(task.next_run_at, "No upcoming run")}
+              {formatScheduledTaskTimestamp(task.next_run_at, "No upcoming run")}
             </Descriptions.Item>
             {renderSourceReferenceItems(task)}
           </Descriptions>

@@ -296,6 +296,141 @@ describe("ScheduledTasksPage", () => {
     expect(within(drawer).getByRole("button", { name: "Edit reminder" })).toBeInTheDocument()
   })
 
+  it("closes the detail drawer when a refetch removes the inspected task", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "reminder_task:stale",
+            primitive: "reminder_task",
+            title: "Stale reminder",
+            description: "Will be removed",
+            status: "scheduled",
+            enabled: true,
+            schedule_summary: "Every weekday",
+            timezone: "UTC",
+            next_run_at: "2030-04-05T12:30:00+00:00",
+            last_run_at: null,
+            edit_mode: "native",
+            manage_url: null,
+            source_ref: { task_id: "stale" }
+          }
+        ],
+        total: 1,
+        partial: true,
+        errors: ["Watchlists jobs temporarily unavailable"]
+      })
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Stale reminder" }))
+    expect(await screen.findByRole("dialog", { name: /Stale reminder/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Stale reminder/i })).not.toBeInTheDocument()
+    })
+    expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+  })
+
+  it("opens the reminder editor from the detail drawer without leaving the drawer open", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:1",
+          primitive: "reminder_task",
+          title: "Review notes",
+          description: "Check the backlog",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "2026-03-21T09:00:00+00:00",
+          timezone: "UTC",
+          next_run_at: "2030-04-05T12:30:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "1", schedule_kind: "one_time", run_at: "2026-03-21T09:00:00+00:00" }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Review notes" }))
+    expect(await screen.findByRole("dialog", { name: /Review notes/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Edit reminder" }))
+
+    expect(await screen.findByText("Edit reminder task")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it("deletes the selected reminder from the detail drawer and does not leave stale drawer state", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "reminder_task:1",
+            primitive: "reminder_task",
+            title: "Review notes",
+            description: "Check the backlog",
+            status: "scheduled",
+            enabled: true,
+            schedule_summary: "2026-03-21T09:00:00+00:00",
+            timezone: "UTC",
+            next_run_at: "2030-04-05T12:30:00+00:00",
+            last_run_at: null,
+            edit_mode: "native",
+            manage_url: null,
+            source_ref: { task_id: "1" }
+          }
+        ],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+    mocks.deleteScheduledTaskReminder.mockResolvedValue({ deleted: true })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Review notes" }))
+    expect(await screen.findByRole("dialog", { name: /Review notes/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Delete reminder" }))
+
+    await waitFor(() => {
+      expect(mocks.deleteScheduledTaskReminder).toHaveBeenCalledWith("reminder_task:1")
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
+    })
+    expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+  })
+
   it("filters scheduled tasks by product status and search text", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [

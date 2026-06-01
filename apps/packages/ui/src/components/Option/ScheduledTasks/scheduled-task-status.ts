@@ -83,6 +83,43 @@ export const SCHEDULED_TASK_ATTENTION_STATUS_KEYS: readonly ScheduledTaskStatusK
   "blocked"
 ] as const
 
+export const isNativeReminderTask = (task: ScheduledTask): boolean =>
+  task.primitive === "reminder_task" && task.edit_mode === "native"
+
+export const scheduledTaskStatusToneToTagColor = (
+  status: ScheduledTaskProductStatus
+): string => {
+  switch (status.tone) {
+    case "success":
+      return "green"
+    case "processing":
+      return "processing"
+    case "warning":
+      return "gold"
+    case "error":
+      return "red"
+    default:
+      return "default"
+  }
+}
+
+export const formatScheduledTaskTimestamp = (
+  timestamp: string | null | undefined,
+  fallback: string
+): string => {
+  if (!timestamp) return fallback
+
+  const parsed = new Date(timestamp)
+  if (Number.isNaN(parsed.getTime())) {
+    return timestamp
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(parsed)
+}
+
 const emptyWatchlistTaskLinks = (settingsUrl: string | null): WatchlistTaskLinks => ({
   settingsUrl,
   activityUrl: null,

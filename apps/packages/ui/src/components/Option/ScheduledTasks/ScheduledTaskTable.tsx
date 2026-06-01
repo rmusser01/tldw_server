@@ -8,8 +8,11 @@ import type {
 import {
   SCHEDULED_TASK_ATTENTION_STATUS_KEYS,
   buildWatchlistTaskLinks,
+  formatScheduledTaskTimestamp,
   getScheduledTaskProductStatus,
   getScheduledTaskTypeLabel,
+  isNativeReminderTask,
+  scheduledTaskStatusToneToTagColor,
   type ScheduledTaskProductStatus,
   type ScheduledTaskStatusKey
 } from "./scheduled-task-status"
@@ -29,24 +32,6 @@ export interface ScheduledTaskTableProps {
 type ScheduledTaskStatusFilter = "all" | ScheduledTaskStatusKey
 type ScheduledTaskTypeFilter = "all" | ScheduledTaskPrimitive
 
-const isNativeReminder = (task: ScheduledTask): boolean =>
-  task.primitive === "reminder_task" && task.edit_mode === "native"
-
-const statusToneToTagColor = (status: ScheduledTaskProductStatus): string => {
-  switch (status.tone) {
-    case "success":
-      return "green"
-    case "processing":
-      return "processing"
-    case "warning":
-      return "gold"
-    case "error":
-      return "red"
-    default:
-      return "default"
-  }
-}
-
 const typeTagColor = (task: ScheduledTask): string =>
   task.primitive === "watchlist_job" ? "gold" : "blue"
 
@@ -55,23 +40,6 @@ const rowActionLabel = (action: string, task: ScheduledTask): string =>
 
 const watchlistLinkLabel = (action: string, task: ScheduledTask): string =>
   `${action} for ${task.title}`
-
-const formatTimestamp = (
-  timestamp: string | null | undefined,
-  fallback: string
-): string => {
-  if (!timestamp) return fallback
-
-  const parsed = new Date(timestamp)
-  if (Number.isNaN(parsed.getTime())) {
-    return timestamp
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(parsed)
-}
 
 const matchesStatusFilter = (
   productStatus: ScheduledTaskProductStatus,
@@ -178,7 +146,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
         return (
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div>
-              <Tag color={statusToneToTagColor(productStatus)}>
+              <Tag color={scheduledTaskStatusToneToTagColor(productStatus)}>
                 {productStatus.label}
               </Tag>
             </div>
@@ -206,7 +174,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       key: "last_run_at",
       render: (_, task) => (
         <Typography.Text>
-          {formatTimestamp(task.last_run_at, "No completed runs yet")}
+          {formatScheduledTaskTimestamp(task.last_run_at, "No completed runs yet")}
         </Typography.Text>
       )
     },
@@ -215,7 +183,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       key: "next_run_at",
       render: (_, task) => (
         <Typography.Text>
-          {formatTimestamp(task.next_run_at, "No upcoming run")}
+          {formatScheduledTaskTimestamp(task.next_run_at, "No upcoming run")}
         </Typography.Text>
       )
     },
@@ -223,8 +191,8 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       title: "Management",
       key: "management",
       render: (_, task) => (
-        <Tag color={isNativeReminder(task) ? "blue" : "gold"}>
-          {isNativeReminder(task) ? "Managed here" : "Managed in Watchlists"}
+        <Tag color={isNativeReminderTask(task) ? "blue" : "gold"}>
+          {isNativeReminderTask(task) ? "Managed here" : "Managed in Watchlists"}
         </Tag>
       )
     },
@@ -232,7 +200,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       title: "Actions",
       key: "actions",
       render: (_, task) => {
-        if (isNativeReminder(task)) {
+        if (isNativeReminderTask(task)) {
           return (
             <Space wrap>
               <Button

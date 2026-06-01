@@ -37,7 +37,7 @@ export const ScheduledTasksPage: React.FC = () => {
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null)
-  const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [scheduledTasksSupported, setScheduledTasksSupported] = useState<
     boolean | null
@@ -94,6 +94,10 @@ export const ScheduledTasksPage: React.FC = () => {
   })
 
   const tasks = tasksQuery.data?.items ?? []
+  const selectedTask = React.useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
+    [selectedTaskId, tasks]
+  )
   const hasLoadedTasks = Boolean(tasksQuery.data)
   const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
   const isLoadingTasks =
@@ -103,9 +107,16 @@ export const ScheduledTasksPage: React.FC = () => {
   const canShowScheduledTasksWorkbench =
     scheduledTasksSupported !== false && !isLoadingTasks && !tasksQuery.isError
 
+  React.useEffect(() => {
+    if (selectedTaskId === null || !hasLoadedTasks) return
+    if (tasks.some((task) => task.id === selectedTaskId)) return
+
+    setSelectedTaskId(null)
+  }, [hasLoadedTasks, selectedTaskId, tasks])
+
   const closeTaskDetail = () => {
-    if (selectedTask === null) return
-    setSelectedTask(null)
+    if (selectedTaskId === null) return
+    setSelectedTaskId(null)
   }
 
   const openCreateReminder = () => {
@@ -120,7 +131,7 @@ export const ScheduledTasksPage: React.FC = () => {
     setEditorOpen(true)
   }
 
-  const openTaskDetail = (task: ScheduledTask) => setSelectedTask(task)
+  const openTaskDetail = (task: ScheduledTask) => setSelectedTaskId(task.id)
 
   const closeEditor = () => {
     setEditorOpen(false)

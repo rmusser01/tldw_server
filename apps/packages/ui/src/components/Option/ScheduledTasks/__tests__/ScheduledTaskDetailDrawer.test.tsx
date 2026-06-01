@@ -27,6 +27,8 @@ const reminderTask: ScheduledTask = {
   }
 }
 
+const longLinkUrl = `https://example.com/notes/${"a".repeat(140)}`
+
 const watchlistTask: ScheduledTask = {
   id: "watchlist_job:42",
   primitive: "watchlist_job",
@@ -68,6 +70,29 @@ describe("ScheduledTaskDetailDrawer", () => {
     expect(screen.getByText("1")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Edit reminder" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete reminder" })).toBeInTheDocument()
+  })
+
+  it("truncates long primitive source values while preserving the full value as a title", () => {
+    render(
+      <ScheduledTaskDetailDrawer
+        open
+        task={{
+          ...reminderTask,
+          source_ref: {
+            ...reminderTask.source_ref,
+            link_url: longLinkUrl
+          }
+        }}
+        onClose={vi.fn()}
+        onEditReminder={vi.fn()}
+        onDeleteReminder={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText(longLinkUrl)).not.toBeInTheDocument()
+    const shortenedLink = screen.getByTitle(longLinkUrl)
+    expect(shortenedLink.textContent).toContain("...")
+    expect(shortenedLink.textContent?.length).toBeLessThan(longLinkUrl.length)
   })
 
   it("shows Watchlists task links without moving workspace configuration into the drawer", () => {
