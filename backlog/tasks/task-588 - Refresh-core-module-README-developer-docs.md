@@ -1,10 +1,10 @@
 ---
 id: TASK-588
 title: Refresh core module README developer docs
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-06-01 07:18'
-updated_date: '2026-06-01 15:25'
+updated_date: '2026-06-01 16:56'
 labels: []
 dependencies: []
 documentation:
@@ -22,10 +22,10 @@ Source-informed documentation pass for all 88 top-level tldw_Server_API/app/core
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every top-level app/core module has a README.md.
-- [ ] #2 README content is source-informed and avoids placeholder scaffolding.
-- [ ] #3 Existing strong READMEs are preserved or tightened rather than rewritten wholesale.
-- [ ] #4 Verification records README coverage and markdown/link sanity checks.
+- [x] #1 Every top-level app/core module has a README.md.
+- [x] #2 README content is source-informed and avoids placeholder scaffolding.
+- [x] #3 Existing strong READMEs are preserved or tightened rather than rewritten wholesale.
+- [x] #4 Verification records README coverage and markdown/link sanity checks.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,14 +46,22 @@ Implementation plan: Docs/superpowers/plans/2026-06-01-core-module-readme-refres
 2026-06-01: Implementation plan written at Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-implementation-plan.md. Worktree: .worktrees/core-module-readmes on branch codex/core-module-readmes.
 
 Implementation inventory created at Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-inventory.md. Initial red checks: 40 top-level core modules missing README.md; Writing README contains scaffold placeholder text.
+
+Verification: Task 5 refreshed existing core READMEs and updated the inventory. Coverage check passed with no missing top-level app/core README files. Placeholder scan returned no matches. Local Markdown link sanity check passed with 'core README markdown sanity checks passed'. git diff --check and git diff --cached --check passed. Optional codespell scan skipped because codespell is not installed. Bandit skipped because this task changed Markdown documentation only; no Python or runtime source files were modified.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed source-informed README orientation pass for all 88 top-level app/core modules. Added missing README files in earlier batches, refreshed scaffolded/thin existing READMEs, preserved strong long-form guides, fixed Markdown sanity issues, and recorded verification results plus docs-only Bandit skip.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
