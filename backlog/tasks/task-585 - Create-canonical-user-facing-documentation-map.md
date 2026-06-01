@@ -1,10 +1,10 @@
 ---
 id: TASK-585
 title: Create canonical user-facing documentation map
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-06-01 05:24'
-updated_date: '2026-06-01 19:31'
+updated_date: '2026-06-01 19:32'
 labels: []
 dependencies: []
 documentation:
