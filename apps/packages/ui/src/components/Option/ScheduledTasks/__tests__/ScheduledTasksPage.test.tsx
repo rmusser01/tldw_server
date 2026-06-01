@@ -198,10 +198,10 @@ describe("ScheduledTasksPage", () => {
           schedule_summary: "0 9 * * *",
           timezone: "UTC",
           next_run_at: "2030-04-06T09:00:00+00:00",
-          last_run_at: null,
+          last_run_at: "2030-04-05T09:00:00+00:00",
           edit_mode: "external",
           manage_url: "/watchlists?tab=jobs",
-          source_ref: { job_id: 2 }
+          source_ref: { job_id: 2, latest_run_id: 25, latest_output_id: 39 }
         }
       ],
       total: 2,
@@ -219,18 +219,112 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("1 needs attention")).toBeInTheDocument()
     expect(screen.getByText("1 running now")).toBeInTheDocument()
     expect(screen.getByText("Next upcoming run")).toBeInTheDocument()
-    expect(screen.getByText(/2030/)).toBeInTheDocument()
+    expect(screen.getAllByText(/2030/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
     expect(await screen.findByText("Review notes")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create Reminder Task" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create scheduled task" })).toBeInTheDocument()
+    expect(screen.getAllByText("Reminder").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Watchlist monitor").length).toBeGreaterThan(0)
+    expect(screen.getByText("Managed here")).toBeInTheDocument()
+    expect(screen.getByText("Managed in Watchlists")).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Last run" })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Next run" })).toBeInTheDocument()
+
+    const reminderRow = screen.getByText("Review notes").closest("tr")
+    expect(reminderRow).not.toBeNull()
+    expect(within(reminderRow as HTMLElement).getByText("Needs attention")).toBeInTheDocument()
+    expect(within(reminderRow as HTMLElement).getByText("No completed runs yet")).toBeInTheDocument()
+
     expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
     expect(await screen.findByText("Morning digest")).toBeInTheDocument()
-    expect(await screen.findByRole("link", { name: "Manage in Watchlists" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Open monitor settings" })).toHaveAttribute(
       "href",
       "/watchlists?tab=jobs"
     )
+    expect(screen.getByRole("link", { name: "Open activity" })).toHaveAttribute(
+      "href",
+      "/watchlists?tab=runs&job_id=2"
+    )
+    expect(screen.getByRole("link", { name: "Open reports" })).toHaveAttribute(
+      "href",
+      "/watchlists?tab=outputs&job_id=2"
+    )
+    expect(screen.getByRole("link", { name: "Open latest run" })).toHaveAttribute(
+      "href",
+      "/watchlists?tab=runs&run_id=25&open_run=1"
+    )
+    expect(screen.getByRole("link", { name: "Open latest report" })).toHaveAttribute(
+      "href",
+      "/watchlists?tab=outputs&output_id=39&open_output=1"
+    )
     expect(screen.queryByRole("button", { name: "Edit watchlist job" })).not.toBeInTheDocument()
+  })
+
+  it("filters scheduled tasks by product status and search text", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:healthy",
+          primitive: "reminder_task",
+          title: "Healthy reminder",
+          description: "Runs normally",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Every weekday",
+          timezone: "UTC",
+          next_run_at: "2030-04-05T12:30:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "healthy" }
+        },
+        {
+          id: "watchlist_job:blocked",
+          primitive: "watchlist_job",
+          title: "Blocked monitor",
+          description: "Needs credentials",
+          status: "blocked",
+          enabled: true,
+          schedule_summary: "Every morning",
+          timezone: "UTC",
+          next_run_at: null,
+          last_run_at: null,
+          edit_mode: "external",
+          manage_url: "/watchlists?tab=jobs",
+          source_ref: { job_id: 42 }
+        }
+      ],
+      total: 2,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(await screen.findByText("Healthy reminder")).toBeInTheDocument()
+    expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
+    const healthyRow = screen.getByText("Healthy reminder").closest("tr")
+    expect(healthyRow).not.toBeNull()
+    expect(within(healthyRow as HTMLElement).getByText("Waiting for next run")).toBeInTheDocument()
+    expect(within(healthyRow as HTMLElement).queryByText("scheduled")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Status filter"), {
+      target: { value: "needs_attention" }
+    })
+
+    expect(screen.queryByText("Healthy reminder")).not.toBeInTheDocument()
+    expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Status filter"), {
+      target: { value: "all" }
+    })
+    fireEvent.change(screen.getByRole("textbox", { name: "Search scheduled tasks" }), {
+      target: { value: "healthy" }
+    })
+
+    expect(screen.getByText("Healthy reminder")).toBeInTheDocument()
+    expect(screen.queryByText("Blocked monitor")).not.toBeInTheDocument()
   })
 
   it("counts blocked tasks as needing attention in the overview", async () => {
@@ -303,8 +397,9 @@ describe("ScheduledTasksPage", () => {
 
     renderWithQueryClient(<ScheduledTasksPage />)
 
-    expect(await screen.findByText(/2030/)).toBeInTheDocument()
-    expect(screen.queryByText(/2029/)).not.toBeInTheDocument()
+    const overview = await screen.findByLabelText("Scheduled task overview")
+    expect(within(overview).getByText(/2030/)).toBeInTheDocument()
+    expect(within(overview).queryByText(/2029/)).not.toBeInTheDocument()
   })
 
   it("shows a clear loading state while scheduled task data loads", async () => {

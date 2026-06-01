@@ -36,6 +36,7 @@ export const ScheduledTasksPage: React.FC = () => {
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null)
+  const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null)
   const [saving, setSaving] = useState(false)
   const [scheduledTasksSupported, setScheduledTasksSupported] = useState<
     boolean | null
@@ -101,15 +102,24 @@ export const ScheduledTasksPage: React.FC = () => {
   const canShowScheduledTasksWorkbench =
     scheduledTasksSupported !== false && !isLoadingTasks && !tasksQuery.isError
 
+  const closeTaskDetail = () => {
+    if (selectedTask === null) return
+    setSelectedTask(null)
+  }
+
   const openCreateReminder = () => {
+    closeTaskDetail()
     setEditingTask(null)
     setEditorOpen(true)
   }
 
   const openEditReminder = (task: ScheduledTask) => {
+    closeTaskDetail()
     setEditingTask(task)
     setEditorOpen(true)
   }
+
+  const openTaskDetail = (task: ScheduledTask) => setSelectedTask(task)
 
   const closeEditor = () => {
     setEditorOpen(false)
@@ -297,6 +307,7 @@ export const ScheduledTasksPage: React.FC = () => {
             <ScheduledTaskTable
               tasks={tasks}
               onCreateReminder={openCreateReminder}
+              onInspectTask={openTaskDetail}
               onEditReminder={openEditReminder}
               onDeleteReminder={handleDeleteReminder}
             />
