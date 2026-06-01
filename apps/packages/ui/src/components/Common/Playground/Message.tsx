@@ -42,6 +42,7 @@ import type { ChatScope } from "@/types/chat-scope"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import type { MessageVariant } from "@/store/option"
+import type { MessageMetadataExtra } from "@/store/option/types"
 import { useStoreChatModelSettings } from "@/store/model"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import type { Character } from "@/types/character"
@@ -66,6 +67,9 @@ import {
   resolveAvatarColumnAlignment,
   resolveMessageRenderSide
 } from "./message-layout"
+import { DynamicMessageRenderer } from "@/components/Common/DynamicUI/DynamicMessageRenderer"
+import { DynamicUISourceFallback } from "@/components/Common/DynamicUI/DynamicUISourceFallback"
+import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import { formatCost } from "@/utils/model-pricing"
 import {
   resolveMessageCostUsd,
@@ -87,6 +91,7 @@ import {
   DEFAULT_TLDW_TTS_MODEL,
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
+import type { DynamicUISurface } from "@/types/dynamic-ui"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -234,7 +239,9 @@ type Props = {
   messageSteeringForceNarrate?: boolean
   onMessageSteeringForceNarrateChange?: (enabled: boolean) => void
   onClearMessageSteering?: () => void
-  metadataExtra?: Record<string, unknown>
+  metadataExtra?: MessageMetadataExtra
+  dynamicUISurface?: DynamicUISurface
+  onDynamicUIAction?: (payload: unknown) => void
   researchActions?: MessageResearchActions
   onRegenerateImage?: (payload: {
     messageId?: string
@@ -1149,6 +1156,10 @@ export const PlaygroundMessage = (props: Props) => {
     props.isStreaming &&
     !errorPayload &&
     !renderGreetingMarkdown
+  const dynamicUIEnvelope = normalizeDynamicUIEnvelope(
+    props.metadataExtra?.dynamic_ui
+  )
+  const resolvedDynamicUISurface = props.dynamicUISurface ?? "artifact"
 
   const shouldShowLoadingStatus =
     props.isBot &&
@@ -2408,6 +2419,21 @@ export const PlaygroundMessage = (props: Props) => {
                   >
                     {props.message}
                   </p>
+                ) : !props.isStreaming && dynamicUIEnvelope ? (
+                  props.messageId ? (
+                    <DynamicMessageRenderer
+                      envelope={dynamicUIEnvelope}
+                      sourceMessageId={props.messageId}
+                      sourceText={props.message}
+                      surface={resolvedDynamicUISurface}
+                      onAction={props.onDynamicUIAction}
+                    />
+                  ) : (
+                    <DynamicUISourceFallback
+                      source={props.message}
+                      error="Dynamic UI actions require a saved assistant message id."
+                    />
+                  )
                 ) : renderGreetingMarkdown ? (
                   <React.Suspense
                     fallback={

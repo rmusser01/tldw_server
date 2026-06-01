@@ -5,9 +5,14 @@ import { EditMessageForm } from "./EditMessageForm"
 import { parseReasoning } from "@/libs/reasoning"
 import { highlightText } from "@/utils/text-highlight"
 import { ReasoningBlock } from "./ReasoningBlock"
+import { DynamicMessageRenderer } from "@/components/Common/DynamicUI/DynamicMessageRenderer"
+import { DynamicUISourceFallback } from "@/components/Common/DynamicUI/DynamicUISourceFallback"
+import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import type { TFunction } from "i18next"
 import type { ChatErrorPayload } from "@/utils/chat-error-message"
 import type { ImageGenerationRequestSnapshot } from "@/utils/image-generation-chat"
+import type { DynamicUISurface } from "@/types/dynamic-ui"
+import type { MessageMetadataExtra } from "@/store/option/types"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -100,6 +105,9 @@ export interface MessageContentProps {
   // Images
   images?: string[]
   messageId?: string
+  metadataExtra?: MessageMetadataExtra
+  dynamicUISurface?: DynamicUISurface
+  onDynamicUIAction?: (payload: unknown) => void
   showInlineImageActions: boolean
   canRegenerateImage: boolean
   imageGenerationMetadata: { request: ImageGenerationRequestSnapshot | null } | null
@@ -139,12 +147,17 @@ export const MessageContent = React.memo(function MessageContent(
     reasoningTimeTaken,
     images,
     messageId,
+    metadataExtra,
+    dynamicUISurface,
+    onDynamicUIAction,
     showInlineImageActions,
     canRegenerateImage,
     imageGenerationMetadata,
     onRegenerateImage,
     onDeleteImage,
   } = props
+  const dynamicUIEnvelope = normalizeDynamicUIEnvelope(metadataExtra?.dynamic_ui)
+  const resolvedDynamicUISurface = dynamicUISurface ?? "artifact"
 
   return (
     <>
@@ -173,6 +186,21 @@ export const MessageContent = React.memo(function MessageContent(
               >
                 {message}
               </p>
+            ) : !isStreaming && dynamicUIEnvelope ? (
+              messageId ? (
+                <DynamicMessageRenderer
+                  envelope={dynamicUIEnvelope}
+                  sourceMessageId={messageId}
+                  sourceText={message}
+                  surface={resolvedDynamicUISurface}
+                  onAction={onDynamicUIAction}
+                />
+              ) : (
+                <DynamicUISourceFallback
+                  source={message}
+                  error="Dynamic UI actions require a saved assistant message id."
+                />
+              )
             ) : renderGreetingMarkdown ? (
               <React.Suspense
                 fallback={
