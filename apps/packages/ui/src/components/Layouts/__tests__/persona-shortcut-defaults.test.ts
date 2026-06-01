@@ -6,8 +6,13 @@ import {
 } from "../header-shortcut-items"
 
 describe("persona shortcut defaults", () => {
+  it("keeps Companion Home first in the shared shortcut IDs", () => {
+    expect(HEADER_SHORTCUT_IDS[0]).toBe("companion-home")
+  })
+
   it("family persona includes safety tools", () => {
     const shortcuts = getDefaultShortcutsForPersona("family")
+    expect(shortcuts).toContain("companion-home")
     expect(shortcuts).toContain("family-guardrails")
     expect(shortcuts).toContain("moderation-review")
     expect(shortcuts).toContain("moderation-rules")
@@ -18,6 +23,7 @@ describe("persona shortcut defaults", () => {
 
   it("researcher persona includes research tools", () => {
     const shortcuts = getDefaultShortcutsForPersona("researcher")
+    expect(shortcuts).toContain("companion-home")
     expect(shortcuts).toContain("deep-research")
     expect(shortcuts).toContain("knowledge-qa")
     expect(shortcuts).toContain("media")
@@ -69,6 +75,7 @@ describe("persona shortcut defaults", () => {
     for (const persona of ["explorer", "default"] as const) {
       const shortcuts = PERSONA_SHORTCUT_DEFAULTS[persona]
       expect(shortcuts).toHaveLength(HEADER_SHORTCUT_IDS.length)
+      expect(shortcuts).toContain("companion-home")
     }
   })
 })

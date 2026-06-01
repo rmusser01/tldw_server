@@ -406,6 +406,7 @@ export const PERSONA_BUDDY_SHELL_ENABLED_SETTING = defineSetting(
 export const SIDEBAR_SHORTCUT_MAX_COUNT = 15
 
 export const HEADER_SHORTCUT_IDS = [
+  "companion-home",
   "chat",
   "chat-workspace",
   "prompts",
@@ -464,6 +465,7 @@ export const DEFAULT_HEADER_SHORTCUT_SELECTION = [
 ] as HeaderShortcutId[]
 
 const REQUIRED_HEADER_SHORTCUT_IDS: HeaderShortcutId[] = [
+  "companion-home",
   "workflows",
   "acp-playground",
   "integrations",

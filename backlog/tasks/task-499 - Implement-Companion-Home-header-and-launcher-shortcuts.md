@@ -6,6 +6,11 @@ modified_files:
 - apps/packages/ui/src/components/Layouts/ChatHeader.tsx
 - apps/packages/ui/src/components/Layouts/Header.tsx
 - apps/packages/ui/src/components/Layouts/__tests__/ChatHeader.test.tsx
+- apps/packages/ui/src/components/Layouts/header-shortcut-items.ts
+- apps/packages/ui/src/services/settings/ui-settings.ts
+- apps/packages/ui/src/services/__tests__/ui-settings.header-shortcuts.test.ts
+- apps/packages/ui/src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts
+- apps/packages/ui/src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts
 ---
 
 ## Description

@@ -6,6 +6,25 @@ describe("header shortcut items hosted mode", () => {
     vi.doUnmock("@/services/tldw/deployment-mode")
   })
 
+  it("keeps Companion Home discoverable in hosted mode", async () => {
+    vi.doMock("@/services/tldw/deployment-mode", () => ({
+      isHostedTldwDeployment: () => true,
+    }))
+
+    const mod = await import("../header-shortcut-items")
+    const shortcutItems = mod.getHeaderShortcutItems()
+
+    expect(shortcutItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "companion-home",
+          to: "/",
+          labelDefault: "Companion Home"
+        })
+      ])
+    )
+  })
+
   it("uses dedicated account and billing shortcut ids in hosted mode", async () => {
     vi.doMock("@/services/tldw/deployment-mode", () => ({
       isHostedTldwDeployment: () => true,
