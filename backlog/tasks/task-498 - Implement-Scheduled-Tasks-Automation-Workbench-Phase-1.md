@@ -1,53 +1,61 @@
 ---
 id: TASK-498
 title: Implement Scheduled Tasks Automation Workbench Phase 1
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-06-01 19:33
+updated_date: '2026-06-01 22:05'
 labels:
-- scheduled-tasks
-- webui
-- ux
-- phase-1
+  - scheduled-tasks
+  - webui
+  - ux
+  - phase-1
 dependencies: []
 references:
-- TASK-496
-- TASK-494
-- Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
-- Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+  - TASK-496
+  - TASK-494
+  - >-
+    Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
 documentation:
-- Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
-- Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
-- 'Task 2 follow-up: stable status keys; disabled next-run filtering; empty state
-  table suppression.'
-- 'Task 5: safer reminder scheduling controls implemented in WebUI.'
-- 'Task 5 spec-review follow-up: recurring preview copy is next-run oriented for presets.'
-- 'Task 5 code-quality follow-up: fixed recurring edit hydration cron preservation
-  and APScheduler-aligned cron token validation.'
-- 'Task 6: extension scheduled-tasks E2E copy assertion updated to the new workbench
-  copy; route/component Vitest passed; extension E2E not run locally because prerequisites
-  are optional for this slice.'
-- 'Final review follow-up: strengthened recurring reminder validation for invalid
-  cron ranges/words and invalid IANA timezones; focused utility/page Vitest passed
-  33 tests.'
-- 'Final review follow-up: aligned numeric weekday validation with APScheduler where
-  0 is Monday and 6 is Sunday and 7 is invalid; focused utility/page Vitest passed
-  35 tests.'
-- 'Final review follow-up: rejected APScheduler-invalid reversed named weekday and
-  month ranges; focused utility/page Vitest passed 37 tests.'
-- 'Final review follow-up: rejected APScheduler-invalid numeric-to-name month and
-  weekday ranges; focused utility/page Vitest passed 38 tests.'
-- 'Final review follow-up: allowed APScheduler-valid name-to-number and open named
-  ranges plus nth weekday bounds; focused utility/page Vitest passed 40 tests.'
+  - >-
+    Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+  - >-
+    Task 2 follow-up: stable status keys; disabled next-run filtering; empty
+    state table suppression.
+  - 'Task 5: safer reminder scheduling controls implemented in WebUI.'
+  - >-
+    Task 5 spec-review follow-up: recurring preview copy is next-run oriented
+    for presets.
+  - >-
+    Task 5 code-quality follow-up: fixed recurring edit hydration cron
+    preservation and APScheduler-aligned cron token validation.
+  - >-
+    Task 6: extension scheduled-tasks E2E copy assertion updated to the new
+    workbench copy; route/component Vitest passed; extension E2E not run locally
+    because prerequisites are optional for this slice.
+  - >-
+    Final review follow-up: strengthened recurring reminder validation for
+    invalid cron ranges/words and invalid IANA timezones; focused utility/page
+    Vitest passed 33 tests.
+  - >-
+    Final review follow-up: aligned numeric weekday validation with APScheduler
+    where 0 is Monday and 6 is Sunday and 7 is invalid; focused utility/page
+    Vitest passed 35 tests.
+  - >-
+    Final review follow-up: rejected APScheduler-invalid reversed named weekday
+    and month ranges; focused utility/page Vitest passed 37 tests.
+  - >-
+    Final review follow-up: rejected APScheduler-invalid numeric-to-name month
+    and weekday ranges; focused utility/page Vitest passed 38 tests.
+  - >-
+    Final review follow-up: allowed APScheduler-valid name-to-number and open
+    named ranges plus nth weekday bounds; focused utility/page Vitest passed 40
+    tests.
 priority: high
-modified_files:
-- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
-- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderTaskEditor.tsx
-- apps/packages/ui/src/components/Option/ScheduledTasks/reminder-schedule-utils.ts
-- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts
-- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
-- apps/extension/tests/e2e/integrations-and-scheduled-tasks.spec.ts
 ---
 
 ## Description
@@ -58,13 +66,13 @@ Implement Phase 1 of the Scheduled Tasks Automation Workbench UX from the approv
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Scheduled task rows use user-facing statuses instead of raw API status strings.
-- [ ] #2 /scheduled-tasks shows overview metrics, loading, empty, partial, unsupported, and error states with recovery actions.
-- [ ] #3 Reminder tasks can be created and edited with safe one-time and recurring schedule controls instead of raw-first run_at/cron/timezone fields.
-- [ ] #4 Watchlist jobs are visible as externally managed monitors with deep links to Watchlists settings, activity, latest run, reports, and latest output when identifiers exist.
-- [ ] #5 Task detail inspection shows current state, schedule, last/next run, source metadata, and available actions without editing Watchlist jobs.
-- [ ] #6 Existing Watchlists functionality and UX remain intact and separate.
-- [ ] #7 Focused WebUI tests and relevant backend contract tests pass, or any skipped checks are documented with cause.
+- [x] #1 Scheduled task rows use user-facing statuses instead of raw API status strings.
+- [x] #2 /scheduled-tasks shows overview metrics, loading, empty, partial, unsupported, and error states with recovery actions.
+- [x] #3 Reminder tasks can be created and edited with safe one-time and recurring schedule controls instead of raw-first run_at/cron/timezone fields.
+- [x] #4 Watchlist jobs are visible as externally managed monitors with deep links to Watchlists settings, activity, latest run, reports, and latest output when identifiers exist.
+- [x] #5 Task detail inspection shows current state, schedule, last/next run, source metadata, and available actions without editing Watchlist jobs.
+- [x] #6 Existing Watchlists functionality and UX remain intact and separate.
+- [x] #7 Focused WebUI tests and relevant backend contract tests pass, or any skipped checks are documented with cause.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -75,23 +83,25 @@ Task 5 code-quality follow-up strict TDD: added failing utility tests for APSche
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 Task 1 review clarification: failure-like status tokens (fail, error, missed) take precedence over result-like tokens when both appear in a single backend status string. This keeps states such as output_error in Needs attention rather than Found results. Helper tests now cover output ID aliases, token-boundary matching, and unsafe ID rejection.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 5 code-quality follow-up: fixed recurring edit hydration by removing the broad effect that regenerated cron from default local preset state. The form now only writes generated cron when entering recurring with no existing cron, or when the user changes preset/hour/minute/weekday controls, preserving saved custom/weekly cron values on edit. Cron validation now allows APScheduler-supported # tokens such as mon#2 and rejects unsupported ? tokens with a scheduler-specific message. RED evidence: focused Vitest failed for mon#2 rejection, ? acceptance, and custom cron being rewritten to 0 9 * * *. GREEN evidence: ./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx passed 29 tests. git diff --check passed. Bandit skipped because touched implementation scope is TypeScript/TSX tests/utilities only.
+Scheduled Tasks Automation Workbench Phase 1 implemented. User-facing statuses, overview metrics and states, searchable/filterable table, detail drawer, Watchlists deep links without Watchlists edit ownership, safer reminder schedule controls, and extension route copy parity. Verification: frontend focused Vitest passed 6 files / 61 tests; backend scheduled-tasks control-plane pytest passed 4 tests; git diff --check passed; final code review approved. Bandit skipped because no backend Python changed. Manual live-data browser verification skipped because no seeded backend/dev data environment is available; component tests cover empty, partial, loaded reminder, loaded Watchlists, filters/search, detail drawer, reminder scheduling, and Watchlists links. Follow-up phases remain templates for GitHub/YouTube/RAG/agents plus Home/results surfacing.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
