@@ -4,7 +4,7 @@ title: Document Character Cards and Character Chat core module
 status: Done
 assignee: []
 created_date: '2026-06-01 06:23'
-updated_date: '2026-06-01 06:25'
+updated_date: '2026-06-01 07:20'
 labels: []
 dependencies: []
 documentation:
@@ -45,6 +45,8 @@ Implementation was prepared in the clean worktree /Users/appledev/Documents/GitH
 Verification: git diff --check passed for tracked modified docs; trailing-whitespace scan over all touched docs returned no matches; stale endpoint/path scan returned no matches; route-source scan confirmed /tags/operations, /world-books/process, /complete-v2, /completions/persist, and dictionary entry paths; git status for Docs/Published returned no changes. Bandit skipped because touched files are Markdown/docs only. Pytest not run because no runtime code changed.
 
 Combined branch verification before PR: git diff --check passed; git status --short Docs/Published produced no output; trailing-whitespace scan returned no matches; stale placeholder scan returned no matches; route-source scans confirmed documented Character Cards, Character Chat, world book, completion persistence, and chat dictionary paths. Pytest and Bandit were not run because this PR changes Markdown documentation only.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2212
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

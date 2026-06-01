@@ -4,7 +4,7 @@ title: Document Personas feature and core module
 status: Done
 assignee: []
 created_date: '2026-06-01 05:44'
-updated_date: '2026-06-01 06:24'
+updated_date: '2026-06-01 07:20'
 labels: []
 dependencies: []
 documentation:
@@ -51,6 +51,8 @@ Final verification: git diff --check passed for the new/modified Markdown files;
 PR integration: combined with TASK-587 in branch codex/personas-character-cards-documentation, based on origin/dev. Added Docs/User_Guides/index.md source link for the Personas guide.
 
 Combined branch verification before PR: git diff --check passed; git status --short Docs/Published produced no output; trailing-whitespace scan returned no matches; stale placeholder scan returned no matches; source route scans confirmed documented Persona mount and key endpoint paths. Pytest and Bandit were not run because this PR changes Markdown documentation only.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2212
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
