@@ -396,6 +396,47 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
+  it("preserves first-source open detail while syncing wizard state", async () => {
+    const user = userEvent.setup()
+    const firstSourceDetail = {
+      source: "first_source_milestone" as const,
+      preferredPreset: "quick" as const,
+      firstSource: true,
+      firstSourceKind: "file_upload" as const,
+    }
+    useQuickIngestSessionStore.getState().createDraftSession({
+      openDetail: firstSourceDetail,
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-first-source",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          id: "queued-url-1",
+          status: "ok",
+          url: "https://example.com/article",
+          type: "html",
+          mediaId: "42",
+          title: "Example article",
+        },
+      ],
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
+    })
+    expect(useQuickIngestSessionStore.getState().session?.openDetail).toEqual(
+      firstSourceDetail
+    )
+  })
+
   it("submits conference batch metadata and item overrides through the session payload", async () => {
     const user = userEvent.setup()
     useQuickIngestSessionStore.getState().createDraftSession()

@@ -17,6 +17,8 @@ interface FileDropZoneProps {
   running?: boolean
   /** Whether server is online for ingest */
   isOnlineForIngest?: boolean
+  /** Focus the drop zone when it is first shown. */
+  autoFocus?: boolean
   /** Additional CSS classes */
   className?: string
 }
@@ -34,17 +36,24 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   onFilesRejected,
   running = false,
   isOnlineForIngest = true,
+  autoFocus = false,
   className
 }) => {
   const { t } = useTranslation(["option"])
   const [isDragging, setIsDragging] = React.useState(false)
   const [isDragReject, setIsDragReject] = React.useState(false)
   const [dragFileCount, setDragFileCount] = React.useState(0)
+  const dropZoneRef = React.useRef<HTMLDivElement>(null)
   const inputRef = React.useRef<HTMLInputElement>(null)
   // Drag counter prevents flickering when dragging over nested elements
   const dragCounterRef = React.useRef(0)
 
   const disabled = running || !isOnlineForIngest
+
+  React.useEffect(() => {
+    if (!autoFocus || disabled) return
+    dropZoneRef.current?.focus()
+  }, [autoFocus, disabled])
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -268,6 +277,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 
   return (
     <div
+      ref={dropZoneRef}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

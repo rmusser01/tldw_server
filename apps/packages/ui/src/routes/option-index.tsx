@@ -1,7 +1,10 @@
 import React from "react"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
-import { FirstSourceMilestonePrompt } from "@/components/Option/Onboarding/FirstSourceMilestonePrompt"
+import {
+  FirstSourceMilestonePrompt,
+  type FirstSourceKind
+} from "@/components/Option/Onboarding/FirstSourceMilestonePrompt"
 import { PostSetupApiRecovery } from "@/components/Option/Onboarding/PostSetupApiRecovery"
 import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import {
@@ -13,7 +16,11 @@ import { usePostOnboardingMediaReadiness } from "@/hooks/usePostOnboardingMediaR
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
-import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import {
+  isFirstSourceOpenDetail,
+  requestQuickIngestOpen
+} from "@/utils/quick-ingest-open"
 import { isSetupStatusRequiringWizard } from "./setup-status"
 
 const LazyCompanionHomeShell = React.lazy(() =>
@@ -38,6 +45,34 @@ const readFirstSourceDismissed = () => {
   }
 }
 
+const openFirstSourceQuickIngest = (kind: FirstSourceKind) => {
+  requestQuickIngestOpen(
+    {
+      source: "first_source_milestone",
+      preferredPreset: "quick",
+      firstSource: true,
+      firstSourceKind: kind
+    },
+    { focusTrigger: true }
+  )
+}
+
+const discussFirstSource = (payload: {
+  mediaId: string
+  title: string | null
+}) => {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent("tldw:discuss-media", {
+      detail: {
+        mediaId: payload.mediaId,
+        title: payload.title || "First source",
+        mode: "rag_media"
+      }
+    })
+  )
+}
+
 const OptionIndex = () => {
   const hostedMode = isHostedTldwDeployment()
   const { phase } = useConnectionState()
@@ -51,6 +86,11 @@ const OptionIndex = () => {
   const [didHydrate, setDidHydrate] = React.useState(false)
   const [firstSourceDismissed, setFirstSourceDismissed] = React.useState(
     readFirstSourceDismissed
+  )
+  const [lastFirstSourceKind, setLastFirstSourceKind] =
+    React.useState<FirstSourceKind>("web_url")
+  const quickIngestSession = useQuickIngestSessionStore(
+    (state) => state.session
   )
 
   React.useEffect(() => {
@@ -134,6 +174,27 @@ const OptionIndex = () => {
 
   const showFirstSourcePrompt =
     shouldCheckPostOnboardingMedia && mediaReadiness.status === "ready"
+  const firstSourceSession = isFirstSourceOpenDetail(
+    quickIngestSession?.openDetail
+  )
+    ? quickIngestSession
+    : null
+  const firstSourceRunSummary = firstSourceSession?.resultSummary ?? null
+  const firstSourceMediaId =
+    firstSourceRunSummary?.status === "success" &&
+    firstSourceRunSummary.firstMediaId
+      ? firstSourceRunSummary.firstMediaId
+      : null
+  const firstSourceAskReady =
+    Boolean(firstSourceMediaId) && mediaReadiness.status === "ready"
+  const firstSourcePromptStatus =
+    firstSourceSession?.lifecycle === "processing"
+      ? "processing"
+      : firstSourceRunSummary?.status === "error"
+        ? "error"
+        : firstSourceAskReady
+          ? "ready"
+          : "idle"
 
   if (
     shouldCheckPostOnboardingMedia &&
@@ -155,16 +216,23 @@ const OptionIndex = () => {
     <OptionLayout>
       {showFirstSourcePrompt ? (
         <FirstSourceMilestonePrompt
-          onAddSource={() => {
-            requestQuickIngestOpen(
-              {
-                source: "first_source_milestone",
-                preferredPreset: "quick",
-                firstSource: true
-              },
-              { focusTrigger: true }
-            )
+          readinessStatus={firstSourcePromptStatus}
+          lastSourceLabel={firstSourceRunSummary?.primarySourceLabel}
+          errorMessage={firstSourceRunSummary?.errorMessage}
+          onAddSource={(kind) => {
+            setLastFirstSourceKind(kind)
+            openFirstSourceQuickIngest(kind)
           }}
+          onRetry={() => openFirstSourceQuickIngest(lastFirstSourceKind)}
+          onAskAboutSource={
+            firstSourceMediaId && firstSourceAskReady
+              ? () =>
+                  discussFirstSource({
+                    mediaId: firstSourceMediaId,
+                    title: firstSourceRunSummary?.primarySourceLabel ?? null
+                  })
+              : undefined
+          }
           onDismiss={dismissFirstSourcePrompt}
         />
       ) : null}

@@ -69,7 +69,8 @@ describe("quick ingest open handoff", () => {
     }
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toEqual({
-      openDetail: detail
+      openDetail: detail,
+      firstSourceAddMode: null
     })
   })
 
@@ -77,11 +78,13 @@ describe("quick ingest open handoff", () => {
     const detail = {
       source: "first_source_milestone" as const,
       preferredPreset: "quick" as const,
-      firstSource: true
+      firstSource: true,
+      firstSourceKind: "paste_text" as const
     }
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
       openDetail: detail,
+      firstSourceAddMode: "paste_text",
       selectedPreset: "quick",
       customBasePreset: "quick",
       presetConfig: {
@@ -106,6 +109,7 @@ describe("quick ingest open handoff", () => {
     } as unknown as QuickIngestOpenDetail
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
+      firstSourceAddMode: "web_url",
       selectedPreset: "quick",
       customBasePreset: "quick",
       presetConfig: {

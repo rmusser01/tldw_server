@@ -4,6 +4,16 @@ import { MemoryRouter } from "react-router-dom"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import {
+  createInitialQuickIngestLastRunSummary,
+  useQuickIngestStore
+} from "@/store/quick-ingest"
+import {
+  createEmptyQuickIngestSession,
+  useQuickIngestSessionStore,
+  type QuickIngestSessionRecord
+} from "@/store/quick-ingest-session"
+
 const routeMocks = vi.hoisted(() => ({
   firstRunState: {
     current: {
@@ -74,6 +84,14 @@ vi.mock("@/components/Option/CompanionHome", () => ({
 }))
 
 vi.mock("@/utils/quick-ingest-open", () => ({
+  isFirstSourceOpenDetail: (detail: any) =>
+    Boolean(
+      detail &&
+        (detail.source === "first_source_milestone" ||
+          detail.firstSource === true)
+    ),
+  isFirstSourceQuickIngestKind: (value: unknown) =>
+    value === "web_url" || value === "file_upload" || value === "paste_text",
   requestQuickIngestOpen: routeMocks.requestQuickIngestOpen
 }))
 
@@ -118,6 +136,33 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
   })
 }))
 
+const createCompletedFirstRunState = () => ({
+  status: "completed",
+  completed_steps: ["first_chat"],
+  skipped_steps: [],
+  step_data: {},
+  acknowledged_steps: ["first_chat"],
+  first_chat: { completed: true }
+})
+
+const seedQuickIngestSession = (
+  overrides: Partial<QuickIngestSessionRecord>
+) => {
+  const base = createEmptyQuickIngestSession()
+  useQuickIngestSessionStore.setState((state) => ({
+    ...state,
+    session: {
+      ...base,
+      ...overrides,
+      resultSummary: {
+        ...base.resultSummary,
+        ...(overrides.resultSummary || {})
+      }
+    },
+    triggerSummary: { count: 0, label: null, hadFailure: false }
+  }))
+}
+
 describe("OptionIndex unified setup resolver", () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -148,6 +193,17 @@ describe("OptionIndex unified setup resolver", () => {
         ...(updates as Record<string, unknown>)
       }
     })
+    useQuickIngestStore.setState((state) => ({
+      ...state,
+      queuedCount: 0,
+      hadRecentFailure: false,
+      lastRunSummary: createInitialQuickIngestLastRunSummary()
+    }))
+    useQuickIngestSessionStore.setState((state) => ({
+      ...state,
+      session: null,
+      triggerSummary: { count: 0, label: null, hadFailure: false }
+    }))
   })
 
   it("renders setup in focused shell when backend state is not complete", async () => {
@@ -167,14 +223,7 @@ describe("OptionIndex unified setup resolver", () => {
   })
 
   it("offers the first-source milestone after authenticated media readiness succeeds", async () => {
-    routeMocks.firstRunState.current = {
-      status: "completed",
-      completed_steps: ["first_chat"],
-      skipped_steps: [],
-      step_data: {},
-      acknowledged_steps: ["first_chat"],
-      first_chat: { completed: true }
-    }
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
     const { default: OptionIndex } = await import("../option-index")
 
     render(
@@ -196,21 +245,179 @@ describe("OptionIndex unified setup resolver", () => {
       {
         source: "first_source_milestone",
         preferredPreset: "quick",
-        firstSource: true
+        firstSource: true,
+        firstSourceKind: "web_url"
       },
       { focusTrigger: true }
     )
   })
 
-  it("shows inline API key recovery when setup is complete but media auth is missing", async () => {
-    routeMocks.firstRunState.current = {
-      status: "completed",
-      completed_steps: ["first_chat"],
-      skipped_steps: [],
-      step_data: {},
-      acknowledged_steps: ["first_chat"],
-      first_chat: { completed: true }
+  it("passes the selected first-source kind into quick ingest", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("radio", { name: /file/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add source/i }))
+    fireEvent.click(screen.getByRole("radio", { name: /paste/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add source/i }))
+
+    expect(routeMocks.requestQuickIngestOpen).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        firstSourceKind: "file_upload"
+      }),
+      { focusTrigger: true }
+    )
+    expect(routeMocks.requestQuickIngestOpen).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        firstSourceKind: "paste_text"
+      }),
+      { focusTrigger: true }
+    )
+  })
+
+  it("does not offer source chat before quick ingest returns a ready media id", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /ask a question about this source/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("ignores unrelated quick ingest success when no first-source session owns it", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    useQuickIngestStore.setState((state) => ({
+      ...state,
+      lastRunSummary: {
+        ...createInitialQuickIngestLastRunSummary(),
+        status: "success",
+        attemptedAt: 1,
+        completedAt: 2,
+        totalCount: 1,
+        successCount: 1,
+        firstMediaId: "unrelated-42",
+        primarySourceLabel: "Unrelated import"
+      }
+    }))
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /ask a question about this source/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("uses persisted first-source session result summary after reload", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    seedQuickIngestSession({
+      lifecycle: "completed",
+      openDetail: {
+        source: "first_source_milestone",
+        preferredPreset: "quick",
+        firstSource: true,
+        firstSourceKind: "file_upload"
+      },
+      resultSummary: {
+        status: "success",
+        attemptedAt: 1,
+        completedAt: 2,
+        totalCount: 1,
+        successCount: 1,
+        failedCount: 0,
+        cancelledCount: 0,
+        firstMediaId: "persisted-42",
+        primarySourceLabel: "Saved PDF",
+        errorMessage: null
+      }
+    })
+    const discussEvents: Array<CustomEvent> = []
+    const listener = (event: Event) => {
+      discussEvents.push(event as CustomEvent)
     }
+    window.addEventListener("tldw:discuss-media", listener)
+    const { default: OptionIndex } = await import("../option-index")
+
+    try {
+      render(
+        <MemoryRouter>
+          <OptionIndex />
+        </MemoryRouter>
+      )
+
+      expect(
+        await screen.findByRole("heading", { name: /add your first source/i })
+      ).toBeInTheDocument()
+
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: /ask a question about this source/i
+        })
+      )
+
+      expect(discussEvents).toHaveLength(1)
+      expect(discussEvents[0]?.detail).toEqual({
+        mediaId: "persisted-42",
+        title: "Saved PDF",
+        mode: "rag_media"
+      })
+    } finally {
+      window.removeEventListener("tldw:discuss-media", listener)
+    }
+  })
+
+  it("does not show first-source processing for an unrelated processing session", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    seedQuickIngestSession({
+      lifecycle: "processing",
+      openDetail: { source: "manual" }
+    })
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/processing your source/i)).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /add source/i })
+    ).toBeInTheDocument()
+  })
+
+  it("shows inline API key recovery when setup is complete but media auth is missing", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
     routeMocks.tldwConfig.current = {
       serverUrl: "http://localhost:3000",
       authMode: "single-user"
@@ -232,14 +439,7 @@ describe("OptionIndex unified setup resolver", () => {
   })
 
   it("saves a recovered API key, rechecks readiness, and then shows the first-source milestone", async () => {
-    routeMocks.firstRunState.current = {
-      status: "completed",
-      completed_steps: ["first_chat"],
-      skipped_steps: [],
-      step_data: {},
-      acknowledged_steps: ["first_chat"],
-      first_chat: { completed: true }
-    }
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
     routeMocks.tldwConfig.current = {
       serverUrl: "http://localhost:3000",
       authMode: "single-user"
@@ -273,14 +473,7 @@ describe("OptionIndex unified setup resolver", () => {
   })
 
   it("does not render the first-source CTA while media readiness is still checking", async () => {
-    routeMocks.firstRunState.current = {
-      status: "completed",
-      completed_steps: ["first_chat"],
-      skipped_steps: [],
-      step_data: {},
-      acknowledged_steps: ["first_chat"],
-      first_chat: { completed: true }
-    }
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
     routeMocks.listMedia.mockReturnValue(new Promise(() => undefined))
     const { default: OptionIndex } = await import("../option-index")
 
