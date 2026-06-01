@@ -25,12 +25,16 @@ documentation:
 - 'Task 5 spec-review follow-up: recurring preview copy is next-run oriented for presets.'
 - 'Task 5 code-quality follow-up: fixed recurring edit hydration cron preservation
   and APScheduler-aligned cron token validation.'
+- 'Task 6: extension scheduled-tasks E2E copy assertion updated to the new workbench
+  copy; route/component Vitest passed; extension E2E not run locally because prerequisites
+  are optional for this slice.'
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
 - apps/packages/ui/src/components/Option/ScheduledTasks/reminder-schedule-utils.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
+- apps/extension/tests/e2e/integrations-and-scheduled-tasks.spec.ts
 ---
 
 ## Description
