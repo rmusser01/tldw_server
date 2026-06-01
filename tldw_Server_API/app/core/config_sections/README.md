@@ -29,7 +29,7 @@
 - `app/core/config.py` imports the aggregate loaders and exposes the effective application configuration.
 - `app/core/Ingestion_Media_Processing/Audio/stt_policy.py` reads typed STT configuration from this package.
 - Config endpoint and effective-config tests cover behavior that flows through these typed loaders.
-- Documentation for the modularization work lives under `Docs/superpowers/plans/2026-03-02-config-modularization-*`.
+- Documentation for the modularization work lives under `Docs/Plans/2026-03-02-config-modularization-*`.
 
 ## Extension Points
 

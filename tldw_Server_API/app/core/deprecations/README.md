@@ -1,12 +1,12 @@
 # deprecations
 
-`deprecations` is a support package for runtime compatibility and deprecation logging. It is not a user-facing feature module; it centralizes registry-backed deprecation messages so compatibility warnings are deliberate, sanitized, and emitted once per runtime cycle.
+`deprecations` is a support package for runtime compatibility and deprecation logging. It is not a user-facing feature module; it centralizes registry-backed deprecation messages so compatibility warnings are deliberate and emitted once per runtime cycle.
 
 ## Start Here
 
 - `runtime_registry.py` contains the registry loader and runtime deprecation logging helpers.
 - `__init__.py` re-exports the public helpers.
-- Related consumers: `app/core/LLM_Calls/chat_calls.py` and `app/core/LLM_Calls/deprecation.py`.
+- Related consumers: `app/core/LLM_Calls/chat_calls.py`, `app/core/LLM_Calls/deprecation.py`, `app/services/web_scraping_service.py`, and `app/services/auth_service.py`.
 - Related tests: `tests/Services/test_compatibility_registry_contract.py` and `tests/lint/test_no_new_runtime_compat_markers.py`.
 
 ## Responsibilities
@@ -24,7 +24,7 @@
 
 ## How It Connects
 
-- `app/core/LLM_Calls/chat_calls.py` and `app/core/LLM_Calls/deprecation.py` call into this package when emitting runtime compatibility warnings.
+- `app/core/LLM_Calls/chat_calls.py`, `app/core/LLM_Calls/deprecation.py`, `app/services/web_scraping_service.py`, and `app/services/auth_service.py` call into this package when emitting runtime compatibility warnings.
 - Compatibility registry contract tests verify that registry-backed messages remain valid.
 - Lint tests prevent new ad hoc runtime compatibility markers from being introduced outside the approved path.
 

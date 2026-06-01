@@ -1,6 +1,6 @@
 # Templating
 
-Templating provides the sandboxed Jinja rendering helper used by chat dictionaries, chatbooks, and prompt-adjacent flows. It builds a constrained environment from configuration, validates expression-only rendering where requested, exposes safe date/random helpers, and enforces timeout and output-size limits.
+Templating provides the sandboxed Jinja rendering helper used by chat dictionaries, chatbooks, and prompt-adjacent flows. It builds a constrained environment from configuration, validates expression-only rendering where requested, exposes safe date/random helpers, truncates oversized output, and records render timeout metrics after rendering completes.
 
 ## Start Here
 
@@ -12,9 +12,9 @@ Templating provides the sandboxed Jinja rendering helper used by chat dictionari
 
 - Build a sandboxed Jinja environment with controlled globals and filters.
 - Render templates with `TemplateContext`, `TemplateOptions`, and environment-derived defaults.
-- Enforce render timeout, output-size, cache, and expression-only constraints.
+- Log render timeout metrics after completion, truncate oversized output, and apply cache and expression-only constraints.
 - Provide deterministic and bounded date/random helper behavior.
-- Raise `TemplateRenderError` for rendering and validation failures.
+- Fall back to the original input text on parse, validation, or render failures.
 
 ## Module Map
 
@@ -41,4 +41,4 @@ Templating provides the sandboxed Jinja rendering helper used by chat dictionari
 
 - The renderer is intentionally sandboxed; avoid adding helpers that can reach the filesystem, network, process environment, or arbitrary Python objects.
 - Expression-only mode is a validation path, not just a style preference, and callers may depend on it to reject block templates.
-- Output limits and timeout settings are part of the safety boundary for user-provided templates.
+- Output limits are enforced by truncation; timeout settings currently produce logs/metrics rather than interrupting an in-progress render.

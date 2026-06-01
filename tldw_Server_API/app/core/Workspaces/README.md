@@ -8,7 +8,7 @@ Workspaces contains helper services that support workspace capability reporting,
 - `source_jobs.py` builds and enqueues workspace source ingestion jobs.
 - `status_projection.py` projects source status from Jobs, Media, and RAG state.
 - `workspace_artifact_exports.py` prepares traceable workspace artifact exports.
-- Related API surface: `app/api/v1/endpoints/workspaces.py`.
+- Related API surface: `app/api/v1/endpoints/workspaces.py` and `app/api/v1/endpoints/workspace_migrations.py`.
 - Related tests: `tests/Workspaces/`.
 
 ## Responsibilities
@@ -28,7 +28,8 @@ Workspaces contains helper services that support workspace capability reporting,
 
 ## How It Connects
 
-- `app/api/v1/endpoints/workspaces.py` exposes workspace CRUD, sources, status, preview, migration, and sub-resource routes.
+- `app/api/v1/endpoints/workspaces.py` exposes workspace CRUD, sources, status, preview, and sub-resource routes.
+- `app/api/v1/endpoints/workspace_migrations.py` exposes workspace migration routes.
 - `app/api/v1/schemas/workspace_schemas.py` defines workspace request and response models.
 - ChaChaNotes workspace tables store workspace metadata, sources, notes, and artifact references.
 - Jobs, Media DB, and RAG/indexing state feed `status_projection.py`.
