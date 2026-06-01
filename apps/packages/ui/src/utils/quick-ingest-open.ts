@@ -79,7 +79,7 @@ const buildPendingOpenRequest = (
   mode,
   at: Date.now(),
   detail,
-  options,
+  options
 })
 
 const normalizeQuickIngestOpenDetail = (
@@ -96,9 +96,7 @@ const dispatchQuickIngestOpenEvent = (
   const scope = getQuickIngestWindow()
   if (!scope) return
   const eventName =
-    mode === "intro"
-      ? "tldw:open-quick-ingest-intro"
-      : "tldw:open-quick-ingest"
+    mode === "intro" ? "tldw:open-quick-ingest-intro" : "tldw:open-quick-ingest"
   scope.dispatchEvent(new CustomEvent(eventName, { detail }))
 }
 
@@ -123,7 +121,11 @@ export const requestQuickIngestOpen = (
   options?: QuickIngestPendingOpenOptions
 ): QuickIngestPendingOpenRequest | null => {
   const normalizedDetail = normalizeQuickIngestOpenDetail(detail)
-  const request = rememberQuickIngestOpenRequest("normal", normalizedDetail, options)
+  const request = rememberQuickIngestOpenRequest(
+    "normal",
+    normalizedDetail,
+    options
+  )
   dispatchQuickIngestOpenEvent("normal", normalizedDetail)
   return request
 }
@@ -133,19 +135,24 @@ export const requestQuickIngestIntro = (
   options?: QuickIngestPendingOpenOptions
 ): QuickIngestPendingOpenRequest | null => {
   const normalizedDetail = normalizeQuickIngestOpenDetail(detail)
-  const request = rememberQuickIngestOpenRequest("intro", normalizedDetail, options)
+  const request = rememberQuickIngestOpenRequest(
+    "intro",
+    normalizedDetail,
+    options
+  )
   dispatchQuickIngestOpenEvent("intro", normalizedDetail)
   return request
 }
 
-export const consumePendingQuickIngestOpen = (): QuickIngestPendingOpenRequest | null => {
-  const scope = getQuickIngestWindow()
-  const request = scope?.__tldwPendingQuickIngestOpen || null
-  if (scope) {
-    delete scope.__tldwPendingQuickIngestOpen
+export const consumePendingQuickIngestOpen =
+  (): QuickIngestPendingOpenRequest | null => {
+    const scope = getQuickIngestWindow()
+    const request = scope?.__tldwPendingQuickIngestOpen || null
+    if (scope) {
+      delete scope.__tldwPendingQuickIngestOpen
+    }
+    return request
   }
-  return request
-}
 
 const hostnameMatches = (hostname: string, allowedHost: string): boolean =>
   hostname === allowedHost || hostname.endsWith(`.${allowedHost}`)
@@ -156,7 +163,10 @@ export const getQuickIngestPlaylistSourceKind = (
   try {
     const parsed = new URL(rawUrl.trim())
     const hostname = parsed.hostname.toLowerCase()
-    if (!hostnameMatches(hostname, "youtube.com") && !hostnameMatches(hostname, "youtu.be")) {
+    if (
+      !hostnameMatches(hostname, "youtube.com") &&
+      !hostnameMatches(hostname, "youtu.be")
+    ) {
       return null
     }
     const playlistId = parsed.searchParams.get("list")?.trim()
@@ -182,7 +192,7 @@ export const buildQuickIngestOpenDetailFromUrl = (
     source: "extension_active_tab",
     url,
     sourceKind,
-    action: "playlist_preflight",
+    action: "playlist_preflight"
   }
 }
 
@@ -194,16 +204,17 @@ export const isQuickIngestPlaylistPreflightDetail = (
 > =>
   Boolean(
     detail &&
-      detail.source === "extension_active_tab" &&
-      detail.action === "playlist_preflight" &&
-      typeof detail.url === "string" &&
-      detail.url.trim().length > 0
+    detail.source === "extension_active_tab" &&
+    detail.action === "playlist_preflight" &&
+    typeof detail.url === "string" &&
+    detail.url.trim().length > 0
   )
 
 const isPreferredPreset = (
   value: unknown
 ): value is Exclude<IngestPreset, "custom"> =>
-  typeof value === "string" && value in DEFAULT_PRESETS
+  typeof value === "string" &&
+  Object.prototype.hasOwnProperty.call(DEFAULT_PRESETS, value)
 
 const isFirstSourceOpenDetail = (
   detail: QuickIngestOpenDetail | null | undefined
@@ -213,8 +224,7 @@ const isFirstSourceOpenDetail = (
 > =>
   Boolean(
     detail &&
-      (detail.source === "first_source_milestone" ||
-        detail.firstSource === true)
+    (detail.source === "first_source_milestone" || detail.firstSource === true)
   )
 
 export const createQuickIngestSessionSeedFromOpenDetail = (

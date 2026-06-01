@@ -1,10 +1,10 @@
 ---
 id: TASK-577
 title: Address PR 2194 onboarding review comments
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 00:37'
+updated_date: '2026-06-01 00:50'
 labels:
   - onboarding
   - review-fix
@@ -43,6 +43,12 @@ Implemented review fixes for PR #2194:
 - Task cleanup: corrected the task-499 end-to-end typo raised by review.
 
 Verification recorded during implementation: backend RED tests failed before fixes; frontend RED tests failed before fixes; after fixes, targeted setup pytest, onboarding Vitest, first-run state pytest, setup suite pytest, Kokoro health tests, Bandit, ESLint, and git diff hygiene checks exited cleanly.
+
+Follow-up: Cubic added five new review threads after commit 2ffcc1c50e. Reopened this task to address the new Layout shell override cleanup, quick ingest preset validation, option setup localization/shared gating, and post-onboarding readiness race comments.
+
+Follow-up implementation: added owner-safe shell override cleanup in OptionLayout, strict own-property preset validation for first-source quick ingest metadata, shared setup status gating helper, /setup translation keys and English locale entries, and request sequencing for post-onboarding media readiness checks.
+
+Follow-up RED/GREEN evidence: the new focused Vitest tests first failed on the inherited preset key and stale readiness overwrite, setup-status helper was missing, and the shell override cleanup test failed because cleanup called another owner setOverrides(null). After implementation, the focused follow-up/onboarding Vitest suite passed with 43 tests. Targeted ESLint exited 0 with the existing Next pages-directory warning, and git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

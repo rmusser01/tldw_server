@@ -1,9 +1,6 @@
 import React from "react"
 
-import {
-  tldwClient,
-  type TldwConfig
-} from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 
 export type PostOnboardingMediaReadinessStatus =
   | "checking"
@@ -55,15 +52,23 @@ export function usePostOnboardingMediaReadiness(
   recoverWithApiKey: (apiKey: string) => Promise<void>
   retry: () => Promise<void>
 } {
-  const [state, setState] =
-    React.useState<PostOnboardingMediaReadinessState>({
-      status: "checking",
-      config: null,
-      errorMessage: null
-    })
+  const requestSequence = React.useRef(0)
+  const [state, setState] = React.useState<PostOnboardingMediaReadinessState>({
+    status: "checking",
+    config: null,
+    errorMessage: null
+  })
 
   const checkReadiness = React.useCallback(async () => {
-    setState((current) => ({
+    const requestId = requestSequence.current + 1
+    requestSequence.current = requestId
+    const isCurrentRequest = () => requestSequence.current === requestId
+    const setCurrentState: typeof setState = (nextState) => {
+      if (!isCurrentRequest()) return
+      setState(nextState)
+    }
+
+    setCurrentState((current) => ({
       ...current,
       status: "checking",
       errorMessage: null
@@ -72,8 +77,9 @@ export function usePostOnboardingMediaReadiness(
     let config: TldwConfig | null = null
     try {
       config = await tldwClient.getConfig().catch(() => null)
+      if (!isCurrentRequest()) return
       if (!hasRequiredAuth(config)) {
-        setState({
+        setCurrentState({
           status: "needs_config",
           config,
           errorMessage: null
@@ -82,13 +88,13 @@ export function usePostOnboardingMediaReadiness(
       }
 
       await tldwClient.listMedia({ results_per_page: 1 })
-      setState({
+      setCurrentState({
         status: "ready",
         config,
         errorMessage: null
       })
     } catch (error) {
-      setState({
+      setCurrentState({
         status: isAuthOrConfigError(error) ? "needs_config" : "error",
         config,
         errorMessage: toErrorMessage(error)
@@ -106,6 +112,7 @@ export function usePostOnboardingMediaReadiness(
     void run()
     return () => {
       cancelled = true
+      requestSequence.current += 1
     }
   }, [checkReadiness, enabled])
 
@@ -118,10 +125,14 @@ export function usePostOnboardingMediaReadiness(
 
       const currentConfig = await tldwClient.getConfig().catch(() => null)
       const serverUrl = String(
-        currentConfig?.serverUrl || state.config?.serverUrl || getCurrentOrigin()
+        currentConfig?.serverUrl ||
+          state.config?.serverUrl ||
+          getCurrentOrigin()
       ).trim()
       if (!serverUrl) {
-        throw new Error("Server URL is missing. Restart quickstart and try again.")
+        throw new Error(
+          "Server URL is missing. Restart quickstart and try again."
+        )
       }
 
       await tldwClient.updateConfig({

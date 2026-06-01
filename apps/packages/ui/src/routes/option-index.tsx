@@ -14,6 +14,7 @@ import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import { isSetupStatusRequiringWizard } from "./setup-status"
 
 const LazyCompanionHomeShell = React.lazy(() =>
   import("@/components/Option/CompanionHome").then((module) => ({
@@ -22,13 +23,6 @@ const LazyCompanionHomeShell = React.lazy(() =>
 )
 
 const LazyOptionHostedHome = React.lazy(() => import("./option-hosted-home"))
-
-const setupRequiredStatuses = new Set([
-  "not_started",
-  "in_progress",
-  "blocked",
-  "first_chat_complete"
-])
 
 const FIRST_SOURCE_MILESTONE_DISMISSED_KEY =
   "tldw:first-source-milestone-dismissed"
@@ -115,7 +109,7 @@ const OptionIndex = () => {
     )
   }
 
-  if (!setupStatus || setupRequiredStatuses.has(setupStatus)) {
+  if (isSetupStatusRequiringWizard(setupStatus)) {
     return (
       <OptionLayout hideHeader hideSidebar>
         <UnifiedSetupWizard

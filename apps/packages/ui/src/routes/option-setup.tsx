@@ -1,33 +1,34 @@
 import React from "react"
 import { useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import { SetupRequiredPanel } from "@/components/ui/state"
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
-
-const setupRequiredStatuses = new Set([
-  "not_started",
-  "in_progress",
-  "blocked",
-  "first_chat_complete"
-])
+import { isSetupStatusRequiringWizard } from "./setup-status"
 
 const OptionSetup = () => {
   const navigate = useNavigate()
+  const { t } = useTranslation("option")
   const { state, metadata, loading, adoptState } = useSetupOnboarding()
   const status = state?.status
-  const showWizard = !status || setupRequiredStatuses.has(status)
+  const showWizard = isSetupStatusRequiringWizard(status)
 
   return (
     <OptionLayout hideHeader hideSidebar>
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
-        title="/setup operator recovery"
-        message="Use this surface when first-run setup needs local operator recovery."
+        title={t("setupRoute.recoveryTitle", "/setup operator recovery")}
+        message={t(
+          "setupRoute.recoveryMessage",
+          "Use this surface when first-run setup needs local operator recovery."
+        )}
         primaryAction={{
-          label: showWizard ? "Continue setup" : "Return home",
+          label: showWizard
+            ? t("setupRoute.continueAction", "Continue setup")
+            : t("setupRoute.returnHomeAction", "Return home"),
           onClick: () => {
             if (!showWizard) {
               navigate("/")
@@ -44,8 +45,11 @@ const OptionSetup = () => {
       />
       {loading && !state ? (
         <PageAssistLoader
-          label="Loading setup..."
-          description="Reading first-run readiness from the server"
+          label={t("setupRoute.loadingLabel", "Loading setup...")}
+          description={t(
+            "setupRoute.loadingDescription",
+            "Reading first-run readiness from the server"
+          )}
         />
       ) : showWizard ? (
         <UnifiedSetupWizard

@@ -23,6 +23,24 @@
   "setupRoute_startAction": {
     "message": "Start setup"
   },
+  "setupRoute_recoveryTitle": {
+    "message": "/setup operator recovery"
+  },
+  "setupRoute_recoveryMessage": {
+    "message": "Use this surface when first-run setup needs local operator recovery."
+  },
+  "setupRoute_continueAction": {
+    "message": "Continue setup"
+  },
+  "setupRoute_returnHomeAction": {
+    "message": "Return home"
+  },
+  "setupRoute_loadingLabel": {
+    "message": "Loading setup..."
+  },
+  "setupRoute_loadingDescription": {
+    "message": "Reading first-run readiness from the server"
+  },
   "connectionCard_headlineMissing": {
     "message": "Connect tldw Assistant to your server"
   },

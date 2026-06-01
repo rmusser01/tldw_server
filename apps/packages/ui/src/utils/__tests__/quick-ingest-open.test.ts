@@ -3,8 +3,9 @@ import {
   buildQuickIngestOpenDetailFromUrl,
   createQuickIngestSessionSeedFromOpenDetail,
   isQuickIngestPlaylistPreflightDetail,
-  requestQuickIngestOpen,
+  requestQuickIngestOpen
 } from "../quick-ingest-open"
+import type { QuickIngestOpenDetail } from "../quick-ingest-open"
 
 describe("quick ingest open handoff", () => {
   it("builds a typed extension playlist preflight detail from an active tab URL", () => {
@@ -16,7 +17,7 @@ describe("quick ingest open handoff", () => {
       source: "extension_active_tab",
       url: "https://www.youtube.com/watch?v=PrNmmN6qBiw&list=PL0065D9B288E6804B",
       sourceKind: "youtube_watch_playlist",
-      action: "playlist_preflight",
+      action: "playlist_preflight"
     })
 
     const playlistDetail = buildQuickIngestOpenDetailFromUrl(
@@ -29,7 +30,9 @@ describe("quick ingest open handoff", () => {
         : null
     ).toBe("youtube_playlist")
     expect(
-      buildQuickIngestOpenDetailFromUrl("https://www.youtube.com/watch?v=abc123")
+      buildQuickIngestOpenDetailFromUrl(
+        "https://www.youtube.com/watch?v=abc123"
+      )
     ).toBeNull()
   })
 
@@ -44,7 +47,7 @@ describe("quick ingest open handoff", () => {
       source: "extension_active_tab" as const,
       url: "https://www.youtube.com/watch?v=a&list=PLx",
       sourceKind: "youtube_watch_playlist" as const,
-      action: "playlist_preflight" as const,
+      action: "playlist_preflight" as const
     }
 
     try {
@@ -62,11 +65,11 @@ describe("quick ingest open handoff", () => {
       source: "extension_active_tab" as const,
       url: "https://www.youtube.com/watch?v=a&list=PLx",
       sourceKind: "youtube_watch_playlist" as const,
-      action: "playlist_preflight" as const,
+      action: "playlist_preflight" as const
     }
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toEqual({
-      openDetail: detail,
+      openDetail: detail
     })
   })
 
@@ -74,7 +77,7 @@ describe("quick ingest open handoff", () => {
     const detail = {
       source: "first_source_milestone" as const,
       preferredPreset: "quick" as const,
-      firstSource: true,
+      firstSource: true
     }
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
@@ -86,12 +89,29 @@ describe("quick ingest open handoff", () => {
         reviewBeforeStorage: false,
         common: {
           perform_analysis: false,
-          perform_chunking: true,
+          perform_chunking: true
         },
         typeDefaults: {
-          document: { ocr: false },
-        },
-      },
+          document: { ocr: false }
+        }
+      }
+    })
+  })
+
+  it("falls back when first-source metadata names an inherited object key as a preset", () => {
+    const detail = {
+      source: "first_source_milestone" as const,
+      preferredPreset: "toString",
+      firstSource: true
+    } as unknown as QuickIngestOpenDetail
+
+    expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
+      selectedPreset: "quick",
+      customBasePreset: "quick",
+      presetConfig: {
+        storeRemote: true,
+        reviewBeforeStorage: false
+      }
     })
   })
 

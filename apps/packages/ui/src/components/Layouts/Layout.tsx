@@ -35,9 +35,7 @@ import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { setSettingsReturnTo } from "@/utils/settings-return"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
-import {
-  VIEWPORT_CONSTRAINED_PATHS,
-} from "@/routes/route-paths"
+import { VIEWPORT_CONSTRAINED_PATHS } from "@/routes/route-paths"
 import { useSetting } from "@/hooks/useSetting"
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStoreMessageOption } from "@/store/option"
@@ -145,7 +143,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const mobileSidebarPathRef = React.useRef(location.pathname)
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const isChatScreen = location.pathname === "/chat"
-  const isViewportConstrainedRoute = (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname)
+  const isViewportConstrainedRoute = (
+    VIEWPORT_CONSTRAINED_PATHS as readonly string[]
+  ).includes(location.pathname)
   const mobileSidebarTitle = location.pathname.startsWith("/knowledge")
     ? t("common:knowledgeSidebar.title", "Knowledge history")
     : t("common:chatSidebar.title", "Chats")
@@ -247,11 +247,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     onIngestPage: handleIngestPage,
     onSwitchModel: () => setOpenModelSettings(true),
     onToggleSidebar: toggleSidebar,
-    additionalCommands: promptPaletteCommands,
+    additionalCommands: promptPaletteCommands
   }
 
   // Quick Chat Helper toggle
-  const { isOpen: quickChatOpen, setIsOpen: setQuickChatOpen } = useQuickChatStore()
+  const { isOpen: quickChatOpen, setIsOpen: setQuickChatOpen } =
+    useQuickChatStore()
   const toggleQuickChat = () => {
     setQuickChatOpen(!quickChatOpen)
   }
@@ -276,7 +277,13 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         target.isContentEditable
 
       // ? key to open help modal (without Ctrl/Cmd to avoid double-fire)
-      if (e.key === "?" && !isInputField && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (
+        e.key === "?" &&
+        !isInputField &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey
+      ) {
         e.preventDefault()
         toggleHelpModal()
         return
@@ -296,10 +303,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
   React.useEffect(() => {
     if (!shortcutLoading) return
-    if (
-      shortcutPendingPath &&
-      shortcutPendingPath !== location.pathname
-    ) {
+    if (shortcutPendingPath && shortcutPendingPath !== location.pathname) {
       return
     }
     const elapsed = shortcutStartedAt ? Date.now() - shortcutStartedAt : 0
@@ -336,7 +340,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             Migrating your chat history…
           </div>
           <div className="text-xs text-text-muted ">
-            This runs once after an update and will reload the extension when finished.
+            This runs once after an update and will reload the extension when
+            finished.
           </div>
         </div>
       </div>
@@ -367,224 +372,261 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         )}
         style={chatScreenBackgroundStyle}
       >
-      {/* Persistent ChatSidebar when feature flag enabled */}
-      {showChatSidebar && !hideHeader && !hideSidebar && !isMobile && (
-        <ChatSidebar
-          collapsed={chatSidebarCollapsed}
-          openResetKey={chatSidebarOpenResetKey}
-          onToggleCollapse={() => {
-            if (chatSidebarCollapsed) signalChatSidebarOpen()
-            setChatSidebarCollapsed((prev) => !prev)
-          }}
-          className="sticky top-0 shrink-0 border-r border-border"
-        />
-      )}
-      <main
-        className={classNames(
-          "relative flex min-h-0 min-w-0 flex-1 flex-col",
-          hideHeader ? "bg-bg " : ""
+        {/* Persistent ChatSidebar when feature flag enabled */}
+        {showChatSidebar && !hideHeader && !hideSidebar && !isMobile && (
+          <ChatSidebar
+            collapsed={chatSidebarCollapsed}
+            openResetKey={chatSidebarOpenResetKey}
+            onToggleCollapse={() => {
+              if (chatSidebarCollapsed) signalChatSidebarOpen()
+              setChatSidebarCollapsed((prev) => !prev)
+            }}
+            className="sticky top-0 shrink-0 border-r border-border"
+          />
         )}
-        data-demo-mode={demoEnabled ? "on" : "off"}>
-        {hideHeader ? (
-          <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto">
-            {children}
-            {shortcutLoading && renderShortcutOverlay()}
-          </div>
-        ) : isViewportConstrainedRoute ? (
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-            <div className="relative z-20 w-full min-w-0 shrink-0">
-              <Header
-                onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                sidebarCollapsed={showChatSidebar && isMobile ? !sidebarOpen : chatSidebarCollapsed}
-                notificationCount={notificationCount}
-                onOpenNotifications={onOpenNotifications}
-              />
-            </div>
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <main
+          className={classNames(
+            "relative flex min-h-0 min-w-0 flex-1 flex-col",
+            hideHeader ? "bg-bg " : ""
+          )}
+          data-demo-mode={demoEnabled ? "on" : "off"}
+        >
+          {hideHeader ? (
+            <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto">
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
-          </div>
-        ) : (
-          <div className="relative flex min-w-0 flex-col min-h-[135vh]">
-            <div className="relative z-20 w-full min-w-0">
-              <Header
-                onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                sidebarCollapsed={showChatSidebar && isMobile ? !sidebarOpen : chatSidebarCollapsed}
-                notificationCount={notificationCount}
-                onOpenNotifications={onOpenNotifications}
-              />
-            </div>
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-              {children}
-              {shortcutLoading && renderShortcutOverlay()}
-            </div>
-          </div>
-        )}
-        {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
-        {!hideHeader && showChatSidebar && !hideSidebar && isMobile && (
-          <Drawer
-            title={
-              <div className="flex items-center justify-between">
-                <span>{mobileSidebarTitle}</span>
-                <IconButton
-                  onClick={() => setSidebarOpen(false)}
-                  ariaLabel={t("common:close", { defaultValue: "Close" }) as string}
-                  title={t("common:close", { defaultValue: "Close" }) as string}
-                  className="h-10 w-10 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
-                >
-                  <XIcon className="h-5 w-5 text-text-muted" />
-                </IconButton>
+          ) : isViewportConstrainedRoute ? (
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+              <div className="relative z-20 w-full min-w-0 shrink-0">
+                <Header
+                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
+                  sidebarCollapsed={
+                    showChatSidebar && isMobile
+                      ? !sidebarOpen
+                      : chatSidebarCollapsed
+                  }
+                  notificationCount={notificationCount}
+                  onOpenNotifications={onOpenNotifications}
+                />
               </div>
-            }
-            placement="left"
-            closeIcon={null}
-            onClose={() => setSidebarOpen(false)}
-            open={sidebarOpen}
-          >
-            <ChatSidebar
-              collapsed={false}
-              openResetKey={chatSidebarOpenResetKey}
-              onToggleCollapse={() => setSidebarOpen(false)}
-            />
-          </Drawer>
-        )}
-
-        {/* Legacy Drawer sidebar - only shown when new ChatSidebar feature is disabled */}
-        {!hideHeader && !showChatSidebar && !hideSidebar && (
-          <Drawer
-            title={
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                {children}
+                {shortcutLoading && renderShortcutOverlay()}
+              </div>
+            </div>
+          ) : (
+            <div className="relative flex min-w-0 flex-col min-h-[135vh]">
+              <div className="relative z-20 w-full min-w-0">
+                <Header
+                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
+                  sidebarCollapsed={
+                    showChatSidebar && isMobile
+                      ? !sidebarOpen
+                      : chatSidebarCollapsed
+                  }
+                  notificationCount={notificationCount}
+                  onOpenNotifications={onOpenNotifications}
+                />
+              </div>
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                {children}
+                {shortcutLoading && renderShortcutOverlay()}
+              </div>
+            </div>
+          )}
+          {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
+          {!hideHeader && showChatSidebar && !hideSidebar && isMobile && (
+            <Drawer
+              title={
+                <div className="flex items-center justify-between">
+                  <span>{mobileSidebarTitle}</span>
                   <IconButton
                     onClick={() => setSidebarOpen(false)}
-                    ariaLabel={t('common:close', { defaultValue: 'Close' }) as string}
-                    title={t('common:close', { defaultValue: 'Close' }) as string}
-                    className="-ml-1 h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0">
-                    <XIcon className="h-5 w-5 text-text-muted " />
+                    ariaLabel={
+                      t("common:close", { defaultValue: "Close" }) as string
+                    }
+                    title={
+                      t("common:close", { defaultValue: "Close" }) as string
+                    }
+                    className="h-10 w-10 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
+                  >
+                    <XIcon className="h-5 w-5 text-text-muted" />
                   </IconButton>
-                  <span>{t("sidebarTitle")}</span>
                 </div>
+              }
+              placement="left"
+              closeIcon={null}
+              onClose={() => setSidebarOpen(false)}
+              open={sidebarOpen}
+            >
+              <ChatSidebar
+                collapsed={false}
+                openResetKey={chatSidebarOpenResetKey}
+                onToggleCollapse={() => setSidebarOpen(false)}
+              />
+            </Drawer>
+          )}
 
-                <div className="flex items-center space-x-3">
-                  <Tooltip
-                    title={t(
-                      "settings:generalSettings.systemData.deleteChatHistory.label",
-                      { defaultValue: t("settings:generalSettings.system.deleteChatHistory.label") as string }
-                    )}
-                    placement="left">
+          {/* Legacy Drawer sidebar - only shown when new ChatSidebar feature is disabled */}
+          {!hideHeader && !showChatSidebar && !hideSidebar && (
+            <Drawer
+              title={
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
                     <IconButton
-                      ariaLabel={t(
+                      onClick={() => setSidebarOpen(false)}
+                      ariaLabel={
+                        t("common:close", { defaultValue: "Close" }) as string
+                      }
+                      title={
+                        t("common:close", { defaultValue: "Close" }) as string
+                      }
+                      className="-ml-1 h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0"
+                    >
+                      <XIcon className="h-5 w-5 text-text-muted " />
+                    </IconButton>
+                    <span>{t("sidebarTitle")}</span>
+                  </div>
+
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      title={t(
                         "settings:generalSettings.systemData.deleteChatHistory.label",
-                        { defaultValue: t("settings:generalSettings.system.deleteChatHistory.label") as string }
-                      ) as string}
-                      onClick={async () => {
-                        const ok = await confirmDanger({
-                          title: t("common:confirmTitle", {
-                            defaultValue: "Please confirm"
-                          }),
-                          content: t(
-                            "settings:generalSettings.systemData.deleteChatHistory.confirm",
+                        {
+                          defaultValue: t(
+                            "settings:generalSettings.system.deleteChatHistory.label"
+                          ) as string
+                        }
+                      )}
+                      placement="left"
+                    >
+                      <IconButton
+                        ariaLabel={
+                          t(
+                            "settings:generalSettings.systemData.deleteChatHistory.label",
                             {
                               defaultValue: t(
-                                "settings:generalSettings.system.deleteChatHistory.confirm"
+                                "settings:generalSettings.system.deleteChatHistory.label"
                               ) as string
                             }
-                          ),
-                          okText: t("common:delete", { defaultValue: "Delete" }),
-                          cancelText: t("common:cancel", { defaultValue: "Cancel" })
-                        })
+                          ) as string
+                        }
+                        onClick={async () => {
+                          const ok = await confirmDanger({
+                            title: t("common:confirmTitle", {
+                              defaultValue: "Please confirm"
+                            }),
+                            content: t(
+                              "settings:generalSettings.systemData.deleteChatHistory.confirm",
+                              {
+                                defaultValue: t(
+                                  "settings:generalSettings.system.deleteChatHistory.confirm"
+                                ) as string
+                              }
+                            ),
+                            okText: t("common:delete", {
+                              defaultValue: "Delete"
+                            }),
+                            cancelText: t("common:cancel", {
+                              defaultValue: "Cancel"
+                            })
+                          })
 
-                        if (!ok) return
+                          if (!ok) return
 
-                        const db = new PageAssistDatabase()
-                        await db.deleteAllChatHistory()
-                        await queryClient.invalidateQueries({
-                          queryKey: ["fetchChatHistory"]
-                        })
-                        clearChat()
-                      }}
-                      className="text-text-muted hover:text-text h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0">
-                      <EraserIcon className="size-5" />
-                    </IconButton>
-                  </Tooltip>
+                          const db = new PageAssistDatabase()
+                          await db.deleteAllChatHistory()
+                          await queryClient.invalidateQueries({
+                            queryKey: ["fetchChatHistory"]
+                          })
+                          clearChat()
+                        }}
+                        className="text-text-muted hover:text-text h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0"
+                      >
+                        <EraserIcon className="size-5" />
+                      </IconButton>
+                    </Tooltip>
+                  </div>
                 </div>
-              </div>
-            }
-            placement="left"
-            closeIcon={null}
-          onClose={() => setSidebarOpen(false)}
-          open={sidebarOpen}>
-          <Sidebar
-            isOpen={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-          />
-        </Drawer>
-        )}
+              }
+              placement="left"
+              closeIcon={null}
+              onClose={() => setSidebarOpen(false)}
+              open={sidebarOpen}
+            >
+              <Sidebar
+                isOpen={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+              />
+            </Drawer>
+          )}
 
-        {!hideHeader && openModelSettings && (
-          <Suspense fallback={null}>
-            <CurrentChatModelSettings
-              open={openModelSettings}
-              setOpen={setOpenModelSettings}
-              useDrawer
-              isOCREnabled={useOCR}
+          {!hideHeader && openModelSettings && (
+            <Suspense fallback={null}>
+              <CurrentChatModelSettings
+                open={openModelSettings}
+                setOpen={setOpenModelSettings}
+                useDrawer
+                isOCREnabled={useOCR}
+              />
+            </Suspense>
+          )}
+
+          {/* Quick Chat Helper floating button (legacy layout only) */}
+          {!hideHeader && !showChatSidebar && !hideSidebar && (
+            <QuickChatHelperButton
+              ariaLabel={t(
+                "option:quickChatHelper.tooltipFloating",
+                "Open Quick Chat Helper"
+              )}
             />
-          </Suspense>
-        )}
+          )}
 
-        {/* Quick Chat Helper floating button (legacy layout only) */}
-        {!hideHeader && !showChatSidebar && !hideSidebar && (
-          <QuickChatHelperButton
-            ariaLabel={t(
-              "option:quickChatHelper.tooltipFloating",
-              "Open Quick Chat Helper"
-            )}
-          />
-        )}
+          {/* Timeline Modal - lazy-loaded */}
+          {!hideHeader && (
+            <Suspense fallback={null}>
+              <TimelineModal />
+            </Suspense>
+          )}
 
-        {/* Timeline Modal - lazy-loaded */}
-        {!hideHeader && (
-          <Suspense fallback={null}>
-            <TimelineModal />
-          </Suspense>
-        )}
+          {/* Command Palette - global keyboard shortcut ⌘K */}
+          {!hideHeader && (
+            <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
+          )}
 
-        {/* Command Palette - global keyboard shortcut ⌘K */}
-        {!hideHeader && (
-          <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
-        )}
+          {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
+          {!hideHeader && (
+            <Suspense fallback={null}>
+              <PageHelpModal />
+            </Suspense>
+          )}
 
-        {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
-        {!hideHeader && (
-          <Suspense fallback={null}>
-            <PageHelpModal />
-          </Suspense>
-        )}
+          {/* Tutorial Runner - executes active tutorials */}
+          {!hideHeader && (
+            <Suspense fallback={null}>
+              <TutorialRunner />
+            </Suspense>
+          )}
 
-        {/* Tutorial Runner - executes active tutorials */}
-        {!hideHeader && (
-          <Suspense fallback={null}>
-            <TutorialRunner />
-          </Suspense>
-        )}
+          {/* Tutorial Prompt - shows first-visit notification */}
+          {!hideHeader && (
+            <Suspense fallback={null}>
+              <TutorialPrompt />
+            </Suspense>
+          )}
 
-        {/* Tutorial Prompt - shows first-visit notification */}
-        {!hideHeader && (
-          <Suspense fallback={null}>
-            <TutorialPrompt />
-          </Suspense>
-        )}
+          {/* Quick Ingest Modal Host - listens for global open events */}
+          <QuickIngestModalHost />
 
-        {/* Quick Ingest Modal Host - listens for global open events */}
-        <QuickIngestModalHost />
+          {/* Notes Dock Host - floating notes panel */}
+          <NotesDockHost />
 
-        {/* Notes Dock Host - floating notes panel */}
-        <NotesDockHost />
-
-        {/* Ensure event-driven modals are available even when the header is hidden */}
-        {hideHeader && <EventOnlyHosts commandPaletteProps={commandPaletteProps} />}
-      </main>
+          {/* Ensure event-driven modals are available even when the header is hidden */}
+          {hideHeader && (
+            <EventOnlyHosts commandPaletteProps={commandPaletteProps} />
+          )}
+        </main>
       </div>
     </>
   )
@@ -645,10 +687,12 @@ function NestedLayoutContent({
     if (!requestedOverrides) return
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let appliedOverrides = false
     const applyOverrides = () => {
       const setOverrides = shell.setOverrides || globalShell?.setOverrides
       if (!setOverrides) return false
       setOverrides(requestedOverrides)
+      appliedOverrides = true
       return true
     }
 
@@ -660,6 +704,7 @@ function NestedLayoutContent({
 
     return () => {
       if (timeoutId) clearTimeout(timeoutId)
+      if (!appliedOverrides) return
       const setOverrides = shell.setOverrides || globalShell?.setOverrides
       setOverrides?.(null)
     }
@@ -733,15 +778,20 @@ function RootLayoutShell({
 export default function OptionLayout(props: OptionLayoutProps) {
   const shell = useContext(LayoutShellContext)
   const globalShell = getGlobalShell()
-  const isNextApp =
-    typeof window !== "undefined" && "__NEXT_DATA__" in window
+  const isNextApp = typeof window !== "undefined" && "__NEXT_DATA__" in window
   const ownerId = React.useId()
   const externalShell =
     Boolean(globalShell?.mounted) &&
     (globalShell?.ownerId == null || globalShell.ownerId !== ownerId)
 
   if (shell.inShell || externalShell || isNextApp) {
-    return <NestedLayoutContent props={props} shell={shell} globalShell={globalShell} />
+    return (
+      <NestedLayoutContent
+        props={props}
+        shell={shell}
+        globalShell={globalShell}
+      />
+    )
   }
 
   return (
