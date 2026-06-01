@@ -28,6 +28,41 @@ from mcp_unified.federation.transports import ExternalFederationTransport
 from mcp_unified.interfaces.storage import AuditStore, ExternalRegistryStore
 from mcp_unified.storage import AuditEvent, ExternalServerDefinition
 
+_INSTALLER_PUBLIC_KEYS = frozenset(
+    {
+        "ok",
+        "available",
+        "reason_code",
+        "server_id",
+        "installer",
+        "version",
+        "installed_version",
+        "latest_version",
+        "message",
+        "details",
+        "required_fields",
+        "warnings",
+        "error_type",
+    }
+)
+_INSTALLER_SENSITIVE_KEY_TOKENS = (
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "authorization",
+    "api_key",
+    "apikey",
+    "headers",
+    "header",
+    "env",
+    "command",
+    "args",
+    "argv",
+)
+_UNSAFE_INSTALLER_VALUE = object()
+_DEFAULT_INSTALLER_STATUS_TIMEOUT_SECONDS = 2.0
+
 
 class GatewayExternalRuntimeError(RuntimeError):
     """Raised when an external runtime operation cannot be completed."""
@@ -83,12 +118,14 @@ class GatewayExternalRuntimeManager:
         audit_store: AuditStore | None = None,
         credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
         installer: ExternalServerInstaller | None = None,
+        installer_status_timeout_seconds: float = _DEFAULT_INSTALLER_STATUS_TIMEOUT_SECONDS,
     ) -> None:
         self._external_registry_store = external_registry_store
         self._transport_factory = transport_factory
         self._audit_store = audit_store
         self._credential_broker = credential_broker
         self._installer = installer or NullExternalServerInstaller()
+        self._installer_status_timeout_seconds = installer_status_timeout_seconds
         self._servers: dict[str, ExternalServerDefinition] = {}
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
@@ -391,6 +428,7 @@ class GatewayExternalRuntimeManager:
                     "tool_count": tool_count,
                     "checks": dict(checks),
                     "last_error": last_error,
+                    "installer": await self._installer_status(server),
                 }
             )
         return {"servers": rows, "total_servers": len(rows)}
@@ -412,14 +450,15 @@ class GatewayExternalRuntimeManager:
         """Delegate optional install work to the configured installer adapter."""
         server = await self._load_server(server_id)
         self._require_enabled(server)
-        payload = await self._installer.install_server(
-            server.model_copy(deep=True),
-            context=context,
-        )
-        return self._installer_payload(
-            payload,
+        return await self._installer_operation_payload(
+            "install",
             server=server,
+            callback=lambda: self._installer.install_server(
+                server.model_copy(deep=True),
+                context=context,
+            ),
             fallback_reason_code="external_server_install_not_configured",
+            failure_reason_code="external_server_install_failed",
         )
 
     async def update_server(
@@ -431,14 +470,15 @@ class GatewayExternalRuntimeManager:
         """Delegate optional update work to the configured installer adapter."""
         server = await self._load_server(server_id)
         self._require_enabled(server)
-        payload = await self._installer.update_server(
-            server.model_copy(deep=True),
-            context=context,
-        )
-        return self._installer_payload(
-            payload,
+        return await self._installer_operation_payload(
+            "update",
             server=server,
+            callback=lambda: self._installer.update_server(
+                server.model_copy(deep=True),
+                context=context,
+            ),
             fallback_reason_code="external_server_update_not_configured",
+            failure_reason_code="external_server_update_failed",
         )
 
     async def execute_virtual_tool(
@@ -741,19 +781,149 @@ class GatewayExternalRuntimeManager:
     def _count_tools_for_server(self, server_id: str) -> int:
         return sum(1 for tool in self._virtual_tools.values() if tool.server_id == server_id)
 
-    @staticmethod
+    async def _installer_status(
+        self,
+        server: ExternalServerDefinition,
+    ) -> dict[str, Any]:
+        """Return sanitized best-effort installer status for one server row."""
+
+        try:
+            payload = await asyncio.wait_for(
+                self._installer.get_status(server.model_copy(deep=True)),
+                timeout=self._installer_status_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.opt(exception=True).error(
+                "External installer status timed out server_id={!r}",
+                server.id,
+            )
+            return {
+                "available": False,
+                "reason_code": "external_server_installer_status_timeout",
+                "server_id": server.id,
+                "error_type": "TimeoutError",
+            }
+        except Exception as exc:  # noqa: BLE001 - installer adapters are optional.
+            logger.error(
+                "External installer status failed server_id={!r} error_type={!r}",
+                server.id,
+                type(exc).__name__,
+            )
+            return {
+                "available": False,
+                "reason_code": "external_server_installer_status_unavailable",
+                "server_id": server.id,
+                "error_type": type(exc).__name__,
+            }
+        return self._installer_payload(
+            payload,
+            server=server,
+            fallback_reason_code="external_server_installer_not_configured",
+            include_ok=False,
+        )
+
+    async def _installer_operation_payload(
+        self,
+        operation: str,
+        *,
+        server: ExternalServerDefinition,
+        callback: Callable[[], Any],
+        fallback_reason_code: str,
+        failure_reason_code: str,
+    ) -> dict[str, Any]:
+        """Run one installer operation and expose only sanitized public metadata."""
+
+        try:
+            payload = await callback()
+        except Exception as exc:  # noqa: BLE001 - installer adapters define failures.
+            logger.error(
+                "External installer operation failed operation={!r} server_id={!r} error_type={!r}",
+                operation,
+                server.id,
+                type(exc).__name__,
+            )
+            raise GatewayExternalRuntimeError(
+                f"External server {operation} failed",
+                reason_code=failure_reason_code,
+                server_id=server.id,
+            ) from exc
+        return self._installer_payload(
+            payload,
+            server=server,
+            fallback_reason_code=fallback_reason_code,
+        )
+
+    @classmethod
     def _installer_payload(
+        cls,
         payload: dict[str, Any],
         *,
         server: ExternalServerDefinition,
         fallback_reason_code: str,
+        include_ok: bool = True,
     ) -> dict[str, Any]:
-        result = deepcopy(payload or {})
-        result.setdefault("ok", False)
+        """Normalize an installer adapter payload into the public gateway shape."""
+
+        result = cls._sanitize_installer_payload(payload or {})
+        if include_ok:
+            result.setdefault("ok", False)
+        else:
+            result.pop("ok", None)
         result.setdefault("available", False)
         result.setdefault("reason_code", fallback_reason_code)
-        result.setdefault("server_id", server.id)
+        result["server_id"] = server.id
         return result
+
+    @classmethod
+    def _sanitize_installer_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return only allowlisted installer fields with nested sensitive keys removed."""
+
+        sanitized: dict[str, Any] = {}
+        for key, value in payload.items():
+            normalized_key = str(key)
+            if normalized_key not in _INSTALLER_PUBLIC_KEYS:
+                continue
+            if cls._is_sensitive_installer_key(normalized_key):
+                continue
+            sanitized_value = cls._sanitize_installer_value(value)
+            if sanitized_value is not _UNSAFE_INSTALLER_VALUE:
+                sanitized[normalized_key] = sanitized_value
+        return sanitized
+
+    @classmethod
+    def _sanitize_installer_value(cls, value: Any) -> Any:
+        """Recursively sanitize installer payload values into JSON-safe public data."""
+
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, child in value.items():
+                normalized_key = str(key)
+                if cls._is_sensitive_installer_key(normalized_key):
+                    continue
+                sanitized_child = cls._sanitize_installer_value(child)
+                if sanitized_child is not _UNSAFE_INSTALLER_VALUE:
+                    sanitized[normalized_key] = sanitized_child
+            return sanitized
+        if isinstance(value, list):
+            sanitized_items = [
+                cls._sanitize_installer_value(item)
+                for item in value
+            ]
+            return [
+                item
+                for item in sanitized_items
+                if item is not _UNSAFE_INSTALLER_VALUE
+            ]
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        return _UNSAFE_INSTALLER_VALUE
+
+    @staticmethod
+    def _is_sensitive_installer_key(key: str) -> bool:
+        """Return true when a key name suggests credentials or command material."""
+
+        lowered = key.strip().lower()
+        return any(token in lowered for token in _INSTALLER_SENSITIVE_KEY_TOKENS)
 
     def _deny_reason(
         self,
