@@ -3206,7 +3206,10 @@ export const Playground = () => {
           rightRail={cockpitRightRail}
           statusStrip={cockpitStatusStrip}
         >
-          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            data-testid="playground-chat-shell"
+            className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+          >
             {parentMeta?.parentHistoryId && (
               <div className="flex w-full justify-center px-5 pt-2">
                 <div className="inline-flex flex-wrap items-center justify-center gap-2">
