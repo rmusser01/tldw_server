@@ -1,7 +1,7 @@
 ---
 id: TASK-499
 title: Implement Companion Home header and launcher shortcuts
-status: In Progress
+status: Done
 modified_files:
 - apps/packages/ui/src/components/Layouts/ChatHeader.tsx
 - apps/packages/ui/src/components/Layouts/Header.tsx
@@ -86,15 +86,32 @@ Verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Companion Home in the shared header and launcher surfaces.
 
+What changed:
+- Added a Companion Home House icon button in `ChatHeader`, immediately before the signpost/page-directory button, wired through `Header` to navigate to `/`.
+- Added `companion-home` as the first shared header shortcut ID and as a required ID so old persisted filtered selections are coerced forward.
+- Added Companion Home to shortcut metadata with `/` target, Start group placement, House icon, hosted-mode visibility, and persona/default coverage.
+- Updated current launcher and legacy sheet active-state logic to use exact route matching, including `NavLink end`, so `/chat` and nested chat routes do not mark Companion Home or Chat incorrectly.
+
+Verification:
+- `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 5 files passed, 61 tests passed.
+- `git diff --check 4e682bea9f..HEAD`: passed.
+- `bunx tsc --noEmit --project tsconfig.json` from `apps/packages/ui`: fails on existing package-wide unrelated errors; the touched-file `ChatHeader.test.tsx` type error found during verification was fixed, and the remaining diagnostics are outside the touched Companion Home files.
+- Bandit: not applicable; touched scope is frontend TypeScript/TSX tests and Backlog markdown only.
+- Browser smoke: Next dev server on `http://127.0.0.1:8080` with seeded local auth showed one Companion Home button immediately before the signpost button, page directory listing included Companion Home with `/` href, and clicking Companion Home navigated from `/chat` to `/`.
+
+Known skips/blockers:
+- Full UI package TypeScript remains blocked by pre-existing unrelated errors outside this change.
+- Browser plugin was available but its in-app viewport rendered the mobile route without the target desktop header, so desktop smoke used a headless Playwright fallback.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
