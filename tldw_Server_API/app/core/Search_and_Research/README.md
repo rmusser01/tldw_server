@@ -28,7 +28,7 @@ where the real code lives.
 
 ## Module Map
 
-- `__Init__.py` is a legacy package marker. It does not contain the active
+- `__init__.py` is a legacy package marker. It does not contain the active
   orchestration code.
 
 ## How It Connects
