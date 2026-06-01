@@ -4,7 +4,7 @@ title: Refresh core module README developer docs
 status: In Progress
 assignee: []
 created_date: '2026-06-01 07:18'
-updated_date: '2026-06-01 07:29'
+updated_date: '2026-06-01 15:25'
 labels: []
 dependencies: []
 documentation:
@@ -44,6 +44,8 @@ Implementation plan: Docs/superpowers/plans/2026-06-01-core-module-readme-refres
 2026-06-01: Implementation-plan inventory corrected the top-level README baseline to 48 existing and 40 missing. The earlier 49/39 count included a nested README and has been corrected in the design spec.
 
 2026-06-01: Implementation plan written at Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-implementation-plan.md. Worktree: .worktrees/core-module-readmes on branch codex/core-module-readmes.
+
+Implementation inventory created at Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-inventory.md. Initial red checks: 40 top-level core modules missing README.md; Writing README contains scaffold placeholder text.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
