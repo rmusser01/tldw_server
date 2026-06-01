@@ -2,28 +2,39 @@
 id: TASK-495
 title: Implement OpenUI dynamic chat rendering
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-06-01 15:57'
+labels: []
+dependencies: []
 references:
-- TASK-491
-- TASK-493
-- Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
-- Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
-- https://github.com/pewdiepie-archdaemon/odysseus/pull/151
+  - TASK-491
+  - TASK-493
+  - Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
+  - 'https://github.com/pewdiepie-archdaemon/odysseus/pull/151'
 documentation:
-- Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
-- Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
+  - Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
 modified_files:
-- Docs/superpowers/reviews/openui-runtime-feasibility-2026-06-01.md
-- apps/tldw-frontend/package.json
-- apps/packages/ui/package.json
-- apps/bun.lock
-- apps/packages/ui/src/types/dynamic-ui.ts
-- apps/packages/ui/src/utils/dynamic-ui.ts
-- apps/packages/ui/src/utils/__tests__/dynamic-ui.test.ts
-- apps/packages/ui/src/utils/message-variants.ts
-- apps/packages/ui/src/utils/__tests__/message-variants.test.ts
-- apps/packages/ui/src/hooks/chat/useServerChatLoader.ts
-- apps/packages/ui/src/routes/sidepanel-chat.tsx
-- backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
+  - Docs/superpowers/reviews/openui-runtime-feasibility-2026-06-01.md
+  - apps/tldw-frontend/package.json
+  - apps/packages/ui/package.json
+  - apps/bun.lock
+  - apps/extension/package.json
+  - apps/packages/ui/src/types/dynamic-ui.ts
+  - apps/packages/ui/src/utils/dynamic-ui.ts
+  - apps/packages/ui/src/utils/__tests__/dynamic-ui.test.ts
+  - apps/packages/ui/src/utils/message-variants.ts
+  - apps/packages/ui/src/utils/__tests__/message-variants.test.ts
+  - apps/packages/ui/src/hooks/chat/useServerChatLoader.ts
+  - apps/packages/ui/src/routes/sidepanel-chat.tsx
+  - apps/packages/ui/src/components/Common/DynamicUI/renderers/OpenUIRenderer.tsx
+  - apps/packages/ui/src/components/Common/DynamicUI/__tests__/OpenUIRenderer.test.tsx
+  - apps/packages/ui/src/store/option.tsx
+  - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
 ## Description
@@ -44,10 +55,18 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-06-01 Task 3: added shared Dynamic UI registry, source fallback, error boundary, placeholder OpenUI renderer, `/chat` surface opt-in, and source-first guards. Red command: `bunx vitest run src/components/Common/DynamicUI/__tests__/DynamicMessageRenderer.test.tsx src/components/Common/Playground/__tests__/Message.dynamic-ui-surface.guard.test.ts src/components/Common/Playground/__tests__/Message.error-recovery.guard.test.ts` failed for the expected missing renderer/default-surface integration. Green rerun passed 8/8 tests. Existing metadata suites passed 22/22 tests. Package-wide `bunx tsc --noEmit --pretty false` still fails on existing baseline issues outside Task 3; a filtered rerun showed no errors in Task 3 touched TypeScript files. Bandit not applicable because Task 3 touched TS/TSX/Backlog markdown only.
 - 2026-06-01 Task 2 quality fix: added focused failing coverage for `metadataExtra` in message variant helpers and shared message metadata normalization. Red command: `bunx vitest run src/hooks/__tests__/useServerChatLoader.test.ts src/hooks/chat/__tests__/useChatActions.persist-mirror.guard.test.ts src/utils/__tests__/dynamic-ui.test.ts src/utils/__tests__/message-variants.test.ts` failed with 5 expected failures for missing `normalizeMessageMetadataExtra` and dropped/stale variant `metadataExtra`. Green rerun passed 44/44 tests after copying/clearing variant metadata and using shared normalization in playground and sidepanel hydration.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-06-01 Task 4: replaced the placeholder OpenUI renderer with the real @openuidev/react-lang Renderer using the @openuidev/react-ui/genui-lib chat library plus package CSS imports. Added focused red/green coverage for source/state/library/action forwarding in OpenUIRenderer.test.tsx; red failed against the placeholder fallback, green passed after adapter implementation. Also re-exported MessageMetadataExtra from the store barrel after package TypeScript exposed earlier Dynamic UI imports depending on that public type boundary. Focused Dynamic UI tests pass 28/28. Frontend build:dev passed with NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 when rerun outside the sandbox; warnings were pre-existing documentation glob and trace-copy warnings. Extension build:chrome:dev reached WXT but stuck at zero CPU for several minutes and was terminated; extension compile passed and a resolver check confirmed the OpenUI runtime specifiers resolve from the shared UI adapter path.
+
+2026-06-01 Task 4 review fixes: rebuilt the OpenUI chat library through createLibrary with chart/style-injection components filtered out, added a bounded themed OpenUI shell, normalized raw OpenUI ActionEvent payloads into the app dynamic action shape, and added raw-event regression coverage. Added OpenUI peer runtime dependencies to apps/extension and refreshed apps/bun.lock so the extension package can resolve the lazy adapter imports while active rendering remains disabled/fallback there. Verification: focused Dynamic UI suite passed 10/10, extension compile passed, Bun resolver from apps/extension passed for react-lang/genui-lib/CSS imports, frontend build:dev passed outside sandbox with known docs/tracing warnings, touched-file diff check passed. apps/packages/ui tsc still fails on unrelated baseline errors with no touched dynamic UI files in output. extension build:chrome:dev still hangs in WXT/Vite after startup and was terminated; tracked as a non-OpenUI-specific build caveat for later surface enablement.
+
+2026-06-01 Task 4 Bandit: not applicable for this slice because touched files are TypeScript/TSX, package manifests/lockfile, and Backlog markdown only; no Python code paths were modified.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
