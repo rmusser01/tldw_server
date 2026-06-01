@@ -235,7 +235,7 @@ async def test_get_tts_health_top_level_failure_log_is_sanitized(monkeypatch):
 
     assert health["status"] == "error"
     assert health["message"] == "TTS health check failed"
-    fake_logger.error.assert_called_once_with("Error getting TTS health", exc_info=True)
+    fake_logger.exception.assert_called_once_with("Error getting TTS health")
 
 
 @pytest.mark.asyncio

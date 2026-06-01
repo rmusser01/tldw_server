@@ -1,4 +1,4 @@
-import { bgRequest } from "@/services/background-proxy"
+import { bgRequest } from "@/services/background-proxy";
 import type {
   AudioDefaultsRequest,
   AudioRecommendationsResponse,
@@ -16,149 +16,166 @@ import type {
   SetupProviderCatalogResponse,
   SetupProviderSaveRequest,
   SetupProviderSaveResponse,
-  SetupProviderValidationResponse
-} from "@/types/setup-onboarding"
+  SetupProviderValidationResponse,
+} from "@/types/setup-onboarding";
 
-const jsonHeaders = { "Content-Type": "application/json" }
+const jsonHeaders = { "Content-Type": "application/json" };
+
+function redactApiKeyFields<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactApiKeyFields(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => key !== "api_key")
+        .map(([key, item]) => [key, redactApiKeyFields(item)]),
+    ) as T;
+  }
+  return value;
+}
 
 export const setupOnboardingMethods = {
   async getFirstRunState(): Promise<FirstRunState> {
     return await bgRequest<FirstRunState>({
       path: "/api/v1/setup/first-run/state",
       method: "GET",
-      noAuth: true
-    })
+      noAuth: true,
+    });
   },
 
   async updateFirstRunState(
-    payload: FirstRunStepUpdateRequest
+    payload: FirstRunStepUpdateRequest,
   ): Promise<FirstRunState> {
     return await bgRequest<FirstRunState>({
       path: "/api/v1/setup/first-run/state",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async getFirstRunMetadata(): Promise<FirstRunMetadata> {
     return await bgRequest<FirstRunMetadata>({
       path: "/api/v1/setup/first-run/metadata",
       method: "GET",
-      noAuth: true
-    })
+      noAuth: true,
+    });
   },
 
-  async skipFirstRun(payload: FirstRunSkipRequest = {}): Promise<FirstRunState> {
+  async skipFirstRun(
+    payload: FirstRunSkipRequest = {},
+  ): Promise<FirstRunState> {
     return await bgRequest<FirstRunState>({
       path: "/api/v1/setup/first-run/skip",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async getSetupProviderCatalog(): Promise<SetupProviderCatalogResponse> {
     return await bgRequest<SetupProviderCatalogResponse>({
       path: "/api/v1/setup/first-run/providers/catalog",
       method: "GET",
-      noAuth: true
-    })
+      noAuth: true,
+    });
   },
 
   async saveSetupProvider(
-    payload: SetupProviderSaveRequest
+    payload: SetupProviderSaveRequest,
   ): Promise<SetupProviderSaveResponse> {
-    return await bgRequest<SetupProviderSaveResponse>({
+    const response = await bgRequest<SetupProviderSaveResponse>({
       path: "/api/v1/setup/first-run/providers",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
+    return redactApiKeyFields(response);
   },
 
   async validateSetupProvider(
-    payload: SetupProviderSaveRequest
+    payload: SetupProviderSaveRequest,
   ): Promise<SetupProviderValidationResponse> {
     return await bgRequest<SetupProviderValidationResponse>({
       path: "/api/v1/setup/first-run/providers/validate",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async saveIngestDefaults(
-    payload: IngestDefaultsRequest
+    payload: IngestDefaultsRequest,
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
       path: "/api/v1/setup/first-run/ingest-defaults",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async saveAudioDefaults(
-    payload: AudioDefaultsRequest
+    payload: AudioDefaultsRequest,
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
       path: "/api/v1/setup/first-run/audio-defaults",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async getSetupAudioRecommendations(): Promise<AudioRecommendationsResponse> {
     return await bgRequest<AudioRecommendationsResponse>({
       path: "/api/v1/setup/audio/recommendations",
       method: "GET",
-      noAuth: true
-    })
+      noAuth: true,
+    });
   },
 
   async saveOptionalAdvanced(
-    payload: OptionalAdvancedRequest
+    payload: OptionalAdvancedRequest,
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
       path: "/api/v1/setup/first-run/optional-advanced",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async verifyFirstRunChat(
-    payload: FirstChatVerifyRequest
+    payload: FirstChatVerifyRequest,
   ): Promise<FirstChatVerifyResponse> {
     return await bgRequest<FirstChatVerifyResponse>({
       path: "/api/v1/setup/first-run/first-chat",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async completeFirstRun(
-    payload: FirstRunCompleteRequest = {}
+    payload: FirstRunCompleteRequest = {},
   ): Promise<SetupCompleteResponse> {
     return await bgRequest<SetupCompleteResponse>({
       path: "/api/v1/setup/first-run/complete",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
-      body: payload
-    })
-  }
-}
+      body: payload,
+    });
+  },
+};
 
-export type SetupOnboardingMethods = typeof setupOnboardingMethods
+export type SetupOnboardingMethods = typeof setupOnboardingMethods;

@@ -10,8 +10,8 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
     REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
     FirstRunStatus,
-    InvalidFirstRunTransition,
 )
+from tldw_Server_API.app.core.exceptions import InvalidFirstRunTransition
 
 
 def _persist_required_first_run_step_data(

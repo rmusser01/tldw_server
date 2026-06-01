@@ -12,7 +12,12 @@ from tldw_Server_API.app.core.Setup.provider_validation import (
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, payload=None, json_error: Exception | None = None):
+    def __init__(
+        self,
+        status_code: int,
+        payload=None,
+        json_error: Exception | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self._json_error = json_error
@@ -24,7 +29,7 @@ class _FakeResponse:
 
 
 class _FakeAsyncClient:
-    def __init__(self, *, response=None, error: Exception | None = None):
+    def __init__(self, *, response=None, error: Exception | None = None) -> None:
         self._response = response
         self._error = error
         self.requests = []
@@ -147,6 +152,40 @@ async def test_openai_local_validation_allows_private_ip_targets(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://ollama.local:11434/v1",
+        "http://llama.lan:8080/v1",
+        "http://workstation.home:5000/v1",
+        "http://gpu-box.internal:8000/v1",
+    ],
+)
+async def test_openai_local_validation_allows_common_local_domain_targets(
+    monkeypatch,
+    base_url,
+):
+    fake_client = _FakeAsyncClient(
+        response=_FakeResponse(
+            200,
+            {"object": "list", "data": [{"id": "local-domain-model", "object": "model"}]},
+        )
+    )
+    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url=base_url,
+        )
+    )
+
+    assert response.status == "ready"
+    assert response.models == ["local-domain-model"]
+    assert fake_client.requests == [(f"{base_url}/models", {})]
+
+
+@pytest.mark.asyncio
 async def test_auth_failure_maps_to_auth_failed(monkeypatch):
     fake_client = _FakeAsyncClient(response=_FakeResponse(401, {"error": "nope"}))
     monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
@@ -200,9 +239,7 @@ async def test_invalid_json_maps_to_unsupported_api_shape(monkeypatch):
 @pytest.mark.asyncio
 async def test_kobold_native_shape_maps_to_ready_and_posts_supplied_url(monkeypatch):
     raw_token = "secret-local-token"
-    fake_client = _FakeAsyncClient(
-        response=_FakeResponse(200, {"results": [{"text": "ok"}]})
-    )
+    fake_client = _FakeAsyncClient(response=_FakeResponse(200, {"results": [{"text": "ok"}]}))
     monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
 
     response = await validate_native_kobold_endpoint(

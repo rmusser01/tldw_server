@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import React from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setupHookMocks = vi.hoisted(() => ({
   saveStep: vi.fn(),
@@ -14,8 +14,8 @@ const setupHookMocks = vi.hoisted(() => ({
   saveOptionalAdvanced: vi.fn(),
   verifyFirstChat: vi.fn(),
   complete: vi.fn(),
-  refresh: vi.fn()
-}))
+  refresh: vi.fn(),
+}));
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
@@ -25,7 +25,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       skipped_steps: [],
       step_data: {},
       acknowledged_steps: [],
-      first_chat: { completed: false }
+      first_chat: { completed: false },
     },
     metadata: {
       auth_mode: "single_user",
@@ -37,10 +37,10 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       connection: {
         frontend_origin: "http://127.0.0.1:3000",
         api_origin: "http://127.0.0.1:8000",
-        browser_access: "local"
+        browser_access: "local",
       },
       setup_paths: [],
-      multi_user_exit: { guide_path: "/docs/multi-user" }
+      multi_user_exit: { guide_path: "/docs/multi-user" },
     },
     providerCatalog: [
       {
@@ -48,8 +48,8 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
         label: "OpenAI",
         provider_type: "hosted_api_key",
         supports_preflight: true,
-        recommended_for_first_chat: true
-      }
+        recommended_for_first_chat: true,
+      },
     ],
     audioRecommendations: [],
     loading: false,
@@ -64,119 +64,132 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     saveAudioDefaults: setupHookMocks.saveAudioDefaults,
     saveOptionalAdvanced: setupHookMocks.saveOptionalAdvanced,
     verifyFirstChat: setupHookMocks.verifyFirstChat,
-    complete: setupHookMocks.complete
-  })
-}))
+    complete: setupHookMocks.complete,
+  }),
+}));
 
 describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
-    setupHookMocks.saveStep.mockReset()
-    setupHookMocks.skip.mockReset()
-    setupHookMocks.loadProviderCatalog.mockReset().mockResolvedValue([])
-    setupHookMocks.loadAudioRecommendations.mockReset().mockResolvedValue([])
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setupHookMocks.saveStep.mockReset();
+    setupHookMocks.skip.mockReset();
+    setupHookMocks.loadProviderCatalog.mockReset().mockResolvedValue([]);
+    setupHookMocks.loadAudioRecommendations.mockReset().mockResolvedValue([]);
     setupHookMocks.saveProvider.mockReset().mockResolvedValue({
       provider_key: "openai",
-      status: "saved"
-    })
+      status: "saved",
+    });
     setupHookMocks.saveIngestDefaults.mockReset().mockResolvedValue({
       status: "saved",
       step: "ingest_defaults",
-      requires_restart: false
-    })
+      requires_restart: false,
+    });
     setupHookMocks.saveAudioDefaults.mockReset().mockResolvedValue({
       status: "saved",
       step: "audio_defaults",
-      requires_restart: false
-    })
+      requires_restart: false,
+    });
     setupHookMocks.saveOptionalAdvanced.mockReset().mockResolvedValue({
       status: "saved",
       step: "optional_advanced",
-      requires_restart: false
-    })
+      requires_restart: false,
+    });
     setupHookMocks.verifyFirstChat.mockReset().mockResolvedValue({
       status: "ready",
       provider: "openai",
       model: "gpt-4.1-mini",
-      response_text: "Hello."
-    })
+      response_text: "Hello.",
+    });
     setupHookMocks.complete.mockReset().mockResolvedValue({
       success: true,
       message: "completed",
       requires_restart: false,
-      install_plan_submitted: false
-    })
+      install_plan_submitted: false,
+    });
     setupHookMocks.refresh.mockReset().mockResolvedValue({
       status: "in_progress",
       completed_steps: [],
       skipped_steps: [],
       step_data: {},
       acknowledged_steps: [],
-      first_chat: { completed: false }
-    })
+      first_chat: { completed: false },
+    });
     setupHookMocks.saveStep.mockResolvedValue({
       status: "in_progress",
       completed_steps: [],
       skipped_steps: [],
       step_data: {},
       acknowledged_steps: [],
-      first_chat: { completed: false }
-    })
-  })
+      first_chat: { completed: false },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("renders a focused first-run heading and setup path choices", async () => {
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
-    render(<UnifiedSetupWizard />)
+    render(<UnifiedSetupWizard />);
 
     expect(
-      screen.getByRole("heading", { name: /first-time setup/i })
-    ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /solo, docker/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /solo, local/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /multi-user/i })).toBeInTheDocument()
-  })
+      screen.getByRole("heading", { name: /first-time setup/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /solo, docker/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /solo, local/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /multi-user/i }),
+    ).toBeInTheDocument();
+  });
 
   it("shows multi-user exit guidance instead of continuing solo wizard", async () => {
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
-    render(<UnifiedSetupWizard />)
-    fireEvent.click(screen.getByRole("button", { name: /multi-user/i }))
+    render(<UnifiedSetupWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /multi-user/i }));
 
-    expect(screen.getByText(/multi-user setup guide/i)).toBeInTheDocument()
-  })
+    expect(screen.getByText(/multi-user setup guide/i)).toBeInTheDocument();
+  });
 
   it("requires privacy and security acknowledgement before provider setup", async () => {
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
-    render(<UnifiedSetupWizard />)
-    fireEvent.click(screen.getByRole("button", { name: /solo, docker/i }))
+    render(<UnifiedSetupWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /solo, docker/i }));
 
     expect(
-      await screen.findByRole("heading", { name: /privacy and security/i })
-    ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled()
+      await screen.findByRole("heading", { name: /privacy and security/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
 
-    fireEvent.click(screen.getByLabelText(/i understand/i))
-    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled()
-  })
+    fireEvent.click(screen.getByLabelText(/i understand/i));
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+  });
 
   it("does not advance past setup path if progress cannot be saved", async () => {
-    setupHookMocks.saveStep.mockRejectedValueOnce(new Error("save failed"))
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+    setupHookMocks.saveStep.mockRejectedValueOnce(new Error("save failed"));
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
-    render(<UnifiedSetupWizard />)
-    fireEvent.click(screen.getByRole("button", { name: /solo, docker/i }))
+    render(<UnifiedSetupWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /solo, docker/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/could not be saved/i)
-    })
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /could not be saved/i,
+      );
+    });
     expect(
-      screen.getByRole("heading", { name: /choose your setup path/i })
-    ).toBeInTheDocument()
+      screen.getByRole("heading", { name: /choose your setup path/i }),
+    ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: /privacy and security/i })
-    ).not.toBeInTheDocument()
-  })
+      screen.queryByRole("heading", { name: /privacy and security/i }),
+    ).not.toBeInTheDocument();
+  });
 
   it("does not advance to provider setup if privacy acknowledgement cannot be saved", async () => {
     setupHookMocks.saveStep
@@ -186,28 +199,30 @@ describe("UnifiedSetupWizard", () => {
         skipped_steps: [],
         step_data: {},
         acknowledged_steps: ["setup_path"],
-        first_chat: { completed: false }
+        first_chat: { completed: false },
       })
-      .mockRejectedValueOnce(new Error("save failed"))
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+      .mockRejectedValueOnce(new Error("save failed"));
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
-    render(<UnifiedSetupWizard />)
-    fireEvent.click(screen.getByRole("button", { name: /solo, docker/i }))
+    render(<UnifiedSetupWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /solo, docker/i }));
 
-    await screen.findByRole("heading", { name: /privacy and security/i })
-    fireEvent.click(screen.getByLabelText(/i understand/i))
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }))
+    await screen.findByRole("heading", { name: /privacy and security/i });
+    fireEvent.click(screen.getByLabelText(/i understand/i));
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/could not be saved/i)
-    })
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /could not be saved/i,
+      );
+    });
     expect(
-      screen.getByRole("heading", { name: /privacy and security/i })
-    ).toBeInTheDocument()
+      screen.getByRole("heading", { name: /privacy and security/i }),
+    ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: /chat provider/i })
-    ).not.toBeInTheDocument()
-  })
+      screen.queryByRole("heading", { name: /chat provider/i }),
+    ).not.toBeInTheDocument();
+  });
 
   it("reports skipped state to the parent route resolver", async () => {
     setupHookMocks.skip.mockResolvedValueOnce({
@@ -217,23 +232,23 @@ describe("UnifiedSetupWizard", () => {
       step_data: {},
       acknowledged_steps: [],
       first_chat: { completed: false },
-      skip_reason: "user_skip"
-    })
-    const onStateChange = vi.fn()
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+      skip_reason: "user_skip",
+    });
+    const onStateChange = vi.fn();
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
-    render(<UnifiedSetupWizard onStateChange={onStateChange} />)
-    fireEvent.click(screen.getByRole("button", { name: /skip for now/i }))
+    render(<UnifiedSetupWizard onStateChange={onStateChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /skip for now/i }));
 
     await waitFor(() => {
       expect(onStateChange).toHaveBeenCalledWith(
-        expect.objectContaining({ status: "skipped" })
-      )
-    })
-  })
+        expect.objectContaining({ status: "skipped" }),
+      );
+    });
+  });
 
   it("resumes at first chat when backend state includes the saved provider model", async () => {
-    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
     render(
       <UnifiedSetupWizard
@@ -245,25 +260,84 @@ describe("UnifiedSetupWizard", () => {
             "providers",
             "ingest_defaults",
             "audio_defaults",
-            "optional_advanced"
+            "optional_advanced",
           ],
           skipped_steps: [],
           step_data: {
             providers: {
               acknowledged: true,
               default_provider: "openai",
-              default_model: "gpt-4.1-mini"
-            }
+              default_model: "gpt-4.1-mini",
+            },
           },
           acknowledged_steps: [],
-          first_chat: { completed: false }
+          first_chat: { completed: false },
         }}
-      />
-    )
+      />,
+    );
 
     expect(
-      screen.getByRole("heading", { name: /first chat/i })
-    ).toBeInTheDocument()
-    expect(screen.getByText(/openai \/ gpt-4.1-mini/i)).toBeInTheDocument()
-  })
-})
+      screen.getByRole("heading", { name: /first chat/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/openai \/ gpt-4.1-mini/i)).toBeInTheDocument();
+  });
+
+  it("resumes provider setup with the saved default provider selected", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: ["setup_path", "privacy_security"],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/select openai/i)).toBeChecked();
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("gpt-4.1-mini");
+  });
+
+  it("shows a non-blocking warning when audio recommendations fail to load", async () => {
+    setupHookMocks.loadAudioRecommendations.mockRejectedValueOnce(
+      new Error("recommendation failure"),
+    );
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+          ],
+          skipped_steps: [],
+          step_data: {},
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/audio recommendations could not be loaded/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+  });
+});

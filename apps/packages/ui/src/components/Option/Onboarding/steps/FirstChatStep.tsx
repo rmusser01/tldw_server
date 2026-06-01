@@ -1,25 +1,27 @@
-import React from "react"
-import { MessageCircle } from "lucide-react"
+import React from "react";
+import { MessageCircle } from "lucide-react";
 
 import type {
   FirstChatVerifyRequest,
   FirstChatVerifyResponse,
   FirstRunCompleteRequest,
-  SetupCompleteResponse
-} from "@/types/setup-onboarding"
+  SetupCompleteResponse,
+} from "@/types/setup-onboarding";
 
 type FirstChatStepProps = {
-  provider: string
-  model: string
+  provider: string;
+  model: string;
   verifyFirstChat: (
-    payload: FirstChatVerifyRequest
-  ) => Promise<FirstChatVerifyResponse>
-  complete: (payload?: FirstRunCompleteRequest) => Promise<SetupCompleteResponse>
-  onComplete: () => void
-  onBack: () => void
-}
+    payload: FirstChatVerifyRequest,
+  ) => Promise<FirstChatVerifyResponse>;
+  complete: (
+    payload?: FirstRunCompleteRequest,
+  ) => Promise<SetupCompleteResponse>;
+  onComplete: () => void;
+  onBack: () => void;
+};
 
-const DEFAULT_FIRST_PROMPT = "Say hello in one short sentence."
+const DEFAULT_FIRST_PROMPT = "Say hello in one short sentence.";
 
 export function FirstChatStep({
   provider,
@@ -27,40 +29,53 @@ export function FirstChatStep({
   verifyFirstChat,
   complete,
   onComplete,
-  onBack
+  onBack,
 }: FirstChatStepProps) {
-  const [prompt, setPrompt] = React.useState(DEFAULT_FIRST_PROMPT)
-  const [response, setResponse] = React.useState<FirstChatVerifyResponse | null>(
-    null
-  )
-  const [running, setRunning] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
+  const [prompt, setPrompt] = React.useState(DEFAULT_FIRST_PROMPT);
+  const [response, setResponse] =
+    React.useState<FirstChatVerifyResponse | null>(null);
+  const [running, setRunning] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   const handleSend = async () => {
-    setRunning(true)
-    setError(null)
-    setResponse(null)
+    setRunning(true);
+    setError(null);
+    setResponse(null);
     try {
-      const verification = await verifyFirstChat({
-        provider,
-        model,
-        prompt
-      })
-      setResponse(verification)
-      if (verification.status !== "ready") {
-        setError(verification.message || "First chat did not complete.")
-        return
+      let verification: FirstChatVerifyResponse;
+      try {
+        verification = await verifyFirstChat({
+          provider,
+          model,
+          prompt,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "First chat failed.");
+        return;
       }
-      await complete({
-        acknowledged_steps: ["first_chat"]
-      })
-      onComplete()
+      setResponse(verification);
+      if (verification.status !== "ready") {
+        setError(verification.message || "First chat did not complete.");
+        return;
+      }
+      try {
+        await complete({
+          acknowledged_steps: ["first_chat"],
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : "Try again.";
+        setError(
+          `Setup completion failed after the first chat succeeded. ${detail}`,
+        );
+        return;
+      }
+      onComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "First chat failed.")
+      setError(err instanceof Error ? err.message : "First chat failed.");
     } finally {
-      setRunning(false)
+      setRunning(false);
     }
-  }
+  };
 
   return (
     <section aria-labelledby="first-chat-title" className="space-y-5">
@@ -132,5 +147,5 @@ export function FirstChatStep({
         </button>
       </div>
     </section>
-  )
+  );
 }

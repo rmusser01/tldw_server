@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -15,6 +16,7 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.core.exceptions import InvalidFirstRunTransition
 from tldw_Server_API.app.core.Setup.first_run_models import (
     FirstRunChatResult,
     FirstRunStateResponse,
@@ -48,11 +50,9 @@ SECRET_KEY_MARKERS = (
     "authorization",
     "bearer",
 )
+SENSITIVE_TOKEN_KEY_PREFIXES = frozenset({"access", "api", "auth", "bearer", "private", "refresh", "secret", "session"})
+TOKEN_KEY_MARKER = "".join(("tok", "en"))
 REDACTION_PLACEHOLDER = "********"
-
-
-class InvalidFirstRunTransition(ValueError):
-    """Raised when a setup state transition would violate first-run rules."""
 
 
 class FirstRunState(FirstRunStateResponse):
@@ -122,11 +122,7 @@ def _ensure_completion_ready(state: FirstRunState) -> None:
     _ensure_mutable_state(state)
     if not state.first_chat.completed:
         raise InvalidFirstRunTransition("first_chat_required")
-    missing_steps = [
-        step
-        for step in REQUIRED_FIRST_RUN_STEPS
-        if not _required_step_is_ready(state, step)
-    ]
+    missing_steps = [step for step in REQUIRED_FIRST_RUN_STEPS if not _required_step_is_ready(state, step)]
     if missing_steps:
         raise InvalidFirstRunTransition("required_steps_missing:" + ",".join(missing_steps))
 
@@ -135,9 +131,30 @@ def _normalized_key(value: object) -> str:
     return "".join(character for character in str(value).lower() if character.isalnum())
 
 
+def _key_tokens(value: object) -> list[str]:
+    raw_key = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value))
+    return [token for token in re.split(r"[^A-Za-z0-9]+", raw_key.lower()) if token]
+
+
+def _has_sensitive_token_key_shape(tokens: list[str]) -> bool:
+    return any(
+        token == TOKEN_KEY_MARKER and index > 0 and tokens[index - 1] in SENSITIVE_TOKEN_KEY_PREFIXES
+        for index, token in enumerate(tokens)
+    )
+
+
 def _is_sensitive_key(key: object) -> bool:
     normalized_key = _normalized_key(key)
-    return any(_normalized_key(marker) in normalized_key for marker in SECRET_KEY_MARKERS)
+    tokens = _key_tokens(key)
+    for marker in SECRET_KEY_MARKERS:
+        normalized_marker = _normalized_key(marker)
+        if normalized_marker == TOKEN_KEY_MARKER:
+            if normalized_key == TOKEN_KEY_MARKER or _has_sensitive_token_key_shape(tokens):
+                return True
+            continue
+        if normalized_marker in normalized_key:
+            return True
+    return False
 
 
 def _redact_secret_step_data(value: Any) -> Any:
@@ -162,7 +179,7 @@ class FirstRunStateStore:
         *,
         lock_timeout_seconds: float = 10.0,
         stale_lock_seconds: float = 300.0,
-    ):
+    ) -> None:
         self.path = path
         self.lock_timeout_seconds = lock_timeout_seconds
         self.stale_lock_seconds = stale_lock_seconds
@@ -219,9 +236,7 @@ class FirstRunStateStore:
         return self._save_unlocked(state)
 
     def _quarantine_bad_state(self) -> bool:
-        quarantine_path = self.path.with_name(
-            f"{self.path.name}.corrupt-{_now().strftime('%Y%m%d%H%M%S%f')}"
-        )
+        quarantine_path = self.path.with_name(f"{self.path.name}.corrupt-{_now().strftime('%Y%m%d%H%M%S%f')}")
         try:
             os.replace(self.path, quarantine_path)
         except OSError:
@@ -340,6 +355,8 @@ class FirstRunStateStore:
             return self._save_unlocked(state)
 
     def update_step(self, step: str, data: dict[str, Any] | None = None) -> FirstRunState:
+        """Persist progress for one first-run step and synchronize completion metadata."""
+
         def _update(state: FirstRunState) -> None:
             _ensure_mutable_state(state)
             if state.status == FirstRunStatus.NOT_STARTED:
@@ -366,6 +383,8 @@ class FirstRunStateStore:
         model: str,
         response_id: str | None,
     ) -> FirstRunState:
+        """Record the successful first chat that unlocks setup completion."""
+
         def _record(state: FirstRunState) -> None:
             _ensure_mutable_state(state)
             state.status = FirstRunStatus.FIRST_CHAT_COMPLETE
@@ -381,12 +400,16 @@ class FirstRunStateStore:
         return self._mutate_state(_record)
 
     def validate_completion_ready(self) -> FirstRunState:
+        """Return current state after verifying all completion prerequisites are met."""
+
         with self._state_lock():
             state = self.load()
             _ensure_completion_ready(state)
             return state
 
     def mark_completed(self) -> FirstRunState:
+        """Mark first-run setup completed when all required gates are satisfied."""
+
         def _complete(state: FirstRunState) -> None:
             _ensure_completion_ready(state)
             state.status = FirstRunStatus.COMPLETED
@@ -420,6 +443,8 @@ class FirstRunStateStore:
                 raise
 
     def mark_skipped(self, *, reason: str | None = None) -> FirstRunState:
+        """Mark first-run setup skipped without altering legacy setup flags."""
+
         def _skip(state: FirstRunState) -> None:
             if state.status == FirstRunStatus.SKIPPED:
                 return

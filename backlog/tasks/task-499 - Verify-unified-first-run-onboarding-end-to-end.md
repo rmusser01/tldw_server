@@ -1,6 +1,6 @@
 ---
 id: TASK-499
-title: Verify unified first-run onboarding end to end
+title: Verify unified first-run onboarding end-to-end
 status: Done
 assignee: []
 created_date: ''

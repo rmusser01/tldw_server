@@ -246,6 +246,10 @@ class UnsafeUserPathError(StoragePathValidationError):
     """Raised when a user-derived path escapes an allowed base directory."""
 
 
+class InvalidFirstRunTransition(ValueError):
+    """Raised when a setup state transition would violate first-run rules."""
+
+
 class AdminDataOpsError(ValueError):
     """Base exception for admin data ops validation errors."""
 

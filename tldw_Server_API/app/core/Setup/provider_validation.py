@@ -21,10 +21,10 @@ FAILURE_PROVIDER_API_KEY_REQUIRED = "provider_api_key_required"
 FAILURE_PROVIDER_API_KEY_INVALID = "provider_api_key_invalid"
 FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED = "local_provider_endpoint_not_allowed"
 _ALLOWED_PRIVATE_IPV4_NETWORKS = tuple(
-    ipaddress.ip_network(network)
-    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
 _ALLOWED_PRIVATE_IPV6_NETWORKS = (ipaddress.ip_network("fc00::/7"),)
+_ALLOWED_LOCAL_HOST_SUFFIXES = (".home", ".internal", ".lan", ".local")
 
 
 class LocalEndpointValidationRequest(BaseModel):
@@ -87,6 +87,8 @@ def _is_allowed_local_provider_host(hostname: str) -> bool:
     normalized_host = hostname.strip().lower()
     if normalized_host == "localhost":
         return True
+    if any(normalized_host.endswith(suffix) for suffix in _ALLOWED_LOCAL_HOST_SUFFIXES):
+        return True
 
     if "%" in normalized_host:
         normalized_host = normalized_host.split("%", 1)[0]
@@ -100,9 +102,7 @@ def _is_allowed_local_provider_host(hostname: str) -> bool:
         return False
 
     if address.version == 4:
-        return address.is_loopback or any(
-            address in network for network in _ALLOWED_PRIVATE_IPV4_NETWORKS
-        )
+        return address.is_loopback or any(address in network for network in _ALLOWED_PRIVATE_IPV4_NETWORKS)
 
     if address.is_loopback:
         return True

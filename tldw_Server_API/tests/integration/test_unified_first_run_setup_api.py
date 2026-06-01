@@ -45,6 +45,7 @@ def _persist_required_first_run_step_data(
         if step not in skipped:
             store.update_step(step, payload)
 
+
 app = app_main.app
 app_main._shared_is_explicit_pytest_runtime = lambda: True
 
@@ -220,11 +221,7 @@ def test_first_run_provider_save_places_new_key_in_api_section(
     state_path = tmp_path / "first_run_state.json"
     config_path = tmp_path / "config.txt"
     config_path.write_text(
-        "[API]\n"
-        "default_api = openai\n"
-        "\n"
-        "[Local-API]\n"
-        "ollama_api_IP = http://127.0.0.1:11434/v1\n",
+        "[API]\n" "default_api = openai\n" "\n" "[Local-API]\n" "ollama_api_IP = http://127.0.0.1:11434/v1\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -684,6 +681,67 @@ def test_first_run_defaults_endpoints_persist_state_and_allow_skip_or_defer(
     assert state.step_data["audio_defaults"]["mode"] == "skip"
     assert state.step_data["optional_advanced"]["rag"] == "defer"
     assert state.step_data["optional_advanced"]["storage_paths"] == "skip"
+
+
+def test_first_run_optional_advanced_allows_common_public_value_keys(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/optional-advanced",
+        json={
+            "rag": "defer",
+            "storage_paths": "defer",
+            "values": {
+                "default_value": "balanced",
+                "display_input": "compact",
+                "token_budget": "small",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    state = FirstRunStateStore(state_path).load()
+    assert state.step_data["optional_advanced"]["values"] == {
+        "default_value": "balanced",
+        "display_input": "compact",
+        "token_budget": "small",
+    }
+
+
+def test_first_run_optional_advanced_allows_storage_path_values(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    storage_root = str(tmp_path / "storage" / "media")
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/optional-advanced",
+        json={
+            "rag": "defer",
+            "storage_paths": "configure",
+            "values": {
+                "storage_paths": [storage_root],
+                "storage_locations": {"media": storage_root},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    state = FirstRunStateStore(state_path).load()
+    assert state.step_data["optional_advanced"]["values"]["storage_paths"] == [storage_root]
+    assert state.step_data["optional_advanced"]["values"]["storage_locations"] == {
+        "media": storage_root,
+    }
 
 
 def test_first_run_ingest_defaults_rejects_relative_escape_roots(
@@ -1237,19 +1295,18 @@ def test_completed_setup_rejects_first_run_writes(monkeypatch, tmp_path, setup_c
 
 
 @pytest.mark.parametrize(
-    ("state_factory", "expected_detail"),
+    "state_factory",
     [
-        ("completed", "setup_already_completed"),
-        ("skipped", "state_skipped"),
-        ("blocked", "state_blocked"),
+        "completed",
+        "skipped",
+        "blocked",
     ],
 )
-def test_setup_config_rejects_terminal_first_run_state_through_write_guard(
+def test_setup_config_allows_terminal_first_run_state_for_recovery_surface(
     monkeypatch,
     tmp_path,
     setup_client,
     state_factory,
-    expected_detail,
 ):
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -1268,19 +1325,49 @@ def test_setup_config_rejects_terminal_first_run_state_through_write_guard(
     else:
         state_path.write_text("{", encoding="utf-8")
         assert store.load().status == FirstRunStatus.BLOCKED
-    monkeypatch.setattr(
-        setup_endpoint.setup_manager,
-        "update_config",
-        lambda *_args, **_kwargs: pytest.fail("/setup/config bypassed first-run write guard"),
-    )
+    writes: list[dict[str, dict[str, str]]] = []
+
+    def _capture_update_config(updates, *, create_backup=True):  # noqa: ARG001
+        writes.append(updates)
+        return tmp_path / "config.bak"
+
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", _capture_update_config)
 
     response = setup_client.post(
         "/api/v1/setup/config",
         json={"updates": {"API": {"default_api": "openai"}}},
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == expected_detail
+    assert response.status_code == 200
+    assert writes == [{"API": {"default_api": "openai"}}]
+
+
+def test_setup_complete_route_uses_recovery_write_guard_without_terminal_state_block(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    FirstRunStateStore(state_path).mark_skipped(reason="user_skip")
+    complete_calls: list[setup_endpoint.SetupCompleteRequest] = []
+
+    async def _fake_complete_setup_flow(payload, background_tasks):  # noqa: ARG001
+        complete_calls.append(payload)
+        return {
+            "success": True,
+            "message": "completed",
+            "requires_restart": True,
+            "install_plan_submitted": False,
+        }
+
+    monkeypatch.setattr(setup_endpoint, "_complete_setup_flow", _fake_complete_setup_flow)
+
+    response = setup_client.post("/api/v1/setup/complete", json={})
+
+    assert response.status_code == 200
+    assert len(complete_calls) == 1
 
 
 def test_setup_config_refreshes_runtime_config_cache_after_write(
@@ -1421,6 +1508,48 @@ def test_setup_complete_does_not_persist_first_run_completion_when_legacy_write_
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Failed to persist setup completion."}
+    state = FirstRunStateStore(state_path).load()
+    assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
+    assert state.completed_at is None
+
+
+def test_setup_complete_does_not_mark_completed_when_disable_prompt_write_fails(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    completion_calls: list[bool] = []
+
+    def _raise_disable_prompt_write_failure(updates, *, create_backup=True):  # noqa: ARG001
+        if updates == {setup_endpoint.setup_manager.SETUP_SECTION: {"enable_first_time_setup": False}}:
+            raise RuntimeError("raw disable prompt path /tmp/config.txt")
+        return tmp_path / "config.bak"
+
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", _raise_disable_prompt_write_failure)
+
+    response = setup_client.post(
+        "/api/v1/setup/complete",
+        json={"disable_first_time_setup": True},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Failed to persist setup completion."}
+    assert completion_calls == []
     state = FirstRunStateStore(state_path).load()
     assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
     assert state.completed_at is None

@@ -10,6 +10,7 @@ import re
 import sys
 from configparser import ConfigParser
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,7 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import clear_config_cache
+from tldw_Server_API.app.core.exceptions import InvalidFirstRunTransition
 from tldw_Server_API.app.core.Setup import (
     audio_pack_service,
     audio_profile_service,
@@ -92,7 +94,6 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
     REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
     FirstRunStatus,
-    InvalidFirstRunTransition,
 )
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
@@ -200,6 +201,21 @@ _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS = (
     "value",
     "input",
 )
+_COMMON_PUBLIC_STEP_DATA_KEY_MARKERS = frozenset({"input", "token", "value"})
+_TOKEN_KEY_MARKER = "".join(("tok", "en"))
+_SENSITIVE_TOKEN_KEY_PREFIXES = frozenset(
+    {"access", "api", "auth", "bearer", "private", "refresh", "secret", "session"}
+)
+_OPTIONAL_ADVANCED_PATH_VALUE_KEYS = frozenset(
+    {
+        "storagepath",
+        "storagepaths",
+        "storagelocation",
+        "storagelocations",
+        "storageroot",
+        "storageroots",
+    }
+)
 _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"(?i)(?:"
     r"sk-[A-Za-z0-9_-]{3,}|"
@@ -216,11 +232,22 @@ _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{3,}"
     r")"
 )
-_LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
-    r"(?:"
-    r"(?<![:/])/(?:[^\s,;\"']+/)+[^\s,;\"']+|"
-    r"[A-Za-z]:\\[^\s,;\"']+"
+_SECRET_LIKE_FIRST_RUN_STEP_KEY_RE = re.compile(
+    r"(?i)(?:"
+    r"sk-[A-Za-z0-9_-]{3,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{6,}|"
+    r"gh[pousr]_[A-Za-z0-9_]{6,}|"
+    r"github_pat_[A-Za-z0-9_]{6,}|"
+    r"hf_[A-Za-z0-9]{6,}|"
+    r"gsk_[A-Za-z0-9]{6,}|"
+    r"pplx-[A-Za-z0-9_-]{6,}|"
+    r"AIza[0-9A-Za-z_-]{6,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}|"
+    r"bearer\s+\S{6,}"
     r")"
+)
+_LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
+    r"(?:" r"(?<![:/])/(?:[^\s,;\"']+/)+[^\s,;\"']+|" r"[A-Za-z]:\\[^\s,;\"']+" r")"
 )
 _SETUP_DEFAULT_PROVIDER_KEYS = {
     "llamacpp": "llama.cpp",
@@ -260,16 +287,45 @@ def _first_run_store() -> FirstRunStateStore:
     return FirstRunStateStore(FIRST_RUN_STATE_PATH)
 
 
+async def _run_first_run_store_call(callback: Callable[[FirstRunStateStore], Any]) -> Any:
+    return await asyncio.to_thread(lambda: callback(_first_run_store()))
+
+
 def _normalized_public_step_data_key(key: object) -> str:
     return "".join(character for character in str(key).lower() if character.isalnum())
 
 
-def _is_unsafe_public_step_data_key(key: object) -> bool:
-    normalized = _normalized_public_step_data_key(key)
+def _public_step_data_key_tokens(key: object) -> list[str]:
+    raw_key = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(key))
+    return [token for token in re.split(r"[^A-Za-z0-9]+", raw_key.lower()) if token]
+
+
+def _has_sensitive_token_key_shape(tokens: list[str]) -> bool:
     return any(
-        _normalized_public_step_data_key(marker) in normalized
-        for marker in _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS
+        token == _TOKEN_KEY_MARKER and index > 0 and tokens[index - 1] in _SENSITIVE_TOKEN_KEY_PREFIXES
+        for index, token in enumerate(tokens)
     )
+
+
+def _is_unsafe_public_step_data_key(key: object) -> bool:
+    if isinstance(key, str) and (
+        _SECRET_LIKE_FIRST_RUN_STEP_KEY_RE.search(key.strip()) is not None
+        or _LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE.search(key.strip()) is not None
+    ):
+        return True
+    normalized = _normalized_public_step_data_key(key)
+    tokens = _public_step_data_key_tokens(key)
+    for marker in _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS:
+        normalized_marker = _normalized_public_step_data_key(marker)
+        if normalized_marker in _COMMON_PUBLIC_STEP_DATA_KEY_MARKERS:
+            if normalized == normalized_marker:
+                return True
+            if normalized_marker == _TOKEN_KEY_MARKER and _has_sensitive_token_key_shape(tokens):
+                return True
+            continue
+        if normalized_marker in normalized:
+            return True
+    return False
 
 
 def _is_explicitly_allowed_unsafe_named_step_key(step: str, key: object) -> bool:
@@ -290,7 +346,22 @@ def _allows_path_like_first_run_step_value(step: str, key: object) -> bool:
     return step == "ingest_defaults" and key == "allowed_local_roots"
 
 
-def _is_public_first_run_step_value(value: Any, *, allow_path_like: bool = False) -> bool:
+def _is_optional_advanced_path_value_key(key: object) -> bool:
+    return _normalized_public_step_data_key(key) in _OPTIONAL_ADVANCED_PATH_VALUE_KEYS
+
+
+def _path_like_child_key_predicate(step: str, key: object) -> Callable[[object], bool] | None:
+    if step == "optional_advanced" and key == "values":
+        return _is_optional_advanced_path_value_key
+    return None
+
+
+def _is_public_first_run_step_value(
+    value: Any,
+    *,
+    allow_path_like: bool = False,
+    path_like_child_key: Callable[[object], bool] | None = None,
+) -> bool:
     if isinstance(value, str):
         if allow_path_like and not _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE.search(value.strip()):
             return True
@@ -299,15 +370,22 @@ def _is_public_first_run_step_value(value: Any, *, allow_path_like: bool = False
         return True
     if isinstance(value, list):
         return all(
-            _is_public_first_run_step_value(item, allow_path_like=allow_path_like)
+            _is_public_first_run_step_value(
+                item,
+                allow_path_like=allow_path_like,
+                path_like_child_key=path_like_child_key,
+            )
             for item in value
         )
     if isinstance(value, dict):
         return all(
             isinstance(key, str)
             and not _is_unsafe_public_step_data_key(key)
-            and not _is_unsafe_public_step_data_value(key)
-            and _is_public_first_run_step_value(item, allow_path_like=allow_path_like)
+            and _is_public_first_run_step_value(
+                item,
+                allow_path_like=(allow_path_like or (path_like_child_key(key) if path_like_child_key else False)),
+                path_like_child_key=path_like_child_key,
+            )
             for key, item in value.items()
         )
     return False
@@ -351,8 +429,7 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
     unsafe_keys = [
         key
         for key in data
-        if _is_unsafe_public_step_data_key(key)
-        and not _is_explicitly_allowed_unsafe_named_step_key(step, key)
+        if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(step, key)
     ]
     if unsupported_keys or unsafe_keys:
         raise HTTPException(
@@ -370,6 +447,7 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
         _is_public_first_run_step_value(
             value,
             allow_path_like=_allows_path_like_first_run_step_value(step, key),
+            path_like_child_key=_path_like_child_key_predicate(step, key),
         )
         for key, value in data.items()
     ):
@@ -393,13 +471,12 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
             continue
         if step == "ingest_defaults" and key == "allowed_local_roots":
             continue
-        if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(
-            step, key
-        ):
+        if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(step, key):
             continue
         if _is_public_first_run_step_value(
             value,
             allow_path_like=_allows_path_like_first_run_step_value(step, key),
+            path_like_child_key=_path_like_child_key_predicate(step, key),
         ):
             public_data[key] = value
     return public_data
@@ -475,7 +552,7 @@ def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateRespon
     return FirstRunStateResponse.model_validate(payload)
 
 
-async def _require_first_run_write_access(request: Request) -> None:
+async def _require_setup_write_access(request: Request) -> None:
     await require_local_setup_access(request)
     status_snapshot = setup_manager.get_status_snapshot()
     if status_snapshot.get("setup_completed") or status_snapshot.get("completed"):
@@ -493,7 +570,11 @@ async def _require_first_run_write_access(request: Request) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="setup_already_completed",
         )
-    state = _first_run_store().load()
+
+
+async def _require_first_run_write_access(request: Request) -> None:
+    await _require_setup_write_access(request)
+    state = await _run_first_run_store_call(lambda store: store.load())
     terminal_details = {
         FirstRunStatus.COMPLETED: "setup_already_completed",
         FirstRunStatus.SKIPPED: "state_skipped",
@@ -698,11 +779,7 @@ def _refresh_runtime_config_cache(context: str) -> bool:
 
 def _sanitize_setup_payload(value: Any) -> Any:
     if isinstance(value, str):
-        return (
-            _SANITIZED_SETUP_DETAIL_MESSAGE
-            if _SUSPICIOUS_SETUP_DETAIL_RE.search(value)
-            else value
-        )
+        return _SANITIZED_SETUP_DETAIL_MESSAGE if _SUSPICIOUS_SETUP_DETAIL_RE.search(value) else value
     if isinstance(value, list):
         return [_sanitize_setup_payload(item) for item in value]
     if isinstance(value, dict):
@@ -773,10 +850,25 @@ async def _complete_setup_flow(
     payload: SetupCompleteRequest,
     background_tasks: BackgroundTasks,
 ) -> SetupCompleteResponse:
-    first_run_store = _first_run_store()
     try:
-        first_run_store.mark_completed_with_legacy_flag(
-            mark_legacy_complete=lambda: setup_manager.mark_setup_completed(True),
+        await _run_first_run_store_call(lambda store: store.validate_completion_ready())
+        plan_requested = False
+        if payload.install_plan and not payload.install_plan.is_empty():
+            plan_requested = True
+            plan_dict = model_dump_compat(payload.install_plan)
+            background_tasks.add_task(execute_install_plan, plan_dict)
+
+        if payload.disable_first_time_setup:
+            await asyncio.to_thread(
+                setup_manager.update_config,
+                {setup_manager.SETUP_SECTION: {"enable_first_time_setup": False}},
+                create_backup=False,
+            )
+
+        await _run_first_run_store_call(
+            lambda store: store.mark_completed_with_legacy_flag(
+                mark_legacy_complete=lambda: setup_manager.mark_setup_completed(True),
+            )
         )
     except InvalidFirstRunTransition as exc:
         raise _completion_conflict(str(exc)) from exc
@@ -788,19 +880,6 @@ async def _complete_setup_flow(
         ) from exc
 
     _refresh_runtime_config_cache("setup completion")
-
-    plan_requested = False
-    if payload.install_plan and not payload.install_plan.is_empty():
-        plan_requested = True
-        plan_dict = model_dump_compat(payload.install_plan)
-        background_tasks.add_task(execute_install_plan, plan_dict)
-
-    if payload.disable_first_time_setup:
-        setup_manager.update_config(
-            {setup_manager.SETUP_SECTION: {"enable_first_time_setup": False}},
-            create_backup=False,
-        )
-        _refresh_runtime_config_cache("setup disable prompt update")
 
     return SetupCompleteResponse(
         success=True,
@@ -938,7 +1017,8 @@ async def get_setup_status(_guard: None = Depends(require_local_setup_access)) -
 
 @router.get("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
 async def get_first_run_state(_guard: None = Depends(require_local_setup_access)) -> FirstRunStateResponse:
-    return _public_first_run_state(_first_run_store().load())
+    state = await _run_first_run_store_call(lambda store: store.load())
+    return _public_first_run_state(state)
 
 
 @router.get("/first-run/metadata", openapi_extra={"security": []}, response_model=FirstRunMetadataResponse)
@@ -1094,10 +1174,12 @@ async def verify_first_run_first_chat(
     try:
         _require_safe_first_chat_request_metadata(provider=response.provider, model=response.model)
         response.response_id = _safe_public_first_chat_metadata_value(response.response_id)
-        _first_run_store().record_first_chat_success(
-            provider=response.provider,
-            model=response.model,
-            response_id=response.response_id,
+        await _run_first_run_store_call(
+            lambda store: store.record_first_chat_success(
+                provider=response.provider,
+                model=response.model,
+                response_id=response.response_id,
+            )
         )
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -1114,7 +1196,9 @@ async def save_first_run_ingest_defaults(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStepSaveResponse:
     try:
-        _first_run_store().update_step("ingest_defaults", _safe_ingest_defaults_payload(payload))
+        await _run_first_run_store_call(
+            lambda store: store.update_step("ingest_defaults", _safe_ingest_defaults_payload(payload))
+        )
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _first_run_step_saved("ingest_defaults")
@@ -1130,7 +1214,9 @@ async def save_first_run_audio_defaults(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStepSaveResponse:
     try:
-        _first_run_store().update_step("audio_defaults", _safe_step_payload("audio_defaults", payload))
+        await _run_first_run_store_call(
+            lambda store: store.update_step("audio_defaults", _safe_step_payload("audio_defaults", payload))
+        )
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _first_run_step_saved("audio_defaults")
@@ -1146,9 +1232,11 @@ async def save_first_run_optional_advanced(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStepSaveResponse:
     try:
-        _first_run_store().update_step(
-            "optional_advanced",
-            _safe_step_payload("optional_advanced", payload),
+        await _run_first_run_store_call(
+            lambda store: store.update_step(
+                "optional_advanced",
+                _safe_step_payload("optional_advanced", payload),
+            )
         )
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -1165,9 +1253,8 @@ async def complete_first_run(
     background_tasks: BackgroundTasks,
     _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupCompleteResponse:
-    first_run_store = _first_run_store()
     try:
-        _acknowledge_first_run_steps(first_run_store, payload.acknowledged_steps)
+        await _run_first_run_store_call(lambda store: _acknowledge_first_run_steps(store, payload.acknowledged_steps))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -1181,7 +1268,8 @@ async def update_first_run_state(
 ) -> FirstRunStateResponse:
     validated_data = _validated_public_first_run_step_data(payload.step, payload.data)
     try:
-        return _public_first_run_state(_first_run_store().update_step(payload.step, validated_data))
+        state = await _run_first_run_store_call(lambda store: store.update_step(payload.step, validated_data))
+        return _public_first_run_state(state)
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -1193,7 +1281,8 @@ async def skip_first_run(
 ) -> FirstRunStateResponse:
     try:
         safe_reason = _safe_first_run_skip_reason(payload.reason)
-        return _public_first_run_state(_first_run_store().mark_skipped(reason=safe_reason))
+        state = await _run_first_run_store_call(lambda store: store.mark_skipped(reason=safe_reason))
+        return _public_first_run_state(state)
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -1231,9 +1320,7 @@ def _ensure_audio_installer_available(*, allow_completed_when_disabled: bool) ->
     if status_snapshot["enabled"]:
         return
 
-    if allow_completed_when_disabled and (
-        status_snapshot.get("setup_completed") or status_snapshot.get("completed")
-    ):
+    if allow_completed_when_disabled and (status_snapshot.get("setup_completed") or status_snapshot.get("completed")):
         return
 
     raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
@@ -1265,9 +1352,7 @@ def _ensure_setup_readiness_available(
             detail="Setup already completed. Use the admin setup readiness endpoints.",
         )
 
-    if allow_completed_when_disabled and (
-        status_snapshot.get("setup_completed") or status_snapshot.get("completed")
-    ):
+    if allow_completed_when_disabled and (status_snapshot.get("setup_completed") or status_snapshot.get("completed")):
         return
 
     raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
@@ -1605,11 +1690,7 @@ def _resolve_setup_readiness_preview(
 
     preview_id = (payload.preview_id or "").strip()
     stored_preview = store.load().get("last_preview")
-    if (
-        not preview_id
-        or not isinstance(stored_preview, dict)
-        or stored_preview.get("preview_id") != preview_id
-    ):
+    if not preview_id or not isinstance(stored_preview, dict) or stored_preview.get("preview_id") != preview_id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="A current readiness preview is required before provisioning.",
@@ -1635,9 +1716,7 @@ def _resolve_setup_readiness_verification_selection(
 
     stored_preview = store.load().get("last_preview")
     preview_id = (payload.preview_id or "").strip()
-    if isinstance(stored_preview, dict) and (
-        not preview_id or stored_preview.get("preview_id") == preview_id
-    ):
+    if isinstance(stored_preview, dict) and (not preview_id or stored_preview.get("preview_id") == preview_id):
         return dict(stored_preview)
 
     raise HTTPException(
@@ -1719,7 +1798,7 @@ async def _preview_setup_readiness(
             "lanes": _preview_lanes_as_list(preview),
             "overlays": preview.get("overlays", []),
             "last_preview": preview,
-        }
+        },
     )
     return preview
 
@@ -1809,13 +1888,11 @@ async def _provision_setup_readiness(
             "last_provision": provision_payload,
             "operation_id": operation_id,
             "operation_status": operation_status,
-        }
+        },
     )
 
     status_url = (
-        "/api/v1/setup/admin/readiness/status"
-        if allow_completed_when_disabled
-        else "/api/v1/setup/readiness/status"
+        "/api/v1/setup/admin/readiness/status" if allow_completed_when_disabled else "/api/v1/setup/readiness/status"
     )
     response = {
         "operation_id": operation_id,
@@ -1971,16 +2048,16 @@ def _build_audio_recommendations_response(
 
     return {
         "machine_profile": (
-            machine_profile.model_dump()
-            if hasattr(machine_profile, "model_dump")
-            else dict(machine_profile)
+            machine_profile.model_dump() if hasattr(machine_profile, "model_dump") else dict(machine_profile)
         ),
         "catalog": list(bundle_lookup.values()),
         **recommendations,
     }
 
 
-@router.get("/audio/readiness", openapi_extra={"security": []}, response_model=audio_readiness_store.AudioReadinessRecord)
+@router.get(
+    "/audio/readiness", openapi_extra={"security": []}, response_model=audio_readiness_store.AudioReadinessRecord
+)
 async def get_audio_readiness(
     _guard: None = Depends(require_local_setup_access),
 ) -> audio_readiness_store.AudioReadinessRecord:
@@ -2197,13 +2274,9 @@ async def import_audio_pack(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
 
     pack_name = getattr(payload, "pack_name", None)
-    raw_pack_path = getattr(payload, "pack_path", None)
-    if raw_pack_path:
-        pack_reference = Path(raw_pack_path).expanduser()
-    elif pack_name:
-        pack_reference = _normalize_audio_pack_name(pack_name)
-    else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Audio pack path is required.")
+    if not pack_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Audio pack name is required.")
+    pack_reference = _normalize_audio_pack_name(pack_name)
     machine_profile = audio_profile_service.detect_machine_profile()
     compatibility = _audio_pack_compatibility(machine_profile)
     machine_profile_payload = model_dump_compat(machine_profile)
@@ -2229,7 +2302,7 @@ async def import_audio_pack(
 @router.post("/config", openapi_extra={"security": []}, response_model=SetupConfigUpdateResponse)
 async def update_setup_config(
     payload: ConfigUpdates,
-    _guard: None = Depends(_require_first_run_write_access),
+    _guard: None = Depends(_require_setup_write_access),
 ) -> SetupConfigUpdateResponse:
     """Persist configuration updates coming from the setup UI."""
     _reject_setup_lifecycle_config_updates(payload.updates)
@@ -2256,7 +2329,7 @@ async def update_setup_config(
 async def mark_setup_complete(
     payload: SetupCompleteRequest,
     background_tasks: BackgroundTasks,
-    _guard: None = Depends(_require_first_run_write_access),
+    _guard: None = Depends(_require_setup_write_access),
 ) -> SetupCompleteResponse:
     """Mark the setup workflow as complete and optionally disable future prompts."""
     return await _complete_setup_flow(payload, background_tasks)
@@ -2275,7 +2348,6 @@ async def ask_setup_assistant(
 
 
 @router.post(
-
     "/reset",
     summary="Reset first-time setup flags (admin)",
     description=(
@@ -2308,7 +2380,6 @@ async def reset_setup_flags(
 
 
 @router.post(
-
     "/self-verify",
     summary="Mark current user as verified (initial setup)",
     description=(

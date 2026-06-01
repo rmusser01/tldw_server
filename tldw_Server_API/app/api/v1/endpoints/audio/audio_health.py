@@ -114,11 +114,7 @@ def _build_internal_health_request(path: str) -> Request:
 
 def _sanitize_public_health_payload(value: Any) -> Any:
     if isinstance(value, str):
-        return (
-            _SANITIZED_PUBLIC_HEALTH_MESSAGE
-            if _SUSPICIOUS_PUBLIC_HEALTH_RE.search(value)
-            else value
-        )
+        return _SANITIZED_PUBLIC_HEALTH_MESSAGE if _SUSPICIOUS_PUBLIC_HEALTH_RE.search(value) else value
     if isinstance(value, list):
         return [_sanitize_public_health_payload(item) for item in value]
     if isinstance(value, dict):
@@ -254,8 +250,7 @@ def _load_auth_provider_configs() -> tuple[bool, dict[str, Any]]:
     try:
         config_manager = get_tts_config_manager()
         return True, {
-            provider_name: config_manager.get_provider_config(provider_name)
-            for provider_name in _AUTH_HEALTH_PROVIDERS
+            provider_name: config_manager.get_provider_config(provider_name) for provider_name in _AUTH_HEALTH_PROVIDERS
         }
     except Exception:
         logger.debug("TTS health auth config lookup failed")
@@ -284,9 +279,7 @@ def _provider_has_auth_failure(
 
     for breaker_key, breaker_status in detailed_circuit_breakers.items():
         normalized_key = str(breaker_key or "").strip().lower()
-        if normalized_key != normalized_provider and not normalized_key.startswith(
-            f"{normalized_provider}:"
-        ):
+        if normalized_key != normalized_provider and not normalized_key.startswith(f"{normalized_provider}:"):
             continue
         if not isinstance(breaker_status, dict):
             continue
@@ -336,23 +329,15 @@ def _enrich_external_provider_auth_health(
     for provider_name in _AUTH_HEALTH_PROVIDERS:
         detail = provider_details.get(provider_name)
         matching_entries = [
-            entry
-            for entry in capability_envelopes
-            if str(entry.get("provider") or "").strip().lower() == provider_name
+            entry for entry in capability_envelopes if str(entry.get("provider") or "").strip().lower() == provider_name
         ]
 
         if not isinstance(detail, dict) and not matching_entries:
             continue
 
-        current_availability = (
-            str(detail.get("availability") or "").strip().lower()
-            if isinstance(detail, dict)
-            else ""
-        )
+        current_availability = str(detail.get("availability") or "").strip().lower() if isinstance(detail, dict) else ""
         if not current_availability and matching_entries:
-            current_availability = str(
-                matching_entries[0].get("availability") or ""
-            ).strip().lower()
+            current_availability = str(matching_entries[0].get("availability") or "").strip().lower()
 
         auth_configured: Optional[bool] = None
         auth_reason: Optional[str] = None
@@ -600,9 +585,7 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
             if not total_providers:
                 total_providers = len(capability_envelopes)
             if not available_providers:
-                available_providers = sum(
-                    1 for entry in capability_envelopes if entry.get("availability") == "enabled"
-                )
+                available_providers = sum(1 for entry in capability_envelopes if entry.get("availability") == "enabled")
 
         health_status = "healthy" if available_providers > 0 else "unhealthy"
 
@@ -698,7 +681,7 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
 
         return health
     except Exception as e:
-        logger.error("Error getting TTS health", exc_info=True)
+        logger.exception("Error getting TTS health")
         request_id = ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=e)
         return {"status": "error", **payload, "timestamp": datetime.utcnow().isoformat()}
@@ -1070,9 +1053,7 @@ async def collect_setup_stt_health(
             "on_demand": False,
             "message": message,
             "error": (
-                detail.get("error")
-                if isinstance(detail, dict) and isinstance(detail.get("error"), str)
-                else None
+                detail.get("error") if isinstance(detail, dict) and isinstance(detail.get("error"), str) else None
             ),
             "status_code": exc.status_code,
         }

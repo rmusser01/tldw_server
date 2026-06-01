@@ -1,23 +1,23 @@
-import React from "react"
+import React from "react";
 
-import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
-import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
+import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
+import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
 import type {
   FirstRunMetadata,
   FirstRunState,
-  FirstRunStepUpdateRequest
-} from "@/types/setup-onboarding"
-import { SetupPathStep } from "./steps/SetupPathStep"
-import { PrivacySecurityStep } from "./steps/PrivacySecurityStep"
-import { MultiUserExitPanel } from "./steps/MultiUserExitPanel"
+  FirstRunStepUpdateRequest,
+} from "@/types/setup-onboarding";
+import { SetupPathStep } from "./steps/SetupPathStep";
+import { PrivacySecurityStep } from "./steps/PrivacySecurityStep";
+import { MultiUserExitPanel } from "./steps/MultiUserExitPanel";
 import {
   ProviderSetupStep,
-  type ProviderSelection
-} from "./steps/ProviderSetupStep"
-import { IngestDefaultsStep } from "./steps/IngestDefaultsStep"
-import { AudioSetupStep } from "./steps/AudioSetupStep"
-import { OptionalAdvancedStep } from "./steps/OptionalAdvancedStep"
-import { FirstChatStep } from "./steps/FirstChatStep"
+  type ProviderSelection,
+} from "./steps/ProviderSetupStep";
+import { IngestDefaultsStep } from "./steps/IngestDefaultsStep";
+import { AudioSetupStep } from "./steps/AudioSetupStep";
+import { OptionalAdvancedStep } from "./steps/OptionalAdvancedStep";
+import { FirstChatStep } from "./steps/FirstChatStep";
 
 type WizardStep =
   | "setup_path"
@@ -27,51 +27,51 @@ type WizardStep =
   | "audio_defaults"
   | "optional_advanced"
   | "first_chat"
-  | "multi_user_exit"
+  | "multi_user_exit";
 
-type SoloSetupPath = "docker" | "local"
+type SoloSetupPath = "docker" | "local";
 
 type UnifiedSetupWizardProps = {
-  initialState?: FirstRunState | null
-  initialMetadata?: FirstRunMetadata | null
-  onStateChange?: (state: FirstRunState) => void
-}
+  initialState?: FirstRunState | null;
+  initialMetadata?: FirstRunMetadata | null;
+  onStateChange?: (state: FirstRunState) => void;
+};
 
 const setupPathToBackend = (path: SoloSetupPath) =>
-  path === "docker" ? "docker_single_user" : "local_single_user"
+  path === "docker" ? "docker_single_user" : "local_single_user";
 
 const stepFromState = (state: FirstRunState | null): WizardStep => {
-  const completed = new Set(state?.completed_steps ?? [])
-  if (!completed.has("setup_path")) return "setup_path"
-  if (!completed.has("privacy_security")) return "privacy_security"
-  if (!completed.has("providers")) return "provider_setup"
-  if (!completed.has("ingest_defaults")) return "ingest_defaults"
-  if (!completed.has("audio_defaults")) return "audio_defaults"
-  if (!completed.has("optional_advanced")) return "optional_advanced"
-  return "first_chat"
-}
+  const completed = new Set(state?.completed_steps ?? []);
+  if (!completed.has("setup_path")) return "setup_path";
+  if (!completed.has("privacy_security")) return "privacy_security";
+  if (!completed.has("providers")) return "provider_setup";
+  if (!completed.has("ingest_defaults")) return "ingest_defaults";
+  if (!completed.has("audio_defaults")) return "audio_defaults";
+  if (!completed.has("optional_advanced")) return "optional_advanced";
+  return "first_chat";
+};
 
 const providerSelectionFromState = (
-  state: FirstRunState | null
+  state: FirstRunState | null,
 ): ProviderSelection | null => {
-  const data = state?.step_data?.providers
-  const provider = data?.default_provider
-  const model = data?.default_model
+  const data = state?.step_data?.providers;
+  const provider = data?.default_provider;
+  const model = data?.default_model;
   if (typeof provider === "string" && typeof model === "string") {
-    return { provider, model }
+    return { provider, model };
   }
-  const firstChatProvider = state?.first_chat?.provider
-  const firstChatModel = state?.first_chat?.model
+  const firstChatProvider = state?.first_chat?.provider;
+  const firstChatModel = state?.first_chat?.model;
   if (firstChatProvider && firstChatModel) {
-    return { provider: firstChatProvider, model: firstChatModel }
+    return { provider: firstChatProvider, model: firstChatModel };
   }
-  return null
-}
+  return null;
+};
 
 export function UnifiedSetupWizard({
   initialState = null,
   initialMetadata = null,
-  onStateChange
+  onStateChange,
 }: UnifiedSetupWizardProps = {}) {
   const {
     state,
@@ -90,69 +90,78 @@ export function UnifiedSetupWizard({
     saveAudioDefaults,
     saveOptionalAdvanced,
     verifyFirstChat,
-    complete
+    complete,
   } = useSetupOnboarding({
     initialState,
     initialMetadata,
-    autoLoad: !initialState || !initialMetadata
-  })
+    autoLoad: !initialState || !initialMetadata,
+  });
   const [step, setStep] = React.useState<WizardStep>(() =>
-    stepFromState(initialState)
-  )
+    stepFromState(initialState),
+  );
   const [providerSelection, setProviderSelection] =
     React.useState<ProviderSelection | null>(() =>
-      providerSelectionFromState(initialState)
-    )
-  const [savingStep, setSavingStep] = React.useState(false)
-  const [stepError, setStepError] = React.useState<string | null>(null)
+      providerSelectionFromState(initialState),
+    );
+  const [savingStep, setSavingStep] = React.useState(false);
+  const [stepError, setStepError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!state) return
-    setProviderSelection((current) => current ?? providerSelectionFromState(state))
-  }, [state])
+    if (!state) return;
+    setProviderSelection(
+      (current) => current ?? providerSelectionFromState(state),
+    );
+  }, [state]);
 
   React.useEffect(() => {
-    if (step !== "provider_setup" || providerCatalog.length > 0) return
-    void loadProviderCatalog().catch(() => {
-      setStepError("Provider catalog could not be loaded. Try again.")
-    })
-  }, [loadProviderCatalog, providerCatalog.length, step])
+    if (step !== "provider_setup" || providerCatalog.length > 0) return;
+    void loadProviderCatalog().catch((err) => {
+      console.error("Provider catalog could not be loaded", err);
+      setStepError("Provider catalog could not be loaded. Try again.");
+    });
+  }, [loadProviderCatalog, providerCatalog.length, step]);
 
   React.useEffect(() => {
-    if (step !== "audio_defaults" || audioRecommendations.length > 0) return
-    void loadAudioRecommendations().catch(() => undefined)
-  }, [audioRecommendations.length, loadAudioRecommendations, step])
+    if (step !== "audio_defaults" || audioRecommendations.length > 0) return;
+    void loadAudioRecommendations().catch((err) => {
+      console.error("Audio recommendations could not be loaded", err);
+      setStepError(
+        "Audio recommendations could not be loaded. You can continue with defaults.",
+      );
+    });
+  }, [audioRecommendations.length, loadAudioRecommendations, step]);
 
   const persistStep = React.useCallback(
     async (payload: FirstRunStepUpdateRequest) => {
-      setSavingStep(true)
-      setStepError(null)
+      setSavingStep(true);
+      setStepError(null);
       try {
-        const nextState = await saveStep(payload)
-        onStateChange?.(nextState)
-        return nextState
-      } catch {
-        setStepError("Setup progress could not be saved. Try again.")
-        return null
+        const nextState = await saveStep(payload);
+        onStateChange?.(nextState);
+        return nextState;
+      } catch (err) {
+        console.error("Setup progress could not be saved", err);
+        setStepError("Setup progress could not be saved. Try again.");
+        return null;
       } finally {
-        setSavingStep(false)
+        setSavingStep(false);
       }
     },
-    [onStateChange, saveStep]
-  )
+    [onStateChange, saveStep],
+  );
 
   const refreshParentState = React.useCallback(async () => {
-    const nextState = await refresh().catch(() => null)
-    if (nextState) onStateChange?.(nextState)
-    return nextState
-  }, [onStateChange, refresh])
+    const nextState = await refresh().catch(() => null);
+    if (nextState) onStateChange?.(nextState);
+    return nextState;
+  }, [onStateChange, refresh]);
 
   const handlePathSelect = React.useCallback(
     (path: "docker" | "local" | "multi_user") => {
       if (path === "multi_user") {
-        setStepError(null)
-        setStep("multi_user_exit")
-        return
+        setStepError(null);
+        setStep("multi_user_exit");
+        return;
       }
 
       void (async () => {
@@ -163,15 +172,15 @@ export function UnifiedSetupWizard({
             selected_path: setupPathToBackend(path),
             setup_path_key: setupPathToBackend(path),
             install_method: path,
-            deployment_mode: "single_user"
-          }
-        })
-        if (!nextState) return
-        setStep("privacy_security")
-      })()
+            deployment_mode: "single_user",
+          },
+        });
+        if (!nextState) return;
+        setStep("privacy_security");
+      })();
     },
-    [persistStep]
-  )
+    [persistStep],
+  );
 
   const handlePrivacyContinue = React.useCallback(() => {
     void (async () => {
@@ -180,13 +189,13 @@ export function UnifiedSetupWizard({
         data: {
           acknowledged: true,
           local_only: metadata?.connection?.browser_access === "local",
-          allow_remote_setup_access: Boolean(metadata?.remote_setup_enabled)
-        }
-      })
-      if (!nextState) return
-      setStep("provider_setup")
-    })()
-  }, [metadata, persistStep])
+          allow_remote_setup_access: Boolean(metadata?.remote_setup_enabled),
+        },
+      });
+      if (!nextState) return;
+      setStep("provider_setup");
+    })();
+  }, [metadata, persistStep]);
 
   const handleProviderContinue = React.useCallback(
     (selection: ProviderSelection) => {
@@ -196,63 +205,64 @@ export function UnifiedSetupWizard({
           data: {
             acknowledged: true,
             default_provider: selection.provider,
-            default_model: selection.model
-          }
-        })
-        if (!nextState) return
-        setProviderSelection(selection)
-        setStep("ingest_defaults")
-      })()
+            default_model: selection.model,
+          },
+        });
+        if (!nextState) return;
+        setProviderSelection(selection);
+        setStep("ingest_defaults");
+      })();
     },
-    [persistStep]
-  )
+    [persistStep],
+  );
 
   const saveIngestAndPublish = React.useCallback(
     async (...args: Parameters<typeof saveIngestDefaults>) => {
-      const response = await saveIngestDefaults(...args)
-      await refreshParentState()
-      return response
+      const response = await saveIngestDefaults(...args);
+      await refreshParentState();
+      return response;
     },
-    [refreshParentState, saveIngestDefaults]
-  )
+    [refreshParentState, saveIngestDefaults],
+  );
 
   const saveAudioAndPublish = React.useCallback(
     async (...args: Parameters<typeof saveAudioDefaults>) => {
-      const response = await saveAudioDefaults(...args)
-      await refreshParentState()
-      return response
+      const response = await saveAudioDefaults(...args);
+      await refreshParentState();
+      return response;
     },
-    [refreshParentState, saveAudioDefaults]
-  )
+    [refreshParentState, saveAudioDefaults],
+  );
 
   const saveAdvancedAndPublish = React.useCallback(
     async (...args: Parameters<typeof saveOptionalAdvanced>) => {
-      const response = await saveOptionalAdvanced(...args)
-      await refreshParentState()
-      return response
+      const response = await saveOptionalAdvanced(...args);
+      await refreshParentState();
+      return response;
     },
-    [refreshParentState, saveOptionalAdvanced]
-  )
+    [refreshParentState, saveOptionalAdvanced],
+  );
 
   const completeAndPublish = React.useCallback(
     async (...args: Parameters<typeof complete>) => {
-      const response = await complete(...args)
-      await refreshParentState()
-      return response
+      const response = await complete(...args);
+      await refreshParentState();
+      return response;
     },
-    [complete, refreshParentState]
-  )
+    [complete, refreshParentState],
+  );
 
   const handleSkip = React.useCallback(() => {
-    setStepError(null)
+    setStepError(null);
     void skip({ reason: "user_skip" })
       .then((nextState) => {
-        onStateChange?.(nextState)
+        onStateChange?.(nextState);
       })
-      .catch(() => {
-        setStepError("Setup skip could not be saved. Try again.")
-      })
-  }, [onStateChange, skip])
+      .catch((err) => {
+        console.error("Setup skip could not be saved", err);
+        setStepError("Setup skip could not be saved. Try again.");
+      });
+  }, [onStateChange, skip]);
 
   if (loading && !state && !metadata) {
     return (
@@ -260,7 +270,7 @@ export function UnifiedSetupWizard({
         label="Loading setup..."
         description="Reading setup readiness from the server"
       />
-    )
+    );
   }
 
   return (
@@ -331,6 +341,7 @@ export function UnifiedSetupWizard({
         {step === "provider_setup" ? (
           <ProviderSetupStep
             providers={providerCatalog}
+            initialSelection={providerSelection}
             onSaveProvider={saveProvider}
             onContinue={handleProviderContinue}
             onBack={() => setStep("privacy_security")}
@@ -365,14 +376,14 @@ export function UnifiedSetupWizard({
             verifyFirstChat={verifyFirstChat}
             complete={completeAndPublish}
             onComplete={() => {
-              void refreshParentState()
+              void refreshParentState();
             }}
             onBack={() => setStep("provider_setup")}
           />
         ) : null}
       </div>
     </div>
-  )
+  );
 }
 
-export default UnifiedSetupWizard
+export default UnifiedSetupWizard;
