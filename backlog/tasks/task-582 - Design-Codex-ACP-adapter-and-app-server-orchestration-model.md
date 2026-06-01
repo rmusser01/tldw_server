@@ -29,7 +29,7 @@ Write and review the design spec for Codex support in the ACP/agent orchestratio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-['Spec review completed. Status: Approved. Blocking issues: none. Advisory recommendations: implementation plan should explicitly target the First Implementation Slice and defer Stage 3-5; planning should clarify native_acp launch-field resolution so existing profiles are not regressed; open questions 1-2 affect certification/setup docs while 3-5 belong to later app-server/event-model stages.']
+['Spec re-review completed after adapter pin/install clarifications. Status: Approved. Blocking issues: none. Advisory planning notes: separate profile/runtime work from live certification evidence so metadata/runner changes can land before certification; include tests for legacy adapter_acp input and native ACP profiles without acp_command to preserve fallback behavior. Awaiting user approval before implementation planning.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1,7 +1,7 @@
 # Codex ACP Adapter and App-Server Orchestration Design
 
 Date: 2026-06-01
-Status: Spec review approved; awaiting user review
+Status: Spec review approved; awaiting user approval for implementation planning
 Tracking: TASK-582
 
 ## Summary
@@ -148,6 +148,10 @@ Sources:
   implemented.
 - Do not install third-party packages during passive registry/status listing.
 - Do not redesign the Research Workspace UI in this task.
+- Do not create a new persistent normalized-event table in the first slice
+  unless it is required to expose adapter readiness/session status. Event
+  persistence ownership belongs to the later app-server/event-model planning
+  slice.
 
 ## Runtime Taxonomy
 
@@ -197,7 +201,9 @@ Proposed active YAML shape:
   adapter_source: zed-industries/codex-acp
   adapter_docs_url: "https://github.com/zed-industries/codex-acp"
   adapter_package: "@zed-industries/codex-acp"
-  adapter_version_policy: pinned_release_required
+  adapter_version: "0.15.0"
+  adapter_version_policy: exact_pin_required
+  adapter_install_source: github_release_preferred
   credential_policy: delegated_to_adapter
   certification_blocker: live_certification_required
 ```
@@ -213,6 +219,17 @@ Important details:
 - `npx @latest` can appear in exploratory docs, but the runtime registry should
   prefer an installed binary or a pinned adapter version. Passive health/listing
   must not launch `npx @latest`.
+- The first certification target is `zed-industries/codex-acp` `0.15.0`, the
+  latest verified release during this spec update. If a later implementation
+  deliberately chooses a newer version, it must update the registry seed, setup
+  docs, compatibility matrix, and certification evidence together.
+- Preferred setup documentation should tell users to install the `0.15.0`
+  GitHub release artifact for their OS/architecture and put `codex-acp` on
+  `PATH`. A pinned npm invocation such as
+  `npx @zed-industries/codex-acp@0.15.0` can be documented as an operator setup
+  or certification alternative, but passive runtime listing must never execute
+  `npx` and seeded runtime config should prefer the installed `codex-acp`
+  binary.
 - `support_state: experimental` means the product knows a plausible adapter
   path. It is not the same as live support.
 - `verification_level` should move to `stub_smoke_tested` or
@@ -238,6 +255,20 @@ Schema changes needed later:
   credential policy so runner behavior is not inferred from the display
   command.
 
+Launch-field compatibility rules:
+
+- For `native_acp`, launch `acp_command + acp_args` when `acp_command` is set.
+- For legacy `native_acp` runner configs that do not yet include
+  `acp_command`, fall back to `command + args` only if the profile is already
+  an existing native ACP profile. This preserves currently certified Goose,
+  Hermes, and OpenCode-style configurations while the Go config catches up.
+- For `external_acp_adapter`, never fall back to `command + args`. Missing
+  `acp_command` is a blocking registry/setup error because `command` is the
+  downstream user-facing agent, not the ACP adapter.
+- For `documented_candidate` and `custom_template`, do not start a session from
+  seeded metadata alone. A custom template must first become a named concrete
+  profile with command, policy, and evidence.
+
 ## Readiness and Health Semantics
 
 Do not collapse readiness into `is_configured`.
@@ -261,6 +292,13 @@ Expose separate signals:
 For `external_acp_adapter`, passive readiness checks may use `shutil.which` or
 the Go equivalent for both `command` and `acp_command`. They must not start the
 agent, contact OpenAI, or install packages.
+
+When `credential_policy` is `delegated_to_adapter`, passive readiness should
+report `credential_state: delegated` rather than `ready`. A delegated credential
+state only becomes proven after an explicit health check or session run. Adapter
+or downstream auth failures should map to stable blockers such as
+`adapter_auth_missing`, `adapter_auth_failed`, or `agent_auth_failed` instead
+of a generic runtime failure.
 
 A bounded active health check can launch `codex-acp`, send ACP `initialize`,
 then terminate. That check belongs in an explicit certification or health action,
@@ -512,7 +550,9 @@ Suggested status fields:
     "source": "zed-industries/codex-acp",
     "docs_url": "https://github.com/zed-industries/codex-acp",
     "package": "@zed-industries/codex-acp",
-    "version_policy": "pinned_release_required"
+    "version": "0.15.0",
+    "version_policy": "exact_pin_required",
+    "install_source": "github_release_preferred"
   },
   "certification": {
     "last_certified_at": null,
@@ -520,6 +560,21 @@ Suggested status fields:
   }
 }
 ```
+
+Compatibility with current response shapes:
+
+- Existing `is_configured` / `isConfigured` fields should remain available for
+  compatibility, but their meaning must narrow to "ready to start an ACP
+  session from the current UI." They should not be treated as proof of
+  production support or live certification.
+- New UI code should prefer `readiness.state`, `primary_blocker`, and
+  `blockers` for display and gating. Legacy UI code can continue using
+  `is_configured` while it is migrated, as long as backend values are derived
+  from the strategy-aware readiness state.
+- For adapter-backed Codex, `is_configured` can be true only when the adapter
+  command is present, the display/downstream command is present when required,
+  no deterministic setup blocker remains, and the profile is eligible to start
+  an ACP session. It can still show `support_state: experimental`.
 
 UI language should be concrete:
 
@@ -571,9 +626,18 @@ Success criteria:
 
 - The Codex row identifies `zed-industries/codex-acp`.
 - Runtime launches `acp_command` for adapter-backed profiles.
-- Setup docs require a pinned adapter release or installed binary.
+- Setup docs require `zed-industries/codex-acp` `0.15.0`, with GitHub release
+  artifact installation as the preferred path and pinned npm invocation only as
+  an operator setup/certification alternative.
 - Live certification evidence records initialize, session create, prompt,
   permission/approval behavior if reachable, cancel, close, and failure modes.
+
+The first implementation plan should cover Stage 1 plus the minimum Stage 2
+runtime/profile work needed to avoid exposing a visible but unusable Codex
+adapter profile. Stage 3-5 are follow-up plans. In practice, that means the
+first PR should not merely add `external_acp_adapter` metadata; it should also
+ensure the runner can launch `acp_command + acp_args` for adapter-backed
+profiles, while preserving legacy native ACP launch behavior.
 
 ### Stage 3: Workspace-aware session diagnostics
 
@@ -634,6 +698,8 @@ The first implementation slice should be considered complete when:
   `external_acp_adapter`, but not emitted.
 - The Codex registry row names `zed-industries/codex-acp` and remains
   experimental until live certification passes.
+- The first seeded adapter version is exactly `0.15.0`, with install docs that
+  prefer the GitHub release artifact and avoid unpinned `npx` in runtime paths.
 - Passive registry/listing reports adapter readiness without launching or
   installing packages.
 - The runner launches `acp_command + acp_args` for `native_acp` and
@@ -645,12 +711,18 @@ The first implementation slice should be considered complete when:
 
 ## Open Questions for Implementation Planning
 
-1. Which exact `codex-acp` version should the first certification pin?
-2. Should the initial setup guide recommend release binary installation first,
-   npm package installation first, or both?
-3. Should app-server live under ACP navigation as an agent backend, or under a
+Resolved for the first implementation slice:
+
+1. Pin `zed-industries/codex-acp` to `0.15.0` for the first certification.
+2. Recommend GitHub release artifact installation first. Document pinned npm
+   invocation only as an operator setup/certification alternative, not as the
+   passive runtime path.
+
+Deferred to later planning:
+
+1. Should app-server live under ACP navigation as an agent backend, or under a
    broader Agent Orchestration surface with ACP as one backend?
-4. How much of Codex app-server's account/login surface should be exposed in
+2. How much of Codex app-server's account/login surface should be exposed in
    tldw_server versus documented as external Codex setup?
-5. Which existing session/event tables should own the normalized event envelope,
+3. Which existing session/event tables should own the normalized event envelope,
    and what retention/redaction policy should apply?
