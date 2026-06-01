@@ -4,7 +4,7 @@ title: Create canonical user-facing documentation map
 status: In Progress
 assignee: []
 created_date: '2026-06-01 05:24'
-updated_date: '2026-06-01 19:25'
+updated_date: '2026-06-01 19:31'
 labels: []
 dependencies: []
 documentation:
@@ -28,7 +28,7 @@ Design and implement the first documentation IA slice: a canonical public user d
 <!-- AC:BEGIN -->
 - [x] #1 Approved design spec exists for the canonical user documentation map.
 - [x] #2 Implementation plan covers the hub rewrite, optional feature map, MkDocs nav, README pointer, and extension docs pointer.
-- [ ] #3 Backlog task records touched files and verification results before closeout.
+- [x] #3 Backlog task records touched files and verification results before closeout.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -43,12 +43,18 @@ Implementation plan written to Docs/superpowers/plans/2026-06-01-user-docs-map.m
 Task 4 verification: refreshed curated docs with Helper_Scripts/refresh_docs_published.sh. Kept generated Docs/Published/User_Guides/index.md, Docs/Published/User_Guides/Feature_Map.md, and Docs/Published/Getting_Started/TROUBLESHOOTING.md because the generated user guide hub links to the troubleshooting guide. Changed Markdown link check passed across README.md, source hub/map, published hub/map, the published troubleshooting target, and extension docs. git diff --check passed. MkDocs build was attempted with the project virtualenv from the main worktree and failed because mkdocs is not installed: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python: No module named mkdocs. Bandit is not applicable for this docs-only slice because no Python or executable code was changed.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created the canonical user-facing documentation map under Docs/User_Guides, added a task-oriented feature map, wired README/MkDocs/extension entry points, refreshed generated published docs, preserved the generated troubleshooting target needed by the published hub link, and recorded docs-only verification. Changed Markdown link checks and git diff --check passed. MkDocs build could not be run because mkdocs is not installed in the available project virtualenv. Bandit was not applicable because no executable code changed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
