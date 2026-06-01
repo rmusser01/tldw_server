@@ -1,7 +1,7 @@
 ---
 id: TASK-485
 title: Fix /chat rails regression coverage and sidepanel handoff target
-status: Done
+status: In Progress
 labels:
 - webui
 - chat
@@ -14,14 +14,22 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-05-31-chat-siderail-collapse-design.md
 - Docs/superpowers/plans/2026-05-31-chat-siderail-edge-expand-implementation-plan.md
+- apps/extension/tests/e2e/sidepanel-options-handoff.spec.ts
 - apps/packages/ui/src/components/Layouts/Layout.tsx
 - apps/packages/ui/src/components/Layouts/__tests__/Layout.chat-sidebar-reset-signal.guard.test.ts
 - apps/packages/ui/src/components/Option/Playground/Playground.tsx
 - apps/packages/ui/src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx
 - apps/packages/ui/src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx
 - apps/packages/ui/src/components/Sidepanel/Chat/ArtifactsPanel.tsx
+- apps/packages/ui/src/components/Sidepanel/Chat/ControlRow.tsx
+- apps/packages/ui/src/components/Sidepanel/Chat/SidepanelHeaderSimple.tsx
+- apps/packages/ui/src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.webui-handoff.test.tsx
+- apps/packages/ui/src/components/Sidepanel/Chat/form.tsx
+- apps/packages/ui/src/services/__tests__/sidepanel-chat-webui-handoff.test.ts
+- apps/packages/ui/src/services/tldw/sidepanel-chat-webui-handoff.ts
 - apps/tldw-frontend/components/layout/WebLayout.tsx
 - apps/tldw-frontend/e2e/workflows/chat-rails-collapse.spec.ts
+- apps/tldw-frontend/extension/routes/sidepanel-chat.tsx
 ---
 
 ## Description
@@ -57,12 +65,15 @@ Implementation completed in commits cb2a400815, d6608e4b7e, and 89f7c6b72c. The 
 Verification recorded: `bunx vitest run src/components/Layouts/__tests__/Layout.chat-sidebar-reset-signal.guard.test.ts src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx src/components/Sidepanel/Chat/__tests__/ArtifactsPanel.jump-source.guard.test.ts` passed 4 files / 16 tests. `TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18081' TLDW_WEB_URL=http://127.0.0.1:18081 bunx playwright test e2e/workflows/chat-rails-collapse.spec.ts --project=chromium --reporter=line` passed 2 tests. Scoped whitespace checks for the touched WebLayout and E2E files passed. Full `git diff --check` is blocked by unrelated pre-existing trailing whitespace in `Docs/Design/Agents.md:155`. Bandit skipped because this slice touched frontend TypeScript/TSX and Playwright coverage only, with no Python runtime or tests changed.
 
 Screenshot evidence captured after the fix: `/private/tmp/tldw-chat-left-rail-collapsed.png` and `/private/tmp/tldw-chat-right-rail-collapsed.png`. The stubbed provider state intentionally shows the existing no-provider warning while exercising layout behavior.
+User rejected the closeout screenshots and validation because they did not show the required visual states: both rails expanded as a baseline, one rail expanded while the opposite same-side expand affordance is visible, and the composer did not match the current /chat surface. Reopened for live-state reproduction and correction.
+2026-06-01 slice: implemented sidepanel chat WebUI handoff helper and wired the visible sidepanel full-screen/header action plus composer overflow Open full app action through `/chat?handoff=...` instead of the extension options hash. The payload preserves draft text, server chat id via existing `settingsServerChatId`, and chat context controls such as model, prompts, chat mode, web search, tool choice, temporary chat, OCR, and title. WebUI `/chat` now decodes the handoff, applies supported context state, seeds the composer with `tldw:set-composer-message` using `ifEmptyOnly`, and cleans the `handoff` query param. Updated extension e2e coverage to assert the sidepanel opens `http://127.0.0.1:8080/chat` with decoded draft/context rather than `options.html`. Verification: focused Vitest set passed 6 files / 19 tests; extension `bun run compile` passed; rail-collapse Playwright e2e passed 2 tests after elevated local-server permission; scoped `git diff --check` passed. Extension handoff Playwright e2e was not completed because its global setup repeatedly entered the existing WXT production build hang and had to be terminated; no test assertion ran. Bandit skipped because this slice touched frontend TS/TSX and Playwright only, no Python runtime files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented same-side desktop edge expand affordances for collapsed /chat rails across the shared layout, artifact panel, and Next WebUI shell. Added focused Playwright coverage for left and right rail collapse/expand behavior, chat width release, vertical stability, composer docking, and no desktop edge buttons below the lg breakpoint.
+2026-06-01 sidepanel handoff slice: visible sidepanel chat actions now open real WebUI `/chat` with encoded handoff draft/context and WebUI `/chat` restores that handoff. Focused unit coverage and rail-collapse Playwright verification pass; extension handoff e2e is updated but remains blocked by the existing WXT production build hang before test execution.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

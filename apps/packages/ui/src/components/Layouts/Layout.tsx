@@ -423,9 +423,15 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                   ?.focus()
               })
             }}
-            className="absolute left-2 top-20 z-30 inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-muted shadow-sm transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            className="absolute left-0 top-1/2 z-40 inline-flex h-28 w-10 -translate-y-1/2 flex-col items-center justify-center gap-2 rounded-r-lg border border-l-0 border-border bg-surface/95 text-text-muted shadow-lg backdrop-blur transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           >
             <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+            <span
+              aria-hidden="true"
+              className="rotate-180 text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]"
+            >
+              Chats
+            </span>
           </button>
         )}
         <main
