@@ -44,7 +44,7 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 0 in progress: OpenUI runtime feasibility audit completed with conditional PASS, package manifests updated for WebUI/shared UI, extension dependency intentionally deferred due React 18.2 peer mismatch, and lockfile updated via `bun install --ignore-scripts` because normal workspace postinstall hangs in existing `wxt-prepare` behavior. Baseline Task 1 test command failed with no test files found as expected. Awaiting Task 0 review/commit.
+Task 0 complete: OpenUI runtime feasibility audit completed with conditional PASS, package manifests updated for WebUI/shared UI, extension dependency intentionally deferred due React 18.2 peer mismatch, and lockfile updated via `bun install --ignore-scripts` because normal workspace postinstall hangs in existing `wxt-prepare` behavior. Baseline Task 1 test command failed with no test files found as expected. Task 0 committed in ec3e71c6b7 and passed spec-compliance plus code-quality review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
