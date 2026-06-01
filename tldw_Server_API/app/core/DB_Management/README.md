@@ -27,7 +27,7 @@ Central data stores and database abstractions for content, prompts, notes, evalu
   - Media/RAG: `tldw_Server_API/app/api/v1/endpoints/media/`, `.../rag_unified.py:1`, `.../chunking.py:1`, `.../chunking_templates.py:1`, `.../paper_search.py:1`, `.../media_embeddings.py:1`, `.../sync.py:1`, `.../vector_stores_openai.py:1`, `.../claims.py:1`
   - Notes/Characters/Chat: `.../chat.py:1`, `.../characters_endpoint.py:1`, `.../character_chat_sessions.py:1`, `.../character_messages.py:1`, `.../notes.py:1`, `.../flashcards.py:1`
   - Prompts/Prompt Studio: `.../prompts.py:1`, `.../prompt_studio_projects.py:1`, `.../prompt_studio_prompts.py:1`, `.../prompt_studio_test_cases.py:1`, `.../prompt_studio_optimization.py:1`, `.../prompt_studio_status.py:1`
-  - Evaluations/Workflows/Other: `.../evaluations/evaluations_unified.py:1`, `.../workflows.py:1`, `.../health.py:1`, `.../watchlists.py:1`, `.../items.py:1`, `.../reading.py:1`, `.../outputs_templates.py:1`
+  - Evaluations/Workflows/Other: `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py:1`, `.../workflows.py:1`, `.../health.py:1`, `.../watchlists.py:1`, `.../items.py:1`, `.../reading.py:1`, `.../outputs_templates.py:1`
 - Related Schemas (selected):
   - Media: `tldw_Server_API/app/api/v1/schemas/media_request_models.py:1`, `tldw_Server_API/app/api/v1/schemas/media_response_models.py:1`, `tldw_Server_API/app/api/v1/schemas/chunking_schema.py:1`, `tldw_Server_API/app/api/v1/schemas/chunking_templates_schemas.py:1`
   - Notes/Prompts: `tldw_Server_API/app/api/v1/schemas/notes_schemas.py:1`, `tldw_Server_API/app/api/v1/schemas/prompt_studio_base.py:1`, `.../prompt_studio_project.py:1`, `.../prompt_studio_schemas.py:1`
@@ -47,11 +47,11 @@ Central data stores and database abstractions for content, prompts, notes, evalu
   - `Prompts_DB.PromptsDatabase`, `PromptStudioDatabase.PromptStudioDatabase` — prompt storage and Prompt Studio artifacts with FTS and migrations.
   - `Evaluations_DB.EvaluationsDatabase` — evaluation runs, datasets, metrics.
   - `Workflows_DB.WorkflowsDatabase` — workflow/job orchestration state and scheduler.
-  - Backends: `backends.sqlite_backend`, `backends.postgresql_backend`, helpers `fts_translator.py`, `query_utils.py`, `pg_rls_policies.py`.
+  - Backends: `backends.sqlite_backend`, `backends.postgresql_backend`, helpers `tldw_Server_API/app/core/DB_Management/backends/fts_translator.py`, `tldw_Server_API/app/core/DB_Management/backends/query_utils.py`, and `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py`.
 - Data Models & DB:
   - Media v2 tables include `Media`, `Keywords`, `MediaKeywords`, `Transcripts`, `MediaChunks`, `UnvectorizedMediaChunks`, `DocumentVersions`, `DocumentStructureIndex`, `ChunkingTemplates`, `sync_log`, `Claims`, plus indices and FTS tables.
   - Prompt Studio migrations under `app/core/DB_Management/migrations/` (schema, indices, FTS, templates, watchlists, scope columns).
-  - For Postgres content mode, RLS policies are expected (see `pg_rls_policies.py`) and validated by `validate_postgres_content_backend()`.
+  - For Postgres content mode, RLS policies are expected (see `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py`) and validated by `validate_postgres_content_backend()`.
 - Configuration:
   - Content backend selection: `TLDW_CONTENT_DB_BACKEND=sqlite|postgresql` (defaults to `sqlite`).
   - SQLite path: `TLDW_CONTENT_SQLITE_PATH` or `[Database].sqlite_path`; backups: `TLDW_DB_BACKUP_PATH` or `[Database].backup_path` (defaults to `./tldw_DB_Backups/`).
@@ -78,10 +78,10 @@ Central data stores and database abstractions for content, prompts, notes, evalu
 - Extension Points:
   - Add a new content DB: create a module with a clear public API, define schema/migrations (SQLite JSON or SQL), implement FTS/indexes, and optionally Postgres DDL + RLS. Expose factory wiring in `DB_Manager.py` if app-wide.
   - Extend Media v2: bump `_CURRENT_SCHEMA_VERSION` and add migration; keep soft-delete/versioning and sync_log semantics consistent; add indices where read paths need them.
-  - Postgres content mode: ensure `pg_rls_policies.py` and `validate_postgres_content_backend()` cover new tables and policies.
+  - Postgres content mode: ensure `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py` and `validate_postgres_content_backend()` cover new tables and policies.
 - Coding Patterns:
   - Use context managers for transactions; rely on `DatabaseBackend.transaction()` or module-provided helpers.
-  - Prefer backend-agnostic helpers (`query_utils`, `fts_translator`) and avoid dialect-specific SQL unless guarded.
+  - Prefer backend-agnostic helpers (`tldw_Server_API/app/core/DB_Management/backends/query_utils.py`, `tldw_Server_API/app/core/DB_Management/backends/fts_translator.py`) and avoid dialect-specific SQL unless guarded.
   - Do not store secrets or PII; never build SQL from untrusted strings.
 - Tests:
   - Locations: `tldw_Server_API/tests/DB_Management`, plus feature suites (Media, ChaChaNotesDB, Prompt_Management, Workflows, Claims).

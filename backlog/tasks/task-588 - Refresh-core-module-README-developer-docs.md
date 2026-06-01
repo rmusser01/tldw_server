@@ -4,7 +4,7 @@ title: Refresh core module README developer docs
 status: Done
 assignee: []
 created_date: '2026-06-01 07:18'
-updated_date: '2026-06-01 17:09'
+updated_date: '2026-06-01 17:18'
 labels: []
 dependencies: []
 documentation:
@@ -50,6 +50,8 @@ Implementation inventory created at Docs/superpowers/plans/2026-06-01-core-modul
 Verification: Task 5 refreshed existing core READMEs and updated the inventory. Coverage check passed with no missing top-level app/core README files. Placeholder scan returned no matches. Local Markdown link sanity check passed with 'core README markdown sanity checks passed'. git diff --check and git diff --cached --check passed. Optional codespell scan skipped because codespell is not installed. Bandit skipped because this task changed Markdown documentation only; no Python or runtime source files were modified.
 
 2026-06-01: Spec compliance follow-up corrected stale endpoint/test evidence in affected READMEs and inventory (evaluations/media/audio endpoint packages; moderation, Guardian family-wizard, and WebSub test paths). Re-ran targeted replacement path existence checks, missing README coverage, placeholder scan, local Markdown sanity, and diff checks. Bandit remains skipped because only Markdown documentation changed.
+
+2026-06-01: Second spec re-review follow-up corrected remaining stale README path evidence for LLM_Calls, Evaluations, DB_Management, and TTS. Re-ran targeted existence checks, targeted stale-path inspection, missing README coverage, placeholder scan, local Markdown sanity, and diff checks before commit. Bandit remains skipped because only Markdown documentation changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

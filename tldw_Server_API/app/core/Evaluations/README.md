@@ -92,7 +92,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Extension Points
   - Add a new evaluator: implement in `Evaluations/` and register in service/registry
-  - Add endpoints: extend `evaluations_unified.py` (or split modules) and add schemas
+  - Add endpoints: extend `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py` (or split modules under that endpoint package) and add schemas
   - Extend A/B: update `embeddings_abtest_service.py` + schemas; update repository queries
   - Extend persona dialogue-tree evaluations by adding scenarios to the recipe/harness and keeping target normalization compatible with both persona and character payloads
 

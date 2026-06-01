@@ -29,14 +29,14 @@
   - Primary entrypoints: `perform_chat_api_call` / `perform_chat_api_call_async` — tldw_Server_API/app/core/Chat/chat_service.py:668
   - Routing/dispatch: adapter registry maps provider name → adapter — tldw_Server_API/app/core/LLM_Calls/adapter_registry.py:1
   - Adapters: per-provider implementations under `providers/`
-  - Compatibility wrappers: `chat_calls.py` / `local_chat_calls.py` (thin wrappers around the registry)
+  - Compatibility and legacy embedding helpers: `tldw_Server_API/app/core/LLM_Calls/chat_calls.py`; local/gateway adapters: `tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py`
   - Streaming: `streaming.py` and `sse.py` normalize lines to SSE — tldw_Server_API/app/core/LLM_Calls/streaming.py:1, tldw_Server_API/app/core/LLM_Calls/sse.py:1
   - Retries: `http_helpers.create_session_with_retries` — tldw_Server_API/app/core/LLM_Calls/http_helpers.py:1
 - Key Functions (entry points):
   - `perform_chat_api_call`, `perform_chat_api_call_async` — chat_service entrypoints used by production call sites.
   - Adapter classes: OpenAI, Groq, Anthropic, Google, Qwen, Mistral, OpenRouter, HuggingFace, Bedrock — under `providers/` and auto-registered via the adapter registry.
-  - Compatibility wrappers (legacy call sites/tests only): `chat_with_openai`, `chat_with_anthropic`, `chat_with_cohere`, `chat_with_groq`, `chat_with_openrouter`, `chat_with_deepseek`, `chat_with_mistral`, `chat_with_google`, `chat_with_qwen`, `chat_with_bedrock`, `chat_with_moonshot`, `chat_with_zai` — chat_calls.py
-  - Compatibility wrappers (legacy call sites/tests only): `chat_with_local_llm`, `chat_with_llama`, `chat_with_kobold`, `chat_with_oobabooga`, `chat_with_tabbyapi`, `chat_with_vllm`, `chat_with_aphrodite`, `chat_with_ollama`, `chat_with_custom_openai(_2)` — local_chat_calls.py
+  - Legacy `chat_with_*` wrapper functions have been removed from `tldw_Server_API/app/core/LLM_Calls/chat_calls.py`; production callers should use `chat_service` entrypoints and provider adapters.
+  - Local/gateway provider classes live in `tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py`, including LocalLLM, llama.cpp, Kobold, Oobabooga, TabbyAPI, vLLM, Aphrodite, Ollama, and custom OpenAI-compatible gateways.
   - Async variants available for select providers (OpenAI, Groq, Anthropic, OpenRouter).
 - Dependencies:
   - Internal: Chat error classes (Chat_Deps), adapter registry, config loader, streaming helpers, summarization libs.
@@ -63,7 +63,7 @@
 ## 3. Developer-Related/Relevant Information for Contributors
 
 - Folder Structure:
-  - `chat_calls.py` (commercial), `local_chat_calls.py` (local/gateways), `streaming.py`, `sse.py`, `http_helpers.py`, `huggingface_api.py`, summarization libs.
+  - `chat_calls.py` (legacy embeddings/session helpers), `providers/local_adapters.py` (local/gateways), `streaming.py`, `sse.py`, `http_helpers.py`, `huggingface_api.py`, summarization libs.
 - Extension Points:
   - Add a provider adapter in `core/LLM_Calls/providers/` and register it in `adapter_registry.py` (the registry is the primary call surface).
   - Parameter translation/validation lives in adapter capability registry; compatibility handlers accept provider-native args.

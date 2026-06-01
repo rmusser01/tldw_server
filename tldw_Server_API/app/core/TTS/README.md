@@ -62,7 +62,7 @@ Provider support snapshot (indicative): OpenAI (cloud), ElevenLabs (cloud, cloni
 
 ## 2.1 Egress and Error Behavior (Ops Overview)
 
-- Outbound HTTP for TTS providers (OpenAI, ElevenLabs, Index-style engines) is centralized in `http_client.py`:
+- Outbound HTTP for TTS providers (OpenAI, ElevenLabs, Index-style engines) is centralized in `tldw_Server_API/app/core/http_client.py`:
   - All adapter POSTs either use the `apost`/`afetch` helpers or the shared `AsyncClient` from `tts_resource_manager`, which calls `_validate_egress_or_raise(url)` before sending.
   - Egress policy is configured via `EGRESS_ALLOWLIST` / `EGRESS_DENYLIST` / `WORKFLOWS_EGRESS_*` and enforces:
     - Allowed schemes (`http/https`) and ports.
