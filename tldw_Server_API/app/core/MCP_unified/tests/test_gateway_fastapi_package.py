@@ -2721,6 +2721,56 @@ def test_gateway_config_bootstrap_wraps_default_factory_when_policy_configured(
         asyncio.run(bootstrap.profile_store.aclose())
 
 
+def test_gateway_config_bootstrap_wraps_explicit_package_factory_when_policy_configured(
+    tmp_path: Path,
+) -> None:
+    """Explicit package stdio factories receive configured process policy too."""
+
+    from mcp_unified.federation import create_external_transport
+    from mcp_unified.federation.stdio_transport import StdioExternalTransportError
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(
+                    enabled=True,
+                    process_policy={"allow_path_lookup": False},
+                ),
+            ),
+            external_transport_factory=create_external_transport,
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        assert manager._transport_factory is not create_external_transport
+        with pytest.raises(StdioExternalTransportError) as exc_info:
+            manager._transport_factory(
+                ExternalServerDefinition(
+                    id="research",
+                    name="Research",
+                    transport="stdio",
+                    command=["python"],
+                    env_allowlist=["PATH"],
+                )
+            )
+
+        assert exc_info.value.reason_code == "process_policy_path_lookup_denied"
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
 def test_gateway_config_bootstrap_custom_factory_ignores_config_process_policy(
     tmp_path: Path,
 ) -> None:

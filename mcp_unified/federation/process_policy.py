@@ -160,7 +160,7 @@ def validate_stdio_process_policy(
     )
     if (
         policy.reject_shell_executables
-        and _normcase(executable_name) in _SHELL_EXECUTABLES
+        and executable_name.lower() in _SHELL_EXECUTABLES
         and not allowed_executable
     ):
         raise StdioProcessPolicyViolation(
@@ -244,6 +244,8 @@ def _require_allowed_env_name(
     normalized_env: tuple[str, ...],
     allowed_env_names: tuple[str, ...] | None,
 ) -> None:
+    """Require an inherited env name in both server and policy allowlists."""
+
     if env_name not in normalized_env:
         raise StdioProcessPolicyViolation(
             "External stdio command requires PATH inheritance",
@@ -264,6 +266,13 @@ def _executable_allowed(
     policy: StdioProcessPolicy,
     cwd: str | None,
 ) -> bool:
+    """Return whether the executable satisfies the configured allowlist.
+
+    Bare allowlist entries only match bare command names. A command that names a
+    relative or absolute path must match a path allowlist entry after resolution,
+    which prevents basename-only entries from authorizing arbitrary binaries.
+    """
+
     if not policy.allowed_executables:
         return False
 
@@ -276,15 +285,23 @@ def _executable_allowed(
     )
     for allowed in policy.allowed_executables:
         if _has_path_separator(allowed) or Path(allowed).is_absolute():
-            if executable_path is not None and executable_path == _resolve_path_key(allowed):
+            if (
+                executable_path is not None
+                and executable_path == _resolve_path_key(allowed)
+            ):
                 return True
             continue
-        if executable_name == _normcase(_executable_basename(allowed)):
+        if (
+            not executable_has_path
+            and executable_name == _normcase(_executable_basename(allowed))
+        ):
             return True
     return False
 
 
 def _resolve_executable_path(executable: str, *, cwd: str | None) -> str:
+    """Resolve an executable path relative to cwd or the current process cwd."""
+
     path = Path(executable).expanduser()
     if not path.is_absolute():
         base = Path(cwd).expanduser() if cwd is not None else Path.cwd()
@@ -293,10 +310,14 @@ def _resolve_executable_path(executable: str, *, cwd: str | None) -> str:
 
 
 def _resolve_path_key(path: str | Path) -> str:
+    """Return the normalized comparison key for a process filesystem path."""
+
     return _normcase(str(Path(path).expanduser().resolve(strict=False)))
 
 
 def _path_is_relative_to(child: Path, root: str | Path) -> bool:
+    """Return whether child resolves inside root using platform path semantics."""
+
     child_key = _resolve_path_key(child)
     root_key = _resolve_path_key(root)
     try:
@@ -306,26 +327,38 @@ def _path_is_relative_to(child: Path, root: str | Path) -> bool:
 
 
 def _normalize_env_names(values: Sequence[str]) -> tuple[str, ...]:
+    """Normalize env allowlist names while dropping blank values."""
+
     return tuple(str(value).strip() for value in values if str(value).strip())
 
 
 def _is_bare_executable(executable: str) -> bool:
+    """Return true when an executable command relies on PATH lookup."""
+
     return not _has_path_separator(executable)
 
 
 def _has_path_separator(value: str) -> bool:
+    """Return true when value contains POSIX or Windows path separators."""
+
     return "/" in value or "\\" in value
 
 
 def _executable_basename(executable: str) -> str:
+    """Return the final path component for POSIX or Windows-style commands."""
+
     return executable.replace("\\", "/").rsplit("/", maxsplit=1)[-1].strip()
 
 
 def _normcase(value: str) -> str:
-    return os.path.normcase(value).lower()
+    """Normalize path case only on platforms where paths are case-insensitive."""
+
+    return os.path.normcase(value)
 
 
 def _coerce_text_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
+    """Coerce a config sequence into a tuple of non-empty text values."""
+
     if isinstance(value, str) or not isinstance(value, Sequence):
         raise ValueError(f"{field_name} must be a list of non-empty strings")
     items: list[str] = []
@@ -340,6 +373,8 @@ def _coerce_text_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
 
 
 def _coerce_path_tuple(value: Any, *, field_name: str) -> tuple[str | Path, ...]:
+    """Coerce a config sequence into a tuple of non-empty path values."""
+
     if isinstance(value, (str, Path)) or not isinstance(value, Sequence):
         raise ValueError(f"{field_name} must be a list of non-empty paths")
     items: list[str | Path] = []
@@ -353,6 +388,8 @@ def _coerce_path_tuple(value: Any, *, field_name: str) -> tuple[str | Path, ...]
 
 
 def _coerce_optional_path(value: Any, *, field_name: str) -> str | Path | None:
+    """Coerce an optional config value into a non-empty path or None."""
+
     if value is None:
         return None
     if not isinstance(value, (str, Path)):
@@ -363,6 +400,8 @@ def _coerce_optional_path(value: Any, *, field_name: str) -> str | Path | None:
 
 
 def _coerce_bool(value: Any, *, field_name: str) -> bool:
+    """Coerce a config value that must already be a boolean."""
+
     if not isinstance(value, bool):
         raise ValueError(f"{field_name} must be a boolean")
     return value

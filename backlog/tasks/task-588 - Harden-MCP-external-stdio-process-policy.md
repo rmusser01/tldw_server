@@ -1,7 +1,7 @@
 ---
-id: TASK-586
+id: TASK-588
 title: Harden MCP external stdio process policy
-status: In Progress
+status: Done
 labels:
 - mcp
 - security
@@ -42,21 +42,26 @@ Implementation plan saved at Docs/superpowers/plans/2026-06-01-mcp-stdio-process
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+PR review pass after rebasing onto latest `origin/dev`: reproduced the active
+Gemini/Qodo findings with failing tests, then fixed the basename allowlist
+bypass, POSIX case-sensitive path comparisons, explicit package-factory
+process-policy wrapping, and private helper docstrings. The rebase introduced a
+Backlog ID collision with the `dev` branch's Personas documentation task, so
+this branch task moved from `TASK-586` to `TASK-588`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added and verified MCP external stdio process-policy hardening. The package now has explicit, tested controls for command execution, cwd boundaries, PATH lookup, env inheritance, and safe error/status reporting before real upstream stdio processes are launched. Verification recorded: targeted pytest for stdio transport, gateway FastAPI package, gateway CLI package, and runtime package boundary passed (245 passed); Bandit on mcp_unified/federation and mcp_unified/gateway completed with no findings at /tmp/bandit_mcp_stdio_process_policy.json; git diff --check passed.
+Added and verified MCP external stdio process-policy hardening. The package now has explicit, tested controls for command execution, cwd boundaries, PATH lookup, env inheritance, and safe error/status reporting before real upstream stdio processes are launched. PR review fixes also deny basename allowlist bypasses, preserve POSIX case-sensitive path semantics, and apply configured policy when the package stdio factory is explicitly injected. Verification recorded: targeted pytest for stdio transport, gateway FastAPI package, gateway CLI package, and runtime package boundary passed (249 passed); Bandit on mcp_unified/federation and mcp_unified/gateway completed with no findings at /tmp/bandit_mcp_stdio_process_policy.json; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

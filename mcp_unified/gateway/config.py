@@ -418,21 +418,22 @@ def external_runtime_manager_from_storage(
 
     from .external_runtime import GatewayExternalRuntimeManager
 
-    resolved_transport_factory = transport_factory
-    if resolved_transport_factory is None:
-        if process_policy_configured:
+    resolved_transport_factory = (
+        create_external_transport if transport_factory is None else transport_factory
+    )
+    if (
+        process_policy_configured
+        and resolved_transport_factory is create_external_transport
+    ):
+        def _policy_transport_factory(
+            server: ExternalServerDefinition,
+        ) -> ExternalFederationTransport:
+            return create_external_transport(
+                server,
+                process_policy=process_policy,
+            )
 
-            def _policy_transport_factory(
-                server: ExternalServerDefinition,
-            ) -> ExternalFederationTransport:
-                return create_external_transport(
-                    server,
-                    process_policy=process_policy,
-                )
-
-            resolved_transport_factory = _policy_transport_factory
-        else:
-            resolved_transport_factory = create_external_transport
+        resolved_transport_factory = _policy_transport_factory
 
     return GatewayExternalRuntimeManager(
         external_registry_store=bundle.external_registry_store,

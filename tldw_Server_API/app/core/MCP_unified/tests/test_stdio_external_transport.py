@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +14,9 @@ import pytest
 from mcp_unified.federation.models import BrokeredExternalCredential
 from mcp_unified.federation.process_policy import (
     StdioProcessPolicy,
+    StdioProcessPolicyViolation,
     coerce_stdio_process_policy,
+    validate_stdio_process_policy,
 )
 from mcp_unified.federation.stdio_transport import (
     StdioExternalTransport,
@@ -324,6 +327,65 @@ def test_stdio_process_policy_allows_explicit_shell_executable() -> None:
     )
 
     assert transport.server_id == "docs"
+
+
+def test_stdio_process_policy_bare_allowlist_denies_path_with_same_basename(
+    tmp_path: Path,
+) -> None:
+    """Bare executable allowlist entries do not authorize arbitrary matching paths."""
+    suspicious_python = tmp_path / "untrusted" / "python"
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            _server(command=[str(suspicious_python), "--version"]),
+            process_policy=StdioProcessPolicy(allowed_executables=("python",)),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_executable_denied"
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows process paths are intentionally compared case-insensitively.",
+)
+def test_stdio_process_policy_posix_executable_paths_are_case_sensitive(
+    tmp_path: Path,
+) -> None:
+    """POSIX executable path allowlists keep distinct path casing separate."""
+    allowed_python = tmp_path / "Allowed" / "python"
+    denied_python = tmp_path / "allowed" / "python"
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            _server(command=[str(denied_python), "--version"]),
+            process_policy=StdioProcessPolicy(
+                allowed_executables=(str(allowed_python),),
+            ),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_executable_denied"
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows process paths are intentionally compared case-insensitively.",
+)
+def test_stdio_process_policy_posix_cwd_roots_are_case_sensitive(
+    tmp_path: Path,
+) -> None:
+    """POSIX cwd-root checks keep distinct path casing separate."""
+    with pytest.raises(StdioProcessPolicyViolation) as exc_info:
+        validate_stdio_process_policy(
+            server_id="docs",
+            command=(sys.executable, "-c", "pass"),
+            cwd=str(tmp_path / "Allowed" / "workspace"),
+            env_allowlist=(),
+            policy=StdioProcessPolicy(
+                allowed_cwd_roots=(tmp_path / "allowed",),
+            ),
+        )
+
+    assert getattr(exc_info.value, "reason_code", None) == "process_policy_cwd_denied"
 
 
 def test_stdio_process_policy_path_lookup_can_be_disabled() -> None:

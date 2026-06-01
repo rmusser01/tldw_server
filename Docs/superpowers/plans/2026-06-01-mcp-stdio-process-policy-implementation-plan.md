@@ -32,7 +32,7 @@
   - Update validate-config expectations and add configured-policy summary coverage.
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
   - Add public export coverage for the new policy contract.
-- Update Backlog task `TASK-586` with touched files and verification results.
+- Update Backlog task `TASK-588` with touched files and verification results.
 
 ## Stage 1: Policy Helper Module
 
@@ -418,7 +418,7 @@ git add mcp_unified/federation/process_policy.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py \
-  "backlog/tasks/task-586 - Harden-MCP-external-stdio-process-policy.md"
+  "backlog/tasks/task-588 - Harden-MCP-external-stdio-process-policy.md"
 git commit -m "feat(mcp): enforce stdio process policy"
 ```
 

@@ -2,7 +2,7 @@
 
 Date: 2026-06-01
 Status: Revised after design review
-Backlog: TASK-586
+Backlog: TASK-588
 
 ## Summary
 
@@ -133,7 +133,8 @@ Semantics:
 - `allowed_executables`: empty means no allowlist restriction. Entries may be
   executable names such as `python` or canonical absolute paths such as
   `/usr/bin/python3`. Entries with path separators are expanded and resolved
-  before comparison; bare-name entries match the normalized executable basename.
+  before comparison. Bare-name entries match only bare command names and never
+  authorize an absolute or relative command path with the same basename.
   Bare-name allowlists still trust the parent `PATH`, so strict deployments
   should use absolute executable paths and set `allow_path_lookup=false`.
 - `allowed_cwd_roots`: empty means cwd only needs to exist. When non-empty, the
@@ -213,7 +214,8 @@ process_policy: StdioProcessPolicy | Mapping[str, Any] | None = None
 
 `external_runtime_manager_from_storage()` should accept the same policy and
 wrap the transport factory only when a non-`None` config policy is supplied and
-the package-owned stdio factory is being used:
+the package-owned stdio factory is being used, including when a host explicitly
+passes `create_external_transport` instead of leaving the factory unset:
 
 ```python
 def factory(server: ExternalServerDefinition) -> ExternalFederationTransport:
