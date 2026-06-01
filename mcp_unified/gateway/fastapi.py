@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mcp_unified.storage.models import ExternalServerDefinition
@@ -46,6 +48,10 @@ from .jsonrpc import (
 )
 from .jsonrpc import (
     runtime_version as _runtime_version,
+)
+from .lifecycle import (
+    GatewayExternalRuntimeLifecycleConfig,
+    normalize_external_runtime_lifecycle_config,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
 from .runtime import GatewayRuntime
@@ -472,6 +478,114 @@ def _resolve_external_runtime_manager(
     return resolved
 
 
+def _resolve_external_runtime_lifecycle(
+    *,
+    external_runtime_lifecycle: (
+        GatewayExternalRuntimeLifecycleConfig | Mapping[str, Any] | None
+    ),
+    profile_bootstrap: GatewayProfileBootstrap | None,
+    external_runtime_manager: GatewayExternalRuntimeManager | None,
+) -> GatewayExternalRuntimeLifecycleConfig:
+    """Return resolved external runtime lifecycle behavior for one app."""
+
+    lifecycle = external_runtime_lifecycle
+    if lifecycle is None and profile_bootstrap is not None:
+        lifecycle = getattr(profile_bootstrap, "external_runtime_lifecycle", None)
+    resolved = normalize_external_runtime_lifecycle_config(lifecycle)
+    if resolved.enabled and external_runtime_manager is None:
+        raise ValueError(
+            "external runtime lifecycle requires external_runtime_manager or profile_bootstrap"
+        )
+    return resolved
+
+
+def _external_runtime_lifecycle_error_payload(
+    reason_code: str,
+    exc: BaseException,
+) -> dict[str, Any]:
+    """Return compact lifecycle failure metadata without traceback or secrets."""
+
+    return {
+        "ok": False,
+        "reason_code": reason_code,
+        "error_type": type(exc).__name__,
+        "error": "External runtime lifecycle operation failed",
+    }
+
+
+def _log_external_runtime_lifecycle_error(
+    reason_code: str,
+    exc: BaseException,
+) -> None:
+    """Log lifecycle failure context without exposing raw exception text."""
+
+    logger.opt(exception=True).error(
+        "External runtime lifecycle operation failed reason_code={!r} error_type={!r}",
+        reason_code,
+        type(exc).__name__,
+    )
+
+
+async def _run_external_runtime_startup(
+    manager: GatewayExternalRuntimeManager,
+) -> dict[str, Any]:
+    """Run best-effort external runtime startup reconciliation."""
+
+    try:
+        return await manager.reconcile()
+    except Exception as exc:  # noqa: BLE001 - app startup must report, not crash.
+        _log_external_runtime_lifecycle_error(
+            "external_runtime_startup_failed",
+            exc,
+        )
+        return _external_runtime_lifecycle_error_payload(
+            "external_runtime_startup_failed",
+            exc,
+        )
+
+
+async def _run_external_runtime_shutdown(
+    manager: GatewayExternalRuntimeManager,
+) -> dict[str, Any]:
+    """Run best-effort external runtime shutdown cleanup."""
+
+    try:
+        return await manager.stop_all()
+    except Exception as exc:  # noqa: BLE001 - shutdown cleanup is best-effort.
+        _log_external_runtime_lifecycle_error(
+            "external_runtime_shutdown_failed",
+            exc,
+        )
+        return _external_runtime_lifecycle_error_payload(
+            "external_runtime_shutdown_failed",
+            exc,
+        )
+
+
+def _create_external_runtime_lifespan(
+    *,
+    manager: GatewayExternalRuntimeManager,
+    lifecycle: GatewayExternalRuntimeLifecycleConfig,
+) -> Any:
+    """Create a FastAPI lifespan context for external runtime lifecycle work."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if lifecycle.reconcile_on_startup:
+            app.state.external_runtime_startup = await _run_external_runtime_startup(
+                manager,
+            )
+        try:
+            yield
+        finally:
+            if lifecycle.stop_on_shutdown:
+                app.state.external_runtime_shutdown = await _run_external_runtime_shutdown(
+                    manager,
+                )
+
+    return lifespan
+
+
 def _mount_profile_management_routes(
     router: APIRouter,
     manager: GatewayProfileManager,
@@ -884,10 +998,35 @@ def create_gateway_app(
     enable_external_registry_management: bool = False,
     external_runtime_manager: GatewayExternalRuntimeManager | None = None,
     enable_external_runtime_management: bool = False,
+    external_runtime_lifecycle: (
+        GatewayExternalRuntimeLifecycleConfig | Mapping[str, Any] | None
+    ) = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app exposing the standalone MCP gateway router."""
 
-    app = FastAPI(title="MCP Unified Gateway", version=_runtime_version(runtime))
+    resolved_external_runtime_manager = _resolve_external_runtime_manager(
+        external_runtime_manager=external_runtime_manager,
+        profile_bootstrap=profile_bootstrap,
+        enable_external_runtime_management=enable_external_runtime_management,
+    )
+    resolved_lifecycle = _resolve_external_runtime_lifecycle(
+        external_runtime_lifecycle=external_runtime_lifecycle,
+        profile_bootstrap=profile_bootstrap,
+        external_runtime_manager=resolved_external_runtime_manager,
+    )
+    lifespan = (
+        _create_external_runtime_lifespan(
+            manager=resolved_external_runtime_manager,
+            lifecycle=resolved_lifecycle,
+        )
+        if resolved_external_runtime_manager is not None and resolved_lifecycle.enabled
+        else None
+    )
+    app = FastAPI(
+        title="MCP Unified Gateway",
+        version=_runtime_version(runtime),
+        lifespan=lifespan,
+    )
     app.include_router(
         create_gateway_router(
             runtime,
@@ -896,7 +1035,7 @@ def create_gateway_app(
             enable_profile_management=enable_profile_management,
             external_registry_manager=external_registry_manager,
             enable_external_registry_management=enable_external_registry_management,
-            external_runtime_manager=external_runtime_manager,
+            external_runtime_manager=resolved_external_runtime_manager,
             enable_external_runtime_management=enable_external_runtime_management,
         ),
         prefix=prefix,

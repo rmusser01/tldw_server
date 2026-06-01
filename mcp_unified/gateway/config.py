@@ -24,6 +24,7 @@ from mcp_unified.profiles.store import (
 
 from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
 from .external_registry import GatewayExternalRegistryManager, GatewayStoreMetadata
+from .lifecycle import GatewayExternalRuntimeLifecycleConfig
 from .profiles import GatewayProfileStoreMetadata
 from .runtime import GatewayRuntime
 
@@ -75,12 +76,22 @@ class GatewayExternalRuntimeBootstrapConfig:
 
     enabled: bool = False
     transport_factory: GatewayExternalRuntimeFactoryKind = "stdio"
+    reconcile_on_startup: bool = False
+    stop_on_shutdown: bool = False
 
     def __post_init__(self) -> None:
         """Validate and normalize the configured runtime factory selector."""
 
         if not isinstance(self.enabled, bool):
             raise ValueError("external_runtime.enabled must be a boolean")
+        if not isinstance(self.reconcile_on_startup, bool):
+            raise ValueError("external_runtime.reconcile_on_startup must be a boolean")
+        if not isinstance(self.stop_on_shutdown, bool):
+            raise ValueError("external_runtime.stop_on_shutdown must be a boolean")
+        if not self.enabled and (self.reconcile_on_startup or self.stop_on_shutdown):
+            raise ValueError(
+                "external_runtime.enabled must be true when lifecycle hooks are enabled"
+            )
 
         normalized_factory = str(self.transport_factory).strip().lower()
         if normalized_factory != "stdio":
@@ -92,6 +103,14 @@ class GatewayExternalRuntimeBootstrapConfig:
             self,
             "transport_factory",
             cast(GatewayExternalRuntimeFactoryKind, normalized_factory),
+        )
+
+    def lifecycle_config(self) -> GatewayExternalRuntimeLifecycleConfig:
+        """Return lifecycle preferences as the shared app lifecycle config."""
+
+        return GatewayExternalRuntimeLifecycleConfig(
+            reconcile_on_startup=self.reconcile_on_startup,
+            stop_on_shutdown=self.stop_on_shutdown,
         )
 
 
@@ -233,6 +252,7 @@ async def bootstrap_profile_gateway_from_config(
         default_preset_id=resolved_config.default_preset_id,
         external_registry_manager=external_registry_manager,
         external_runtime_manager=resolved_external_runtime_manager,
+        external_runtime_lifecycle=resolved_config.external_runtime.lifecycle_config(),
     )
 
 

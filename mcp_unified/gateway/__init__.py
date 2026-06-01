@@ -16,6 +16,7 @@ from .config import (
     bootstrap_profile_gateway_from_config,
     load_gateway_profile_bootstrap_config,
 )
+from .lifecycle import GatewayExternalRuntimeLifecycleConfig
 from .profile_runtime import ProfileAwareGatewayRuntime
 from .profiles import (
     GatewayProfileManagementError,
@@ -36,6 +37,7 @@ __all__ = [
     "GatewayPolicyDenied",
     "GatewayConfigFormat",
     "GatewayExternalRuntimeBootstrapConfig",
+    "GatewayExternalRuntimeLifecycleConfig",
     "GatewayExternalRuntimeError",
     "GatewayExternalRuntimeManager",
     "GatewayProfileBootstrap",

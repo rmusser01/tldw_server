@@ -4,6 +4,7 @@ import asyncio
 import json
 from typing import Any
 
+import mcp_unified.gateway.external_runtime as gateway_external_runtime
 import pytest
 from mcp_unified.federation.installers import ExternalServerInstaller
 from mcp_unified.federation.models import (
@@ -16,6 +17,7 @@ from mcp_unified.gateway.external_runtime import (
     GatewayExternalRuntimeError,
     GatewayExternalRuntimeManager,
 )
+from mcp_unified.interfaces.storage import ExternalRegistryStoreUnavailableError
 from mcp_unified.storage.models import AuditEvent, ExternalServerDefinition
 
 
@@ -63,6 +65,20 @@ class InMemoryExternalRegistryStore:
             server.model_copy(deep=True)
             for server in sorted(rows, key=lambda item: item.id)
         ]
+
+
+class ToggleOutageExternalRegistryStore(InMemoryExternalRegistryStore):
+    """Registry store fake that can fail get_server calls after startup."""
+
+    def __init__(self, servers: list[ExternalServerDefinition] | None = None) -> None:
+        super().__init__(servers)
+        self.fail_get_server = False
+
+    async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
+        """Return one server definition or simulate store unavailability."""
+        if self.fail_get_server:
+            raise ExternalRegistryStoreUnavailableError("registry unavailable")
+        return await super().get_server(server_id)
 
 
 class RecordingAuditStore:
@@ -165,6 +181,21 @@ class RecordingExternalTransport:
         self.calls.append((tool_name, dict(arguments or {})))
         self.runtime_auth_seen = None if runtime_auth is None else runtime_auth.copy()
         return self.result.copy()
+
+
+class FakeLogger:
+    """Logger fake that records structured exception log calls."""
+
+    def __init__(self) -> None:
+        self.opt_calls: list[dict[str, Any]] = []
+        self.error_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def opt(self, **kwargs: Any) -> FakeLogger:
+        self.opt_calls.append(kwargs)
+        return self
+
+    def error(self, message: str, *args: Any) -> None:
+        self.error_calls.append((message, args))
 
 
 class BlockingConnectTransport(RecordingExternalTransport):
@@ -363,6 +394,145 @@ async def test_external_runtime_stop_is_idempotent_and_clears_tools() -> None:
     assert rows["servers"][0]["status"] == "stopped"
     assert rows["servers"][0]["tool_count"] == 0
     assert transport.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_stop_all_stops_active_transports_and_clears_tools() -> None:
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(),
+            _server(id="docs", name="Docs", command=["fake-docs-mcp"]),
+        ]
+    )
+    transports = {
+        "research": RecordingExternalTransport(
+            server_id="research",
+            tools=[ExternalToolDefinition(name="search")],
+        ),
+        "docs": RecordingExternalTransport(
+            server_id="docs",
+            tools=[ExternalToolDefinition(name="lookup")],
+        ),
+    }
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: transports[server.id],
+    )
+    await manager.start_server("research")
+    await manager.start_server("docs")
+
+    payload = await manager.stop_all()
+    rows = await manager.list_runtime_servers()
+    tools = await manager.list_virtual_tools()
+
+    assert payload == {
+        "ok": True,
+        "reason_code": "external_runtime_stopped",
+        "stopped_servers": 2,
+        "total_servers": 2,
+        "errors": {},
+    }
+    assert {row["id"]: row["status"] for row in rows["servers"]} == {
+        "docs": "stopped",
+        "research": "stopped",
+    }
+    assert tools == []
+    assert transports["research"].close_count == 1
+    assert transports["docs"].close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_stop_all_does_not_require_registry_store_for_active_transports() -> None:
+    store = ToggleOutageExternalRegistryStore(
+        [
+            _server(),
+            _server(id="docs", name="Docs", command=["fake-docs-mcp"]),
+        ]
+    )
+    transports = {
+        "research": RecordingExternalTransport(
+            server_id="research",
+            tools=[ExternalToolDefinition(name="search")],
+        ),
+        "docs": RecordingExternalTransport(
+            server_id="docs",
+            tools=[ExternalToolDefinition(name="lookup")],
+        ),
+    }
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: transports[server.id],
+    )
+    await manager.start_server("research")
+    await manager.start_server("docs")
+    store.fail_get_server = True
+
+    payload = await manager.stop_all()
+    tools = await manager.list_virtual_tools()
+
+    assert payload == {
+        "ok": True,
+        "reason_code": "external_runtime_stopped",
+        "stopped_servers": 2,
+        "total_servers": 2,
+        "errors": {},
+    }
+    assert tools == []
+    assert transports["research"].close_count == 1
+    assert transports["docs"].close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_stop_all_continues_after_unexpected_stop_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ExplodingStopRuntimeManager(GatewayExternalRuntimeManager):
+        async def stop_server(self, server_id: str) -> dict[str, Any]:
+            if server_id == "research":
+                raise RuntimeError("stop failed")
+            return await super().stop_server(server_id)
+
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(gateway_external_runtime, "logger", fake_logger)
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(),
+            _server(id="docs", name="Docs", command=["fake-docs-mcp"]),
+        ]
+    )
+    transports = {
+        "research": RecordingExternalTransport(
+            server_id="research",
+            tools=[ExternalToolDefinition(name="search")],
+        ),
+        "docs": RecordingExternalTransport(
+            server_id="docs",
+            tools=[ExternalToolDefinition(name="lookup")],
+        ),
+    }
+    manager = ExplodingStopRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: transports[server.id],
+    )
+    await manager.start_server("research")
+    await manager.start_server("docs")
+
+    payload = await manager.stop_all()
+
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "external_runtime_stopped"
+    assert payload["stopped_servers"] == 1
+    assert payload["total_servers"] == 2
+    assert payload["errors"]["research"]["reason_code"] == "external_server_stop_failed"
+    assert payload["errors"]["research"]["error_type"] == "RuntimeError"
+    assert fake_logger.opt_calls == [{"exception": True}]
+    assert fake_logger.error_calls == [
+        (
+            "External runtime stop failed server_id={!r} error_type={!r}",
+            ("research", "RuntimeError"),
+        )
+    ]
+    assert transports["docs"].close_count == 1
 
 
 @pytest.mark.asyncio
