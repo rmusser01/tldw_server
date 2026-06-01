@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import math
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -117,10 +118,12 @@ class StdioExternalTransport:
                     "initialize",
                     {
                         "protocolVersion": _MCP_PROTOCOL_VERSION,
+                        "capabilities": {},
                         "clientInfo": _CLIENT_INFO,
                     },
                     timeout_s=self._connect_timeout_s,
                 )
+                await self._notify("notifications/initialized", {})
             except Exception:
                 await self._close_process_unlocked()
                 raise
@@ -252,24 +255,23 @@ class StdioExternalTransport:
         timeout_s: float | None = None,
         raise_on_error: bool = True,
     ) -> dict[str, Any]:
-        proc = self._proc
-        if proc is None or proc.stdin is None or proc.stdout is None:
-            raise self._error(
-                "External stdio process is not connected",
-                reason_code="not_connected",
-                method=method,
-            )
-
-        request_id = self._next_request_id
-        self._next_request_id += 1
-        payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": deepcopy(params or {}),
-        }
-
         async with self._request_lock:
+            proc = self._proc
+            if proc is None or proc.stdin is None or proc.stdout is None:
+                raise self._error(
+                    "External stdio process is not connected",
+                    reason_code="not_connected",
+                    method=method,
+                )
+
+            request_id = self._next_request_id
+            self._next_request_id += 1
+            payload = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": deepcopy(params or {}),
+            }
             try:
                 encoded = json.dumps(payload, separators=(",", ":"))
             except (TypeError, ValueError) as exc:
@@ -289,18 +291,18 @@ class StdioExternalTransport:
                 proc.stdin.write((encoded + "\n").encode("utf-8"))
                 await proc.stdin.drain()
                 response = await asyncio.wait_for(
-                    self._read_response(request_id),
+                    self._read_response(proc, request_id),
                     timeout=timeout_s or self._request_timeout_s,
                 )
             except asyncio.TimeoutError as exc:
-                await self._close_process_unlocked()
+                self._schedule_process_cleanup(proc)
                 raise self._error(
                     f"External stdio request timed out for method '{method}'",
                     reason_code="request_timeout",
                     method=method,
                 ) from exc
             except (BrokenPipeError, ConnectionError) as exc:
-                self._initialized = False
+                self._schedule_process_cleanup(proc)
                 raise self._error(
                     "External stdio process connection closed",
                     reason_code="connection_closed",
@@ -315,9 +317,61 @@ class StdioExternalTransport:
             )
         return response
 
-    async def _read_response(self, request_id: int) -> dict[str, Any]:
-        proc = self._proc
-        if proc is None or proc.stdout is None:
+    async def _notify(self, method: str, params: dict[str, Any]) -> None:
+        async with self._request_lock:
+            proc = self._proc
+            if proc is None or proc.stdin is None:
+                raise self._error(
+                    "External stdio process is not connected",
+                    reason_code="not_connected",
+                    method=method,
+                )
+            payload = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": deepcopy(params or {}),
+            }
+            try:
+                encoded = json.dumps(payload, separators=(",", ":"))
+            except (TypeError, ValueError) as exc:
+                raise self._error(
+                    "External stdio notification is not JSON serializable",
+                    reason_code="invalid_request",
+                    method=method,
+                ) from exc
+            if "\n" in encoded:
+                raise self._error(
+                    "External stdio notification contains an invalid newline",
+                    reason_code="invalid_request",
+                    method=method,
+                )
+            try:
+                proc.stdin.write((encoded + "\n").encode("utf-8"))
+                await asyncio.wait_for(
+                    proc.stdin.drain(),
+                    timeout=self._request_timeout_s,
+                )
+            except asyncio.TimeoutError as exc:
+                self._schedule_process_cleanup(proc)
+                raise self._error(
+                    f"External stdio notification timed out for method '{method}'",
+                    reason_code="request_timeout",
+                    method=method,
+                ) from exc
+            except (BrokenPipeError, ConnectionError) as exc:
+                self._schedule_process_cleanup(proc)
+                raise self._error(
+                    "External stdio process connection closed",
+                    reason_code="connection_closed",
+                    method=method,
+                ) from exc
+
+    async def _read_response(
+        self,
+        proc: asyncio.subprocess.Process,
+        request_id: int,
+    ) -> dict[str, Any]:
+        if proc.stdout is None:
             raise self._error(
                 "External stdio process stdout is not available",
                 reason_code="not_connected",
@@ -326,7 +380,8 @@ class StdioExternalTransport:
         while True:
             line = await proc.stdout.readline()
             if not line:
-                self._initialized = False
+                if self._proc is proc:
+                    self._initialized = False
                 raise self._error(
                     "External stdio process connection closed",
                     reason_code="connection_closed",
@@ -348,6 +403,22 @@ class StdioExternalTransport:
 
         stderr_task = self._stderr_task
         self._stderr_task = None
+        await self._terminate_process(proc, stderr_task)
+
+    def _schedule_process_cleanup(self, proc: asyncio.subprocess.Process) -> None:
+        stderr_task = self._stderr_task if self._proc is proc else None
+        if self._proc is proc:
+            self._proc = None
+            self._stderr_task = None
+        self._initialized = False
+        task = asyncio.create_task(self._terminate_process(proc, stderr_task))
+        task.add_done_callback(self._discard_cleanup_result)
+
+    async def _terminate_process(
+        self,
+        proc: asyncio.subprocess.Process | None,
+        stderr_task: asyncio.Task[None] | None,
+    ) -> None:
         if stderr_task is not None:
             stderr_task.cancel()
 
@@ -357,18 +428,37 @@ class StdioExternalTransport:
                 with contextlib.suppress(Exception):
                     stdin.close()
             if proc.returncode is None:
-                proc.terminate()
                 try:
-                    await asyncio.wait_for(proc.wait(), timeout=self._close_timeout_s)
+                    if proc.returncode is None:
+                        proc.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    if proc.returncode is None:
+                        await asyncio.wait_for(proc.wait(), timeout=self._close_timeout_s)
                 except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
+                    try:
+                        if proc.returncode is None:
+                            proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    with contextlib.suppress(ProcessLookupError):
+                        await proc.wait()
                 except ProcessLookupError:
                     pass
 
         if stderr_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await stderr_task
+
+    @staticmethod
+    def _discard_cleanup_result(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001 - background cleanup must not leak task warnings.
+            return
 
     async def _drain_stderr(self) -> None:
         proc = self._proc
@@ -422,6 +512,13 @@ class StdioExternalTransport:
                 reason_code="missing_command",
                 server_id=server.id,
             )
+        env_names = {str(name).strip() for name in server.env_allowlist}
+        if cls._requires_path_lookup(command[0]) and "PATH" not in env_names:
+            raise StdioExternalTransportError(
+                "Command requires PATH; allowlist PATH or use an absolute executable path",
+                reason_code="invalid_command",
+                server_id=server.id,
+            )
         return command
 
     @classmethod
@@ -438,13 +535,25 @@ class StdioExternalTransport:
 
     @classmethod
     def _positive_timeout(cls, value: float, field_name: str) -> float:
-        timeout = float(value)
-        if timeout <= 0:
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError) as exc:
             raise StdioExternalTransportError(
-                f"External stdio transport {field_name} must be positive",
+                f"External stdio transport {field_name} must be a finite positive number",
+                reason_code="invalid_timeout",
+            ) from exc
+        if timeout <= 0 or not math.isfinite(timeout):
+            raise StdioExternalTransportError(
+                f"External stdio transport {field_name} must be a finite positive number",
                 reason_code="invalid_timeout",
             )
         return timeout
+
+    @staticmethod
+    def _requires_path_lookup(executable: str) -> bool:
+        if Path(executable).is_absolute():
+            return False
+        return not any(separator and separator in executable for separator in (os.sep, os.altsep))
 
     @staticmethod
     def _runtime_auth_meta(

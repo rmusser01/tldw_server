@@ -1,9 +1,13 @@
+"""Subprocess-backed tests for the package upstream stdio MCP transport."""
+
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from pathlib import Path
 from textwrap import dedent
+from time import monotonic
 
 import pytest
 from mcp_unified.federation.models import BrokeredExternalCredential
@@ -17,8 +21,16 @@ from mcp_unified.storage import ExternalServerDefinition
 _STUB_SERVER_SCRIPT = r"""
 import json
 import os
+import signal
 import sys
 import time
+
+
+IGNORE_SIGTERM = False
+initialized_notification = False
+
+if IGNORE_SIGTERM:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
 def send(payload):
@@ -36,6 +48,13 @@ for raw in sys.stdin:
     params = message.get("params") or {}
 
     if method == "initialize":
+        if not isinstance(params.get("capabilities"), dict):
+            send({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32602, "message": "missing capabilities"},
+            })
+            continue
         send({
             "jsonrpc": "2.0",
             "id": request_id,
@@ -43,6 +62,18 @@ for raw in sys.stdin:
                 "protocolVersion": "2024-11-05",
                 "serverInfo": {"name": "stub-stdio"},
             },
+        })
+        continue
+
+    if method == "notifications/initialized":
+        initialized_notification = True
+        continue
+
+    if not initialized_notification:
+        send({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": -32002, "message": "session not initialized"},
         })
         continue
 
@@ -157,9 +188,13 @@ for raw in sys.stdin:
 """
 
 
-def _write_stub_server(tmp_path: Path) -> str:
+def _write_stub_server(tmp_path: Path, *, ignore_sigterm: bool = False) -> str:
+    """Write a temporary MCP-like stdio server for transport tests."""
     script_path = tmp_path / "stub_stdio_mcp_server.py"
-    script_path.write_text(dedent(_STUB_SERVER_SCRIPT), encoding="utf-8")
+    script = dedent(_STUB_SERVER_SCRIPT)
+    if ignore_sigterm:
+        script = script.replace("IGNORE_SIGTERM = False", "IGNORE_SIGTERM = True")
+    script_path.write_text(script, encoding="utf-8")
     return str(script_path)
 
 
@@ -169,6 +204,7 @@ def _server(
     cwd: str | None = None,
     env_allowlist: list[str] | None = None,
 ) -> ExternalServerDefinition:
+    """Build a stdio external server definition for tests."""
     return ExternalServerDefinition(
         id="docs",
         name="Docs",
@@ -180,6 +216,7 @@ def _server(
 
 
 def test_stdio_transport_import_does_not_import_host_package() -> None:
+    """Importing the package stdio transport must not import host code."""
     code = (
         "import sys; import mcp_unified.federation.stdio_transport; "
         "print('tldw_Server_API' in sys.modules)"
@@ -195,6 +232,7 @@ def test_stdio_transport_import_does_not_import_host_package() -> None:
 
 
 def test_stdio_transport_rejects_non_stdio_definition() -> None:
+    """The stdio transport rejects non-stdio server definitions."""
     server = ExternalServerDefinition(
         id="ws",
         name="WebSocket",
@@ -209,6 +247,7 @@ def test_stdio_transport_rejects_non_stdio_definition() -> None:
 
 
 def test_stdio_transport_rejects_empty_command_even_when_definition_disabled() -> None:
+    """The transport validates its own command contract for disabled rows too."""
     server = ExternalServerDefinition(
         id="disabled",
         name="Disabled",
@@ -224,6 +263,7 @@ def test_stdio_transport_rejects_empty_command_even_when_definition_disabled() -
 
 
 def test_stdio_transport_rejects_missing_cwd(tmp_path: Path) -> None:
+    """Configured cwd paths must resolve to existing directories."""
     server = _server(
         command=[sys.executable, "-c", "pass"],
         cwd=str(tmp_path / "missing"),
@@ -235,7 +275,31 @@ def test_stdio_transport_rejects_missing_cwd(tmp_path: Path) -> None:
     assert exc_info.value.reason_code == "invalid_cwd"
 
 
+def test_stdio_transport_rejects_bare_command_without_path_allowlist() -> None:
+    """Bare executable names require PATH allowlisting for predictable launch."""
+    server = _server(command=["python"])
+
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(server)
+
+    assert exc_info.value.reason_code == "invalid_command"
+    assert "PATH" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, "bad", float("nan"), float("inf")])
+def test_stdio_transport_rejects_invalid_request_timeouts(timeout: object) -> None:
+    """Timeout configuration errors are reported as structured transport errors."""
+    with pytest.raises(StdioExternalTransportError) as exc_info:
+        StdioExternalTransport(
+            _server(command=[sys.executable, "-c", "pass"]),
+            request_timeout_s=timeout,  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.reason_code == "invalid_timeout"
+
+
 def test_create_external_transport_factory_returns_stdio_transport() -> None:
+    """The package factory returns the stdio transport for stdio definitions."""
     transport = create_external_transport(_server(command=[sys.executable, "-c", "pass"]))
 
     assert isinstance(transport, StdioExternalTransport)
@@ -243,6 +307,7 @@ def test_create_external_transport_factory_returns_stdio_transport() -> None:
 
 @pytest.mark.asyncio
 async def test_stdio_transport_connect_list_call_and_close(tmp_path: Path) -> None:
+    """The transport initializes, sends initialized notification, lists, calls, and closes."""
     script_path = _write_stub_server(tmp_path)
     transport = StdioExternalTransport(
         _server(command=[sys.executable, "-u", script_path]),
@@ -284,6 +349,7 @@ async def test_stdio_transport_uses_only_allowlisted_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Child process environments include only explicitly allowlisted variables."""
     script_path = _write_stub_server(tmp_path)
     monkeypatch.setenv("MCP_ALLOWED", "yes")
     monkeypatch.setenv("MCP_BLOCKED", "no")
@@ -307,6 +373,7 @@ async def test_stdio_transport_uses_only_allowlisted_environment(
 async def test_stdio_transport_sends_runtime_auth_in_meta_without_leaking_secret(
     tmp_path: Path,
 ) -> None:
+    """Runtime credentials are passed through call metadata without leaking in errors."""
     script_path = _write_stub_server(tmp_path)
     secret = "super-secret-token"
     transport = StdioExternalTransport(
@@ -347,7 +414,32 @@ async def test_stdio_transport_sends_runtime_auth_in_meta_without_leaking_secret
 
 
 @pytest.mark.asyncio
+async def test_stdio_transport_timeout_does_not_wait_for_shutdown_timeout(tmp_path: Path) -> None:
+    """Request timeout returns before asynchronous process cleanup finishes."""
+    script_path = _write_stub_server(tmp_path, ignore_sigterm=True)
+    transport = StdioExternalTransport(
+        _server(command=[sys.executable, "-u", script_path]),
+        request_timeout_s=0.05,
+        close_timeout_s=0.4,
+    )
+
+    try:
+        await transport.connect()
+        started_at = monotonic()
+        with pytest.raises(StdioExternalTransportError) as exc_info:
+            await transport.call_tool("docs.slow", {})
+        elapsed = monotonic() - started_at
+
+        assert exc_info.value.reason_code == "request_timeout"
+        assert elapsed < 0.25
+        await asyncio.sleep(0.5)
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
 async def test_stdio_transport_health_marks_exited_process_disconnected(tmp_path: Path) -> None:
+    """Health checks mark a process that exited after a call as disconnected."""
     script_path = _write_stub_server(tmp_path)
     transport = StdioExternalTransport(_server(command=[sys.executable, "-u", script_path]))
 
