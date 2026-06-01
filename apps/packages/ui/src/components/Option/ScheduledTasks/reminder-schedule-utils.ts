@@ -143,6 +143,13 @@ const getCronFieldOrderValue = (
   return Number(value)
 }
 
+const isNamedCronFieldValue = (
+  value: string,
+  options: CronFieldOptions
+): boolean => {
+  return !/^\d+$/.test(value) && options.names?.[value.toUpperCase()] !== undefined
+}
+
 const validateCronFieldBase = (
   base: string,
   options: CronFieldOptions
@@ -186,6 +193,13 @@ const validateCronFieldBase = (
     if (!startResult.valid) return startResult
     const endResult = parseCronFieldValue(end, options)
     if (!endResult.valid) return endResult
+
+    if (/^\d+$/.test(start) && isNamedCronFieldValue(end, options)) {
+      return {
+        valid: false,
+        error: `Cron ${options.label} range cannot start with a number and end with a name.`
+      }
+    }
 
     const startOrder = getCronFieldOrderValue(start, options)
     const endOrder = getCronFieldOrderValue(end, options)

@@ -83,6 +83,17 @@ describe("reminder schedule utilities", () => {
     })
   })
 
+  it("rejects APScheduler-invalid numeric-to-named ranges", () => {
+    expect(validateCronExpression("0 9 * 1-dec mon")).toEqual({
+      valid: false,
+      error: "Cron month range cannot start with a number and end with a name."
+    })
+    expect(validateCronExpression("0 9 * * 0-sun")).toEqual({
+      valid: false,
+      error: "Cron day of week range cannot start with a number and end with a name."
+    })
+  })
+
   it("rejects scheduler-invalid cron ranges", () => {
     expect(validateCronExpression("99 99 * * *")).toEqual({
       valid: false,

@@ -36,6 +36,8 @@ documentation:
   35 tests.'
 - 'Final review follow-up: rejected APScheduler-invalid reversed named weekday and
   month ranges; focused utility/page Vitest passed 37 tests.'
+- 'Final review follow-up: rejected APScheduler-invalid numeric-to-name month and
+  weekday ranges; focused utility/page Vitest passed 38 tests.'
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
