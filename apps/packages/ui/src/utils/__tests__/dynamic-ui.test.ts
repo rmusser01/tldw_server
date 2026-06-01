@@ -27,6 +27,36 @@ describe("dynamic UI utilities", () => {
     })
   })
 
+  it("rejects envelopes with non-strict JSON state", () => {
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+
+    expect(
+      normalizeDynamicUIEnvelope({
+        renderer: "openui",
+        version: "v1",
+        source: "root = <Card />",
+        state: { callback: () => undefined }
+      })
+    ).toBeNull()
+    expect(
+      normalizeDynamicUIEnvelope({
+        renderer: "openui",
+        version: "v1",
+        source: "root = <Card />",
+        state: { selected: new Map([["a", "b"]]) }
+      })
+    ).toBeNull()
+    expect(
+      normalizeDynamicUIEnvelope({
+        renderer: "openui",
+        version: "v1",
+        source: "root = <Card />",
+        state: circular
+      })
+    ).toBeNull()
+  })
+
   it("rejects unknown renderers and empty source", () => {
     expect(normalizeDynamicUIEnvelope({ renderer: "html", source: "<script />" })).toBeNull()
     expect(normalizeDynamicUIEnvelope({ renderer: "openui", source: "" })).toBeNull()
@@ -84,6 +114,22 @@ describe("dynamic UI utilities", () => {
     expect(shouldBlockDynamicUIActionValues({ settings: { privateKey: "abc123" } })).toBe(true)
     expect(shouldBlockDynamicUIActionValues([{ config: { access_key: "abc123" } }])).toBe(true)
     expect(shouldBlockDynamicUIActionValues({ auth: { keys: [{ key: "abc123" }] } })).toBe(true)
+  })
+
+  it("blocks plural and authorization sensitive key variants", () => {
+    expect(shouldBlockDynamicUIActionValues({ apiKeys: ["abc123"] })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues({ settings: { accessKeys: ["abc123"] } })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues({ credentials: { username: "Ada" } })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues([{ authorization: "Bearer abc123" }])).toBe(true)
+  })
+
+  it("blocks when sensitive action value inspection exceeds the depth limit", () => {
+    expect(shouldBlockDynamicUIActionValues({ harmless: "value" }, 9)).toBe(true)
+
+    const deeplyNestedSensitiveValue = {
+      a: { b: { c: { d: { e: { f: { g: { h: { i: { token: "abc123" } } } } } } } } }
+    }
+    expect(shouldBlockDynamicUIActionValues(deeplyNestedSensitiveValue)).toBe(true)
   })
 
   it("rejects non-serializable action values without throwing", () => {
