@@ -1,4 +1,4 @@
-"""Standalone non-spawning external federation shell."""
+"""Standalone external federation contracts and transports."""
 
 from . import catalog_loader, config_schema
 from .catalog_loader import get_catalog_entry, list_catalog_entries, load_mcp_catalog
@@ -30,6 +30,7 @@ from .models import (
     MCPCatalogEntry,
     VirtualExternalTool,
 )
+from .process_policy import StdioProcessPolicy, coerce_stdio_process_policy
 from .stdio_transport import (
     StdioExternalTransport,
     StdioExternalTransportError,
@@ -64,9 +65,11 @@ __all__ = [
     "NullExternalServerInstaller",
     "StdioExternalTransport",
     "StdioExternalTransportError",
+    "StdioProcessPolicy",
     "VirtualExternalTool",
     "catalog_loader",
     "config_schema",
+    "coerce_stdio_process_policy",
     "create_external_transport",
     "get_catalog_entry",
     "list_catalog_entries",

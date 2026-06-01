@@ -7,6 +7,7 @@ import contextlib
 import json
 import math
 import os
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,12 @@ from mcp_unified.federation.models import (
     BrokeredExternalCredential,
     ExternalToolCallResult,
     ExternalToolDefinition,
+)
+from mcp_unified.federation.process_policy import (
+    StdioProcessPolicy,
+    StdioProcessPolicyViolation,
+    coerce_stdio_process_policy,
+    validate_stdio_process_policy,
 )
 from mcp_unified.storage.models import ExternalServerDefinition
 
@@ -58,11 +65,36 @@ class StdioExternalTransport:
         request_timeout_s: float = _DEFAULT_REQUEST_TIMEOUT_S,
         close_timeout_s: float = _DEFAULT_CLOSE_TIMEOUT_S,
         health_timeout_s: float = _DEFAULT_HEALTH_TIMEOUT_S,
+        process_policy: StdioProcessPolicy | Mapping[str, Any] | None = None,
     ) -> None:
         self._server = server.model_copy(deep=True)
         self.server_id = self._server.id
         self._command = self._validate_command(self._server)
-        self._cwd = self._resolve_cwd(self._server.cwd)
+        self._process_policy = coerce_stdio_process_policy(process_policy)
+        self._cwd = self._resolve_cwd(
+            self._server.cwd
+            if self._server.cwd is not None
+            else (
+                str(self._process_policy.default_cwd)
+                if self._process_policy.default_cwd is not None
+                else None
+            )
+        )
+        try:
+            process_decision = validate_stdio_process_policy(
+                server_id=self.server_id,
+                command=self._command,
+                cwd=self._cwd,
+                env_allowlist=self._server.env_allowlist,
+                policy=self._process_policy,
+            )
+        except StdioProcessPolicyViolation as exc:
+            raise self._error(
+                "External stdio process policy denied launch",
+                reason_code=exc.reason_code,
+                details=exc.details,
+            ) from exc
+        self._allowed_env_names = process_decision.allowed_env_names
         self._connect_timeout_s = self._positive_timeout(connect_timeout_s, "connect_timeout_s")
         self._request_timeout_s = self._positive_timeout(request_timeout_s, "request_timeout_s")
         self._close_timeout_s = self._positive_timeout(close_timeout_s, "close_timeout_s")
@@ -472,9 +504,18 @@ class StdioExternalTransport:
 
     def _build_child_env(self) -> dict[str, str]:
         child_env: dict[str, str] = {}
+        allowed_env_names = (
+            None
+            if self._allowed_env_names is None
+            else set(self._allowed_env_names)
+        )
         for name in self._server.env_allowlist:
             env_name = str(name).strip()
-            if env_name and env_name in os.environ:
+            if (
+                env_name
+                and env_name in os.environ
+                and (allowed_env_names is None or env_name in allowed_env_names)
+            ):
                 child_env[env_name] = os.environ[env_name]
         return child_env
 
@@ -571,10 +612,14 @@ class StdioExternalTransport:
         return payload
 
 
-def create_external_transport(server: ExternalServerDefinition) -> StdioExternalTransport:
+def create_external_transport(
+    server: ExternalServerDefinition,
+    *,
+    process_policy: StdioProcessPolicy | Mapping[str, Any] | None = None,
+) -> StdioExternalTransport:
     """Create a package-owned external transport for a supported server definition."""
     if server.transport == "stdio":
-        return StdioExternalTransport(server)
+        return StdioExternalTransport(server, process_policy=process_policy)
     raise StdioExternalTransportError(
         "External server transport is not supported by the package factory",
         reason_code="unsupported_transport",

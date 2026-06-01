@@ -58,6 +58,15 @@ def test_gateway_cli_validate_config_reports_success_json(
         "default_profile_id": None,
         "external_runtime": {
             "enabled": False,
+            "process_policy": {
+                "allow_path_lookup": True,
+                "allowed_cwd_roots": 0,
+                "allowed_env_names": None,
+                "allowed_executables": 0,
+                "configured": False,
+                "default_cwd": False,
+                "reject_shell_executables": True,
+            },
             "reconcile_on_startup": False,
             "stop_on_shutdown": False,
             "transport_factory": "stdio",
@@ -66,6 +75,67 @@ def test_gateway_cli_validate_config_reports_success_json(
         "path": str(config_path),
         "profiles": 0,
         "store": {"kind": "memory", "sqlite_path": None},
+    }
+
+
+def test_gateway_cli_validate_config_reports_process_policy_summary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Validate-config reports policy counts without echoing path details."""
+
+    secret_path = tmp_path / "workspace"
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "external_runtime": {
+                    "enabled": True,
+                    "process_policy": {
+                        "allowed_executables": ["/usr/bin/python3", "node"],
+                        "allowed_cwd_roots": [str(secret_path)],
+                        "allowed_env_names": ["PATH", "TOKEN"],
+                        "allow_path_lookup": False,
+                        "default_cwd": str(secret_path),
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["external_runtime"]["process_policy"] == {
+        "allow_path_lookup": False,
+        "allowed_cwd_roots": 1,
+        "allowed_env_names": 2,
+        "allowed_executables": 2,
+        "configured": True,
+        "default_cwd": True,
+        "reject_shell_executables": True,
+    }
+    assert str(secret_path) not in captured.out
+
+
+def test_gateway_cli_process_policy_summary_handles_missing_policy() -> None:
+    """Process-policy summaries keep stable keys for older runtime config shapes."""
+
+    runtime = type("LegacyRuntimeConfig", (), {})()
+
+    assert gateway_cli._process_policy_summary(runtime) == {
+        "allow_path_lookup": False,
+        "allowed_cwd_roots": 0,
+        "allowed_env_names": None,
+        "allowed_executables": 0,
+        "configured": False,
+        "default_cwd": False,
+        "reject_shell_executables": False,
     }
 
 

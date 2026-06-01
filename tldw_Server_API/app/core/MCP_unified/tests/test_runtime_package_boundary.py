@@ -148,6 +148,18 @@ def test_federation_installer_contracts_are_public_exports() -> None:
     assert package_federation.NullExternalServerInstaller is package_installers.NullExternalServerInstaller
 
 
+def test_federation_process_policy_contracts_are_public_exports() -> None:
+    """Stdio process-policy contracts should be public federation exports."""
+    package_federation = importlib.import_module("mcp_unified.federation")
+    package_policy = importlib.import_module("mcp_unified.federation.process_policy")
+
+    assert package_federation.StdioProcessPolicy is package_policy.StdioProcessPolicy
+    assert (
+        package_federation.coerce_stdio_process_policy
+        is package_policy.coerce_stdio_process_policy
+    )
+
+
 def test_virtual_external_tool_copy_returns_caller_owned_data() -> None:
     """Virtual tool copies must not expose mutable source state."""
     package_models = importlib.import_module("mcp_unified.federation.models")

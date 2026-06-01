@@ -1,4 +1,4 @@
-"""Non-spawning transport contracts for standalone external federation."""
+"""Transport contracts for standalone external federation."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .models import (
 
 
 class ExternalFederationTransport(Protocol):
-    """Minimal external transport lifecycle used by the standalone shell."""
+    """Minimal external transport lifecycle used by the standalone gateway."""
 
     server_id: str
 
@@ -23,7 +23,7 @@ class ExternalFederationTransport(Protocol):
         ...
 
     async def connect(self) -> None:
-        """Start the logical transport lifecycle without launching processes."""
+        """Start the transport lifecycle."""
         ...
 
     async def close(self) -> None:
