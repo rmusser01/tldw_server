@@ -123,7 +123,7 @@ Note: This README follows the project-wide template to help contributors quickly
   - LLM budget enforcement relies on correct `LLM_BUDGET_ENDPOINTS` and middleware placement.
   - Single-user `X-API-KEY` may be additionally constrained by IP allowlist.
   - Tests may rely on relaxed foreign keys for usage tables; do not tighten without updating fixtures.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Complete docstring cleanup for obsolete params referenced in older comments.
   - Expand integration tests for lockout/CSRF and virtual-key requeues.
   - Optional CI guard to assert presence of the three section headers in module READMEs.

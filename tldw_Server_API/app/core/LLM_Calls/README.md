@@ -84,7 +84,7 @@
   - Some local gateways reject unknown keys; enable strict filtering to drop non-standard fields.
   - Provider tools/tool_choice semantics differ; tool_choice requires tools and is rejected otherwise.
   - Long-running streams must handle transport errors by emitting SSE error frames and a single `[DONE]` sentinel.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Unify sync/async call paths and migrate providers to consistent async with timeouts.
   - Expand provider unit tests (DeepSeek/Google/Groq) and add tool-calling coverage.
   - Reduce duplication by extracting common request/stream scaffolding.

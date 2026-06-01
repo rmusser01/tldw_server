@@ -92,5 +92,5 @@ Provider adapters for external scholarly/metadata services used by the Paper Sea
   - Providers rate‑limit and occasionally time out; endpoints intentionally allow 200/404/502/504 in tests to reduce flakiness.
   - Some providers don’t return direct `pdf_url` (e.g., Scopus); resolve via Unpaywall when needed.
   - XML/HTML parsing can be brittle (arXiv/PMC); prefer small, defensive transformations.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Expand provider parity (additional OSF preprint servers), add cache hints, and consider adapter‑level metrics (success rate/latency per provider).

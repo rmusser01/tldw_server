@@ -1,4 +1,4 @@
-**Embeddings Module**
+# Embeddings
 
 ## 1. Descriptive of Current Feature Set
 
@@ -85,7 +85,7 @@
   - `dimensions` applies only to models that support it (OpenAI t-e-3 family); HF/ONNX outputs are fixed
   - Policy enforcement may block unknown providers/models; set enforcement flags accordingly in dev
   - Backpressure may reject requests when queues are deep; check health and stage status endpoints
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Expand pgvector-first pathway and tests; unify Chroma/pgvector adapters
   - Stabilize re-embed scheduling; improve compactor heuristics
   - Extend providers list and add auto-tuning for batch sizes per model

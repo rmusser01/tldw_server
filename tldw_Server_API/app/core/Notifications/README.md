@@ -1,57 +1,66 @@
 # Notifications
 
-## 1. Descriptive of Current Feature Set
+The Notifications module delivers user-facing events and generated outputs
+through email, Chatbook persistence, notification APIs, SSE streams, reminder
+bridges, and Jobs-backed notification workers. The small core package contains
+delivery services; endpoint and scheduler packages provide the broader control
+plane.
 
-- Purpose: Unified helper to deliver outputs (primarily Watchlists) via email or store them as Chatbook documents for later review.
-- Capabilities:
-  - Email delivery (async) via central AuthNZ email service with optional attachments.
-  - Chatbook persistence using the Chat document generator and per‑user ChaCha DB.
-  - Sensible defaults: fallback to the user’s email when no recipients provided (configurable).
-- Inputs/Outputs:
-  - Input: subject/body/attachments for email; title/content/metadata for Chatbook.
-  - Output: `NotificationResult` with channel/status/details.
-- Related Endpoints (usage within Watchlists output delivery):
-  - Create notification service and deliver email/chatbook: tldw_Server_API/app/api/v1/endpoints/watchlists.py:2168, tldw_Server_API/app/api/v1/endpoints/watchlists.py:2195, tldw_Server_API/app/api/v1/endpoints/watchlists.py:2223
-- Related Schemas: internal dataclass `NotificationResult` (no Pydantic model): tldw_Server_API/app/core/Notifications/service.py:18
+## Start Here
 
-## 2. Technical Details of Features
+- Core services: `service.py` and `email_delivery.py`.
+- API endpoint: `app/api/v1/endpoints/notifications.py`.
+- Related reminder endpoint/services: `app/api/v1/endpoints/reminders.py`,
+  `app/services/reminders_scheduler.py`, and
+  `app/services/reminder_jobs_worker.py`.
+- Tests: `tests/Notifications/`.
 
-- Architecture & Data Flow
-  - `NotificationsService` wires to the AuthNZ email service and Chat document generator to deliver content via two channels: tldw_Server_API/app/core/Notifications/service.py:1
-  - Email: `deliver_email(...)` sends one email per recipient via `get_email_service()`; returns aggregated status with per‑recipient results: tldw_Server_API/app/core/Notifications/service.py:40
-  - Chatbook: `deliver_chatbook(...)` stores a document in the user’s ChaCha DB using `DocumentGeneratorService`: tldw_Server_API/app/core/Notifications/service.py:87
+## Responsibilities
 
-- Dependencies
-  - Email: tldw_Server_API/app/core/AuthNZ/email_service.py (provider configured elsewhere).
-  - Chatbook: `CharactersRAGDB` (per‑user DB) and `DocumentGeneratorService`:
-    - tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:1
-    - tldw_Server_API/app/core/Chat/document_generator.py:1
-  - DB path helpers: tldw_Server_API/app/core/DB_Management/db_path_utils.py:1
+- Send email through the AuthNZ email service and report per-recipient status.
+- Store generated content as Chatbook documents when requested by Watchlists or
+  other workflows.
+- Support notification API/service flows for lifecycle, pruning, SSE, reminders,
+  and companion/reflection bridges.
+- Keep delivery failures structured rather than raising raw provider exceptions
+  into callers.
 
-- Configuration
-  - Email provider/credentials are managed by the AuthNZ email service; this module does not introduce new env variables.
-  - Watchlists endpoints construct delivery plans from request payload; attachments are optional and derived from produced content.
+## Module Map
 
-- Concurrency & Performance
-  - Email delivery is async and performed per recipient; aggregation combines results into a single `NotificationResult`.
-  - Chatbook persistence is synchronous and returns the created document ID.
+- `service.py` defines `NotificationsService` and `NotificationResult` for email
+  and Chatbook delivery.
+- `email_delivery.py` contains email delivery helper logic used by notification
+  tests and services.
 
-- Error Handling & Safety
-  - Email: catches exceptions per recipient and returns `sent|partial|failed|skipped` status (skipped when no recipients are available).
-  - Chatbook: returns `stored|failed` with error details on exceptions.
+## How It Connects
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Watchlists uses Notifications to deliver report outputs by email or Chatbook.
+- Reminders enqueue notification work through scheduler and worker services.
+- AuthNZ owns email provider configuration and message sending.
+- Chat document generation and ChaChaNotes DB persistence are used for Chatbook
+  delivery.
 
-- Folder Structure
-  - `service.py` — `NotificationsService`, email and Chatbook delivery logic, result shape.
-- Extension Points
-  - Add additional channels (e.g., webhook, in‑app notifications) by adding methods to `NotificationsService` and associated provider wiring.
-  - Keep side effects well‑scoped and return a `NotificationResult` for each channel.
-- Tests
-  - Email and Chatbook flows (fakes/monkeypatches): tldw_Server_API/tests/Notifications/test_notifications_service.py:1
-- Local Dev Tips
-  - For email, ensure the AuthNZ email provider is configured; otherwise tests should monkeypatch `get_email_service`.
-  - For Chatbook, document IDs are written to per‑user ChaCha DB; use a temp DB in tests.
-- Pitfalls & Gotchas
-  - Avoid large attachments when not necessary; Watchlists helpers include an option to inline or attach content.
-  - Ensure recipients are present or enable the fallback to user email when appropriate.
+## Extension Points
+
+- Add a new delivery channel by adding a focused method returning
+  `NotificationResult`, then wire it from endpoint/service code.
+- Keep channel-specific provider credentials outside this module; use the owning
+  integration or AuthNZ provider.
+
+## Testing
+
+- Core delivery: `tests/Notifications/test_notifications_service.py` and
+  `tests/Notifications/test_email_delivery.py`.
+- API/SSE/lifecycle: `tests/Notifications/test_notifications_api.py`,
+  `tests/Notifications/test_notifications_sse.py`, and
+  `tests/Notifications/test_notifications_service_lifecycle.py`.
+- Reminder and bridge flows: `tests/Notifications/test_reminders_api.py`,
+  `tests/Notifications/test_reminder_jobs_worker.py`, and
+  `tests/Notifications/test_companion_reflection_notifications.py`.
+
+## Gotchas
+
+- Email delivery is often partially successful. Preserve per-recipient details
+  when aggregating status.
+- Chatbook delivery writes to the per-user ChaChaNotes DB; use temp DB fixtures
+  in tests.

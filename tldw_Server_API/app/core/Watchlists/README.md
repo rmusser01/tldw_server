@@ -1,62 +1,76 @@
 # Watchlists
 
-## 1. Descriptive of Current Feature Set
+Watchlists manages scheduled monitoring of feeds, sites, and scraped content:
+sources, filters, alert rules, WebSub, runs, outputs, reports, templates, audio
+briefings, and notification delivery. It is user-visible orchestration that
+touches Web Scraping, Collections, Jobs/Scheduler, Notifications, TTS, and
+Security egress policy.
 
-- Purpose: Manage sources (RSS/sites), schedules, runs, and outputs that summarize and notify users about new items matching configured filters.
-- Capabilities:
-  - CRUD for sources, groups, tags; OPML import/export (with case/tag/group support).
-  - Job scheduling (cron-like) for periodic fetch and filter pipelines; on-demand runs.
-  - Preview endpoints to evaluate filters and extraction rules before running.
-  - Output production with optional TTLs/retention and delivery via email or Chatbooks.
-  - Optional topic monitoring notifications via Monitoring module.
-- Inputs/Outputs:
-  - Inputs: sources (URLs and parsing rules), jobs (filters, schedule), preview parameters.
-  - Outputs: run details (tallies, filtered samples), outputs (HTML/Markdown content), exports (CSV/OPML).
-- Related Endpoints (mounted under `/api/v1/watchlists`)
-  - Router: tldw_Server_API/app/api/v1/endpoints/watchlists.py:83
-  - Sources CRUD/bulk/import/export — see tests referencing routes:
-    - Bulk create: `/watchlists/sources/bulk` (POST)
-    - Export: `/watchlists/sources/export` (GET)
-    - Examples: tldw_Server_API/tests/Watchlists/test_youtube_normalization_more.py:93, 118; test_opml_export_group_more.py:74; test_opml_export_tag_case.py:62
-  - Jobs CRUD, run, preview
-    - Create job: `/watchlists/jobs` (POST) — tldw_Server_API/tests/Watchlists/test_filters_api.py:38
-    - Run job now: `/watchlists/jobs/{job_id}/run` (POST) — tldw_Server_API/tests/Watchlists/test_watchlists_scheduler_integration.py:99
-    - Preview: `/watchlists/jobs/{job_id}/preview` (POST) — tldw_Server_API/tests/Watchlists/test_preview_endpoint_more.py:53
-  - Runs and details
-    - Runs listing and details: `/watchlists/runs`, `/watchlists/runs/{run_id}/details` — tldw_Server_API/tests/Watchlists/test_run_detail_filtered_sample.py:92
-  - Outputs
-    - Create outputs + deliveries (email/chatbook) — see tldw_Server_API/app/api/v1/endpoints/watchlists.py:2140–2240
+## Start Here
 
-## 2. Technical Details of Features
+- Pipeline: `pipeline.py`, `fetchers.py`, and `filters.py`.
+- Templates and reports: `template_store.py`, `template_composer_ast.py`,
+  `template_composer_roundtrip.py`, and `report_evidence.py`.
+- Alerts and outputs: `alert_rules.py`, `content_alerts.py`,
+  `output_enrichment_handler.py`, and `audio_artifact_projection.py`.
+- Interop: `opml.py`, `websub.py`, and `audio_briefing_workflow.py`.
+- API endpoints and schemas: `app/api/v1/endpoints/watchlists.py`,
+  `app/api/v1/endpoints/watchlist_alert_rules.py`, and
+  `app/api/v1/schemas/watchlists_schemas.py`.
+- Tests: `tests/Watchlists/`.
 
-- Architecture & Data Flow
-  - Pipeline orchestrator: `run_watchlist_job` consumes sources, fetches items (RSS or site rules), evaluates filters, and produces outputs: tldw_Server_API/app/core/Watchlists/pipeline.py:1
-  - Outputs are stored in Collections outputs with origin metadata set to `watchlists`.
-  - Fetchers and filters: RSS and site fetchers; filter evaluation utilities: tldw_Server_API/app/core/Watchlists/fetchers.py:1, tldw_Server_API/app/core/Watchlists/filters.py:1
-  - Templates: HTML/Markdown templates stored and validated: tldw_Server_API/app/core/Watchlists/template_store.py:1
-  - OPML import/export helpers: tldw_Server_API/app/core/Watchlists/opml.py:1
+## Responsibilities
 
-- Delivery
-  - NotificationsService (email/chatbook) integration used at output creation: tldw_Server_API/app/api/v1/endpoints/watchlists.py:2168–2240
-  - Monitoring module can emit topic alerts from content (see Monitoring README).
+- Fetch and normalize feed/site items under configured egress and selector rules.
+- Evaluate filters and include/exclude rules for source items.
+- Run scheduled or on-demand jobs and persist run/output metadata.
+- Render Markdown/HTML templates and evidence-backed reports.
+- Deliver outputs through Notifications and optional audio briefing paths.
+- Import/export OPML and support WebSub push item parsing.
 
-- Rate Limiting
-  - Ingress rate limits are enforced by Resource Governor policies and route_map.
+## Module Map
 
-- Configuration
-  - Default retention/TTL via `WATCHLIST_OUTPUT_DEFAULT_TTL_SECONDS` and `WATCHLIST_OUTPUT_TEMP_TTL_SECONDS` env vars.
+- `pipeline.py` orchestrates fetch, filter, output, and run status behavior.
+- `fetchers.py` handles RSS/site extraction and selector validation.
+- `filters.py` evaluates matching/filter rules.
+- `template_store.py` validates stored templates.
+- `content_alerts.py` and `alert_rules.py` support alerting workflows.
+- `watchlists_telemetry_metrics.py` emits telemetry/metrics for operations.
+- `websub.py` and `opml.py` handle external feed formats.
 
-## 3. Developer-Related/Relevant Information for Contributors
+## How It Connects
 
-- Folder Structure
-  - `pipeline.py`, `fetchers.py`, `filters.py`, `template_store.py`, `opml.py` — core watchlists components.
-- Extension Points
-  - Add new fetchers for providers; extend filter DSL; add more output formats or channels by reusing NotificationsService.
-- Tests (selection)
-  - Scheduler and run lifecycle: tldw_Server_API/tests/Watchlists/test_watchlists_scheduler_integration.py:63–109
-  - Preview endpoints: tldw_Server_API/tests/Watchlists/test_preview_endpoint_more.py:39–95
-  - OPML import/export (tag/group/case): tldw_Server_API/tests/Watchlists/test_opml_export_tag_case.py:51–62, test_opml_export_group_more.py:52–82
-  - Runs listing/pagination: tldw_Server_API/tests/Watchlists/test_runs_list_global.py:49–73
-- Local Dev Tips
-  - Use OPML import to seed sources quickly; test preview before running long jobs.
-  - For dev, use permissive RG policies and set temporary output TTLs to keep data tidy.
+- `Security.egress` and Web Scraping helpers guard outbound requests.
+- Collections stores outputs and reading/list-style artifacts.
+- Notifications delivers email/Chatbook outputs.
+- TTS and audio modules can create briefings from Watchlist output.
+- Jobs/Scheduler service periodic work and admin controls for runs.
+
+## Extension Points
+
+- Add fetchers in `fetchers.py` with explicit egress checks and selector tests.
+- Extend filter behavior in `filters.py` and update preview endpoint tests.
+- Add output formats by composing template/report helpers and Notification
+  delivery rather than embedding side effects in the pipeline.
+
+## Testing
+
+- Pipeline and scheduler: `tests/Watchlists/test_watchlists_pipeline.py`,
+  `tests/Watchlists/test_full_pipeline_integration.py`, and
+  `tests/Watchlists/test_watchlists_scheduler_integration.py`.
+- Preview/filter behavior: `tests/Watchlists/test_preview_endpoint.py`,
+  `tests/Watchlists/test_filters_api.py`, and
+  `tests/Watchlists/test_filters_matching.py`.
+- OPML/WebSub/templates: `tests/Watchlists/test_opml_api.py`,
+  `tests/Watchlists/test_websub.py`, and
+  `tests/Watchlists/test_watchlists_template_store.py`.
+- Delivery/reports/audio: `tests/Watchlists/test_delivery_integrations.py`,
+  `tests/Watchlists/test_watchlist_reports_api.py`, and
+  `tests/Watchlists/test_audio_briefing_workflow.py`.
+
+## Gotchas
+
+- Network fetches must honor egress policy and should be deterministic in tests
+  through fakes or fixture responses.
+- Scheduled runs can be expensive. Keep preview paths cheap and avoid mutating
+  run state during validation-only flows.

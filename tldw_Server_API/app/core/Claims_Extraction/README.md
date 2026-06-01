@@ -1,68 +1,77 @@
 # Claims_Extraction
 
-## 1. Descriptive of Current Feature Set
+Claims_Extraction extracts, parses, stores, clusters, reviews, monitors, and
+verifies factual claims from generated answers and ingested content. It also
+supports RAG streaming overlays so clients can see claim support/refutation
+signals and evidence while an answer is being produced.
 
-- Purpose: Extract and verify factual claims from generated answers and optionally overlay them into RAG streaming responses for grounding and citations.
-- Capabilities:
-  - LLM-based claim extraction with strict JSON parsing and safe fallbacks
-  - Heuristic sentence extractor; optional NER-assisted mode; APS-style propositions via Chunking strategy
-  - Hybrid verification: numeric/date heuristics, evidence retrieval, optional NLI, and LLM judge with citations and offsets
-  - RAG integration: incremental claims overlay events during streaming
-- Inputs/Outputs:
-  - Input: model answer text, user query, candidate context documents (or a retrieve function)
-  - Output: list of claims, per-claim verification labels (supported/refuted/nei), confidence, evidence snippets, citation offsets
-- Related Endpoints:
-  - Claims API: `tldw_Server_API/app/api/v1/endpoints/claims.py:1` (status, list, rebuild, rebuild_fts)
-  - RAG streaming (claims overlay): `tldw_Server_API/app/api/v1/endpoints/rag_unified.py:1176`, `tldw_Server_API/app/api/v1/endpoints/rag_unified.py:1348`
-- Related Engine/Libs:
-  - Core engine: `tldw_Server_API/app/core/Claims_Extraction/claims_engine.py:1`
-  - Ingestion helpers: `tldw_Server_API/app/core/Claims_Extraction/ingestion_claims.py:1`
-  - Rebuild service: `tldw_Server_API/app/core/Claims_Extraction/claims_rebuild_service.py:1`
-  - Monitoring helpers: `tldw_Server_API/app/core/Claims_Extraction/monitoring.py:1`
+## Start Here
 
-## 2. Technical Details of Features
+- Engine: `claims_engine.py`.
+- Service/API persistence helpers: `claims_service.py`, `claims_utils.py`,
+  `ingestion_claims.py`, and `claims_rebuild_service.py`.
+- Parsing and validation: `output_parser.py`, `prompt_validation.py`,
+  `span_alignment.py`, and `runtime_config.py`.
+- Review/monitoring/clustering: `review_assignment.py`, `monitoring.py`,
+  `claims_clustering.py`, `claims_embeddings.py`, and `claims_notifications.py`.
+- API endpoint and schemas: `app/api/v1/endpoints/claims.py` and
+  `app/api/v1/schemas/claims_schemas.py`.
+- Tests: `tests/Claims/`.
 
-- Architecture & Data Flow:
-  - ClaimsEngine.run(answer, query, documents, …) orchestrates extraction then verification.
-  - Verification composes heuristics + optional retrieval + LLM judgment; citations computed via offset search.
-- Key Classes/Functions:
-  - `ClaimsEngine`, `LLMBasedClaimExtractor`, `HeuristicSentenceExtractor`, `HybridClaimVerifier` in `claims_engine.py`
-  - RAG overlay publisher in `rag_unified.py` emits `claims_overlay` events during streaming
-- Dependencies:
-  - Internal: `Utils.prompt_loader`, `RAG.rag_service.types.Document`, optional `Chunking.strategies.propositions`
-  - External (optional): `transformers` NLI pipeline; provider LLMs via unified analyze function
-- Data Models & DB:
-  - Claims persisted in per-user Media DB (tables `Claims`, FTS `claims_fts`); rebuild endpoints trigger maintenance
-- Configuration (env/config.txt):
-  - `CLAIMS_LLM_PROVIDER`, `CLAIMS_LLM_MODEL`, `CLAIMS_LLM_TEMPERATURE`; RAG fallbacks: `RAG.default_llm_provider`, `RAG.default_llm_model`
-  - Tuning: `claims_top_k`, `claims_conf_threshold`, `claims_max`, `claims_concurrency` (request-level)
-- Concurrency & Performance:
-  - Async extract/verify; bounded `claims_concurrency`; lightweight numeric/date heuristics short-circuit
-- Error Handling:
-  - Robust JSON extraction with fenced-block detection and heuristic fallback; verifier falls back on base docs when retrieval fails
-- Security:
-  - No network calls unless a provider/NLI is configured; inputs validated; respects AuthNZ and RBAC at API layer
+## Responsibilities
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Extract claims with LLM-backed, heuristic, or configured extractor paths.
+- Parse model output defensively, including fenced JSON and strict-parse modes.
+- Verify claims against retrieved evidence, numeric/date heuristics, optional
+  NLI/LLM judge paths, and citation offsets.
+- Persist claims into Media DB claim tables and maintain FTS/rebuild health.
+- Support clustering, review assignment, dashboard metrics, alert digests, and
+  webhook/notification delivery.
 
-- Folder Structure:
-  - Engine: `app/core/Claims_Extraction/claims_engine.py`
-  - Ingestion helpers: `app/core/Claims_Extraction/ingestion_claims.py`
-  - Ingestion utilities: `app/core/Claims_Extraction/claims_utils.py`
-  - Rebuild service: `app/core/Claims_Extraction/claims_rebuild_service.py`
-  - Monitoring helpers: `app/core/Claims_Extraction/monitoring.py`
-  - API: `app/api/v1/endpoints/claims.py`
-- Extension Points:
-  - Add a new extractor (Protocol `ClaimExtractor`) or verifier (Protocol `ClaimVerifier`) and register in `ClaimsEngine`
-  - Inject custom `retrieve_fn` for domain-specific evidence selection
-- Coding Patterns:
-  - Use loguru for diagnostics; prefer async boundaries; avoid raw SQL (use DB_Management)
-- Related Tests:
-  - `tldw_Server_API/app/api/v1/endpoints/claims.py:1` (integration tests should cover list/rebuild behaviors)
-  - `tldw_Server_API/app/core/Claims_Extraction/claims_engine.py:1` (unit tests for extraction/verifier; see tracker TODOs)
-- Local Dev Tips:
-  - Enable claims in RAG requests, set `claims_top_k`/`claims_max` to small values while iterating
-- Pitfalls & Gotchas:
-  - Citation offset computation is best-effort; guard against long contexts and partial matches
-- Roadmap/TODOs:
-  - Property-based tests for offsets and numeric/date heuristics; tighten FTS rebuild reporting
+## Module Map
+
+- `claims_engine.py` defines extractors, verifiers, and orchestration.
+- `claims_service.py` provides API-facing service operations.
+- `ingestion_claims.py` extracts claims during ingestion workflows.
+- `claims_rebuild_service.py` rebuilds claim indexes and health state.
+- `claims_embeddings.py` and `claims_clustering.py` support semantic grouping.
+- `monitoring.py`, `claims_notifications.py`, and `verification_report.py`
+  support reporting and alerting.
+- `budget_guard.py` limits expensive claim work.
+
+## How It Connects
+
+- RAG streaming emits claim overlay events from `rag_unified.py`.
+- Media DB owns persisted claims, FTS, clusters, and review records.
+- Watchlists and monitoring can deliver claim alert notifications.
+- Embeddings/Chroma support semantic claim clustering and refresh flows.
+
+## Extension Points
+
+- Add extractors through the extractor registry/catalog and cover strict parsing
+  plus fallback behavior in tests.
+- Add verifiers by keeping evidence selection, label semantics, and confidence
+  outputs explicit.
+- Add dashboards or alerts through service/query helpers rather than embedding
+  direct SQL in endpoint handlers.
+
+## Testing
+
+- Engine and parsing: `tests/Claims/test_claims_engine_modes.py`,
+  `tests/Claims/test_claims_output_parser.py`, and
+  `tests/Claims/test_claims_prompt_validation.py`.
+- API/service/persistence: `tests/Claims/test_claims_endpoints_api.py`,
+  `tests/Claims/test_claims_service_backend_selection.py`, and
+  `tests/Claims/test_claims_utils_persistence.py`.
+- Rebuild/monitoring/review: `tests/Claims/test_claims_rebuild_service_failure.py`,
+  `tests/Claims/test_claims_monitoring_api.py`, and
+  `tests/Claims/test_claims_review_api.py`.
+- Clustering/embeddings: `tests/Claims/test_claims_clustering_embeddings.py`
+  and `tests/Claims/test_claim_embeddings_chroma.py`.
+
+## Gotchas
+
+- Citation offsets are best-effort and sensitive to text normalization. Keep span
+  alignment tests close to parser changes.
+- Strict-parse mode should fail loudly for malformed model output; fallback mode
+  should remain useful without hiding parser defects in tests.

@@ -152,7 +152,7 @@ Provider support snapshot (indicative): OpenAI (cloud), ElevenLabs (cloud, cloni
   - Some providers require specific sample rates or short reference durations (e.g., Higgs 3–10s); voice uploads enforce provider constraints.
   - Missing or misconfigured adapters are skipped after failure; optional retry window controlled by `adapter_failure_retry_seconds`.
   - Quotas/rate limits may short-circuit requests; check Usage/Audio quota logs when debugging.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - AllTalk adapter (enum/config placeholder only; requests currently return "provider not configured").
   - Adaptive chunk shaping; provider health probes and proactive warmups; richer voice metadata unification.
 

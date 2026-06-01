@@ -104,7 +104,7 @@ Central data stores and database abstractions for content, prompts, notes, evalu
   - Ensure per-user DB paths are used (avoid legacy root-level Media_DB paths) via `DatabasePaths`.
   - Postgres content mode requires RLS policies and up-to-date schema; use `validate_postgres_content_backend()` on startup.
   - FTS tokenization and LIKE queries differ between backends; use `fts_translator` and helper functions to keep behavior consistent.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Expand property-based tests for Media v2 synchronization and conflict resolution.
   - Add more Postgres integration tests for FTS, ranking, and RLS policy coverage.
   - Unify docstrings across DB modules; remove references to obsolete params where noted in code comments.

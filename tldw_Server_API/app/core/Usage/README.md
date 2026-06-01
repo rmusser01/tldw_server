@@ -1,51 +1,61 @@
 # Usage
 
-## 1. Descriptive of Current Feature Set
+The Usage module records and normalizes usage events for quotas, billing, audio
+minutes, LLM token accounting, pricing estimates, and usage middleware. It is
+the lightweight accounting layer that feeds Billing, Resource Governance,
+observability, and user-facing usage summaries.
 
-- Purpose: Track usage and quotas for selected modules (e.g., audio) and support pricing catalogs.
-- Capabilities:
-  - Per-user usage counters; simple quota checks for audio
-  - Pricing catalog utilities for cost estimation
-- Inputs/Outputs:
-  - Inputs: usage events (audio seconds, requests)
-  - Outputs: counters and quota decisions
-- Related Modules:
-  - `tldw_Server_API/app/core/Usage/audio_quota.py:1`, `pricing_catalog.py:1`, `usage_tracker.py:1`
+## Start Here
 
-## 2. Technical Details of Features
+- Usage tracking: `usage_tracker.py`.
+- Audio quota helpers: `audio_quota.py`.
+- LLM usage normalization: `llm_usage_normalizer.py`.
+- Pricing catalog: `pricing_catalog.py`.
+- Related docs: `Docs/Published/User_Guides/Server/Usage_Module.md`.
+- Tests: `tests/Usage/`.
 
-- Architecture & Data Flow:
-  - Utilities consumed by endpoints/services to increment counters and enforce quotas
-- Key Classes/Functions:
-  - `audio_quota`: quota checks and updates
-  - `pricing_catalog`: catalog lookups for provider/model pricing
-  - `usage_tracker`: simple in-memory/file-backed patterns
-- Dependencies:
-  - Internal: Metrics module for counters (if configured)
-- Data Models & DB:
-  - No dedicated DB by default; pluggable backends as needed
-- Configuration:
-  - Provider pricing via config/env; limits via env
-- Concurrency & Performance:
-  - Lightweight, called in hot paths (keep O(1))
-- Error Handling:
-  - Fail-safe decisions when catalog missing; log warnings
-- Security:
-  - Enforce per-user scope
+## Responsibilities
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Normalize usage payloads from provider-specific response shapes.
+- Track per-user and per-resource usage in middleware and quota helpers.
+- Provide pricing lookup and override behavior for cost estimates.
+- Support audio-minute quota TTL caches and Resource Governance heartbeat
+  integration.
 
-- Folder Structure:
-  - `Usage/` with `audio_quota.py`, `pricing_catalog.py`, `usage_tracker.py`
-- Extension Points:
-  - Add new sinks (DB/prometheus) and resources; wire into endpoints
-- Coding Patterns:
-  - Keep counters consistent with Metrics; minimize global state
-- Tests:
-  - (Add module-level tests as behaviors expand)
-- Local Dev Tips:
-  - Start with generous limits to avoid noisy tests; enable metrics to observe counters
-- Pitfalls & Gotchas:
-  - High-cardinality labels if exported to metrics; cap keys
-- Roadmap/TODOs:
-  - Persistent usage store; richer pricing per tier
+## Module Map
+
+- `usage_tracker.py` provides the SQLite-backed usage tracker and aggregation
+  helpers used by middleware and reports.
+- `audio_quota.py` implements audio-minute quota cache checks and updates.
+- `llm_usage_normalizer.py` converts provider response usage into a common
+  shape.
+- `pricing_catalog.py` loads model/provider pricing defaults and overrides.
+
+## How It Connects
+
+- Billing enforcement reads usage context when deciding plan limits.
+- User profile and audio flows use audio quota helpers for per-user limits.
+- Logging and Metrics consume usage events for operational visibility.
+
+## Extension Points
+
+- Add resource-specific counters in `usage_tracker.py` only after defining the
+  consumer and aggregation semantics.
+- Add provider pricing in `pricing_catalog.py` with tests for override and path
+  loading behavior.
+
+## Testing
+
+- Tracker and middleware behavior: `tests/Usage/test_usage_tracker_sqlite.py`,
+  `tests/Usage/test_usage_middleware.py`, and `tests/Usage/test_usage_aggregator.py`.
+- Audio quota behavior: `tests/Usage/test_audio_quota_ttl_cache.py` and
+  `tests/Usage/test_audio_rg_minutes_and_heartbeat.py`.
+- Pricing and normalization: `tests/Usage/test_pricing_catalog.py`,
+  `tests/Usage/test_pricing_catalog_overrides.py`, and
+  `tests/Usage/test_llm_usage_normalizer.py`.
+
+## Gotchas
+
+- Avoid high-cardinality metric labels for user/provider/model combinations.
+- Provider usage fields vary widely; normalize defensively and preserve unknowns
+  only when a downstream consumer needs them.

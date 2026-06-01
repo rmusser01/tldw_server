@@ -132,7 +132,7 @@ See `Docs/API/sync-v2.md` for endpoint details.
   - Conflicts: compare versions/client_id and fall back to LWW on server timestamp; idempotency skips duplicates/older versions.
 - Security:
   - Endpoints require authenticated user (per‑user DB via `get_media_db_for_user`).
-  - Client TODOs: add auth headers/tokens (see Issues.md recommendations).
+  - Client follow-ups: add auth headers/tokens (see Issues.md recommendations).
 
 ## 3. Developer-Related/Relevant Information for Contributors
 
@@ -154,5 +154,5 @@ See `Docs/API/sync-v2.md` for endpoint details.
   - Ensure `CLIENT_ID` uniqueness per device/instance; state file should be per‑client.
   - Be mindful of FTS sync ordering when triggers are disabled (delete/update before main; insert after).
   - Link/unlink operations for junction tables require UUID lookups; skip gracefully if parents don’t exist locally.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Implement authenticated client requests; externalize configuration; add end‑to‑end tests and monitoring/metrics for sync volume and latency.

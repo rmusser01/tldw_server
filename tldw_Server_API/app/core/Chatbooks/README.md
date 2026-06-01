@@ -1,6 +1,4 @@
-**Chatbooks Module**
-
-Note: This README is aligned to the project’s 3-section template. The original content is preserved below under section 3 to avoid any loss of information.
+# Chatbooks
 
 Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 

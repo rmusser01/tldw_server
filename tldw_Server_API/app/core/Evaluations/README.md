@@ -500,7 +500,7 @@ evaluation:
 
 - **[User Guide](EVALS_USER_GUIDE.md)**: Comprehensive user documentation
 - **[Developer Guide](EVALS_DEVELOPER_GUIDE.md)**: Architecture and extension guide
-- **[API Reference](api_reference.md)**: Complete API documentation
+- **[API Reference](../../../../Docs/API-related/Evaluations_API_Unified_Reference.md)**: Complete API documentation
 
 ## 🧪 Testing
 

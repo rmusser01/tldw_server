@@ -1,51 +1,70 @@
 # Setup
 
-## 1. Descriptive of Current Feature Set
+The Setup module owns first-run setup state, config-file updates, provider
+validation, local audio resource readiness, and install-plan previews. It keeps
+setup mutations explicit and sanitized so `/setup` and admin setup endpoints can
+guide a new deployment without leaking secrets or silently rewriting unrelated
+configuration.
 
-- Purpose: Centralize first-time setup and config management (config.txt), and define install plans for STT/TTS/Embeddings.
-- Capabilities:
-  - Read/update `config.txt` with section labels, hints, and diff-safe writes
-  - Toggle remote setup access and propagate via hook
-  - Define validated install plans for STT/TTS/Embeddings
-- Inputs/Outputs:
-  - Inputs: form-like updates to config fields; install plan models
-  - Outputs: persisted config.txt and install plan DTOs
-- Related Schemas:
-  - `tldw_Server_API/app/core/Setup/install_schema.py:1`
+## Start Here
 
-## 2. Technical Details of Features
+- Config management: `setup_manager.py`.
+- First-run state: `first_run_state.py` and `first_run_models.py`.
+- Readiness and install planning: `readiness_service.py`, `readiness_store.py`,
+  `readiness_profiles.py`, `install_manager.py`, and `install_schema.py`.
+- Audio setup packs: `audio_bundle_catalog.py`, `audio_profile_service.py`,
+  `audio_pack_service.py`, and `audio_readiness_store.py`.
+- API endpoint and schemas: `app/api/v1/endpoints/setup.py` and
+  `app/api/v1/schemas/setup_schemas.py`.
+- Tests: `tests/Setup/`.
 
-- Architecture & Data Flow:
-  - `setup_manager.py` reads/writes config with placeholder detection; `install_manager.py` manages dependency checks/installs
-- Key Classes/Functions:
-  - `register_remote_access_hook`, section label/description maps, field hints, diff helpers
-  - Install models: `InstallPlan`, `STTInstall`, `TTSInstall`, `EmbeddingsInstall`
-- Dependencies:
-  - Standard library; optional pip invocation via controlled gates
-- Data Models & DB:
-  - No DB; files under `Config_Files/`
-- Configuration:
-  - `TLDW_SETUP_SKIP_PIP` to block installs; env for default engines and models
-- Concurrency & Performance:
-  - File IO only
-- Error Handling:
-  - Safe fallbacks for missing sections; placeholder detection to prevent accidental secrets commit
-- Security:
-  - Sensitive key markers; never log secrets; anchor relative paths to project root
+## Responsibilities
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Read, validate, mask, preview, and update `Config_Files/config.txt`.
+- Track first-run progress and setup readiness overlays.
+- Build install plans for audio/STT/TTS/embedding resources without performing
+  unexpected writes during preview paths.
+- Validate provider keys/settings and support the first-chat readiness check.
+- Coordinate remote setup access policy with Security setup guards.
 
-- Folder Structure:
-  - `Setup/setup_manager.py`, `install_manager.py`, `install_schema.py`
-- Extension Points:
-  - Add new sections/labels/hints; extend installers for new engines
-- Coding Patterns:
-  - Keep config mutations idempotent and minimal; use helper utilities for diffing
-- Tests:
-  - (Add targeted tests for diff/hints as features expand)
-- Local Dev Tips:
-  - Use a temp copy of `Config_Files/config.txt` while iterating
-- Pitfalls & Gotchas:
-  - Placeholder values should be replaced; handle OS-specific paths
-- Roadmap/TODOs:
-  - Expose minimal setup APIs and UI helpers
+## Module Map
+
+- `setup_manager.py` centralizes config section metadata and safe writes.
+- `provider_catalog.py` and `provider_validation.py` describe and validate
+  provider setup inputs.
+- `install_manager.py` builds and executes controlled install plans.
+- `readiness_*` modules store and compute setup readiness state.
+- `audio_*` modules rank, package, and track local audio resource bundles.
+- `first_chat_verifier.py` checks whether configured chat providers can respond.
+
+## How It Connects
+
+- Security middlewares guard remote setup access and Setup UI CSP.
+- AuthNZ setup dependencies decide when setup routes are public, admin-only, or
+  disabled.
+- Config section loaders in `config_sections/` consume settings written here.
+
+## Extension Points
+
+- Add new setup fields by updating config metadata in `setup_manager.py`, schema
+  fields in `setup_schemas.py`, and tests for masking/defaults.
+- Add resource installers through `install_schema.py` and `install_manager.py`;
+  preview behavior should stay side-effect-free.
+
+## Testing
+
+- Config masking and insertion: `tests/Setup/test_setup_manager_masking.py` and
+  `tests/Setup/test_setup_manager_provider_field_insertion.py`.
+- Readiness APIs and stores: `tests/Setup/test_setup_readiness_api.py`,
+  `tests/Setup/test_setup_readiness_preview.py`, and
+  `tests/Setup/test_setup_readiness_store.py`.
+- Audio bundle/profile/pack flows: `tests/Setup/test_audio_bundle_catalog.py`,
+  `tests/Setup/test_audio_profile_service.py`, and
+  `tests/Setup/test_audio_pack_service.py`.
+
+## Gotchas
+
+- Preview endpoints must not write config or resource files.
+- Never log provider keys or unmasked config values.
+- Remote setup access and CSP behavior are security-sensitive; update
+  `tests/Security/` when changing those hooks.

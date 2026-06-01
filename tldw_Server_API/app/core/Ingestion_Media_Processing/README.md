@@ -101,7 +101,7 @@ The ingestion and media processing hub for video, audio, PDF, EPUB, documents (t
   - OCR/Docling are optional; guard imports and provide fallbacks with clear warnings.
   - Never accept client API keys; select provider/model from server config only.
   - Chunk overlap must be < size; enforced by chunker validators.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Consolidate duplicate parsing paths; unify analysis prompt profiles.
   - Expand email/PST parsing; add more robust HTML sanitization policies.
   - Improve adapter coverage for additional VLMs and OCR engines.

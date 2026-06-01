@@ -699,6 +699,6 @@ reg.register(
 ## Support
 
 For issues or questions:
-- Check the [main documentation](../../../README.md)
-- Review [example implementations](./examples/)
-- Open an issue on GitHub
+- Check the main project documentation at `README.md`.
+- Review metric call sites listed in this README for implementation examples.
+- Open an issue on GitHub.
