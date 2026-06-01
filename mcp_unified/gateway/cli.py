@@ -922,18 +922,37 @@ def _process_policy_summary(
 ) -> dict[str, Any]:
     """Return a compact process-policy summary without path or command values."""
 
-    policy = external_runtime.process_policy
-    allowed_env_names = policy.allowed_env_names
+    policy = getattr(external_runtime, "process_policy", None)
+    if policy is None:
+        return {
+            "allow_path_lookup": False,
+            "allowed_cwd_roots": 0,
+            "allowed_env_names": None,
+            "allowed_executables": 0,
+            "configured": getattr(
+                external_runtime,
+                "process_policy_configured",
+                False,
+            ),
+            "default_cwd": False,
+            "reject_shell_executables": False,
+        }
+
+    allowed_env_names = getattr(policy, "allowed_env_names", None)
     return {
-        "allow_path_lookup": policy.allow_path_lookup,
-        "allowed_cwd_roots": len(policy.allowed_cwd_roots),
+        "allow_path_lookup": getattr(policy, "allow_path_lookup", False),
+        "allowed_cwd_roots": len(getattr(policy, "allowed_cwd_roots", ())),
         "allowed_env_names": (
             None if allowed_env_names is None else len(allowed_env_names)
         ),
-        "allowed_executables": len(policy.allowed_executables),
-        "configured": external_runtime.process_policy_configured,
-        "default_cwd": policy.default_cwd is not None,
-        "reject_shell_executables": policy.reject_shell_executables,
+        "allowed_executables": len(getattr(policy, "allowed_executables", ())),
+        "configured": getattr(external_runtime, "process_policy_configured", False),
+        "default_cwd": getattr(policy, "default_cwd", None) is not None,
+        "reject_shell_executables": getattr(
+            policy,
+            "reject_shell_executables",
+            False,
+        ),
     }
 
 

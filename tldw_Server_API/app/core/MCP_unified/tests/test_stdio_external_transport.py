@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -307,8 +308,11 @@ def test_stdio_process_policy_rejects_invalid_mapping_values() -> None:
 
 def test_stdio_process_policy_defaults_block_shell_wrappers() -> None:
     """Default process policy blocks direct shell-wrapper launches."""
+    shell = shutil.which("bash") or shutil.which("sh")
+    if shell is None:
+        pytest.skip("No POSIX shell wrapper available on this host")
     secret_arg = "do-not-leak-shell-argument"
-    server = _server(command=["/bin/bash", "-lc", secret_arg])
+    server = _server(command=[shell, "-lc", secret_arg])
 
     with pytest.raises(StdioExternalTransportError) as exc_info:
         StdioExternalTransport(server)
@@ -320,9 +324,12 @@ def test_stdio_process_policy_defaults_block_shell_wrappers() -> None:
 
 def test_stdio_process_policy_allows_explicit_shell_executable() -> None:
     """Hosts can deliberately allow a shell executable through allowlisting."""
-    policy = StdioProcessPolicy(allowed_executables=("/bin/bash",))
+    shell = shutil.which("bash") or shutil.which("sh")
+    if shell is None:
+        pytest.skip("No POSIX shell wrapper available on this host")
+    policy = StdioProcessPolicy(allowed_executables=(shell,))
     transport = StdioExternalTransport(
-        _server(command=["/bin/bash", "--version"]),
+        _server(command=[shell, "--version"]),
         process_policy=policy,
     )
 

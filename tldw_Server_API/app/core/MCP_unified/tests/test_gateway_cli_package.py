@@ -123,6 +123,22 @@ def test_gateway_cli_validate_config_reports_process_policy_summary(
     assert str(secret_path) not in captured.out
 
 
+def test_gateway_cli_process_policy_summary_handles_missing_policy() -> None:
+    """Process-policy summaries keep stable keys for older runtime config shapes."""
+
+    runtime = type("LegacyRuntimeConfig", (), {})()
+
+    assert gateway_cli._process_policy_summary(runtime) == {
+        "allow_path_lookup": False,
+        "allowed_cwd_roots": 0,
+        "allowed_env_names": None,
+        "allowed_executables": 0,
+        "configured": False,
+        "default_cwd": False,
+        "reject_shell_executables": False,
+    }
+
+
 def test_gateway_cli_validate_config_reports_error_json(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

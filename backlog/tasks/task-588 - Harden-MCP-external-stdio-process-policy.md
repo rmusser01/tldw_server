@@ -31,6 +31,12 @@ Add explicit process-execution policy for standalone MCP external stdio transpor
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 `StdioProcessPolicy` validates executable allowlists, cwd roots, PATH lookup, shell-wrapper rejection, and environment inheritance before stdio process spawn.
+- [x] #2 Bare executable allowlist entries authorize only bare commands, while relative or absolute command paths require explicit path allowlist entries.
+- [x] #3 POSIX path comparisons remain case-sensitive; Windows path comparisons continue to use platform path normalization.
+- [x] #4 Gateway config applies configured process policy when the package `create_external_transport` factory is used implicitly or injected explicitly, while custom factories remain caller-owned.
+- [x] #5 CLI `validate-config` reports a redacted process-policy summary with stable keys and no raw deployment paths.
+- [x] #6 Targeted MCP pytest coverage, Bandit on touched MCP code, and whitespace validation pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -53,7 +59,7 @@ this branch task moved from `TASK-586` to `TASK-588`.
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added and verified MCP external stdio process-policy hardening. The package now has explicit, tested controls for command execution, cwd boundaries, PATH lookup, env inheritance, and safe error/status reporting before real upstream stdio processes are launched. PR review fixes also deny basename allowlist bypasses, preserve POSIX case-sensitive path semantics, and apply configured policy when the package stdio factory is explicitly injected. Verification recorded: targeted pytest for stdio transport, gateway FastAPI package, gateway CLI package, and runtime package boundary passed (249 passed); Bandit on mcp_unified/federation and mcp_unified/gateway completed with no findings at /tmp/bandit_mcp_stdio_process_policy.json; git diff --check passed.
+Added and verified MCP external stdio process-policy hardening. The package now has explicit, tested controls for command execution, cwd boundaries, PATH lookup, env inheritance, and safe error/status reporting before real upstream stdio processes are launched. PR review fixes also deny basename allowlist bypasses, preserve POSIX case-sensitive path semantics, apply configured policy when the package stdio factory is explicitly injected, keep CLI process-policy summary keys stable, and avoid hardcoded shell paths in tests. Verification recorded: targeted pytest for stdio transport, gateway FastAPI package, gateway CLI package, and runtime package boundary passed (250 passed); Bandit on mcp_unified/federation and mcp_unified/gateway completed with no findings at /tmp/bandit_mcp_stdio_process_policy.json; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
