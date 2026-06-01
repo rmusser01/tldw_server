@@ -43,7 +43,8 @@ Add a public Media DB operation for user-facing media item updates, for example 
 - Create document versions according to the existing endpoint contract.
 - Refresh FTS state when title or content changes.
 - Write sync log entries.
-- Trigger or report best-effort post-commit hooks for highlight staleness and RAG/vector invalidation.
+- Run DB-local best-effort post-commit hooks, such as collection highlight staleness.
+- Return explicit effect metadata for endpoint-scoped/user-scoped invalidation, such as RAG cache invalidation.
 
 The endpoint should call this public operation and then return the existing rich media detail response.
 
@@ -62,6 +63,22 @@ Extend `JobManager.list_job_events_after` into the authoritative public event-re
 
 `JobManager` owns postgres/sqlite placeholder differences, selected columns, ordering, bounded limits, row normalization, and connection lifecycle. Endpoints keep authorization decisions and pass only the allowed filters to the manager.
 
+The canonical internal event dictionary returned by `JobManager` should include raw event storage fields:
+
+- `id`
+- `event_type`
+- `attrs_json`
+- `job_id`
+- `domain`
+- `queue`
+- `job_type`
+- `owner_user_id`
+- `request_id`
+- `trace_id`
+- `created_at`
+
+Endpoints remain responsible for endpoint-specific response mapping, including parsing `attrs_json` into `attrs` for SSE payloads where that is the existing client contract.
+
 ### Document Workspace Repository And Migrations
 
 Move reading progress, annotations, and parsed-reference cache storage into Media DB-owned repositories and schema setup.
@@ -72,7 +89,7 @@ The repository surface should cover current endpoint needs:
 - Annotations: list, create, update, sync, soft delete.
 - Parsed-reference cache: get by media/user/parser/content hash and upsert.
 
-Schema creation and upgrades should run through Media DB bootstrap/migration paths, not endpoint `_ensure_*_table` helpers. The bootstrap must be idempotent so old per-user SQLite databases open cleanly.
+Schema creation and upgrades should run through Media DB bootstrap/versioned migration paths, not endpoint `_ensure_*_table` helpers. The bootstrap must be idempotent so old per-user SQLite databases open cleanly. It should not become ad hoc DDL on every request or every DB open; implementation should attach these tables to the existing schema initialization/migration mechanism used by Media DB.
 
 ## Component Data Flow
 
@@ -81,16 +98,16 @@ Schema creation and upgrades should run through Media DB bootstrap/migration pat
 1. Endpoint validates auth and parses `MediaUpdateRequest`.
 2. Endpoint calls the public Media DB update operation.
 3. Media DB performs the transaction and returns update metadata.
-4. DB-owned post-commit hooks run best-effort or return hook metadata for the endpoint to complete user-scoped invalidation.
+4. Media DB runs DB-local post-commit hooks best-effort and returns explicit effect metadata for endpoint/user-scoped invalidation.
 5. Endpoint fetches and returns `MediaDetailResponse` through the existing rich detail path.
 
 ### Jobs Events
 
 1. Endpoint validates auth and domain/owner scope.
 2. Endpoint calls `JobManager.list_job_events_after(...)` with allowed filters.
-3. Manager returns normalized event dictionaries.
+3. Manager returns canonical event dictionaries with raw `attrs_json`.
 4. List endpoints map dictionaries into response schemas.
-5. SSE endpoints keep the existing streaming loop, cursor advancement, snapshot events, and termination rules while polling through the manager API.
+5. SSE endpoints keep the existing streaming loop, cursor advancement, snapshot events, and termination rules while polling through the manager API and preserving existing parsed `attrs` payloads.
 
 ### Document Workspace
 
@@ -109,8 +126,9 @@ Public API compatibility is mandatory by default.
 - Reuse existing domain errors where possible: `InputError`, `ConflictError`, and `DatabaseError`.
 - Keep endpoint HTTP mapping via `map_db_error_to_http`.
 - Preserve existing missing-media, conflict, and unexpected-error behavior.
-- Define and test the identical-content case before implementation changes it. Today the endpoint appears to create a document version whenever `content` is present, even if the content hash is unchanged.
+- Preserve the current identical-content contract by default: when a non-null `content` field is present in the request, create a document version with the provided content/prompt/analysis even if the content hash is unchanged. Only change this if a regression test proves the behavior is broken and the behavior change is explicitly approved.
 - Best-effort hooks should log and continue, matching current cache/highlight invalidation behavior.
+- Media DB should own DB-local side effects. Endpoint code should own request/user-scoped RAG cache invalidation using the effect metadata returned by the Media DB update operation.
 
 ### Jobs Events
 
@@ -190,6 +208,10 @@ Final verification:
 - Run focused pytest modules for touched Media, DB_Management, Jobs, AudioJobs, Prompt Studio, and document workspace tests.
 - Run Bandit on touched backend paths.
 - Confirm no endpoint-owned private storage calls or lazy table DDL remain in the targeted paths.
+- Run explicit smoke checks for the targeted endpoints, such as:
+  - `rg -n "_update_fts_media|_log_sync_event" tldw_Server_API/app/api/v1/endpoints/media/item.py`
+  - `rg -n "jm\\._connect|jm\\._pg_cursor" tldw_Server_API/app/api/v1/endpoints/jobs_admin.py tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py tldw_Server_API/app/api/v1/endpoints/audio/audio_jobs.py tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_status.py`
+  - `rg -n "CREATE TABLE IF NOT EXISTS|ALTER TABLE|PRAGMA table_info" tldw_Server_API/app/api/v1/endpoints/media/reading_progress.py tldw_Server_API/app/api/v1/endpoints/media/document_annotations.py tldw_Server_API/app/api/v1/endpoints/media/document_references.py`
 
 ## Risks And Mitigations
 
@@ -200,7 +222,7 @@ Final verification:
 - Risk: Jobs event filters diverge between SQLite and postgres.
   Mitigation: centralize SQL generation in `JobManager` and test normalized event output.
 - Risk: content update post-commit hooks become hidden side effects.
-  Mitigation: keep hooks explicit in the Media DB update result or a named helper with tests.
+  Mitigation: Media DB owns only DB-local post-commit hooks and returns explicit effect metadata for endpoint/user-scoped invalidation.
 
 ## Definition Of Done
 
