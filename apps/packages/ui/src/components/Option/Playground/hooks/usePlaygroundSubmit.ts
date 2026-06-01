@@ -46,10 +46,12 @@ export type UsePlaygroundSubmitDeps = {
   pinnedSourceTokenEstimate: number
   resolvedMaxContext: number
   jsonMode: boolean
+  openUIRequestMode: boolean
   researchContext?: ChatResearchContext
   importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   clearImportedSidepanelContext?: () => void
   sendMessage: (args: any) => Promise<any>
+  clearOpenUIRequestMode: () => void
   clearSelectedDocuments: () => void
   clearUploadedFiles: () => void
   textAreaFocus: () => void
@@ -82,10 +84,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     pinnedSourceTokenEstimate,
     resolvedMaxContext,
     jsonMode,
+    openUIRequestMode,
     researchContext,
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
+    clearOpenUIRequestMode,
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
@@ -300,6 +304,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         imageGenerationSource: intent.isImageCommand
           ? "slash-command"
           : undefined,
+        requestOverrides:
+          openUIRequestMode && !intent.isImageCommand
+            ? { dynamicUIRequest: { renderer: "openui" } }
+            : undefined,
         researchContext:
           intent.isImageCommand || compareModeActive
             ? undefined
@@ -317,6 +325,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
         }
       })
+      if (openUIRequestMode) {
+        clearOpenUIRequestMode()
+      }
     })()
   }
 
