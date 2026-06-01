@@ -2,20 +2,28 @@
 id: TASK-498
 title: Implement Scheduled Tasks Automation Workbench Phase 1
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-06-01 19:33'
 labels:
-- scheduled-tasks
-- webui
-- ux
-- phase-1
-priority: High
+  - scheduled-tasks
+  - webui
+  - ux
+  - phase-1
+dependencies: []
 references:
-- TASK-496
-- TASK-494
-- Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
-- Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+  - TASK-496
+  - TASK-494
+  - >-
+    Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
 documentation:
-- Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
-- Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+  - >-
+    Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+priority: high
 ---
 
 ## Description
@@ -39,12 +47,12 @@ Implement Phase 1 of the Scheduled Tasks Automation Workbench UX from the approv
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
+Task 1 review clarification: failure-like status tokens (fail, error, missed) take precedence over result-like tokens when both appear in a single backend status string. This keeps states such as output_error in Needs attention rather than Found results. Helper tests now cover output ID aliases, token-boundary matching, and unsafe ID rejection.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
