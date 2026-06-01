@@ -36,7 +36,7 @@ Create a design spec for addressing the Codeslop Vibecheck findings across tldw_
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written at Docs/superpowers/specs/2026-06-01-api-boundary-remediation-design.md. Spec review subagent approved it with no blocking issues. Verification is documentation-only: no code tests or Bandit were run because this task only adds a design spec and Backlog tracking record. Follow-up implementation planning should keep the three rollout stages independently testable, lock identical-content media update behavior before coding Stage 1, and choose one post-commit hook ownership direction.
+Design spec written and revised at Docs/superpowers/specs/2026-06-01-api-boundary-remediation-design.md. Initial and second spec review subagents both approved it with no blocking issues. The revision clarifies Media DB post-commit hook ownership, identical-content compatibility behavior, document workspace migration ownership, Jobs event normalization, and explicit smoke checks. Verification is documentation-only: no code tests or Bandit were run because this task only changes the design spec and Backlog tracking record. Implementation planning should name the preferred Media DB update method and keep each rollout stage separately verifiable.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
