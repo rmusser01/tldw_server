@@ -18,6 +18,7 @@ from .config_schema import (
     load_external_server_registry,
     parse_external_server_registry,
 )
+from .installers import ExternalServerInstaller, NullExternalServerInstaller
 from .manager import ExternalFederationManager
 from .models import (
     BrokeredExternalCredential,
@@ -40,6 +41,7 @@ __all__ = [
     "ExternalFederationTransport",
     "ExternalMCPServerConfig",
     "ExternalRetryConfig",
+    "ExternalServerInstaller",
     "ExternalServerRegistryConfig",
     "ExternalServerRegistryPartialLoadError",
     "ExternalStdioConfig",
@@ -54,6 +56,7 @@ __all__ = [
     "FederationPolicyDenied",
     "MCPAuthType",
     "MCPCatalogEntry",
+    "NullExternalServerInstaller",
     "VirtualExternalTool",
     "catalog_loader",
     "config_schema",

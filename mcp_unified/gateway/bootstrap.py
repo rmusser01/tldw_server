@@ -18,6 +18,7 @@ from .runtime import GatewayRuntime
 
 if TYPE_CHECKING:
     from mcp_unified.gateway.external_registry import GatewayExternalRegistryManager
+    from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeManager
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class GatewayProfileBootstrap:
     default_profile_id: str | None
     seeded_profile_ids: tuple[str, ...]
     external_registry_manager: GatewayExternalRegistryManager | None = None
+    external_runtime_manager: GatewayExternalRuntimeManager | None = None
 
 
 async def bootstrap_profile_gateway(
@@ -46,6 +48,7 @@ async def bootstrap_profile_gateway(
     default_profile_id: str | None = None,
     default_preset_id: str | None = None,
     external_registry_manager: GatewayExternalRegistryManager | None = None,
+    external_runtime_manager: GatewayExternalRuntimeManager | None = None,
 ) -> GatewayProfileBootstrap:
     """Seed profile data and return a profile-aware gateway runtime."""
 
@@ -105,6 +108,7 @@ async def bootstrap_profile_gateway(
         default_profile_id=resolved_default_profile_id,
         seeded_profile_ids=seeded_profile_ids,
         external_registry_manager=external_registry_manager,
+        external_runtime_manager=external_runtime_manager,
     )
 
 

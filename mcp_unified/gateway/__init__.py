@@ -25,11 +25,17 @@ from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
 
 if TYPE_CHECKING:
+    from .external_runtime import (
+        GatewayExternalRuntimeError,
+        GatewayExternalRuntimeManager,
+    )
     from .fastapi import create_gateway_app, create_gateway_router
 
 __all__ = [
     "GatewayPolicyDenied",
     "GatewayConfigFormat",
+    "GatewayExternalRuntimeError",
+    "GatewayExternalRuntimeManager",
     "GatewayProfileBootstrap",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileManagementError",
@@ -60,5 +66,15 @@ def __getattr__(name: str) -> Any:
         return {
             "create_gateway_app": create_gateway_app,
             "create_gateway_router": create_gateway_router,
+        }[name]
+    if name in {"GatewayExternalRuntimeError", "GatewayExternalRuntimeManager"}:
+        from .external_runtime import (
+            GatewayExternalRuntimeError,
+            GatewayExternalRuntimeManager,
+        )
+
+        return {
+            "GatewayExternalRuntimeError": GatewayExternalRuntimeError,
+            "GatewayExternalRuntimeManager": GatewayExternalRuntimeManager,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

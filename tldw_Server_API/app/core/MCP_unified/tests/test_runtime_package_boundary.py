@@ -120,6 +120,24 @@ def test_host_external_manager_reexports_package_virtual_tool_contract() -> None
     assert package_federation.VirtualExternalTool is package_models.VirtualExternalTool
 
 
+def test_gateway_external_runtime_exports_are_package_owned() -> None:
+    """Gateway runtime exports must resolve without host package imports."""
+    package_gateway = importlib.import_module("mcp_unified.gateway")
+    package_runtime = importlib.import_module("mcp_unified.gateway.external_runtime")
+
+    assert package_gateway.GatewayExternalRuntimeManager is package_runtime.GatewayExternalRuntimeManager
+    assert package_gateway.GatewayExternalRuntimeError is package_runtime.GatewayExternalRuntimeError
+
+
+def test_federation_installer_contracts_are_public_exports() -> None:
+    """Installer contracts should be importable from the public federation package."""
+    package_federation = importlib.import_module("mcp_unified.federation")
+    package_installers = importlib.import_module("mcp_unified.federation.installers")
+
+    assert package_federation.ExternalServerInstaller is package_installers.ExternalServerInstaller
+    assert package_federation.NullExternalServerInstaller is package_installers.NullExternalServerInstaller
+
+
 def test_virtual_external_tool_copy_returns_caller_owned_data() -> None:
     """Virtual tool copies must not expose mutable source state."""
     package_models = importlib.import_module("mcp_unified.federation.models")

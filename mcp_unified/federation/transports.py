@@ -5,7 +5,11 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Protocol
 
-from .models import ExternalToolCallResult, ExternalToolDefinition
+from .models import (
+    BrokeredExternalCredential,
+    ExternalToolCallResult,
+    ExternalToolDefinition,
+)
 
 
 class ExternalFederationTransport(Protocol):
@@ -38,7 +42,9 @@ class ExternalFederationTransport(Protocol):
         self,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
         context: Any = None,
+        runtime_auth: BrokeredExternalCredential | None = None,
     ) -> ExternalToolCallResult:
         """Execute a logical external tool call."""
         ...
@@ -63,6 +69,7 @@ class FakeExternalTransport:
         self.close_count = 0
         self.spawn_count = 0
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.runtime_auth_seen: BrokeredExternalCredential | None = None
         self._tools = [tool.copy() for tool in tools or []]
         self._results = {
             name: result.copy()
@@ -97,12 +104,15 @@ class FakeExternalTransport:
         self,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
         context: Any = None,
+        runtime_auth: BrokeredExternalCredential | None = None,
     ) -> ExternalToolCallResult:
         """Return a configured fake result for the requested tool."""
         del context
         call_args = deepcopy(arguments or {})
         self.calls.append((tool_name, call_args))
+        self.runtime_auth_seen = None if runtime_auth is None else runtime_auth.copy()
         result = self._results.get(tool_name)
         if result is None:
             return ExternalToolCallResult(
