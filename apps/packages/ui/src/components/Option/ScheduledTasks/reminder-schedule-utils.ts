@@ -38,6 +38,22 @@ const MONTH_MAP: Record<string, number> = {
   NOV: 11,
   DEC: 12
 }
+const WEEKDAY_ORDER_MAP: Record<string, number> = {
+  "0": 0,
+  "1": 1,
+  "2": 2,
+  "3": 3,
+  "4": 4,
+  "5": 5,
+  "6": 6,
+  MON: 0,
+  TUE: 1,
+  WED: 2,
+  THU: 3,
+  FRI: 4,
+  SAT: 5,
+  SUN: 6
+}
 const WEEKDAY_LABELS: Record<ReminderWeekdayToken, string> = {
   SUN: "Sunday",
   MON: "Monday",
@@ -84,6 +100,7 @@ type CronFieldOptions = {
   min: number
   max: number
   names?: Record<string, unknown>
+  orderValues?: Record<string, number>
   allowNthWeekday?: boolean
 }
 
@@ -112,6 +129,18 @@ const parseCronFieldValue = (
   }
 
   return { valid: true, error: null }
+}
+
+const getCronFieldOrderValue = (
+  value: string,
+  options: CronFieldOptions
+): number | null => {
+  const upperValue = value.toUpperCase()
+  const namedOrder = options.orderValues?.[upperValue]
+  if (namedOrder !== undefined) return namedOrder
+
+  if (!/^\d+$/.test(value)) return null
+  return Number(value)
 }
 
 const validateCronFieldBase = (
@@ -158,7 +187,9 @@ const validateCronFieldBase = (
     const endResult = parseCronFieldValue(end, options)
     if (!endResult.valid) return endResult
 
-    if (/^\d+$/.test(start) && /^\d+$/.test(end) && Number(start) > Number(end)) {
+    const startOrder = getCronFieldOrderValue(start, options)
+    const endOrder = getCronFieldOrderValue(end, options)
+    if (startOrder !== null && endOrder !== null && startOrder > endOrder) {
       return {
         valid: false,
         error: `Cron ${options.label} range start must be less than or equal to the end.`
@@ -262,12 +293,19 @@ export const validateCronExpression = (
     validateCronField(minute, { label: "minute", min: 0, max: 59 }),
     validateCronField(hour, { label: "hour", min: 0, max: 23 }),
     validateCronField(day, { label: "day", min: 1, max: 31 }),
-    validateCronField(month, { label: "month", min: 1, max: 12, names: MONTH_MAP }),
+    validateCronField(month, {
+      label: "month",
+      min: 1,
+      max: 12,
+      names: MONTH_MAP,
+      orderValues: MONTH_MAP
+    }),
     validateCronField(dayOfWeek, {
       label: "day of week",
       min: 0,
       max: 6,
       names: WEEKDAY_MAP,
+      orderValues: WEEKDAY_ORDER_MAP,
       allowNthWeekday: true
     })
   ]

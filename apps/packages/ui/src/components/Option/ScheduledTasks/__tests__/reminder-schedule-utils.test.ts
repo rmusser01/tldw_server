@@ -69,6 +69,20 @@ describe("reminder schedule utilities", () => {
     })
   })
 
+  it("rejects APScheduler-invalid reversed named weekday ranges", () => {
+    expect(validateCronExpression("0 9 * * fri-mon")).toEqual({
+      valid: false,
+      error: "Cron day of week range start must be less than or equal to the end."
+    })
+  })
+
+  it("rejects APScheduler-invalid reversed named month ranges", () => {
+    expect(validateCronExpression("0 9 * dec-jan mon")).toEqual({
+      valid: false,
+      error: "Cron month range start must be less than or equal to the end."
+    })
+  })
+
   it("rejects scheduler-invalid cron ranges", () => {
     expect(validateCronExpression("99 99 * * *")).toEqual({
       valid: false,
