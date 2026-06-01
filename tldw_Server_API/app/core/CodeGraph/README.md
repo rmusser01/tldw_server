@@ -59,7 +59,7 @@ CodeGraph indexes trusted workspace source trees into a local code graph for MCP
 
 - Direct tests live under `tldw_Server_API/tests/CodeGraph/`.
 - Coverage includes config, workspace resolution, context, repository, resolver, indexer, jobs, jobs worker, language registry, and language extractor tests.
-- MCP tool behavior is covered alongside CodeGraph and MCP Unified tests; inspect `Docs/MCP/Unified/CodeGraph.md` for the documented tool contract.
+- No specific MCP CodeGraph tool test coverage was found in this pass; inspect `Docs/MCP/Unified/CodeGraph.md` and `MCP_unified/modules/implementations/codegraph_module.py` for the documented tool contract and implementation.
 
 ## Gotchas
 
