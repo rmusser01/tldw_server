@@ -1,11 +1,12 @@
 import React, { useState } from "react"
-import { Alert, Button, Card, Input, message, Result } from "antd"
+import { Button, Card, Input, message, Result } from "antd"
 import { CheckCircle, Download, Save, Table2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useQueryClient } from "@tanstack/react-query"
 import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { exportAndDownload } from "@/utils/data-table-export"
+import { Alert } from "@/components/ui/primitives"
 import type { ExportFormat } from "@/types/data-tables"
 
 const { TextArea } = Input
@@ -121,14 +122,14 @@ export const SaveTablePanel: React.FC = () => {
   if (!generatedTable) {
     return (
       <Alert
-        type="warning"
+        variant="warning"
         title={t("dataTables:noTableToSave", "No table to save")}
-        description={t(
+      >
+        {t(
           "dataTables:goBackToGenerate",
           "Go back to the previous step to generate a table first."
         )}
-        showIcon
-      />
+      </Alert>
     )
   }
 

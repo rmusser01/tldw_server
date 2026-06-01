@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Descriptions,
   Drawer,
@@ -17,6 +16,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useDataTablesStore } from "@/store/data-tables"
 import { exportAndDownload } from "@/utils/data-table-export"
 import { pollDataTableJob } from "@/utils/data-tables-jobs"
+import { Alert } from "@/components/ui/primitives"
 import type { DataTable, ExportFormat } from "@/types/data-tables"
 import { EditableDataTable } from "./EditableDataTable"
 
@@ -238,11 +238,11 @@ export const TableDetailModal: React.FC<TableDetailModalProps> = ({
       {/* Error */}
       {error && (
         <Alert
-          type="error"
+          variant="error"
           title={t("common:error", "Error")}
-          description={error}
-          showIcon
-        />
+        >
+          {error}
+        </Alert>
       )}
 
       {/* Content */}
