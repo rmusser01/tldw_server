@@ -32,9 +32,13 @@ This keeps the launcher and legacy sheet behavior data-driven. Once the shortcut
 
 `HeaderShortcuts.tsx` should not need structural changes because both current and legacy sheet views already render `getHeaderShortcutGroups()`. Any change there should be limited to tests if needed.
 
+`HeaderShortcuts.tsx` should update its active-route check when `/` is added as a visible shortcut. The current launcher treats `/` as active while the user is on `/chat`; after this change, Companion Home should only be active on `/`, and Chat should remain the active item on `/chat`.
+
 ## Data Flow
 
 The header home button navigates directly to `/`. The page directory modal reads selected shortcut ids from `HEADER_SHORTCUT_SELECTION_SETTING`, resolves groups through `getHeaderShortcutGroups()`, and renders the resulting list in either current or legacy mode. Adding `companion-home` to `HEADER_SHORTCUT_IDS` and `BASE_HEADER_SHORTCUT_GROUPS` makes it available in default selections and in reset-to-all behavior.
+
+Because some users may have a persisted filtered shortcut selection, the implementation must make Companion Home visible for those users too. The preferred approach is to add `companion-home` to `REQUIRED_HEADER_SHORTCUT_IDS`, unless implementation planning identifies a safer existing migration pattern. This preserves the requested core navigation entry without asking users to reset their launcher.
 
 Hosted deployment filtering should include `/` only if Companion Home is valid and useful there. If hosted mode does not expose the same home surface, the hosted shortcut filter can omit it while the direct header button remains scoped to the shared options shell only after confirming route availability.
 
@@ -70,5 +74,7 @@ This change should not redesign the header, alter the signpost behavior, change 
 - The icon has accessible label and tooltip copy naming Companion Home.
 - The page directory current view lists Companion Home.
 - The legacy sheet view lists Companion Home.
+- Companion Home remains visible for users with existing filtered launcher selections.
+- Adding a `/` shortcut does not make Companion Home appear active while the user is on `/chat`.
 - Existing shortcut filtering and reset behavior continue to work.
 - Focused unit tests cover the header button and launcher listing.
