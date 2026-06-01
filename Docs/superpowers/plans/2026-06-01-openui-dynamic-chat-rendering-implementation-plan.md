@@ -1786,7 +1786,7 @@ git commit -m "feat: add OpenUI request mode control"
 - Test: sidepanel test chosen by implementer after inspecting existing coverage
 - Create: `apps/tldw-frontend/e2e/smoke/chat-openui-dynamic-ui.spec.ts`
 
-- [ ] **Step 1: Pass explicit surface IDs**
+- [x] **Step 1: Pass explicit surface IDs**
 
 In shared message call sites:
 
@@ -1796,7 +1796,7 @@ In shared message call sites:
 
 Expected behavior: non-web-chat surfaces source-fallback unless registry capability changes after CSP checks.
 
-- [ ] **Step 2: Add workspace/sidepanel fallback tests**
+- [x] **Step 2: Add workspace/sidepanel fallback tests**
 
 Add or update tests to render a message with:
 
@@ -1812,7 +1812,7 @@ metadataExtra: {
 
 Assert sidepanel/workspace show source fallback, not the active OpenUI renderer.
 
-- [ ] **Step 3: Add browser smoke**
+- [x] **Step 3: Add browser smoke**
 
 Create `apps/tldw-frontend/e2e/smoke/chat-openui-dynamic-ui.spec.ts` with a mocked/synthetic persisted message path if available, or a route-level smoke that asserts the OpenUI control exists and the page does not throw.
 
@@ -1827,7 +1827,7 @@ test("chat exposes OpenUI mode control", async ({ page }) => {
 })
 ```
 
-- [ ] **Step 4: Run focused unit tests**
+- [x] **Step 4: Run focused unit tests**
 
 ```bash
 cd apps
@@ -1836,7 +1836,7 @@ bunx vitest run packages/ui/src/components/Common/DynamicUI/__tests__/DynamicMes
 
 Expected: PASS.
 
-- [ ] **Step 5: Run frontend build**
+- [x] **Step 5: Run frontend build**
 
 ```bash
 cd apps
@@ -1845,7 +1845,7 @@ bun --cwd tldw-frontend run build:dev
 
 Expected: PASS.
 
-- [ ] **Step 6: Run extension build if dependencies changed there**
+- [x] **Step 6: Run extension build if dependencies changed there**
 
 ```bash
 cd apps
@@ -1853,6 +1853,8 @@ bun --cwd extension run build:chrome:dev
 ```
 
 Expected: PASS, or documented source-fallback blocker if OpenUI cannot safely resolve in extension.
+
+Task 8 verification note: the package-local focused unit command passed 22/22 tests. Playwright `/chat` smoke passed 1/1 outside the sandbox after sandboxed local port binding failed. Frontend `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run build:dev` passed outside the sandbox with known documentation tracing warnings and token-sync OK. No Task 8 extension dependency changes were made; `bun run compile` passed in `apps/extension`. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors, with no errors in the new Task 8 fallback tests after fixing a test-only mock type.
 
 - [ ] **Step 7: Commit**
 

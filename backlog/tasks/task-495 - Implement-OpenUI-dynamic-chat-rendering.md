@@ -18,6 +18,7 @@ documentation:
 - Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
 modified_files:
 - Docs/superpowers/reviews/openui-runtime-feasibility-2026-06-01.md
+- Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
 - apps/tldw-frontend/package.json
 - apps/packages/ui/package.json
 - apps/bun.lock
@@ -47,6 +48,11 @@ modified_files:
 - apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundSubmit.ts
 - apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx
 - apps/packages/ui/src/public/_locales/en/playground.json
+- apps/packages/ui/src/components/Option/ChatWorkspace/WorkspaceChatPanel.tsx
+- apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.dynamic-ui-fallback.test.tsx
+- apps/packages/ui/src/components/Sidepanel/Chat/body.tsx
+- apps/packages/ui/src/components/Sidepanel/Chat/__tests__/body.dynamic-ui-fallback.test.tsx
+- apps/tldw-frontend/e2e/smoke/chat-openui-dynamic-ui.spec.ts
 - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
@@ -70,6 +76,8 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 
 <!-- SECTION:PLAN:BEGIN -->
 2026-06-01 Task 7: added the one-send /chat OpenUI request-mode control, passed Dynamic UI request overrides through Playground submit, and reset the mode after resolved dispatch. Red command: `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx` failed for the expected missing accessible OpenUI button. Green focused command passed 3/3 tests: `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx src/components/Option/Playground/__tests__/PlaygroundForm.signals.guard.test.ts`. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors; no Task 7 implementation files or the new OpenUI-mode test appear in the output. `git diff --cached --check` passed. Bandit not applicable because Task 7 touched TypeScript/TSX, locale JSON, and markdown only.
+
+2026-06-01 Task 8: forwarded Dynamic UI metadata to workspace and extension sidepanel message surfaces, setting explicit fallback-only surface IDs `workspace` and `extension-sidepanel`. Red command: `bunx vitest run src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.dynamic-ui-fallback.test.tsx src/components/Sidepanel/Chat/__tests__/body.dynamic-ui-fallback.test.tsx` failed because the fallback mock never received metadata/surface props. Green focused command passed 2/2 after forwarding those props. Broader focused unit command passed 22/22: `bunx vitest run src/components/Common/DynamicUI/__tests__/DynamicMessageRenderer.test.tsx src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.dynamic-ui-fallback.test.tsx src/components/Sidepanel/Chat/__tests__/body.dynamic-ui-fallback.test.tsx`. Browser smoke passed 1/1 outside sandbox after the sandbox denied local dev-server binding: `bun run e2e:pw e2e/smoke/chat-openui-dynamic-ui.spec.ts --reporter=line --workers=1`. Frontend `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run build:dev` passed outside sandbox after Turbopack hit an internal sandbox port-binding failure; warnings were the known documentation glob/traced-file warnings and token-sync reported OK. Extension `bun run compile` passed. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors; the new Task 8 fallback tests no longer appear after fixing a test-only mock type, while existing `WorkspaceChatPanel.test.tsx` baseline errors remain. Bandit not applicable because Task 8 touched TypeScript/TSX, Playwright test, and Backlog markdown only.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes

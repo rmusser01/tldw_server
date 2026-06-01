@@ -245,6 +245,8 @@ export const WorkspaceChatPanel = ({
                 isProcessing={false}
                 isStreaming={Boolean(streaming && index === messages.length - 1)}
                 createdAt={message?.createdAt}
+                metadataExtra={message?.metadataExtra}
+                dynamicUISurface="workspace"
                 hideEditAndRegenerate
                 hideContinue
                 onRegenerate={noop}
