@@ -32,7 +32,9 @@ Track design and implementation for making the LLM provider key management setti
 <!-- SECTION:PLAN:BEGIN -->
 Brainstorming approved: make /settings/provider-keys a first-class route in hosted WebUI and extension/options routing, reusing existing ProviderKeysSettings and adding route coverage.
 
-Spec review completed by subagent on 2026-06-01. Status: Approved. No blocking issues found. Advisory recommendation: optionally name expected test locations during implementation planning.
+Spec review completed by subagent on 2026-06-01. Status: Approved. No blocking issues found.
+
+Follow-up design audit completed after user review request: clarified that the shared package shell resolves settings deep links via apps/packages/ui/src/routes/option-settings-route-registry.tsx and DeferredOptionsRoute, while the extension/options shell needs its own apps/tldw-frontend/extension/routes/route-registry.tsx entry. Added suggested route test locations/patterns.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
