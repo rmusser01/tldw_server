@@ -37,6 +37,12 @@ Verification:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] Companion Home appears as a header icon immediately left of the page-directory signpost control and navigates to `/`.
+- [x] Companion Home is listed in both the current page launcher and legacy sheet views with the `/` target.
+- [x] Persisted shortcut selections are coerced so existing users receive Companion Home without losing their saved visible shortcuts.
+- [x] Legacy full-default shortcut selections still receive the Sources backfill even when they predate both Companion Home and Sources.
+- [x] Route-current state is exact: `/` marks Companion Home current, while `/chat` and nested chat routes do not.
+- [x] Focused regression tests and PR review follow-up verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -50,11 +56,13 @@ PR #2215 dev rebase follow-up complete:
 - Resolved the `HeaderShortcuts.test.tsx` conflict by keeping the shared `HEADER_SHORTCUT_IDS` test selection instead of a stale hard-coded shortcut list.
 - Force-pushed the rebased branch with lease and retargeted PR #2215 from `main` to `dev`.
 - Replied to and resolved the outdated Gemini Dockerfile `.env` parser review thread after verifying `Dockerfiles/entrypoints/tldw-app-first-run.sh` is no longer in the current PR diff.
+- After `dev` advanced again, rebased the PR branch onto the refreshed `origin/dev` tip and force-pushed the updated branch.
+- Addressed Cubic review comments by adding legacy migration coverage for selections missing both `companion-home` and `sources`, moving required shortcut injection before the Sources backfill check, and filling this task's Acceptance Criteria section.
 
 Rebase verification:
-- `bunx vitest run src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 9 tests passed after conflict resolution.
+- `bunx vitest run src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 10 tests passed after the Cubic migration follow-up.
 - `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui`: 30 tests passed after conflict resolution.
-- `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 5 files passed, 68 tests passed.
+- `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 5 files passed, 69 tests passed.
 - `git diff --check origin/dev..HEAD`: passed.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json` from `apps/packages/ui`: fails on existing package-wide unrelated errors in QuickIngest, Layout shell override test, setup onboarding test, and quick-ingest utils; none are in the touched Companion Home files.
 - Bandit: not applicable; touched scope remains frontend TypeScript/TSX tests and Backlog markdown only.
@@ -114,7 +122,7 @@ What changed:
 - Made legacy sheet keyboard-selection styling distinct from route-current styling so the initially selected Companion Home row does not visually read as current on `/chat`.
 
 Verification:
-- `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 5 files passed, 68 tests passed after the `origin/dev` rebase.
+- `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 5 files passed, 69 tests passed after the `origin/dev` rebase and Cubic follow-up.
 - `git diff --check origin/dev..HEAD`: passed.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json` from `apps/packages/ui`: fails on existing package-wide unrelated errors; the remaining diagnostics are outside the touched Companion Home files.
 - Bandit: not applicable; touched scope is frontend TypeScript/TSX tests and Backlog markdown only.

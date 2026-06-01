@@ -43,6 +43,20 @@ describe("header shortcut defaults", () => {
     expect(normalized).toContain("sources")
   })
 
+  it("adds Sources to legacy full-default selections missing Companion Home and Sources", () => {
+    const legacyFullDefaultSelection = DEFAULT_HEADER_SHORTCUT_SELECTION.filter(
+      (id) => id !== "companion-home" && id !== "sources"
+    )
+
+    const normalized = normalizeSettingValue(
+      HEADER_SHORTCUT_SELECTION_SETTING,
+      legacyFullDefaultSelection
+    )
+
+    expect(normalized).toContain("companion-home")
+    expect(normalized).toContain("sources")
+  })
+
   it("does not add Sources to custom persisted selections", () => {
     const normalized = normalizeSettingValue(
       HEADER_SHORTCUT_SELECTION_SETTING,

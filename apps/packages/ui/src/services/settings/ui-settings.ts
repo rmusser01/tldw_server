@@ -502,11 +502,11 @@ const coerceHeaderShortcutSelection = (
       }
     }
   }
-  if (hasExactHeaderShortcutIds(unique, HEADER_SHORTCUT_IDS_WITHOUT_SOURCES)) {
-    unique.add("sources")
-  }
   for (const requiredId of required) {
     unique.add(requiredId)
+  }
+  if (hasExactHeaderShortcutIds(unique, HEADER_SHORTCUT_IDS_WITHOUT_SOURCES)) {
+    unique.add("sources")
   }
   return HEADER_SHORTCUT_IDS.filter((id) => unique.has(id))
 }
