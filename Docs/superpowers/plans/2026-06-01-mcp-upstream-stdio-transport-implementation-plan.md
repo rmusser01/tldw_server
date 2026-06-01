@@ -269,7 +269,7 @@ git diff --check
 
 Record files changed, verification commands, and final notes in TASK-582.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add \
