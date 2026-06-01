@@ -116,6 +116,7 @@ import type {
 import {
   type ChatHistory,
   type Message,
+  type MessageMetadataExtra,
   useStoreMessageOption,
   type Knowledge,
   type ReplyTarget,
@@ -123,6 +124,7 @@ import {
 } from "@/store/option"
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData } from "@/types/chat-modes"
+import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import {
   buildGreetingOptionsFromEntries,
   collectGreetingEntries,
@@ -150,6 +152,8 @@ type ChatModeOverrides = {
   webSearch?: boolean
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
   researchContext?: ChatResearchContext
+  dynamicUIRequest?: DynamicUIRequest
+  userMetadataExtra?: MessageMetadataExtra
   ragMediaIds?: number[] | null
   fileRetrievalEnabled?: boolean
   selectedKnowledge?: Knowledge | null
@@ -2120,6 +2124,8 @@ export const useChatActions = ({
     imageGenerationSource,
     imageEventSyncPolicy,
     messageSteeringOverride,
+    dynamicUIRequest,
+    userMetadataExtra,
     requestOverrides,
     continueOutputTarget = "chat",
     serverChatIdOverride,
@@ -2143,6 +2149,8 @@ export const useChatActions = ({
     imageGenerationSource?: "slash-command" | "generate-modal" | "message-regen"
     imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
     messageSteeringOverride?: Partial<MessageSteeringState> | null
+    dynamicUIRequest?: DynamicUIRequest
+    userMetadataExtra?: MessageMetadataExtra
     requestOverrides?: ChatModeOverrides
     continueOutputTarget?: "chat" | "composer_input"
     serverChatIdOverride?: string | null
@@ -2206,6 +2214,10 @@ export const useChatActions = ({
     )
       ? requestOverrides?.selectedKnowledge
       : selectedKnowledge
+    const turnDynamicUIRequest =
+      dynamicUIRequest ?? requestOverrides?.dynamicUIRequest
+    const turnUserMetadataExtra =
+      userMetadataExtra ?? requestOverrides?.userMetadataExtra
     const chatModeParams = await buildChatModeParams({
       ...(requestOverrides ?? {}),
       ragMediaIds: turnRagMediaIds,
@@ -2220,7 +2232,9 @@ export const useChatActions = ({
       imageGenerationPromptMode,
       imageGenerationSource,
       imageEventSyncPolicy,
-      researchContext
+      researchContext,
+      dynamicUIRequest: turnDynamicUIRequest,
+      userMetadataExtra: turnUserMetadataExtra
     })
     const baseMessages = chatHistory || messages
     const baseHistory = memory || history

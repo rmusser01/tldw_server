@@ -4,37 +4,40 @@ title: Implement OpenUI dynamic chat rendering
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 15:57'
+updated_date: 2026-06-01 15:57
 labels: []
 dependencies: []
 references:
-  - TASK-491
-  - TASK-493
-  - Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
-  - 'https://github.com/pewdiepie-archdaemon/odysseus/pull/151'
+- TASK-491
+- TASK-493
+- Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
+- Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
+- https://github.com/pewdiepie-archdaemon/odysseus/pull/151
 documentation:
-  - Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
+- Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
+- Docs/superpowers/plans/2026-06-01-openui-dynamic-chat-rendering-implementation-plan.md
 modified_files:
-  - Docs/superpowers/reviews/openui-runtime-feasibility-2026-06-01.md
-  - apps/tldw-frontend/package.json
-  - apps/packages/ui/package.json
-  - apps/bun.lock
-  - apps/extension/package.json
-  - apps/packages/ui/src/types/dynamic-ui.ts
-  - apps/packages/ui/src/utils/dynamic-ui.ts
-  - apps/packages/ui/src/utils/__tests__/dynamic-ui.test.ts
-  - apps/packages/ui/src/utils/message-variants.ts
-  - apps/packages/ui/src/utils/__tests__/message-variants.test.ts
-  - apps/packages/ui/src/hooks/chat/useServerChatLoader.ts
-  - apps/packages/ui/src/routes/sidepanel-chat.tsx
-  - apps/packages/ui/src/components/Common/DynamicUI/renderers/OpenUIRenderer.tsx
-  - apps/packages/ui/src/components/Common/DynamicUI/__tests__/OpenUIRenderer.test.tsx
-  - apps/packages/ui/src/store/option.tsx
-  - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
+- Docs/superpowers/reviews/openui-runtime-feasibility-2026-06-01.md
+- apps/tldw-frontend/package.json
+- apps/packages/ui/package.json
+- apps/bun.lock
+- apps/extension/package.json
+- apps/packages/ui/src/types/dynamic-ui.ts
+- apps/packages/ui/src/utils/dynamic-ui.ts
+- apps/packages/ui/src/utils/__tests__/dynamic-ui.test.ts
+- apps/packages/ui/src/utils/message-variants.ts
+- apps/packages/ui/src/utils/__tests__/message-variants.test.ts
+- apps/packages/ui/src/hooks/chat/useServerChatLoader.ts
+- apps/packages/ui/src/routes/sidepanel-chat.tsx
+- apps/packages/ui/src/components/Common/DynamicUI/renderers/OpenUIRenderer.tsx
+- apps/packages/ui/src/components/Common/DynamicUI/__tests__/OpenUIRenderer.test.tsx
+- apps/packages/ui/src/store/option.tsx
+- apps/packages/ui/src/utils/dynamic-ui-openui-prompt.ts
+- apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts
+- apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts
+- apps/packages/ui/src/hooks/chat/useChatActions.ts
+- apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts
+- backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
 ## Description
@@ -66,6 +69,8 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 2026-06-01 Task 4 review fixes: rebuilt the OpenUI chat library through createLibrary with chart/style-injection components filtered out, added a bounded themed OpenUI shell, normalized raw OpenUI ActionEvent payloads into the app dynamic action shape, and added raw-event regression coverage. Added OpenUI peer runtime dependencies to apps/extension and refreshed apps/bun.lock so the extension package can resolve the lazy adapter imports while active rendering remains disabled/fallback there. Verification: focused Dynamic UI suite passed 10/10, extension compile passed, Bun resolver from apps/extension passed for react-lang/genui-lib/CSS imports, frontend build:dev passed outside sandbox with known docs/tracing warnings, touched-file diff check passed. apps/packages/ui tsc still fails on unrelated baseline errors with no touched dynamic UI files in output. extension build:chrome:dev still hangs in WXT/Vite after startup and was terminated; tracked as a non-OpenUI-specific build caveat for later surface enablement.
 
 2026-06-01 Task 4 Bandit: not applicable for this slice because touched files are TypeScript/TSX, package manifests/lockfile, and Backlog markdown only; no Python code paths were modified.
+
+2026-06-01 Task 5: added OpenUI request-mode prompt injection and metadata tagging in the chat pipeline. Red command: `bunx vitest run src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts` failed for the expected missing OpenUI prompt injection. Green focused command passed 22/22 tests: `bunx vitest run src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts src/utils/__tests__/dynamic-ui.test.ts`. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors; after touched-file fixes there are no new errors for Task 5 files, while an existing error remains in `chatModePipeline.conversation-id.test.ts`. Bandit not applicable because Task 5 touched TypeScript/TSX and markdown only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
