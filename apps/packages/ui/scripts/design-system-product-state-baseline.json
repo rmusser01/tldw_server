@@ -418,28 +418,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Settings/ProviderKeysSettings.tsx:Alert#antd-alert-providerkeyssettings-type-error-line-196-tt66rs",
-    "path": "src/components/Option/Settings/ProviderKeysSettings.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Settings/ProviderKeysSettings.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Settings/ProviderKeysSettings.tsx:Alert#antd-alert-providerkeyssettings-type-info-line-117-9uvxvl",
-    "path": "src/components/Option/Settings/ProviderKeysSettings.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Settings/ProviderKeysSettings.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Settings/splash.tsx:Alert",
     "path": "src/components/Option/Settings/splash.tsx",
     "rule": "antd-product-state-import",

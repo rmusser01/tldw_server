@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Alert, Button, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from "antd"
+import { Button, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from "antd"
 import { Key, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 type ProviderKey = {
@@ -115,11 +116,11 @@ export const ProviderKeysSettings = () => {
     return (
       <div className="mx-auto max-w-3xl px-4 py-6">
         <Alert
-          type="info"
-          showIcon
-          message={t("settings:providerKeys.unavailableTitle", "Provider key management is not available")}
-          description={t("settings:providerKeys.unavailableDesc", "Set BYOK_ENCRYPTION_KEY in your server's .env file to enable user-managed provider keys. Docker users: this is auto-generated on first run.")}
-        />
+          variant="info"
+          title={t("settings:providerKeys.unavailableTitle", "Provider key management is not available")}
+        >
+          {t("settings:providerKeys.unavailableDesc", "Set BYOK_ENCRYPTION_KEY in your server's .env file to enable user-managed provider keys. Docker users: this is auto-generated on first run.")}
+        </Alert>
       </div>
     )
   }
@@ -193,7 +194,13 @@ export const ProviderKeysSettings = () => {
       </div>
 
       {error && (
-        <Alert type="error" message={error} className="mb-4" closable onClose={() => setError(null)} />
+        <Alert
+          variant="error"
+          title={error}
+          className="mb-4"
+          dismissible
+          onDismiss={() => setError(null)}
+        />
       )}
 
       <div className="mb-4 flex items-center justify-between">
