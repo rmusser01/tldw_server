@@ -123,10 +123,15 @@ def test_host_external_manager_reexports_package_virtual_tool_contract() -> None
 def test_gateway_external_runtime_exports_are_package_owned() -> None:
     """Gateway runtime exports must resolve without host package imports."""
     package_gateway = importlib.import_module("mcp_unified.gateway")
+    package_config = importlib.import_module("mcp_unified.gateway.config")
     package_runtime = importlib.import_module("mcp_unified.gateway.external_runtime")
 
     assert package_gateway.GatewayExternalRuntimeManager is package_runtime.GatewayExternalRuntimeManager
     assert package_gateway.GatewayExternalRuntimeError is package_runtime.GatewayExternalRuntimeError
+    assert (
+        package_gateway.GatewayExternalRuntimeBootstrapConfig
+        is package_config.GatewayExternalRuntimeBootstrapConfig
+    )
 
 
 def test_federation_installer_contracts_are_public_exports() -> None:

@@ -900,6 +900,10 @@ def _validated_config_payload(
     return {
         "default_preset_id": config.default_preset_id,
         "default_profile_id": config.default_profile_id,
+        "external_runtime": {
+            "enabled": config.external_runtime.enabled,
+            "transport_factory": config.external_runtime.transport_factory,
+        },
         "ok": True,
         "path": str(path),
         "profiles": len(config.profiles),

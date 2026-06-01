@@ -7,6 +7,7 @@ import io
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 from mcp_unified.gateway import cli as gateway_cli
@@ -55,6 +56,10 @@ def test_gateway_cli_validate_config_reports_success_json(
     assert payload == {
         "default_preset_id": "project-researcher",
         "default_profile_id": None,
+        "external_runtime": {
+            "enabled": False,
+            "transport_factory": "stdio",
+        },
         "ok": True,
         "path": str(config_path),
         "profiles": 0,

@@ -549,14 +549,16 @@ class GatewayExternalRuntimeManager:
         self,
         server: ExternalServerDefinition,
     ) -> tuple[ExternalFederationTransport, list[ExternalToolDefinition]]:
-        transport = self._transport_factory(server.model_copy(deep=True))
+        transport: ExternalFederationTransport | None = None
         try:
+            transport = self._transport_factory(server.model_copy(deep=True))
             await transport.connect()
             tools = await transport.list_tools()
         except Exception as exc:  # noqa: BLE001 - transport adapters define their own errors.
             async with self._lock:
                 self._last_errors[server.id] = self._exception_summary(exc)
-            await self._close_best_effort(transport)
+            if transport is not None:
+                await self._close_best_effort(transport)
             await self._audit_best_effort(
                 "external_server.lifecycle",
                 payload={
