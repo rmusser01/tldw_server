@@ -30,6 +30,11 @@ from .models import (
     MCPCatalogEntry,
     VirtualExternalTool,
 )
+from .stdio_transport import (
+    StdioExternalTransport,
+    StdioExternalTransportError,
+    create_external_transport,
+)
 from .transports import ExternalFederationTransport, FakeExternalTransport
 
 __all__ = [
@@ -57,9 +62,12 @@ __all__ = [
     "MCPAuthType",
     "MCPCatalogEntry",
     "NullExternalServerInstaller",
+    "StdioExternalTransport",
+    "StdioExternalTransportError",
     "VirtualExternalTool",
     "catalog_loader",
     "config_schema",
+    "create_external_transport",
     "get_catalog_entry",
     "list_catalog_entries",
     "load_external_server_registry",
