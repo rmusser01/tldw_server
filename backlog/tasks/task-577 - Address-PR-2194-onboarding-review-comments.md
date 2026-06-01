@@ -1,10 +1,10 @@
 ---
 id: TASK-577
 title: Address PR 2194 onboarding review comments
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 00:31'
+updated_date: '2026-06-01 00:37'
 labels:
   - onboarding
   - review-fix
@@ -21,10 +21,10 @@ Evaluate and fix unresolved PR review comments for the unified first-run solo on
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All unresolved PR #2194 review comments are mapped to fixes or documented as non-actionable.
-- [ ] #2 Backend setup/readiness fixes have regression coverage for sanitizer behavior, local provider hosts, setup recovery writes, completion ordering, first-run state doc/type requirements, and audio health logging.
-- [ ] #3 Frontend onboarding fixes have regression coverage for provider resume state, multi-provider saves, first-chat completion errors, audio recommendation error surfacing, static test imports, and provider secret redaction.
-- [ ] #4 Targeted pytest, Vitest, Bandit, ESLint, and diff hygiene checks are recorded before PR thread closeout.
+- [x] #1 All unresolved PR #2194 review comments are mapped to fixes or documented as non-actionable.
+- [x] #2 Backend setup/readiness fixes have regression coverage for sanitizer behavior, local provider hosts, setup recovery writes, completion ordering, first-run state doc/type requirements, and audio health logging.
+- [x] #3 Frontend onboarding fixes have regression coverage for provider resume state, multi-provider saves, first-chat completion errors, audio recommendation error surfacing, static test imports, and provider secret redaction.
+- [x] #4 Targeted pytest, Vitest, Bandit, ESLint, and diff hygiene checks are recorded before PR thread closeout.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,19 +48,23 @@ Verification recorded during implementation: backend RED tests failed before fix
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Addressed all unresolved PR #2194 review threads and pushed commit 2b1c568ecf. Backend fixes covered setup sanitizer false positives, optional advanced storage path handling, local provider hostname validation, centralized first-run transition errors, async first-run store offloading, setup recovery write guards, completion persistence order, audio pack import cleanup, and TTS health exception logging. Frontend fixes covered provider resume state, multi-provider saves, first-chat completion failure messaging, audio recommendation error feedback, wizard error logging, static imports in tests, and api_key redaction.
 
+Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/TTS_NEW/integration/test_kokoro_runtime_health_envelope.py -q passed with 347 passed, 4 warnings; bunx vitest run targeted onboarding/setup tests passed with 19 passed; Bandit on touched Python implementation files exited 0 and wrote /tmp/bandit_pr2194_review_fixes.json; targeted ESLint exited 0 with the existing Next pages-directory warning; git diff --check exited 0.
+
+PR thread closeout: replied to and resolved all 24 review threads, then re-queried GitHub and confirmed zero unresolved review threads. No known blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
