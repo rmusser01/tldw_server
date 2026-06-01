@@ -4,6 +4,7 @@ import {
   formatDynamicUIActionUserMessage,
   normalizeDynamicUIActionPayload,
   normalizeDynamicUIEnvelope,
+  normalizeMessageMetadataExtra,
   preflightOpenUISource,
   shouldBlockDynamicUIActionValues
 } from "../dynamic-ui"
@@ -83,6 +84,43 @@ describe("dynamic UI utilities", () => {
       source: "root = <Card />"
     })
     expect(buildDynamicUIEnvelope("openui", "plain refusal")).toBeNull()
+  })
+
+  it("normalizes dynamic UI inside message metadata while preserving unrelated metadata", () => {
+    expect(
+      normalizeMessageMetadataExtra({
+        dynamic_ui: {
+          renderer: "openui",
+          version: "v1",
+          source: "  root = <Card />  ",
+          capabilities: ["forms", 1]
+        },
+        trace_id: "trace-1"
+      })
+    ).toEqual({
+      dynamic_ui: {
+        renderer: "openui",
+        version: "v1",
+        source: "root = <Card />",
+        capabilities: ["forms"]
+      },
+      trace_id: "trace-1"
+    })
+  })
+
+  it("omits invalid dynamic UI inside message metadata while preserving unrelated metadata", () => {
+    expect(
+      normalizeMessageMetadataExtra({
+        dynamic_ui: {
+          renderer: "openui",
+          version: "v2",
+          source: ""
+        },
+        trace_id: "trace-1"
+      })
+    ).toEqual({
+      trace_id: "trace-1"
+    })
   })
 
   it("normalizes action payloads and blocks sensitive-looking values", () => {

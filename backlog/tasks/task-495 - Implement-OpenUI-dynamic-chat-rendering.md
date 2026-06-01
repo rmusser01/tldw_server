@@ -19,6 +19,10 @@ modified_files:
 - apps/packages/ui/src/types/dynamic-ui.ts
 - apps/packages/ui/src/utils/dynamic-ui.ts
 - apps/packages/ui/src/utils/__tests__/dynamic-ui.test.ts
+- apps/packages/ui/src/utils/message-variants.ts
+- apps/packages/ui/src/utils/__tests__/message-variants.test.ts
+- apps/packages/ui/src/hooks/chat/useServerChatLoader.ts
+- apps/packages/ui/src/routes/sidepanel-chat.tsx
 - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
@@ -41,7 +45,7 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- 2026-06-01 Task 2 quality fix: added focused failing coverage for `metadataExtra` in message variant helpers and shared message metadata normalization. Red command: `bunx vitest run src/hooks/__tests__/useServerChatLoader.test.ts src/hooks/chat/__tests__/useChatActions.persist-mirror.guard.test.ts src/utils/__tests__/dynamic-ui.test.ts src/utils/__tests__/message-variants.test.ts` failed with 5 expected failures for missing `normalizeMessageMetadataExtra` and dropped/stale variant `metadataExtra`. Green rerun passed 44/44 tests after copying/clearing variant metadata and using shared normalization in playground and sidepanel hydration.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
