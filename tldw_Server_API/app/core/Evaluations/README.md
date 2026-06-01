@@ -506,7 +506,7 @@ pytest tests/Evaluations/ -m integration
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+We welcome contributions! Please see our [Contributing Guidelines](../../../../CONTRIBUTING.md).
 
 ### Adding a New Benchmark
 

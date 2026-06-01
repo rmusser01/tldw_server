@@ -4,7 +4,7 @@ title: Refresh core module README developer docs
 status: Done
 assignee: []
 created_date: '2026-06-01 07:18'
-updated_date: '2026-06-01 17:18'
+updated_date: '2026-06-01 17:28'
 labels: []
 dependencies: []
 documentation:
@@ -52,6 +52,8 @@ Verification: Task 5 refreshed existing core READMEs and updated the inventory. 
 2026-06-01: Spec compliance follow-up corrected stale endpoint/test evidence in affected READMEs and inventory (evaluations/media/audio endpoint packages; moderation, Guardian family-wizard, and WebSub test paths). Re-ran targeted replacement path existence checks, missing README coverage, placeholder scan, local Markdown sanity, and diff checks. Bandit remains skipped because only Markdown documentation changed.
 
 2026-06-01: Second spec re-review follow-up corrected remaining stale README path evidence for LLM_Calls, Evaluations, DB_Management, and TTS. Re-ran targeted existence checks, targeted stale-path inspection, missing README coverage, placeholder scan, local Markdown sanity, and diff checks before commit. Bandit remains skipped because only Markdown documentation changed.
+
+2026-06-01: Final quality review follow-up fixed the Evaluations CONTRIBUTING.md link, clarified Billing README OSS limit-enforcement versus non-public/injected Stripe compatibility, and renamed the inventory verification section to Task 5 / Task 6. Re-ran local Markdown sanity including a stricter README-relative link check, missing README coverage, placeholder scan, targeted Billing overclaim scan, and diff checks. Bandit remains skipped because only Markdown documentation changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

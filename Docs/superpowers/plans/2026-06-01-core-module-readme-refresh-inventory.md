@@ -109,7 +109,7 @@ Recorded on 2026-06-01 from `/Users/appledev/Documents/GitHub/tldw_server/.workt
 - README coverage check: red as expected. `test -z "$missing"` exited `1` and printed the 40 modules marked `missing` at initial inventory time.
 - Placeholder scan: red as expected. `rg -n "Replace placeholders|scaffolded from the core template|Link API routes and files|Planned improvements|T[B]D|F[I]XME" tldw_Server_API/app/core --glob 'README.md'` exited `0` and reported `tldw_Server_API/app/core/Writing/README.md` lines 3, 10, and 32.
 
-## Task 5 Verification
+## Task 5 / Task 6 Verification
 
 Recorded on 2026-06-01 from `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/core-module-readmes`.
 

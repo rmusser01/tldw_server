@@ -1,15 +1,19 @@
 # Billing
 
-The Billing module owns subscription state, plan limits, overage settings,
-Stripe-backed checkout/portal/webhook flows, billing audit records, and runtime
-limit enforcement. It is an operational boundary between AuthNZ organization
-state, Usage accounting, Resource Governance, Storage quotas, and Stripe.
+The Billing module owns OSS/self-host plan limits, overage settings, billing
+audit records, and runtime limit enforcement. Historical Stripe checkout,
+portal, and webhook compatibility remains in the service layer for non-public
+or injected-client deployments, but the public OSS runtime keeps payment
+billing disabled.
 
 ## Start Here
 
-- Limit enforcement: `enforcement.py`, `plan_limits.py`, `overage_config.py`,
-  and `runtime_flags.py`.
-- Stripe/subscription lifecycle: `subscription_service.py`.
+- Limit enforcement: `enforcement.py`, `plan_limits.py`, and
+  `overage_config.py`.
+- OSS billing runtime flag: `runtime_flags.py` returns disabled for payment
+  billing.
+- Historical subscription and injected-client Stripe compatibility:
+  `subscription_service.py`.
 - Audit helpers: `billing_audit.py`.
 - API dependency helpers: `app/api/v1/API_Deps/billing_deps.py`.
 - API endpoint and schemas: `app/api/v1/endpoints/billing.py` and
@@ -18,12 +22,15 @@ state, Usage accounting, Resource Governance, Storage quotas, and Stripe.
 
 ## Responsibilities
 
-- Decide whether billing and limit enforcement are enabled at runtime.
-- Resolve plan limits and overage behavior for organizations/users.
+- Decide whether OSS limit enforcement is enabled and whether payment billing
+  is disabled at runtime.
+- Resolve free/self-host plan limits and overage behavior for
+  organizations/users.
 - Enforce storage, media, audio, and provider/resource limits through shared
   request contexts.
-- Create Stripe checkout/portal sessions and reconcile Stripe webhooks.
-- Record billing audit events without leaking secrets or Stripe payload details.
+- Preserve non-public/injected-client checkout, portal, and webhook
+  compatibility paths without exposing an active public payment runtime.
+- Record billing audit events without leaking secrets or raw provider payloads.
 
 ## Module Map
 
@@ -31,10 +38,12 @@ state, Usage accounting, Resource Governance, Storage quotas, and Stripe.
 - `plan_limits.py` maps plans to concrete limits and fallback tiers.
 - `overage_config.py` parses overage settings and failure modes.
 - `subscription_service.py` coordinates subscription, checkout, portal, cancel,
-  resume, and webhook updates.
+  resume, and webhook compatibility, but `_get_stripe_client()` raises in OSS
+  unless a client is injected and `runtime_flags.is_billing_enabled()` still
+  reports payment billing disabled.
 - `billing_audit.py` records security-relevant billing events.
-- `runtime_flags.py` centralizes feature flags such as `BILLING_ENABLED` and
-  `LIMIT_ENFORCEMENT_ENABLED`.
+- `runtime_flags.py` centralizes the OSS payment-billing flag; `enforcement.py`
+  reads `LIMIT_ENFORCEMENT_ENABLED` for quota enforcement.
 
 ## How It Connects
 
@@ -42,23 +51,26 @@ state, Usage accounting, Resource Governance, Storage quotas, and Stripe.
   helpers before creating expensive or quota-bound work.
 - AuthNZ repositories provide organization, user, subscription, and role data.
 - Usage and Resource Governance provide usage counters and cost-unit context.
-- Stripe integration is optional and guarded by runtime flags and secrets.
+- Payment-provider compatibility is isolated from normal OSS limit enforcement;
+  public builds should operate on the free/self-host tier without active
+  checkout or portal flows.
 
 ## Extension Points
 
 - Add a new enforced resource by extending `LimitCategory`, plan limits, endpoint
   dependency wiring, and tests together.
-- Add webhook events in `subscription_service.py` only with idempotency and audit
-  coverage.
-- Keep redirect URL validation strict; checkout/portal flows must honor the
-  configured host allowlist and HTTPS policy.
+- Add webhook events in `subscription_service.py` only for injected-client or
+  non-public deployments, with idempotency and audit coverage.
+- Keep redirect URL validation strict; checkout/portal compatibility paths must
+  honor the configured host allowlist and HTTPS policy.
 
 ## Testing
 
 - Enforcement behavior: `tests/Billing/test_billing_enforcement.py`,
   `tests/Billing/test_limit_enforcer_context.py`, and
   `tests/Billing/test_overage_enforcement_integration.py`.
-- Subscription and webhook flows: `tests/Billing/test_subscription_service.py`,
+- Subscription and compatibility webhook behavior:
+  `tests/Billing/test_subscription_service.py`,
   `tests/Billing/test_subscription_webhook_updates.py`, and
   `tests/Billing/test_subscription_service_updates.py`.
 - Endpoint/schema/dependency coverage: `tests/Billing/test_billing_schemas.py`,
@@ -69,6 +81,6 @@ state, Usage accounting, Resource Governance, Storage quotas, and Stripe.
 
 - `BILLING_ENFORCEMENT_FAILURE_MODE=closed` changes allow-on-error behavior into
   deny-on-error behavior; tests should cover both modes for new resources.
-- Stripe cancel/resume paths fail closed when remote state cannot be reconciled.
-- Never log `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, or raw signed webhook
-  bodies.
+- Historical Stripe cancel/resume compatibility paths fail closed when remote
+  state cannot be reconciled.
+- Never log injected payment-provider secrets or raw signed webhook bodies.
