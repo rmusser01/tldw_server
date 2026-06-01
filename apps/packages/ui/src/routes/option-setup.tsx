@@ -20,7 +20,7 @@ const OptionSetup = () => {
     <OptionLayout hideHeader hideSidebar>
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
-        title={t("setupRoute.recoveryTitle", "/setup operator recovery")}
+        title={t("setupRoute.recoveryTitle", "Setup operator recovery")}
         message={t(
           "setupRoute.recoveryMessage",
           "Use this surface when first-run setup needs local operator recovery."

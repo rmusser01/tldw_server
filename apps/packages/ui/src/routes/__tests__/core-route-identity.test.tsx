@@ -173,7 +173,7 @@ describe("core route identity guardrails", () => {
     firstRender.unmount()
 
     const secondRender = render(<OptionSetup />)
-    expect(screen.getByText("/setup operator recovery")).toBeInTheDocument()
+    expect(screen.getByText("Setup operator recovery")).toBeInTheDocument()
     expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
     expect(optionLayoutMock).toHaveBeenLastCalledWith(
       expect.objectContaining({

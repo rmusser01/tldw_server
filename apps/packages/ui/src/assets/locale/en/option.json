@@ -8,7 +8,7 @@
     "panelTitle": "Connect your server",
     "panelMessage": "Guided connection setup for production use.",
     "startAction": "Start setup",
-    "recoveryTitle": "/setup operator recovery",
+    "recoveryTitle": "Setup operator recovery",
     "recoveryMessage": "Use this surface when first-run setup needs local operator recovery.",
     "continueAction": "Continue setup",
     "returnHomeAction": "Return home",

@@ -24,7 +24,7 @@
     "message": "Start setup"
   },
   "setupRoute_recoveryTitle": {
-    "message": "/setup operator recovery"
+    "message": "Setup operator recovery"
   },
   "setupRoute_recoveryMessage": {
     "message": "Use this surface when first-run setup needs local operator recovery."

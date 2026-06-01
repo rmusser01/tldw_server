@@ -4,7 +4,7 @@ title: Address PR 2194 onboarding review comments
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 00:52'
+updated_date: '2026-06-01 00:58'
 labels:
   - onboarding
   - review-fix
@@ -49,16 +49,18 @@ Follow-up: Cubic added five new review threads after commit 2ffcc1c50e. Reopened
 Follow-up implementation: added owner-safe shell override cleanup in OptionLayout, strict own-property preset validation for first-source quick ingest metadata, shared setup status gating helper, /setup translation keys and English locale entries, and request sequencing for post-onboarding media readiness checks.
 
 Follow-up RED/GREEN evidence: the new focused Vitest tests first failed on the inherited preset key and stale readiness overwrite, setup-status helper was missing, and the shell override cleanup test failed because cleanup called another owner setOverrides(null). After implementation, the focused follow-up/onboarding Vitest suite passed with 43 tests. Targeted ESLint exited 0 with the existing Next pages-directory warning, and git diff --check exited 0.
+
+Final Cubic cleanup: changed the setup recovery title from a path-like label to the natural-language "Setup operator recovery" in both locale files and the route fallback, and updated the route identity expectation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed the original PR #2194 review threads in 2b1c568ecf and the post-push Cubic follow-up threads in b658b3b8d2. Backend fixes covered setup sanitizer false positives, optional advanced storage path handling, local provider hostname validation, centralized first-run transition errors, async first-run store offloading, setup recovery write guards, completion persistence order, audio pack import cleanup, and TTS health exception logging. Frontend fixes covered provider resume state, multi-provider saves, first-chat completion failure messaging, audio recommendation error feedback, wizard error logging, static imports in tests, api_key redaction, owner-safe shell override cleanup, strict quick-ingest preset validation, shared setup status gating, /setup localization keys, and stale readiness request protection.
+Addressed the original PR #2194 review threads in 2b1c568ecf, the post-push Cubic follow-up threads in b658b3b8d2, and the final recovery-title cleanup in the latest follow-up. Backend fixes covered setup sanitizer false positives, optional advanced storage path handling, local provider hostname validation, centralized first-run transition errors, async first-run store offloading, setup recovery write guards, completion persistence order, audio pack import cleanup, and TTS health exception logging. Frontend fixes covered provider resume state, multi-provider saves, first-chat completion failure messaging, audio recommendation error feedback, wizard error logging, static imports in tests, api_key redaction, owner-safe shell override cleanup, strict quick-ingest preset validation, shared setup status gating, /setup localization keys and natural-language recovery title, and stale readiness request protection.
 
-Verification: python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/TTS_NEW/integration/test_kokoro_runtime_health_envelope.py -q passed with 347 passed, 4 warnings; bunx vitest run targeted onboarding/setup tests passed with 19 passed; follow-up focused Vitest run passed with 43 passed; Bandit on touched Python implementation files exited 0 and wrote /tmp/bandit_pr2194_review_fixes.json; targeted ESLint exited 0 with the existing Next pages-directory warning; git diff --check exited 0.
+Verification: python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/TTS_NEW/integration/test_kokoro_runtime_health_envelope.py -q passed with 347 passed, 4 warnings; bunx vitest run targeted onboarding/setup tests passed with 19 passed; follow-up focused Vitest run passed with 43 passed; route identity recovery-title focused test passed; Bandit on touched Python implementation files exited 0 and wrote /tmp/bandit_pr2194_review_fixes.json; targeted ESLint exited 0 with the existing Next pages-directory warning; git diff --check exited 0.
 
-PR thread closeout: replied to and resolved the original 24 review threads, then replied to and resolved the 5 post-push Cubic code threads. A final task-record cleanup removed the absolute local path from this summary. No known blockers remain.
+PR thread closeout: replied to and resolved the original 24 review threads, then replied to and resolved the 5 post-push Cubic code threads and the final task/locale cleanup threads. No known blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
