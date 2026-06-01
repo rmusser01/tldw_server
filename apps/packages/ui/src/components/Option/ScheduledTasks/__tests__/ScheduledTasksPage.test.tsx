@@ -666,6 +666,50 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("Run at is required for one-time reminders")).toBeInTheDocument()
   })
 
+  it("creates a daily recurring reminder with cron and timezone from safer controls", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+    mocks.createScheduledTaskReminder.mockResolvedValue({
+      id: "reminder_task:daily",
+      primitive: "reminder_task",
+      title: "Daily recurring review",
+      description: null,
+      status: "scheduled",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: { task_id: "daily" }
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
+    await user.type(await screen.findByRole("textbox", { name: "Title" }), "Daily recurring review")
+    fireEvent.click(screen.getByText("Repeat"))
+    expect(await screen.findByRole("combobox", { name: "Repeat preset" })).toBeInTheDocument()
+    fireEvent.change(await screen.findByLabelText("Timezone"), {
+      target: { value: "America/Los_Angeles" }
+    })
+    await user.click(await screen.findByRole("button", { name: "Save reminder" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskReminder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Daily recurring review",
+          schedule_kind: "recurring",
+          cron: "0 9 * * *",
+          timezone: "America/Los_Angeles",
+          enabled: true
+        })
+      )
+    })
+  })
+
   it("does not create a recurring reminder without cron and timezone", async () => {
     const user = userEvent.setup()
 

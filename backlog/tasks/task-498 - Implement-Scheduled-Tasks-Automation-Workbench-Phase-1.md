@@ -22,12 +22,11 @@ documentation:
 - 'Task 2 follow-up: stable status keys; disabled next-run filtering; empty state
   table suppression.'
 - 'Task 5: safer reminder scheduling controls implemented in WebUI.'
+- 'Task 5 spec-review follow-up: recurring preview copy is next-run oriented for presets.'
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/reminder-schedule-utils.ts
-- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts
-- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderTaskEditor.tsx
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
 ---
 
@@ -51,7 +50,7 @@ Implement Phase 1 of the Scheduled Tasks Automation Workbench UX from the approv
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Task 5 strict TDD: added reminder-schedule utility tests, captured RED missing-module failure, implemented native Date/Intl scheduling helpers, updated page tests for safer controls, captured integration RED against old raw fields, then replaced raw reminder schedule inputs with Ant Design controls preserving schedule_kind/run_at/cron/timezone fields and payload shape.
+Task 5 spec-review follow-up strict TDD: added a failing utility assertion that daily recurring preview must be next-run oriented instead of raw cron output, added recurring daily payload coverage, then updated preview copy for daily/weekly presets while preserving custom cron validation and payload fields.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -64,7 +63,7 @@ Task 1 review clarification: failure-like status tokens (fail, error, missed) ta
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 5: replaced raw reminder run_at/cron/timezone editing with safer Run once/Repeat controls, native datetime-local ISO conversion, daily/weekly/custom cron helpers, local timezone defaults, preview copy, custom cron validation, and updated reminder editor copy. RED evidence: reminder-schedule-utils focused test failed on missing ../reminder-schedule-utils; updated ScheduledTasksPage focused test failed on old editor copy/raw fields. GREEN evidence: ./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx passed 24 tests. git diff --check passed. Bandit skipped because touched implementation scope is TypeScript/TSX plus tests only.
+Task 5 spec-review follow-up: recurring preset previews now use user-facing next-run language such as the next daily/weekly HH:mm occurrence in the selected timezone, while custom cron is framed as scheduler evaluation of the custom expression. Added daily recurring payload coverage for schedule_kind=recurring, cron=0 9 * * *, and timezone. RED evidence: focused Vitest failed because daily preview was still 'Daily schedule: 0 9 * * * (...)'; the new page test initially exposed interaction timing around Repeat controls and was corrected to wait for them. GREEN evidence: ./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx passed 26 tests. git diff --check passed. Bandit skipped because touched implementation scope is TypeScript/TSX tests/utilities only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

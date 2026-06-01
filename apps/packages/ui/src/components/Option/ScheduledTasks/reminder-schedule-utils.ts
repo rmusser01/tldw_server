@@ -25,6 +25,15 @@ const WEEKDAY_MAP: Record<string, ReminderWeekdayToken> = {
 }
 
 const CRON_TOKEN_PATTERN = /^[A-Za-z0-9*?/,\-]+$/
+const WEEKDAY_LABELS: Record<ReminderWeekdayToken, string> = {
+  SUN: "Sunday",
+  MON: "Monday",
+  TUE: "Tuesday",
+  WED: "Wednesday",
+  THU: "Thursday",
+  FRI: "Friday",
+  SAT: "Saturday"
+}
 
 const clampInteger = (value: unknown, min: number, max: number): number => {
   const parsed = Number(value)
@@ -155,15 +164,22 @@ export const getRecurringPreviewCopy = (
 ): string => {
   const normalizedCron = cron?.trim() || ""
   const normalizedTimezone = timezone?.trim() || ""
-  if (!normalizedCron) return "Choose a repeat schedule to preview the cron expression."
+  if (!normalizedCron) return "Choose a repeat schedule to preview the next eligible run."
   const validation = validateCronExpression(normalizedCron)
   if (!validation.valid) return validation.error
 
-  const cadence =
-    preset === "custom"
-      ? "Custom schedule"
-      : preset === "weekly"
-        ? "Weekly schedule"
-        : "Daily schedule"
-  return `${cadence}: ${normalizedCron}${normalizedTimezone ? ` (${normalizedTimezone})` : ""}`
+  const parsedCron = parseReminderCron(normalizedCron)
+  const timezoneCopy = normalizedTimezone || "the selected timezone"
+
+  if (preset === "daily" && parsedCron?.preset === "daily") {
+    const time = `${String(parsedCron.hour).padStart(2, "0")}:${String(parsedCron.minute).padStart(2, "0")}`
+    return `Next run: the next daily ${time} occurrence in ${timezoneCopy}.`
+  }
+
+  if (preset === "weekly" && parsedCron?.preset === "weekly") {
+    const time = `${String(parsedCron.hour).padStart(2, "0")}:${String(parsedCron.minute).padStart(2, "0")}`
+    return `Next run: the next ${WEEKDAY_LABELS[parsedCron.weekday]} ${time} occurrence in ${timezoneCopy}.`
+  }
+
+  return `Next eligible run: the scheduler will evaluate custom cron "${normalizedCron}" in ${timezoneCopy}.`
 }

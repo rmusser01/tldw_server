@@ -5,6 +5,7 @@ import {
   buildWeeklyCron,
   datetimeLocalToIsoString,
   getDefaultReminderTimezone,
+  getRecurringPreviewCopy,
   validateCronExpression
 } from "../reminder-schedule-utils"
 
@@ -32,5 +33,14 @@ describe("reminder schedule utilities", () => {
       valid: false,
       error: "Cron must have exactly 5 fields"
     })
+  })
+
+  it("describes daily recurring preview as a next-run oriented cadence instead of raw cron output", () => {
+    const preview = getRecurringPreviewCopy("daily", "0 9 * * *", "America/Los_Angeles")
+
+    expect(preview).toContain("Next run:")
+    expect(preview).toContain("daily 09:00")
+    expect(preview).toContain("America/Los_Angeles")
+    expect(preview).not.toBe("Daily schedule: 0 9 * * * (America/Los_Angeles)")
   })
 })
