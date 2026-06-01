@@ -2,6 +2,7 @@ import React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { useDynamicUIActionBridge } from "@/hooks/chat/useDynamicUIActionBridge"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { PlaygroundEmpty } from "./PlaygroundEmpty"
 import {
@@ -192,6 +193,13 @@ export const PlaygroundChat = ({
     setCompareSplitChat,
     compareMaxModels
   } = useMessageOption()
+  const confirmSensitiveValues = React.useCallback(async () => false, [])
+  const bridgedDynamicUIAction = useDynamicUIActionBridge({
+    messages,
+    onSubmit,
+    confirmSensitiveValues
+  })
+  const resolvedDynamicUIAction = onDynamicUIAction ?? bridgedDynamicUIAction
   const [openReasoning] = useStorage("openReasoning", false)
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
   const isConnected = useIsConnected()
@@ -1257,7 +1265,7 @@ export const PlaygroundChat = ({
                 pinned={Boolean(message.pinned)}
                 metadataExtra={message.metadataExtra}
                 dynamicUISurface="web-chat"
-                onDynamicUIAction={onDynamicUIAction}
+                onDynamicUIAction={resolvedDynamicUIAction}
                 researchActions={buildMessageResearchActions(message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
@@ -1332,7 +1340,7 @@ export const PlaygroundChat = ({
                 compareSplitChats={compareSplitChats}
                 compareMaxModels={compareMaxModels}
                 dynamicUISurface="web-chat"
-                onDynamicUIAction={onDynamicUIAction}
+                onDynamicUIAction={resolvedDynamicUIAction}
                 modelMetaById={modelMetaById}
                 getTokenCount={getTokenCount}
                 getPreviousUserMessage={getPreviousUserMessage}
