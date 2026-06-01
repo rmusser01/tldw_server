@@ -35,6 +35,7 @@ const createDeps = (
   modelSummaryLabel: "GPT-4.1",
   isSessionDegraded: false,
   connectionStatusLabel: "Connected",
+  isConnectionReady: true,
   compareModeActive: false,
   compareSelectedModels: [],
   currentPreset: null,
@@ -72,6 +73,44 @@ const createDeps = (
 });
 
 describe("usePlaygroundContextItems role-play state", () => {
+  it("does not add a duplicate offline session status chip", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          isSessionDegraded: true,
+          connectionStatusLabel: "Offline",
+          isConnectionReady: false,
+        }),
+      ),
+    );
+
+    expect(
+      result.current.find((item) => item.id === "sessionStatus"),
+    ).toBeUndefined();
+  });
+
+  it("keeps the session status chip for connected degraded sessions", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          isSessionDegraded: true,
+          connectionStatusLabel: "Degraded",
+          isConnectionReady: true,
+        }),
+      ),
+    );
+
+    expect(result.current).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "sessionStatus",
+          value: "Degraded",
+          tone: "warning",
+        }),
+      ]),
+    );
+  });
+
   it("labels applied behavior templates by name instead of as anonymous prompt state", () => {
     const { result } = renderHook(() =>
       usePlaygroundContextItems(

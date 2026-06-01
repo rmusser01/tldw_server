@@ -3,6 +3,7 @@ import React from "react"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 
 import { PlaygroundForm } from "../PlaygroundForm"
 
@@ -320,11 +321,19 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
+  MemoryRouter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Link: ({ children, to, ...rest }: any) => (
     <a href={typeof to === "string" ? to : "#"} {...rest}>
       {children}
     </a>
   ),
+  useLocation: () => ({
+    pathname: "/chat",
+    search: "",
+    hash: "",
+    state: null,
+    key: "test-location"
+  }),
   useNavigate: () => vi.fn()
 }))
 
@@ -365,6 +374,7 @@ vi.mock("@/store/model", () => ({
       extraBody: "",
       jsonMode: false,
       numCtx: 8192,
+      setActiveSettingsScope: vi.fn(),
       updateSetting: vi.fn(),
       updateSettings: vi.fn()
     })
@@ -402,6 +412,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
   useMcpTools: () => ({
     hasMcp: false,
     healthState: "ready",
+    discoveredTools: [],
+    chatTools: [],
+    toolCounts: { enabled: 0, available: 0 },
     tools: [],
     toolsLoading: false,
     catalogs: [],
@@ -518,17 +531,23 @@ vi.mock("../MentionsDropdown", () => ({
 
 vi.mock("../ComposerTextarea", () => ({
   ComposerTextarea: ({
+    textareaRef,
     value,
     onChange,
+    onFocus,
     placeholder
   }: {
+    textareaRef?: React.RefObject<HTMLTextAreaElement | null>
     value: string
     onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+    onFocus?: () => void
     placeholder?: string
   }) => (
     <textarea
+      ref={textareaRef}
       value={value}
       onChange={onChange}
+      onFocus={onFocus}
       placeholder={placeholder}
       data-testid="composer-textarea"
     />
@@ -866,6 +885,36 @@ beforeEach(() => {
 })
 
 describe("PlaygroundForm pinned fallback", () => {
+  it("uses one shared disconnected recovery notice without duplicate composer copy", async () => {
+    const user = userEvent.setup()
+    playgroundFormConnectionState.phase = "disconnected"
+    playgroundFormConnectionState.isConnected = false
+
+    render(
+      <MemoryRouter>
+        <PlaygroundForm droppedFiles={[]} />
+      </MemoryRouter>
+    )
+
+    const textarea = screen.getByTestId("composer-textarea")
+
+    expect(textarea).toHaveAttribute(
+      "placeholder",
+      "Type a message... (/ commands, @ mentions)"
+    )
+    expect(
+      screen.getByTestId("playground-composer-disconnected-notice")
+    ).toBeInTheDocument()
+
+    await user.click(textarea)
+
+    expect(
+      screen.queryByText(
+        "Connect to your tldw server in Settings to send messages."
+      )
+    ).not.toBeInTheDocument()
+  })
+
   it("renders a dedicated pinned-only fallback card and separate recent history block", () => {
     render(
       <PlaygroundForm

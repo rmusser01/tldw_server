@@ -565,25 +565,18 @@ export const Playground = () => {
     cockpitRuntimeRailVisible !== false;
   const mobileCockpitComposerConstrained =
     isMobileViewport && normalizedChatLayoutMode === "cockpit";
+  const cockpitRailCollapsedWideContent =
+    normalizedChatLayoutMode === "cockpit" &&
+    (!normalizedCockpitContextRailVisible ||
+      !normalizedCockpitRuntimeRailVisible);
+  const chatContentWidthClassName = cockpitRailCollapsedWideContent
+    ? "max-w-none"
+    : "max-w-[64rem]";
   const handleChatLayoutModeChange = React.useCallback(
     (mode: PlaygroundCockpitMode) => {
-      if (
-        mode === "cockpit" &&
-        !normalizedCockpitContextRailVisible &&
-        !normalizedCockpitRuntimeRailVisible
-      ) {
-        void setCockpitContextRailVisible(true);
-        void setCockpitRuntimeRailVisible(true);
-      }
       void setChatLayoutMode(mode);
     },
-    [
-      normalizedCockpitContextRailVisible,
-      normalizedCockpitRuntimeRailVisible,
-      setChatLayoutMode,
-      setCockpitContextRailVisible,
-      setCockpitRuntimeRailVisible,
-    ],
+    [setChatLayoutMode],
   );
 
   React.useEffect(() => {
@@ -2988,7 +2981,7 @@ export const Playground = () => {
     <div
       ref={drop}
       data-is-dragging={dropState === "dragging"}
-      className="relative flex h-full min-h-0 flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"
+      className="relative flex h-full min-h-0 w-full flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"
       style={
         chatBackgroundImage
           ? {
@@ -3098,7 +3091,9 @@ export const Playground = () => {
               </div>
             )}
             <div className="px-4 pt-2">
-              <div className="mx-auto flex w-full max-w-[64rem] items-center justify-between text-[11px] text-text-muted">
+              <div
+                className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between text-[11px] text-text-muted`}
+              >
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span
                     data-testid="playground-active-chat-mode"
@@ -3228,7 +3223,7 @@ export const Playground = () => {
                   role="dialog"
                   aria-modal="false"
                   aria-label={t("playground:shortcuts.title", "Shortcuts")}
-                  className="mx-auto mt-1 w-full max-w-[64rem] rounded-md border border-border bg-surface2 px-2 py-1.5 text-[11px] text-text"
+                  className={`mx-auto mt-1 w-full ${chatContentWidthClassName} rounded-md border border-border bg-surface2 px-2 py-1.5 text-[11px] text-text`}
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="font-semibold">
@@ -3314,7 +3309,9 @@ export const Playground = () => {
                 </div>
               )}
               {threadSearchOpen && (
-                <div className="mx-auto mt-1 flex w-full max-w-[64rem] flex-wrap items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1">
+                <div
+                  className={`mx-auto mt-1 flex w-full ${chatContentWidthClassName} flex-wrap items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1`}
+                >
                   <div className="relative min-w-[200px] flex-1">
                     <Search
                       className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-subtle"
@@ -3398,7 +3395,7 @@ export const Playground = () => {
               {compactFeatureNoticeVisible && (
                 <div
                   data-testid="playground-mobile-parity-notice"
-                  className="mx-auto mt-1 w-full max-w-[64rem] rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-[10px] text-warn"
+                  className={`mx-auto mt-1 w-full ${chatContentWidthClassName} rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-[10px] text-warn`}
                 >
                   {t(
                     "playground:regions.compactFeatureNotice",
@@ -3428,7 +3425,7 @@ export const Playground = () => {
               aria-label={t("playground:aria.chatTranscript", "Chat messages")}
               className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4"
             >
-              <div className="mx-auto w-full max-w-[64rem] pb-6">
+              <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
                   <PlaygroundChat
                     showStarterDeck={showStarterDeck}
@@ -3466,7 +3463,9 @@ export const Playground = () => {
                   : ""
               }`}
             >
-              <div className="mx-auto w-full max-w-[64rem] px-4 pt-2 text-[11px] text-text-muted">
+              <div
+                className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
+              >
                 <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
                   {t("playground:regions.composer", "Composer")}
                 </span>
@@ -3498,6 +3497,7 @@ export const Playground = () => {
                 droppedFiles={droppedFiles}
                 stickyDockEnabled={stickyChatInput}
                 mobileCockpitModeActive={mobileCockpitComposerConstrained}
+                forceWideMode={cockpitRailCollapsedWideContent}
                 onComposerLayoutChange={
                   stickyChatInput ? handleComposerLayoutChange : undefined
                 }
