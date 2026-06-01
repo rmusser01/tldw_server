@@ -447,6 +447,7 @@ files = [
     Path("Docs/User_Guides/Feature_Map.md"),
     Path("Docs/Published/User_Guides/index.md"),
     Path("Docs/Published/User_Guides/Feature_Map.md"),
+    Path("Docs/Published/Getting_Started/TROUBLESHOOTING.md"),
     Path("apps/extension/docs/index.md"),
 ]
 
