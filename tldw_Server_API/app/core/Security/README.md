@@ -1,64 +1,74 @@
-## 1. Descriptive of Current Feature Set
+# Security
 
-- Purpose: Central security controls for outbound network policy (SSRF guard), HTTP hardening headers, request ID propagation, CSP for the Setup UI, URL validation for endpoints, and secret management.
-- Capabilities:
-  - Egress policy enforcement (allowlist/denylist, private IP blocking, port restrictions) with per-tenant helpers.
-  - Hardened HTTP response headers (CSP, Permissions-Policy, HSTS opt-in, referrer policy, remove Server header).
-  - Request ID middleware (sanitizes incoming X-Request-ID, generates UUID when invalid; propagates via response and request.state).
-  - CSP nonce and relaxed policies for Setup UI and API docs; Setup remote access guard with IP allowlists.
-  - Secret management: retrieval, validation, caching (e.g., single-user API key, JWT secret) via config sources.
-- Related Endpoints/Middleware Wiring:
-  - Middlewares added in `main.py`: RequestID, Setup CSP, Setup access guard, SecurityHeaders — see tldw_Server_API/app/main.py.
-  - URL validation helper used by endpoints (e.g., web scraping duplicate check): tldw_Server_API/app/api/v1/endpoints/web_scraping.py:320.
-- Related Schemas: N/A (security uses middleware and utility functions rather than Pydantic models).
+The Security module centralizes outbound network policy, safe serialization,
+secret lookup, request IDs, setup access controls, CSP handling, HTTP hardening,
+drain-gate middleware, and URL validation helpers. It is used by API startup,
+web scraping, workflows, setup, storage, and any code path that reaches
+untrusted URLs or sensitive configuration.
 
-## 2. Technical Details of Features
+## Start Here
 
-- Egress/SSRF
-  - Policy eval: `evaluate_url_policy(url)` returns `URLPolicyResult(allowed, reason)`: tldw_Server_API/app/core/Security/egress.py:146.
-  - Helpers: `is_url_allowed`, `is_url_allowed_for_tenant`, `is_webhook_url_allowed_for_tenant` (env-based allow/deny, per-tenant overrides), scheme/port checks, DNS resolution with private IP guard (IPv4/IPv6).
-  - Env knobs: `EGRESS_ALLOWLIST`, `EGRESS_DENYLIST`, `WORKFLOWS_EGRESS_ALLOWLIST`, `WORKFLOWS_EGRESS_DENYLIST`, `WORKFLOWS_EGRESS_BLOCK_PRIVATE`, `WORKFLOWS_EGRESS_ALLOWED_PORTS`, `WORKFLOWS_EGRESS_PROFILE`.
-  - Endpoint-friendly wrapper: `assert_url_safe(url)` — tldw_Server_API/app/core/Security/url_validation.py:6.
+- Egress/SSRF controls: `egress.py` and `url_validation.py`.
+- HTTP and request middlewares: `middleware.py`, `request_id_middleware.py`,
+  `setup_access_guard.py`, `setup_csp.py`, and `drain_gate_middleware.py`.
+- Secrets and crypto: `secret_manager.py`, `crypto.py`, and `safe_pickle.py`.
+- Startup wiring: `app/main.py`.
+- Tests: `tests/Security/` plus downstream WebScraping and Text2SQL security
+  tests.
 
-- HTTP Hardening
-  - `SecurityHeadersMiddleware` sets default CSP/permissions, removes `Server`, adds HSTS when `SECURITY_ENABLE_HSTS=true` and request is HTTPS (incl. `X-Forwarded-Proto: https`): tldw_Server_API/app/core/Security/middleware.py:86.
-  - Path-scoped CSP:
-    - Setup UI (`/setup`): relaxed CSP; nonce-aware when `request.state.csp_nonce` present.
-    - API docs (`/docs`, `/redoc`): relaxed CSP allowing inline/eval and optional HTTPS CDNs.
-    - Else: strict default CSP.
-  - `SetupCSPMiddleware` injects a per-request CSP nonce and tailored policy for Setup UI: tldw_Server_API/app/core/Security/setup_csp.py:72.
-  - Setup CSP eval policy: `TLDW_SETUP_NO_EVAL` takes precedence. If present and truthy (`1|true|yes|on|y`, case-insensitive), `'unsafe-eval'` is DISABLED.
-  - `SetupAccessGuardMiddleware` enforces Setup remote access policy and IP allowlists: tldw_Server_API/app/core/Security/setup_access_guard.py:62.
+## Responsibilities
 
-- Request ID Propagation
-  - `RequestIDMiddleware` validates/sanitizes `X-Request-ID`, stores value on `request.state.request_id`, and returns header in responses: tldw_Server_API/app/core/Security/request_id_middleware.py:34.
+- Reject unsafe outbound URLs before network calls.
+- Set security headers, CSP variants, HSTS behavior, and request IDs.
+- Guard remote Setup UI access and setup-specific CSP nonces.
+- Load and validate secrets without hard-coded defaults or log leakage.
+- Provide safe pickle and encrypted JSON helpers for callers that must handle
+  serialized or sensitive blobs.
 
-- Secret Management
-  - `SecretManager` provides typed getters/validation for secrets (JWT, OAuth, single-user API key) with source precedence and caching: tldw_Server_API/app/core/Security/secret_manager.py:76.
-  - Single-user mode requires explicit `SINGLE_USER_API_KEY` with strong length; no hard-coded defaults.
+## Module Map
 
-## 3. Developer-Related/Relevant Information for Contributors
+- `egress.py` evaluates URL allow/deny/private-IP/port policies and tenant
+  webhook rules.
+- `url_validation.py` exposes endpoint-friendly safe-URL assertions.
+- `middleware.py` adds response hardening headers.
+- `request_id_middleware.py` sanitizes or creates `X-Request-ID`.
+- `setup_access_guard.py` and `setup_csp.py` enforce Setup UI access/CSP policy.
+- `secret_manager.py` resolves JWT, OAuth, and single-user API-key secrets.
+- `crypto.py` encrypts/decrypts JSON blobs for Jobs and related persistence.
+- `safe_pickle.py` restricts pickle loading to approved classes.
 
-- Folder Structure
-  - `egress.py`: URL policy evaluation and env-driven allow/deny controls.
-  - `middleware.py`: security headers + CSP strategies.
-  - `setup_csp.py`: CSP nonce injection for Setup UI.
-  - `setup_access_guard.py`: remote access guard for Setup UI.
-  - `request_id_middleware.py`: request ID sanitization and echo.
-  - `secret_manager.py`: secret sources, types, validation.
-  - `url_validation.py`: endpoint helper to assert URL safety.
-- Extension Points
-  - When adding outbound integrations, call `evaluate_url_policy` or `assert_url_safe` before any HTTP call.
-  - Prefer centralized `SecurityHeadersMiddleware`; if you need per-route CSP overrides, set `response.headers["Content-Security-Policy"]` explicitly for that route.
-- Tests
-  - Security headers: tldw_Server_API/tests/Security/test_security_headers_middleware.py:1
-  - Request ID: tldw_Server_API/tests/Security/test_request_id_middleware.py:1
-  - Egress policy (core + global env): tldw_Server_API/tests/Security/test_egress.py:1, tldw_Server_API/tests/Security/test_egress_global_env.py:1
-  - Downstream enforcement examples: tldw_Server_API/tests/WebScraping/test_scraping_module.py:1
-- Local Dev Tips
-  - Set `SECURITY_ENABLE_HSTS=false` for local dev behind non-HTTPS proxies.
-  - Use `WORKFLOWS_EGRESS_ALLOWLIST` to limit outbound access when testing integrations.
-- Operational Notes
-  - Keep security middlewares enabled in production; they’re added in `main.py` during normal runs.
-  - When behind a proxy/ingress, ensure HSTS is emitted only once (proxy vs app). Middleware respects `X-Forwarded-Proto`.
-  - Review and maintain egress allowlists as integrations evolve.
+## How It Connects
+
+- `app/main.py` installs security middlewares during normal startup.
+- Web scraping, Watchlists, WebSearch, Workflows, Text2SQL, and third-party
+  providers should call egress helpers before outbound work.
+- AuthNZ and setup flows read secret and setup guard behavior from this module.
+
+## Extension Points
+
+- Add outbound policy knobs in `egress.py` and cover global, workflow, and
+  tenant-specific behavior in tests.
+- Add middleware behavior with path-specific tests so `/setup`, `/docs`, and API
+  routes keep their intended CSP/header differences.
+- Add secret types through `secret_manager.py` with explicit source precedence
+  and validation rules.
+
+## Testing
+
+- Egress: `tests/Security/test_egress.py`,
+  `tests/Security/test_egress_global_env.py`, and
+  `tests/Security/test_websearch_egress_guard.py`.
+- Headers and request IDs: `tests/Security/test_security_headers_middleware.py`
+  and `tests/Security/test_request_id_middleware.py`.
+- Setup guards/CSP: `tests/Security/test_setup_access_guard.py` and
+  `tests/Security/test_setup_csp_eval_policy.py`.
+- Crypto/serialization: `tests/Security/test_crypto.py` and
+  `tests/Security/test_zip_safe_extract.py`.
+
+## Gotchas
+
+- Do not add per-feature URL validators. Central policy prevents inconsistent
+  SSRF behavior.
+- HSTS should be coordinated with proxies/ingress; middleware respects HTTPS and
+  `X-Forwarded-Proto`.
+- Secret redaction is not a substitute for avoiding secret logging.

@@ -19,15 +19,14 @@ The ingestion and media processing hub for video, audio, PDF, EPUB, documents (t
   - Inputs: file uploads (multipart), URLs, bytes/paths for library calls.
   - Outputs: dict aligned to MediaItemProcessResponse: `status`, `input_ref`, `processing_source`, `media_type`, `metadata`, `content` or `segments`, `chunks`, `analysis`, `analysis_details`, `keywords`, `warnings`, `error`.
 - Related Endpoints (examples):
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:7467` — POST `/api/v1/media/process-pdfs`
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:6892` — POST `/api/v1/media/process-documents`
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:5535` — POST `/api/v1/media/process-audios`
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:5073` — POST `/api/v1/media/process-videos`
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:6102` — POST `/api/v1/media/process-ebooks`
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:7951` — POST `/api/v1/media/mediawiki/process-dump` (ephemeral stream)
-  - `tldw_Server_API/app/api/v1/endpoints/media.py:7875` — POST `/api/v1/media/mediawiki/ingest-dump` (persist)
-  - `tldw_Server_API/app/api/v1/endpoints/audio.py:502` — POST `/api/v1/audio/transcriptions` (file STT)
-  - `tldw_Server_API/app/api/v1/endpoints/audio.py:1196` — WS `/api/v1/audio/stream/transcribe` (real‑time STT)
+  - `tldw_Server_API/app/api/v1/endpoints/media/process_pdfs.py` - POST `/api/v1/media/process-pdfs`
+  - `tldw_Server_API/app/api/v1/endpoints/media/process_documents.py` - POST `/api/v1/media/process-documents`
+  - `tldw_Server_API/app/api/v1/endpoints/media/process_audios.py` - POST `/api/v1/media/process-audios`
+  - `tldw_Server_API/app/api/v1/endpoints/media/process_videos.py` - POST `/api/v1/media/process-videos`
+  - `tldw_Server_API/app/api/v1/endpoints/media/process_ebooks.py` - POST `/api/v1/media/process-ebooks`
+  - `tldw_Server_API/app/api/v1/endpoints/media/process_mediawiki.py` - POST `/api/v1/media/mediawiki/process-dump` (ephemeral stream) and `/api/v1/media/mediawiki/ingest-dump` (persist)
+  - `tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py` - POST `/api/v1/audio/transcriptions` (file STT)
+  - `tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py` - WS `/api/v1/audio/stream/transcribe` (real-time STT)
 
 
 ## 2. Technical Details of Features
@@ -83,7 +82,7 @@ The ingestion and media processing hub for video, audio, PDF, EPUB, documents (t
   - Add a new pipeline folder with a `process_*` entry that returns the standard result dict.
   - Register new OCR/VLM backends under `OCR/backends` or `VLM/backends`; expose via registry.
   - If supporting new file types, extend allowlists in `Upload_Sink.py` and update `EXT_TO_MEDIA_TYPE_KEY`.
-  - Wire a new endpoint in `tldw_Server_API/app/api/v1/endpoints/media.py` and add Pydantic models in schemas.
+  - Wire a new endpoint in the `tldw_Server_API/app/api/v1/endpoints/media/` package and add Pydantic models in schemas.
 - Coding Patterns:
   - Keep processors DB‑agnostic; delegate persistence to API layer (`DB_Management`).
   - Use `loguru` via `app/core/Utils/Utils.py` helpers; return predictable result keys.
@@ -101,7 +100,7 @@ The ingestion and media processing hub for video, audio, PDF, EPUB, documents (t
   - OCR/Docling are optional; guard imports and provide fallbacks with clear warnings.
   - Never accept client API keys; select provider/model from server config only.
   - Chunk overlap must be < size; enforced by chunker validators.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Consolidate duplicate parsing paths; unify analysis prompt profiles.
   - Expand email/PST parsing; add more robust HTML sanitization policies.
   - Improve adapter coverage for additional VLMs and OCR engines.

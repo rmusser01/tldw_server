@@ -13,13 +13,8 @@
   - Input: Text and optional voice reference metadata; OpenAI-compatible JSON (see schema).
   - Output: Streaming or buffered audio bytes in mp3, opus, aac, flac, wav, or raw pcm.
 - Related Endpoints:
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:249 — POST /api/v1/audio/speech
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:1131 — GET /api/v1/audio/voices/catalog
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:1957 — POST /api/v1/audio/voices/upload
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2031 — GET /api/v1/audio/voices
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2066 — GET /api/v1/audio/voices/{voice_id}
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2103 — DELETE /api/v1/audio/voices/{voice_id}
-  - tldw_Server_API/app/api/v1/endpoints/audio.py:2142 — POST /api/v1/audio/voices/{voice_id}/preview
+  - `tldw_Server_API/app/api/v1/endpoints/audio/audio_tts.py` - POST `/api/v1/audio/speech`, GET `/api/v1/audio/voices/catalog`
+  - `tldw_Server_API/app/api/v1/endpoints/audio/audio_voices.py` - POST `/api/v1/audio/voices/upload`, GET/DELETE `/api/v1/audio/voices/{voice_id}`, and POST `/api/v1/audio/voices/{voice_id}/preview`
 - Related Schemas:
   - tldw_Server_API/app/api/v1/schemas/audio_schemas.py:44 — OpenAISpeechRequest
   - tldw_Server_API/app/core/TTS/voice_manager.py:74 — VoiceUploadRequest
@@ -67,7 +62,7 @@ Provider support snapshot (indicative): OpenAI (cloud), ElevenLabs (cloud, cloni
 
 ## 2.1 Egress and Error Behavior (Ops Overview)
 
-- Outbound HTTP for TTS providers (OpenAI, ElevenLabs, Index-style engines) is centralized in `http_client.py`:
+- Outbound HTTP for TTS providers (OpenAI, ElevenLabs, Index-style engines) is centralized in `tldw_Server_API/app/core/http_client.py`:
   - All adapter POSTs either use the `apost`/`afetch` helpers or the shared `AsyncClient` from `tts_resource_manager`, which calls `_validate_egress_or_raise(url)` before sending.
   - Egress policy is configured via `EGRESS_ALLOWLIST` / `EGRESS_DENYLIST` / `WORKFLOWS_EGRESS_*` and enforces:
     - Allowed schemes (`http/https`) and ports.
@@ -152,7 +147,7 @@ Provider support snapshot (indicative): OpenAI (cloud), ElevenLabs (cloud, cloni
   - Some providers require specific sample rates or short reference durations (e.g., Higgs 3–10s); voice uploads enforce provider constraints.
   - Missing or misconfigured adapters are skipped after failure; optional retry window controlled by `adapter_failure_retry_seconds`.
   - Quotas/rate limits may short-circuit requests; check Usage/Audio quota logs when debugging.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - AllTalk adapter (enum/config placeholder only; requests currently return "provider not configured").
   - Adaptive chunk shaping; provider health probes and proactive warmups; richer voice metadata unification.
 

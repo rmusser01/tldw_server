@@ -100,6 +100,6 @@ Centralized helpers for shared runtime infrastructure. Today this module focuses
   - In‑memory client does not implement full Redis feature parity. Pub/Sub is not available in the stub.
   - If you rely on strict Redis behavior (e.g., exact stream IDs, ordering guarantees, Lua semantics), add integration tests with a real Redis and gate them via env.
   - When `fallback_to_fake=False`, be prepared to handle connection exceptions during startup.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Consider factories for additional infra (Postgres pool, object storage) following the same pattern.
   - Expand metrics (pool usage, cache hit/miss) if/when additional factories are introduced.

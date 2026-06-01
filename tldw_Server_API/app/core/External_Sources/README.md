@@ -114,6 +114,6 @@
   - Legacy `external_items` rows without `media_id` must be replayed before cursor-only sync is trustworthy
   - Webhook callbacks should only enqueue work; never add ingestion logic to the request path
   - Manual sync queues a job and returns immediately; it does not run inline with the API request
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Additional file-hosting providers such as Dropbox, Box, and SharePoint
   - Richer admin/source observability beyond the current per-source sync status endpoint

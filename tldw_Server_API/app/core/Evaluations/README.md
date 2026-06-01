@@ -19,25 +19,11 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
   - Output: structured responses (scores/metrics/results); streaming available where applicable
 
 - Related Endpoints (examples)
-  - Router base: /api/v1/evaluations — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:90
-  - CRUD: POST `/api/v1/evaluations` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:29
-  - CRUD: GET `/api/v1/evaluations` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:84
-  - CRUD: GET `/api/v1/evaluations/{eval_id}` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:118
-  - CRUD: PATCH `/api/v1/evaluations/{eval_id}` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:142
-  - CRUD: DELETE `/api/v1/evaluations/{eval_id}` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:160
-  - Runs: POST `/api/v1/evaluations/{eval_id}/runs` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1035
-  - GEval: POST `/api/v1/evaluations/geval` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1144
-  - RAG: POST `/api/v1/evaluations/rag` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1332
-  - Response Quality: POST `/api/v1/evaluations/response-quality` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1475
-  - Propositions: POST `/api/v1/evaluations/propositions` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1635
-  - OCR: POST `/api/v1/evaluations/ocr` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:2059
-  - OCR (PDF): POST `/api/v1/evaluations/ocr-pdf` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:2118
-  - Batch: POST `/api/v1/evaluations/batch` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1781
-  - History: POST `/api/v1/evaluations/history` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:2234
-  - Rate limits: GET `/api/v1/evaluations/rate-limits` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:644
-  - Admin: POST `/api/v1/evaluations/admin/idempotency/cleanup` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:140
-  - Webhooks: POST `/api/v1/evaluations/webhooks` — tldw_Server_API/app/api/v1/endpoints/evaluations_webhooks.py:41
-  - Emb. A/B: POST `/api/v1/evaluations/embeddings/abtest` — tldw_Server_API/app/api/v1/endpoints/evaluations_embeddings_abtest.py:42
+  - Router base: `/api/v1/evaluations` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py`
+  - CRUD: POST/GET/PATCH/DELETE `/api/v1/evaluations...` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_crud.py`
+  - Runs and evaluator routes: `/runs`, `/geval`, `/rag`, `/response-quality`, `/propositions`, `/ocr`, `/ocr-pdf`, `/batch`, `/history`, `/rate-limits`, and admin idempotency cleanup - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py`
+  - Webhooks: POST `/api/v1/evaluations/webhooks` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_webhooks.py`
+  - Emb. A/B: POST `/api/v1/evaluations/embeddings/abtest` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_embeddings_abtest.py`
 
 - Related Schemas (key models)
   - Create/Update/Get Evaluation — tldw_Server_API/app/api/v1/schemas/evaluation_schemas_unified.py:239, 257, 264
@@ -106,7 +92,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Extension Points
   - Add a new evaluator: implement in `Evaluations/` and register in service/registry
-  - Add endpoints: extend `evaluations_unified.py` (or split modules) and add schemas
+  - Add endpoints: extend `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py` (or split modules under that endpoint package) and add schemas
   - Extend A/B: update `embeddings_abtest_service.py` + schemas; update repository queries
   - Extend persona dialogue-tree evaluations by adding scenarios to the recipe/harness and keeping target normalization compatible with both persona and character payloads
 
@@ -500,7 +486,7 @@ evaluation:
 
 - **[User Guide](EVALS_USER_GUIDE.md)**: Comprehensive user documentation
 - **[Developer Guide](EVALS_DEVELOPER_GUIDE.md)**: Architecture and extension guide
-- **[API Reference](api_reference.md)**: Complete API documentation
+- **[API Reference](../../../../Docs/API-related/Evaluations_API_Unified_Reference.md)**: Complete API documentation
 
 ## 🧪 Testing
 
@@ -509,7 +495,7 @@ evaluation:
 pytest tests/Evaluations/
 
 # Run specific test
-pytest tests/Evaluations/test_benchmark_utils.py -v
+pytest tests/Evaluations/test_evaluations_benchmarks_api.py -v
 
 # Run with coverage
 pytest tests/Evaluations/ --cov=app.core.Evaluations --cov-report=html
@@ -520,7 +506,7 @@ pytest tests/Evaluations/ -m integration
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+We welcome contributions! Please see our [Contributing Guidelines](../../../../CONTRIBUTING.md).
 
 ### Adding a New Benchmark
 

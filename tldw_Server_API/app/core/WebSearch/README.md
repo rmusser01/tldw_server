@@ -87,7 +87,7 @@ Notes
   - Some providers (Searx/Tavily) require self-hosted instance URL or API key.
   - Endpoint-level behavior assumes network access; tests may mock providers or accept 500 in offline environments.
   - Bing is deprecated in the public schema; avoid re-exposing without a clear migration/test plan.
-- Roadmap/TODOs
+- Follow-up candidates
   - Consolidate Web_Scraping provider adapters into this module and ensure a single pipeline implementation.
   - Expand structured relevance outputs to reduce regex-based parsing.
   - Optional caching layer for provider results to reduce egress and cost.

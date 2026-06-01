@@ -678,8 +678,8 @@ reg.register(
   - Core metrics (Prometheus): `tldw_Server_API/app/main.py:2701`
   - Core metrics (JSON): `tldw_Server_API/app/main.py:2758`
   - Embeddings service metrics (admin): `tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py:2608`
-  - Evaluations metrics endpoint: `tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:878`
-  - Media ingestion metrics usage: `tldw_Server_API/app/api/v1/endpoints/media.py:3733`, `tldw_Server_API/app/api/v1/endpoints/media.py:4680`
+  - Evaluations metrics endpoint: `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py`
+  - Media ingestion metrics usage: `tldw_Server_API/app/api/v1/endpoints/media/`
   - Chat request metrics usage: `tldw_Server_API/app/api/v1/endpoints/chat.py:708`, `tldw_Server_API/app/api/v1/endpoints/chat.py:3082`
   - HTTP middleware class: `tldw_Server_API/app/core/Metrics/http_middleware.py:10`
 - Schemas
@@ -699,6 +699,6 @@ reg.register(
 ## Support
 
 For issues or questions:
-- Check the [main documentation](../../../README.md)
-- Review [example implementations](./examples/)
-- Open an issue on GitHub
+- Check the main project documentation at `README.md`.
+- Review metric call sites listed in this README for implementation examples.
+- Open an issue on GitHub.
