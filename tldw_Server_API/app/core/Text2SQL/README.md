@@ -32,7 +32,7 @@ Text2SQL turns natural-language questions into guarded, read-only SQL execution 
 
 - `app/api/v1/endpoints/text2sql.py` exposes query and source APIs.
 - `app/api/v1/schemas/text2sql_schemas.py` defines request and response contracts.
-- `app/core/RAG/database_retrievers.py` and the unified RAG pipeline use Text2SQL source registry behavior for database retrieval.
+- `app/core/RAG/rag_service/database_retrievers.py` and the unified RAG pipeline use Text2SQL source registry behavior for database retrieval.
 - Security tests cover RBAC and source ACL behavior around the endpoint surface.
 
 ## Extension Points

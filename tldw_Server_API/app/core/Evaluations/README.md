@@ -495,7 +495,7 @@ evaluation:
 pytest tests/Evaluations/
 
 # Run specific test
-pytest tests/Evaluations/test_benchmark_utils.py -v
+pytest tests/Evaluations/test_evaluations_benchmarks_api.py -v
 
 # Run with coverage
 pytest tests/Evaluations/ --cov=app.core.Evaluations --cov-report=html
