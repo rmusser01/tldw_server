@@ -4,6 +4,7 @@ import type {
   DynamicUIEnvelope,
   DynamicUIRendererId
 } from "@/types/dynamic-ui"
+import type { MessageMetadataExtra } from "@/store/option"
 
 const SUPPORTED_RENDERERS = new Set<DynamicUIRendererId>(["openui"])
 const SENSITIVE_KEY_SEGMENTS = new Set(["password", "token", "secret", "credential", "key", "auth"])
@@ -106,6 +107,18 @@ export const buildDynamicUIEnvelope = (
   source: string
 ): DynamicUIEnvelope | null =>
   normalizeDynamicUIEnvelope({ renderer, version: "v1", source })
+
+export const normalizeMessageMetadataExtra = (
+  value: unknown
+): MessageMetadataExtra | undefined => {
+  if (!isRecord(value)) return undefined
+
+  const { dynamic_ui: rawDynamicUI, ...rest } = value
+  const dynamicUI = normalizeDynamicUIEnvelope(rawDynamicUI)
+  return (dynamicUI
+    ? { ...rest, dynamic_ui: dynamicUI }
+    : rest) as MessageMetadataExtra
+}
 
 export const normalizeDynamicUIActionPayload = (
   value: unknown,
