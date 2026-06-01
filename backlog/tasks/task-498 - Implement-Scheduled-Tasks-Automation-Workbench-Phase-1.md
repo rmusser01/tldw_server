@@ -31,6 +31,9 @@ documentation:
 - 'Final review follow-up: strengthened recurring reminder validation for invalid
   cron ranges/words and invalid IANA timezones; focused utility/page Vitest passed
   33 tests.'
+- 'Final review follow-up: aligned numeric weekday validation with APScheduler where
+  0 is Monday and 6 is Sunday and 7 is invalid; focused utility/page Vitest passed
+  35 tests.'
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx

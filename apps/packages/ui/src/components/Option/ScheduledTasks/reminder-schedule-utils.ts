@@ -7,14 +7,13 @@ export type CronValidationResult =
   | { valid: false; error: string }
 
 const WEEKDAY_MAP: Record<string, ReminderWeekdayToken> = {
-  "0": "SUN",
-  "1": "MON",
-  "2": "TUE",
-  "3": "WED",
-  "4": "THU",
-  "5": "FRI",
-  "6": "SAT",
-  "7": "SUN",
+  "0": "MON",
+  "1": "TUE",
+  "2": "WED",
+  "3": "THU",
+  "4": "FRI",
+  "5": "SAT",
+  "6": "SUN",
   SUN: "SUN",
   MON: "MON",
   TUE: "TUE",
@@ -267,7 +266,7 @@ export const validateCronExpression = (
     validateCronField(dayOfWeek, {
       label: "day of week",
       min: 0,
-      max: 7,
+      max: 6,
       names: WEEKDAY_MAP,
       allowNthWeekday: true
     })

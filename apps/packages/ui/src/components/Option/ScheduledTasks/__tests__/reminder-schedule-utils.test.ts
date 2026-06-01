@@ -6,6 +6,7 @@ import {
   datetimeLocalToIsoString,
   getDefaultReminderTimezone,
   getRecurringPreviewCopy,
+  parseReminderCron,
   validateCronExpression,
   validateReminderTimezone
 } from "../reminder-schedule-utils"
@@ -47,6 +48,24 @@ describe("reminder schedule utilities", () => {
     expect(validateCronExpression("0 9 * * ?")).toEqual({
       valid: false,
       error: "Cron field '?' is not supported by the scheduler."
+    })
+  })
+
+  it("rejects APScheduler-invalid numeric weekday 7", () => {
+    expect(validateCronExpression("0 9 * * 7")).toEqual({
+      valid: false,
+      error: "Cron day of week must be between 0 and 6."
+    })
+  })
+
+  it("parses numeric weekdays using APScheduler weekday numbering", () => {
+    expect(parseReminderCron("0 9 * * 0")).toMatchObject({
+      preset: "weekly",
+      weekday: "MON"
+    })
+    expect(parseReminderCron("0 9 * * 6")).toMatchObject({
+      preset: "weekly",
+      weekday: "SUN"
     })
   })
 
