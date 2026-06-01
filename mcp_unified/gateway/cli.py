@@ -902,6 +902,8 @@ def _validated_config_payload(
         "default_profile_id": config.default_profile_id,
         "external_runtime": {
             "enabled": config.external_runtime.enabled,
+            "reconcile_on_startup": config.external_runtime.reconcile_on_startup,
+            "stop_on_shutdown": config.external_runtime.stop_on_shutdown,
             "transport_factory": config.external_runtime.transport_factory,
         },
         "ok": True,

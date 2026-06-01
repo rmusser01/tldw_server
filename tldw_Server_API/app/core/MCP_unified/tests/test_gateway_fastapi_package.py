@@ -615,6 +615,16 @@ class _ExternalRuntimeManagerDouble:
             "server_id": server_id,
         }
 
+    async def stop_all(self) -> dict[str, Any]:
+        self.calls.append(("stop_all", (), {}))
+        return {
+            "ok": True,
+            "reason_code": "external_runtime_stopped",
+            "stopped_servers": 1,
+            "total_servers": 1,
+            "errors": {},
+        }
+
     async def install_server(
         self,
         server_id: str,
@@ -643,8 +653,14 @@ class _ExternalRuntimeManagerDouble:
 
 
 class _ExternalRuntimeBootstrapDouble:
-    def __init__(self, manager: _ExternalRuntimeManagerDouble) -> None:
+    def __init__(
+        self,
+        manager: _ExternalRuntimeManagerDouble,
+        *,
+        lifecycle: Any = None,
+    ) -> None:
         self.external_runtime_manager = manager
+        self.external_runtime_lifecycle = lifecycle
 
 
 class _ExternalRuntimeErrorManagerDouble(_ExternalRuntimeManagerDouble):
@@ -668,6 +684,28 @@ class _ExternalRuntimeErrorManagerDouble(_ExternalRuntimeManagerDouble):
     async def refresh_server(self, server_id: str | None = None) -> dict[str, Any]:
         await self._raise_if_targeted("refresh_server")
         return await super().refresh_server(server_id)
+
+
+class _ExternalRuntimeReconcileFailureManagerDouble(_ExternalRuntimeManagerDouble):
+    async def reconcile(self, server_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(("reconcile", (server_id,), {}))
+        return {
+            "ok": False,
+            "reason_code": "external_server_reconciled",
+            "server_id": server_id,
+            "started_servers": 0,
+            "stopped_servers": 0,
+            "restarted_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 1,
+            "errors": {"research": "external_server_start_failed"},
+        }
+
+
+class _ExternalRuntimeLifecycleExceptionManagerDouble(_ExternalRuntimeManagerDouble):
+    async def reconcile(self, server_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(("reconcile", (server_id,), {}))
+        raise RuntimeError("startup exploded")
 
 
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
@@ -1710,6 +1748,158 @@ def test_gateway_external_runtime_management_enabled_without_manager_raises() ->
         )
 
 
+def test_gateway_external_runtime_lifecycle_is_disabled_by_default() -> None:
+    manager = _ExternalRuntimeManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert manager.calls == []
+    assert not hasattr(app.state, "external_runtime_startup")
+    assert not hasattr(app.state, "external_runtime_shutdown")
+
+
+def test_gateway_external_runtime_lifecycle_reconciles_on_startup() -> None:
+    from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
+
+    manager = _ExternalRuntimeManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=manager,
+        external_runtime_lifecycle=GatewayExternalRuntimeLifecycleConfig(
+            reconcile_on_startup=True,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert manager.calls == [("reconcile", (None,), {})]
+    assert app.state.external_runtime_startup == {
+        "ok": True,
+        "reason_code": "external_server_reconciled",
+        "server_id": None,
+    }
+    assert not hasattr(app.state, "external_runtime_shutdown")
+
+
+def test_gateway_external_runtime_lifecycle_uses_bootstrap_config_on_startup() -> None:
+    from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
+
+    manager = _ExternalRuntimeManagerDouble()
+    bootstrap = _ExternalRuntimeBootstrapDouble(
+        manager,
+        lifecycle=GatewayExternalRuntimeLifecycleConfig(reconcile_on_startup=True),
+    )
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_bootstrap=bootstrap,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert manager.calls == [("reconcile", (None,), {})]
+    assert app.state.external_runtime_startup["reason_code"] == "external_server_reconciled"
+
+
+def test_gateway_external_runtime_lifecycle_startup_failure_payload_does_not_block_status() -> None:
+    from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
+
+    manager = _ExternalRuntimeReconcileFailureManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=manager,
+        external_runtime_lifecycle=GatewayExternalRuntimeLifecycleConfig(
+            reconcile_on_startup=True,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert manager.calls == [("reconcile", (None,), {})]
+    assert app.state.external_runtime_startup["ok"] is False
+    assert app.state.external_runtime_startup["errors"] == {
+        "research": "external_server_start_failed",
+    }
+
+
+def test_gateway_external_runtime_lifecycle_logs_unexpected_startup_exception(
+    monkeypatch: Any,
+) -> None:
+    from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
+
+    manager = _ExternalRuntimeLifecycleExceptionManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=manager,
+        external_runtime_lifecycle=GatewayExternalRuntimeLifecycleConfig(
+            reconcile_on_startup=True,
+        ),
+    )
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(gateway_fastapi, "logger", fake_logger, raising=False)
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert app.state.external_runtime_startup == {
+        "ok": False,
+        "reason_code": "external_runtime_startup_failed",
+        "error_type": "RuntimeError",
+        "error": "External runtime lifecycle operation failed",
+    }
+    assert fake_logger.opt_calls == [{"exception": True}]
+    assert fake_logger.error_calls == [
+        (
+            "External runtime lifecycle operation failed reason_code={!r} error_type={!r}",
+            ("external_runtime_startup_failed", "RuntimeError"),
+        )
+    ]
+
+
+def test_gateway_external_runtime_lifecycle_stops_on_shutdown() -> None:
+    from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
+
+    manager = _ExternalRuntimeManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=manager,
+        external_runtime_lifecycle=GatewayExternalRuntimeLifecycleConfig(
+            stop_on_shutdown=True,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert manager.calls == [("stop_all", (), {})]
+    assert app.state.external_runtime_shutdown == {
+        "ok": True,
+        "reason_code": "external_runtime_stopped",
+        "stopped_servers": 1,
+        "total_servers": 1,
+        "errors": {},
+    }
+
+
 @pytest.mark.parametrize(
     ("reason_code", "status_code"),
     [
@@ -2445,6 +2635,18 @@ def test_gateway_config_bootstrap_rejects_unsupported_external_runtime_factory()
         )
 
 
+@pytest.mark.parametrize("lifecycle_flag", ["reconcile_on_startup", "stop_on_shutdown"])
+def test_gateway_config_bootstrap_rejects_lifecycle_flags_when_external_runtime_disabled(
+    lifecycle_flag: str,
+) -> None:
+    """Lifecycle hooks require the external runtime manager to be enabled."""
+
+    from mcp_unified.gateway.config import GatewayExternalRuntimeBootstrapConfig
+
+    with pytest.raises(ValueError, match="external_runtime.enabled"):
+        GatewayExternalRuntimeBootstrapConfig(**{lifecycle_flag: True})
+
+
 def test_gateway_config_bootstrap_rejects_external_runtime_without_registry_store() -> None:
     """Runtime management requires an external registry-capable store."""
 
@@ -2463,6 +2665,43 @@ def test_gateway_config_bootstrap_rejects_external_runtime_without_registry_stor
                 ),
             )
         )
+
+
+def test_gateway_config_bootstrap_carries_external_runtime_lifecycle(
+    tmp_path: Path,
+) -> None:
+    """Config bootstrap should carry lifecycle preferences into app creation."""
+
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(
+                    enabled=True,
+                    reconcile_on_startup=True,
+                    stop_on_shutdown=True,
+                ),
+            ),
+        )
+    )
+
+    try:
+        assert bootstrap.external_runtime_lifecycle == GatewayExternalRuntimeLifecycleConfig(
+            reconcile_on_startup=True,
+            stop_on_shutdown=True,
+        )
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
 
 
 def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Path) -> None:

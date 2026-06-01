@@ -124,6 +124,7 @@ def test_gateway_external_runtime_exports_are_package_owned() -> None:
     """Gateway runtime exports must resolve without host package imports."""
     package_gateway = importlib.import_module("mcp_unified.gateway")
     package_config = importlib.import_module("mcp_unified.gateway.config")
+    package_lifecycle = importlib.import_module("mcp_unified.gateway.lifecycle")
     package_runtime = importlib.import_module("mcp_unified.gateway.external_runtime")
 
     assert package_gateway.GatewayExternalRuntimeManager is package_runtime.GatewayExternalRuntimeManager
@@ -131,6 +132,10 @@ def test_gateway_external_runtime_exports_are_package_owned() -> None:
     assert (
         package_gateway.GatewayExternalRuntimeBootstrapConfig
         is package_config.GatewayExternalRuntimeBootstrapConfig
+    )
+    assert (
+        package_gateway.GatewayExternalRuntimeLifecycleConfig
+        is package_lifecycle.GatewayExternalRuntimeLifecycleConfig
     )
 
 

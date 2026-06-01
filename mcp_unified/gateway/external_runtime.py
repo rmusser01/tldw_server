@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
 
+from loguru import logger
+
 from mcp_unified.federation.installers import (
     ExternalServerInstaller,
     NullExternalServerInstaller,
@@ -139,11 +141,10 @@ class GatewayExternalRuntimeManager:
 
     async def stop_server(self, server_id: str) -> dict[str, Any]:
         """Stop one external server and clear its discovered virtual tools."""
-        server = await self._find_server(server_id)
         async with self._lock:
             known_active = server_id in self._transports or server_id in self._servers
             transport = self._pop_runtime_unlocked(server_id)
-        if server is None and not known_active:
+        if not known_active and await self._find_server(server_id) is None:
             raise GatewayExternalRuntimeError(
                 f"External server '{server_id}' was not found",
                 reason_code="external_server_not_found",
@@ -160,6 +161,41 @@ class GatewayExternalRuntimeManager:
             "ok": True,
             "reason_code": "external_server_stopped",
             "server_id": server_id,
+        }
+
+    async def stop_all(self) -> dict[str, Any]:
+        """Stop every active external server transport."""
+        async with self._lock:
+            target_ids = sorted(self._transports)
+
+        stopped = 0
+        errors: dict[str, Any] = {}
+        for target_id in target_ids:
+            try:
+                payload = await self.stop_server(target_id)
+            except GatewayExternalRuntimeError as exc:
+                errors[target_id] = exc.reason_code
+            except Exception as exc:  # noqa: BLE001 - shutdown must remain best-effort.
+                logger.opt(exception=True).error(
+                    "External runtime stop failed server_id={!r} error_type={!r}",
+                    target_id,
+                    type(exc).__name__,
+                )
+                errors[target_id] = {
+                    "reason_code": "external_server_stop_failed",
+                    "error_type": type(exc).__name__,
+                    "error_summary": self._exception_summary(exc),
+                }
+            else:
+                if payload["reason_code"] == "external_server_stopped":
+                    stopped += 1
+
+        return {
+            "ok": not errors,
+            "reason_code": "external_runtime_stopped",
+            "stopped_servers": stopped,
+            "total_servers": len(target_ids),
+            "errors": errors,
         }
 
     async def restart_server(self, server_id: str) -> dict[str, Any]:

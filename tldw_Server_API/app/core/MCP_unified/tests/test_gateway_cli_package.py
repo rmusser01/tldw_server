@@ -58,6 +58,8 @@ def test_gateway_cli_validate_config_reports_success_json(
         "default_profile_id": None,
         "external_runtime": {
             "enabled": False,
+            "reconcile_on_startup": False,
+            "stop_on_shutdown": False,
             "transport_factory": "stdio",
         },
         "ok": True,
