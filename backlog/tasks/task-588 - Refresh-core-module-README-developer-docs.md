@@ -4,11 +4,13 @@ title: Refresh core module README developer docs
 status: In Progress
 assignee: []
 created_date: '2026-06-01 07:18'
-updated_date: '2026-06-01 07:21'
+updated_date: '2026-06-01 07:29'
 labels: []
 dependencies: []
 documentation:
   - Docs/superpowers/specs/2026-06-01-core-module-readme-refresh-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-implementation-plan.md
 priority: medium
 ---
 
@@ -26,12 +28,22 @@ Source-informed documentation pass for all 88 top-level tldw_Server_API/app/core
 - [ ] #4 Verification records README coverage and markdown/link sanity checks.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Implementation plan: Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-06-01: Design approved by user: source-informed orientation pass for all 88 top-level core modules first, followed by a deeper architecture-guide pass.
 
 2026-06-01: Pre-plan review found and corrected spec risks: Phase 2 now aligns with the user's 'approach 3 after approach 2' direction by treating all 88 modules as deep-guide candidates; scope now explicitly covers all immediate non-cache app/core directories; implementation inventory and local verification fallback are documented.
+
+2026-06-01: Implementation-plan inventory corrected the top-level README baseline to 48 existing and 40 missing. The earlier 49/39 count included a nested README and has been corrected in the design spec.
+
+2026-06-01: Implementation plan written at Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-implementation-plan.md. Worktree: .worktrees/core-module-readmes on branch codex/core-module-readmes.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -2,7 +2,7 @@
 
 ## Context
 
-The `tldw_Server_API/app/core` package contains 88 top-level module directories. At the start of this work, 49 modules already had a `README.md` and 39 did not. Existing READMEs vary widely: some are useful contributor guides, some are long architecture references, and some are scaffolded placeholders.
+The `tldw_Server_API/app/core` package contains 88 top-level module directories. At the start of this work, 48 top-level modules already had a `README.md` and 40 did not. Existing READMEs vary widely: some are useful contributor guides, some are long architecture references, and some are scaffolded placeholders.
 
 This work improves contributor orientation without changing runtime code. It covers all immediate non-cache directories under `tldw_Server_API/app/core`, including lowercase helper packages such as `config_sections` and `deprecations`. Nested READMEs may be linked from parent modules, but this pass does not expand every nested package into its own guide.
 
