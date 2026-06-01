@@ -375,7 +375,7 @@ describe("ScheduledTasksPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit reminder" }))
 
-    expect(await screen.findByText("Edit reminder task")).toBeInTheDocument()
+    expect(await screen.findByText("Edit reminder")).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
     })
@@ -595,7 +595,7 @@ describe("ScheduledTasksPage", () => {
     expect(
       screen.queryByRole("heading", { level: 4, name: "Scheduled tasks" })
     ).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Create Reminder Task" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Save reminder" })).not.toBeInTheDocument()
     expect(
       screen.getByText(
         "Create a reminder now. Automation templates for GitHub, YouTube, RAG, and agents are planned follow-up phases."
@@ -627,15 +627,17 @@ describe("ScheduledTasksPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Daily review")
-    await user.type(screen.getByRole("textbox", { name: "Run at" }), "2026-03-21T10:00:00+00:00")
-    await user.click(await screen.findByRole("button", { name: "Save Reminder Task" }))
+    fireEvent.change(screen.getByLabelText("Run once at"), {
+      target: { value: "2026-03-21T10:00" }
+    })
+    await user.click(await screen.findByRole("button", { name: "Save reminder" }))
 
     await waitFor(() => {
       expect(mocks.createScheduledTaskReminder).toHaveBeenCalledWith(
         expect.objectContaining({
           title: "Daily review",
           schedule_kind: "one_time",
-          run_at: "2026-03-21T10:00:00+00:00",
+          run_at: expect.stringMatching(/^2026-03-21T\d{2}:00:00\.000Z$/),
           enabled: true
         })
       )
@@ -656,7 +658,7 @@ describe("ScheduledTasksPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Missing run at")
-    await user.click(await screen.findByRole("button", { name: "Save Reminder Task" }))
+    await user.click(await screen.findByRole("button", { name: "Save reminder" }))
 
     await waitFor(() => {
       expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
@@ -678,9 +680,12 @@ describe("ScheduledTasksPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Recurring reminder")
-    await user.click(await screen.findByRole("combobox", { name: "Schedule kind" }))
-    await user.click(await screen.findByText("Recurring"))
-    fireEvent.click(await screen.findByRole("button", { name: "Save Reminder Task" }))
+    fireEvent.click(screen.getByText("Repeat"))
+    await user.click(await screen.findByRole("combobox", { name: "Repeat preset" }))
+    await user.click(await screen.findByText("Custom schedule"))
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom cron" }), { target: { value: "" } })
+    fireEvent.change(screen.getByRole("textbox", { name: "Timezone" }), { target: { value: "" } })
+    fireEvent.click(await screen.findByRole("button", { name: "Save reminder" }))
 
     expect(await screen.findByText("Cron is required for recurring reminders")).toBeInTheDocument()
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
@@ -701,8 +706,8 @@ describe("ScheduledTasksPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Whitespace run at")
-    fireEvent.change(screen.getByRole("textbox", { name: "Run at" }), { target: { value: "   " } })
-    await user.click(await screen.findByRole("button", { name: "Save Reminder Task" }))
+    fireEvent.change(screen.getByLabelText("Run once at"), { target: { value: "   " } })
+    await user.click(await screen.findByRole("button", { name: "Save reminder" }))
 
     await waitFor(() => {
       expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
@@ -726,11 +731,12 @@ describe("ScheduledTasksPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
       target: { value: "Whitespace recurring reminder" }
     })
-    await user.click(await screen.findByRole("combobox", { name: "Schedule kind" }))
-    await user.click(await screen.findByText("Recurring"))
-    fireEvent.change(screen.getByRole("textbox", { name: "Cron" }), { target: { value: "   " } })
+    fireEvent.click(screen.getByText("Repeat"))
+    await user.click(await screen.findByRole("combobox", { name: "Repeat preset" }))
+    await user.click(await screen.findByText("Custom schedule"))
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom cron" }), { target: { value: "   " } })
     fireEvent.change(screen.getByRole("textbox", { name: "Timezone" }), { target: { value: "   " } })
-    await user.click(screen.getByRole("button", { name: "Save Reminder Task" }))
+    await user.click(screen.getByRole("button", { name: "Save reminder" }))
 
     await waitFor(() => {
       expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
@@ -779,11 +785,11 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByText("Review notes")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "Edit Review notes" }))
-    expect(await screen.findByText("Edit reminder task")).toBeInTheDocument()
+    expect(await screen.findByText("Edit reminder")).toBeInTheDocument()
     fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
       target: { value: "Updated review" }
     })
-    fireEvent.click(await screen.findByRole("button", { name: "Save Reminder Task" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Save reminder" }))
 
     await waitFor(() => {
       expect(mocks.updateScheduledTaskReminder).toHaveBeenCalledWith(

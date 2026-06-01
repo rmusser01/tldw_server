@@ -21,7 +21,14 @@ documentation:
 - Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
 - 'Task 2 follow-up: stable status keys; disabled next-run filtering; empty state
   table suppression.'
+- 'Task 5: safer reminder scheduling controls implemented in WebUI.'
 priority: high
+modified_files:
+- apps/packages/ui/src/components/Option/ScheduledTasks/reminder-schedule-utils.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderTaskEditor.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
 ---
 
 ## Description
@@ -41,6 +48,12 @@ Implement Phase 1 of the Scheduled Tasks Automation Workbench UX from the approv
 - [ ] #7 Focused WebUI tests and relevant backend contract tests pass, or any skipped checks are documented with cause.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Task 5 strict TDD: added reminder-schedule utility tests, captured RED missing-module failure, implemented native Date/Intl scheduling helpers, updated page tests for safer controls, captured integration RED against old raw fields, then replaced raw reminder schedule inputs with Ant Design controls preserving schedule_kind/run_at/cron/timezone fields and payload shape.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -51,7 +64,7 @@ Task 1 review clarification: failure-like status tokens (fail, error, missed) ta
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 2 code-quality follow-up: added stable product status keys for overview and future filters, counted blocked tasks as needing attention, ignored disabled tasks when selecting the next upcoming run, and suppressed the table on the empty state. Verification: scheduled-task-status.test.ts passed 10 tests; ScheduledTasksPage.test.tsx passed 14 tests; git diff --check passed. Bandit skipped because the touched implementation scope is TypeScript/TSX plus Backlog metadata only.
+Task 5: replaced raw reminder run_at/cron/timezone editing with safer Run once/Repeat controls, native datetime-local ISO conversion, daily/weekly/custom cron helpers, local timezone defaults, preview copy, custom cron validation, and updated reminder editor copy. RED evidence: reminder-schedule-utils focused test failed on missing ../reminder-schedule-utils; updated ScheduledTasksPage focused test failed on old editor copy/raw fields. GREEN evidence: ./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx passed 24 tests. git diff --check passed. Bandit skipped because touched implementation scope is TypeScript/TSX plus tests only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
