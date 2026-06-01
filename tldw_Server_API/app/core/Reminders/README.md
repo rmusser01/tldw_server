@@ -9,7 +9,7 @@ Reminders owns reminder task lifecycle helpers and due-reminder job handling for
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/reminders.py` and `tldw_Server_API/app/api/v1/endpoints/notifications.py`.
 - Related schemas: `tldw_Server_API/app/api/v1/schemas/reminders_schemas.py`.
 - Related scheduler and worker: `tldw_Server_API/app/services/reminders_scheduler.py` and `tldw_Server_API/app/services/reminder_jobs_worker.py`.
-- Related tests: `tldw_Server_API/tests/Notifications/test_reminders_service.py`, `test_reminders_api.py`, `test_reminders_scheduler.py`, `test_reminder_jobs_worker.py`, and `test_reminders_schemas.py`.
+- Related tests live under `tldw_Server_API/tests/Notifications/`: `test_reminders_service.py`, `test_reminders_api.py`, `test_reminders_scheduler.py`, `test_reminder_jobs_worker.py`, and `test_reminders_schemas.py`.
 
 ## Responsibilities
 
