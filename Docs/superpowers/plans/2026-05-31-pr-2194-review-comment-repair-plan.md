@@ -32,4 +32,4 @@
 **Goal**: Address the five Cubic review threads opened after the review-fix push.
 **Success Criteria**: Shell override cleanup is owner-safe, quick-ingest preset validation rejects inherited keys, setup route copy uses translation keys, setup status gating is shared, and post-onboarding readiness ignores stale checks.
 **Tests**: Focused Vitest coverage for the five follow-up comments plus targeted ESLint and diff hygiene.
-**Status**: In Progress
+**Status**: Complete

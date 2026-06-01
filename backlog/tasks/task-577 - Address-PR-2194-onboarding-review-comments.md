@@ -1,10 +1,10 @@
 ---
 id: TASK-577
 title: Address PR 2194 onboarding review comments
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 00:50'
+updated_date: '2026-06-01 00:52'
 labels:
   - onboarding
   - review-fix
@@ -54,11 +54,11 @@ Follow-up RED/GREEN evidence: the new focused Vitest tests first failed on the i
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed all unresolved PR #2194 review threads and pushed commit 2b1c568ecf. Backend fixes covered setup sanitizer false positives, optional advanced storage path handling, local provider hostname validation, centralized first-run transition errors, async first-run store offloading, setup recovery write guards, completion persistence order, audio pack import cleanup, and TTS health exception logging. Frontend fixes covered provider resume state, multi-provider saves, first-chat completion failure messaging, audio recommendation error feedback, wizard error logging, static imports in tests, and api_key redaction.
+Addressed the original PR #2194 review threads in 2b1c568ecf and the post-push Cubic follow-up threads in b658b3b8d2. Backend fixes covered setup sanitizer false positives, optional advanced storage path handling, local provider hostname validation, centralized first-run transition errors, async first-run store offloading, setup recovery write guards, completion persistence order, audio pack import cleanup, and TTS health exception logging. Frontend fixes covered provider resume state, multi-provider saves, first-chat completion failure messaging, audio recommendation error feedback, wizard error logging, static imports in tests, api_key redaction, owner-safe shell override cleanup, strict quick-ingest preset validation, shared setup status gating, /setup localization keys, and stale readiness request protection.
 
-Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/TTS_NEW/integration/test_kokoro_runtime_health_envelope.py -q passed with 347 passed, 4 warnings; bunx vitest run targeted onboarding/setup tests passed with 19 passed; Bandit on touched Python implementation files exited 0 and wrote /tmp/bandit_pr2194_review_fixes.json; targeted ESLint exited 0 with the existing Next pages-directory warning; git diff --check exited 0.
+Verification: python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/TTS_NEW/integration/test_kokoro_runtime_health_envelope.py -q passed with 347 passed, 4 warnings; bunx vitest run targeted onboarding/setup tests passed with 19 passed; follow-up focused Vitest run passed with 43 passed; Bandit on touched Python implementation files exited 0 and wrote /tmp/bandit_pr2194_review_fixes.json; targeted ESLint exited 0 with the existing Next pages-directory warning; git diff --check exited 0.
 
-PR thread closeout: replied to and resolved all 24 review threads, then re-queried GitHub and confirmed zero unresolved review threads. No known blockers remain.
+PR thread closeout: replied to and resolved the original 24 review threads, then replied to and resolved the 5 post-push Cubic code threads. A final task-record cleanup removed the absolute local path from this summary. No known blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
