@@ -77,6 +77,7 @@ nav:
       - WebUI and Extension:
           - WebUI User Guide: User_Guides/WebUI_Extension/User_Guide.md
           - Chat Pages: User_Guides/WebUI_Extension/Chat_Pages.md
+          - Workflow Examples: User_Guides/WebUI_Extension/Workflows_Examples.md
           - STT and TTS Quickstart: User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md
           - Chatbooks: User_Guides/WebUI_Extension/Chatbook_User_Guide.md
           - Flashcards: User_Guides/WebUI_Extension/Flashcards_Study_Guide.md
@@ -99,7 +100,6 @@ nav:
       - TTS API: API-related/TTS_API.md
       - Evaluations API: API-related/Evaluations_API_Unified_Reference.md
       - Media Ingest Jobs API: API-related/Media_Ingest_Jobs_API.md
-      - Chat Workflows API: API-related/Chat_Workflows_API.md
       - Collections Feeds API: API-related/Collections_Feeds_API.md
       - Ingestion Sources API: API-related/Ingestion_Sources_API.md
       - Prompt Studio API: API-related/Prompt_Studio_API.md
