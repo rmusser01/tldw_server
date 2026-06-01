@@ -72,6 +72,15 @@ Verification:
 - Red check: `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui` failed before production changes with 2 expected active-state failures.
 - Green check: `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui`: 30 tests passed.
 - Bandit: not applicable for this Task 3 frontend-only TypeScript/TSX touched scope.
+Task 3 quality review follow-up complete:
+- Added exact `aria-current` regression coverage for current launcher and legacy sheet links, including `/chat/thread/1` not marking Chat current.
+- Added direct `aria-current` assertions for `/chat` Chat current state and `/` Companion Home current state.
+- Added `end` to both launcher `NavLink` instances so React Router current semantics match the exact route helper and visual active styling.
+
+Verification:
+- Red check: `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui` failed before production changes with 2 expected nested-route `aria-current` failures.
+- Green check: `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui`: 32 tests passed.
+- Bandit: not applicable for this frontend-only TypeScript/TSX and Backlog markdown touched scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -489,6 +489,7 @@ export function HeaderShortcuts({
                         <NavLink
                           key={ri.item.id}
                           to={ri.item.to}
+                          end
                           onClick={(e) => {
                             e.preventDefault()
                             navigateTo(ri.item.to)
@@ -572,6 +573,7 @@ export function HeaderShortcuts({
                           <NavLink
                             key={ri.item.id}
                             to={ri.item.to}
+                            end
                             onClick={(e) => {
                               e.preventDefault()
                               navigateTo(ri.item.to)

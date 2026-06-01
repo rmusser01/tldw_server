@@ -217,7 +217,24 @@ describe("HeaderShortcuts launcher modal", () => {
     const chat = getShortcutLink(listbox, "Chat")
 
     expect(companionHome.className).not.toContain("border-primary")
+    expect(companionHome).not.toHaveAttribute("aria-current")
     expect(chat.className).toContain("border-primary")
+    expect(chat).toHaveAttribute("aria-current", "page")
+  })
+
+  it("does not expose Chat as current in the launcher on nested chat routes", () => {
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat/thread/1"
+    )
+
+    const listbox = screen.getByRole("listbox", { name: "Pages" })
+    const companionHome = getShortcutLink(listbox, "Companion Home")
+    const chat = getShortcutLink(listbox, "Chat")
+
+    expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat.className).not.toContain("border-primary")
+    expect(chat).not.toHaveAttribute("aria-current")
   })
 
   it("marks Companion Home as current in the launcher on the home route", () => {
@@ -230,6 +247,7 @@ describe("HeaderShortcuts launcher modal", () => {
     const companionHome = getShortcutLink(listbox, "Companion Home")
 
     expect(companionHome.className).toContain("border-primary")
+    expect(companionHome).toHaveAttribute("aria-current", "page")
   })
 
   it("does not show Content Review in the launcher modal", () => {
@@ -421,7 +439,27 @@ describe("HeaderShortcuts launcher modal", () => {
     fireEvent.mouseEnter(chat)
 
     expect(companionHome).not.toHaveClass("border-border")
+    expect(companionHome).not.toHaveAttribute("aria-current")
     expect(chat).toHaveClass("border-border")
+    expect(chat).toHaveAttribute("aria-current", "page")
+  })
+
+  it("does not expose Chat as current in the legacy sheet on nested chat routes", () => {
+    mockState.launcherView = "legacy"
+
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat/thread/1"
+    )
+
+    const legacySheet = screen.getByRole("listbox", { name: "Legacy sheet" })
+    const companionHome = getShortcutLink(legacySheet, "Companion Home")
+    const chat = getShortcutLink(legacySheet, "Chat")
+
+    fireEvent.mouseEnter(chat)
+
+    expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat).not.toHaveAttribute("aria-current")
   })
 
   it("marks Companion Home as current in the legacy sheet on the home route", () => {
@@ -439,6 +477,8 @@ describe("HeaderShortcuts launcher modal", () => {
     fireEvent.mouseEnter(chat)
 
     expect(companionHome).toHaveClass("border-border")
+    expect(companionHome).toHaveAttribute("aria-current", "page")
+    expect(chat).not.toHaveAttribute("aria-current")
   })
 
   it("opens in persisted legacy view mode when preference is set", () => {
