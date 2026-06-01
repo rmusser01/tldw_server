@@ -50,6 +50,12 @@ const statusToneToTagColor = (status: ScheduledTaskProductStatus): string => {
 const typeTagColor = (task: ScheduledTask): string =>
   task.primitive === "watchlist_job" ? "gold" : "blue"
 
+const rowActionLabel = (action: string, task: ScheduledTask): string =>
+  `${action} ${task.title}`
+
+const watchlistLinkLabel = (action: string, task: ScheduledTask): string =>
+  `${action} for ${task.title}`
+
 const formatTimestamp = (
   timestamp: string | null | undefined,
   fallback: string
@@ -229,13 +235,26 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
         if (isNativeReminder(task)) {
           return (
             <Space wrap>
-              <Button size="small" onClick={() => onInspectTask(task)}>
+              <Button
+                size="small"
+                aria-label={rowActionLabel("Inspect", task)}
+                onClick={() => onInspectTask(task)}
+              >
                 Inspect
               </Button>
-              <Button size="small" onClick={() => onEditReminder(task)}>
+              <Button
+                size="small"
+                aria-label={rowActionLabel("Edit", task)}
+                onClick={() => onEditReminder(task)}
+              >
                 Edit
               </Button>
-              <Button size="small" danger onClick={() => onDeleteReminder(task)}>
+              <Button
+                size="small"
+                danger
+                aria-label={rowActionLabel("Delete", task)}
+                onClick={() => onDeleteReminder(task)}
+              >
                 Delete
               </Button>
             </Space>
@@ -246,7 +265,11 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
 
         return (
           <Space wrap>
-            <Button size="small" onClick={() => onInspectTask(task)}>
+            <Button
+              size="small"
+              aria-label={rowActionLabel("Inspect", task)}
+              onClick={() => onInspectTask(task)}
+            >
               Inspect
             </Button>
             {links.settingsUrl ? (
@@ -255,6 +278,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
                 type="link"
                 href={links.settingsUrl}
                 target="_self"
+                aria-label={watchlistLinkLabel("Open monitor settings", task)}
               >
                 Open monitor settings
               </Button>
@@ -265,6 +289,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
                 type="link"
                 href={links.activityUrl}
                 target="_self"
+                aria-label={watchlistLinkLabel("Open activity", task)}
               >
                 Open activity
               </Button>
@@ -275,6 +300,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
                 type="link"
                 href={links.reportsUrl}
                 target="_self"
+                aria-label={watchlistLinkLabel("Open reports", task)}
               >
                 Open reports
               </Button>
@@ -285,6 +311,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
                 type="link"
                 href={links.latestRunUrl}
                 target="_self"
+                aria-label={watchlistLinkLabel("Open latest run", task)}
               >
                 Open latest run
               </Button>
@@ -295,6 +322,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
                 type="link"
                 href={links.latestOutputUrl}
                 target="_self"
+                aria-label={watchlistLinkLabel("Open latest report", task)}
               >
                 Open latest report
               </Button>

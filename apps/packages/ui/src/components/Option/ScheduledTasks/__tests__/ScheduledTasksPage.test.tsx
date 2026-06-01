@@ -235,30 +235,65 @@ describe("ScheduledTasksPage", () => {
     expect(within(reminderRow as HTMLElement).getByText("Needs attention")).toBeInTheDocument()
     expect(within(reminderRow as HTMLElement).getByText("No completed runs yet")).toBeInTheDocument()
 
-    expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Inspect Review notes" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Edit Review notes" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete Review notes" })).toBeInTheDocument()
     expect(await screen.findByText("Morning digest")).toBeInTheDocument()
-    expect(await screen.findByRole("link", { name: "Open monitor settings" })).toHaveAttribute(
-      "href",
-      "/watchlists?tab=jobs"
-    )
-    expect(screen.getByRole("link", { name: "Open activity" })).toHaveAttribute(
+    expect(
+      await screen.findByRole("link", { name: "Open monitor settings for Morning digest" })
+    ).toHaveAttribute("href", "/watchlists?tab=jobs")
+    expect(screen.getByRole("link", { name: "Open activity for Morning digest" })).toHaveAttribute(
       "href",
       "/watchlists?tab=runs&job_id=2"
     )
-    expect(screen.getByRole("link", { name: "Open reports" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open reports for Morning digest" })).toHaveAttribute(
       "href",
       "/watchlists?tab=outputs&job_id=2"
     )
-    expect(screen.getByRole("link", { name: "Open latest run" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open latest run for Morning digest" })).toHaveAttribute(
       "href",
       "/watchlists?tab=runs&run_id=25&open_run=1"
     )
-    expect(screen.getByRole("link", { name: "Open latest report" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open latest report for Morning digest" })).toHaveAttribute(
       "href",
       "/watchlists?tab=outputs&output_id=39&open_output=1"
     )
     expect(screen.queryByRole("button", { name: "Edit watchlist job" })).not.toBeInTheDocument()
+  })
+
+  it("opens the detail drawer for the inspected scheduled task row", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:1",
+          primitive: "reminder_task",
+          title: "Review notes",
+          description: "Check the backlog",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "2026-03-21T09:00:00+00:00",
+          timezone: "UTC",
+          next_run_at: "2030-04-05T12:30:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "1" }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Review notes" }))
+
+    const drawer = await screen.findByRole("dialog", { name: /Review notes/i })
+    expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
+    expect(within(drawer).getByRole("button", { name: "Edit reminder" })).toBeInTheDocument()
   })
 
   it("filters scheduled tasks by product status and search text", async () => {
@@ -608,7 +643,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />)
 
     expect(await screen.findByText("Review notes")).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Review notes" }))
     expect(await screen.findByText("Edit reminder task")).toBeInTheDocument()
     fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
       target: { value: "Updated review" }
@@ -622,7 +657,7 @@ describe("ScheduledTasksPage", () => {
       )
     })
 
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Delete Review notes" }))
 
     await waitFor(() => {
       expect(mocks.deleteScheduledTaskReminder).toHaveBeenCalledWith("reminder_task:1")

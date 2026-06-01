@@ -17,6 +17,7 @@ import {
 import { ScheduledTaskTable } from "./ScheduledTaskTable"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
+import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 
@@ -155,6 +156,7 @@ export const ScheduledTasksPage: React.FC = () => {
     try {
       await deleteScheduledTaskReminder(task.id)
       message.success("Reminder task deleted")
+      closeTaskDetail()
       await refreshTasks()
     } catch (error: any) {
       message.error(error?.message || "Unable to delete reminder task")
@@ -319,6 +321,13 @@ export const ScheduledTasksPage: React.FC = () => {
             saving={saving}
             onClose={closeEditor}
             onSubmit={handleSubmit}
+          />
+          <ScheduledTaskDetailDrawer
+            open={Boolean(selectedTask)}
+            task={selectedTask}
+            onClose={closeTaskDetail}
+            onEditReminder={openEditReminder}
+            onDeleteReminder={handleDeleteReminder}
           />
         </>
       ) : null}
