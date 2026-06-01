@@ -145,6 +145,7 @@ type Props = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
   onHeightChange?: (height: number) => void
   draftKey?: string
+  onOpenChatInWebUi?: () => Promise<void> | void
 }
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -161,7 +162,8 @@ export const SidepanelForm = ({
   dropedFile,
   inputRef,
   onHeightChange,
-  draftKey
+  draftKey,
+  onOpenChatInWebUi
 }: Props) => {
   const formContainerRef = React.useRef<HTMLDivElement>(null)
   const localTextareaRef = React.useRef<HTMLTextAreaElement>(null)
@@ -2930,6 +2932,7 @@ export const SidepanelForm = ({
                               chatLoopStatus={chatLoopState.status}
                               pendingApprovalsCount={chatLoopState.pendingApprovals.length}
                               runningToolCount={chatLoopState.inflightToolCallIds.length}
+                              onOpenChatInWebUi={onOpenChatInWebUi}
                             />
                           )}
                           <div className="flex flex-wrap items-center justify-end gap-2">

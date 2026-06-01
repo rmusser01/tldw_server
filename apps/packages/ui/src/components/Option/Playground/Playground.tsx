@@ -63,6 +63,10 @@ import {
   SETTINGS_HISTORY_ID_PARAM,
   SETTINGS_SERVER_CHAT_ID_PARAM,
 } from "@/utils/settings-return";
+import {
+  decodeSidepanelChatWebUiHandoff,
+  SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
+} from "@/services/tldw/sidepanel-chat-webui-handoff";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
 import { useNavigate } from "react-router-dom";
 import {
@@ -132,10 +136,24 @@ export const Playground = () => {
     setHistoryId,
     setHistory,
     setMessages,
+    selectedSystemPrompt,
     setSelectedSystemPrompt,
+    selectedQuickPrompt,
+    setSelectedQuickPrompt,
+    selectedModel,
     setSelectedModel,
     setServerChatId,
     setContextFiles,
+    chatMode,
+    setChatMode,
+    webSearch,
+    setWebSearch,
+    toolChoice,
+    setToolChoice,
+    temporaryChat,
+    setTemporaryChat,
+    useOCR,
+    setUseOCR,
     createChatBranch,
     streaming,
     selectedCharacter,
@@ -189,15 +207,12 @@ export const Playground = () => {
     typeof setTimeout
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
+  const sidepanelHandoffAppliedRef = React.useRef(false);
   const previousThreadRef = React.useRef<string | null>(null);
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
-  const setSelectedQuickPrompt = useStoreMessageOption(
-    (state) => state.setSelectedQuickPrompt,
-  );
-
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
   }, [setRouteContext]);
@@ -815,6 +830,7 @@ export const Playground = () => {
         historyId: null as string | null,
         serverChatId: null as string | null,
         researchReturnRunId: null as string | null,
+        sidepanelHandoff: null,
       };
     }
     const params = new URLSearchParams(window.location.search);
@@ -823,13 +839,17 @@ export const Playground = () => {
       params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
     const researchReturnRunId =
       params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
-    return { historyId, serverChatId, researchReturnRunId };
+    const sidepanelHandoff = decodeSidepanelChatWebUiHandoff(
+      params.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
+    );
+    return { historyId, serverChatId, researchReturnRunId, sidepanelHandoff };
   }, []);
 
   const returnHistoryIdFromSettings = settingsReturnContext.historyId;
   const returnServerChatIdFromSettings = settingsReturnContext.serverChatId;
   const returnResearchRunIdFromSettings =
     settingsReturnContext.researchReturnRunId;
+  const sidepanelChatHandoff = settingsReturnContext.sidepanelHandoff;
 
   React.useEffect(() => {
     if (!playgroundReady) return;
@@ -908,6 +928,114 @@ export const Playground = () => {
     serverChatId,
     setServerChatId,
     dismissedReturnedResearchRunId,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      !playgroundReady ||
+      !sidepanelChatHandoff ||
+      sidepanelHandoffAppliedRef.current
+    ) {
+      return;
+    }
+    sidepanelHandoffAppliedRef.current = true;
+
+    if (
+      sidepanelChatHandoff.serverChatId &&
+      sidepanelChatHandoff.serverChatId !== serverChatId
+    ) {
+      setServerChatId(sidepanelChatHandoff.serverChatId);
+    }
+    if (
+      sidepanelChatHandoff.selectedModel &&
+      sidepanelChatHandoff.selectedModel !== selectedModel
+    ) {
+      setSelectedModel(sidepanelChatHandoff.selectedModel);
+    }
+    if (
+      sidepanelChatHandoff.selectedSystemPrompt &&
+      sidepanelChatHandoff.selectedSystemPrompt !== selectedSystemPrompt
+    ) {
+      setSelectedSystemPrompt(sidepanelChatHandoff.selectedSystemPrompt);
+    }
+    if (
+      sidepanelChatHandoff.selectedQuickPrompt &&
+      sidepanelChatHandoff.selectedQuickPrompt !== selectedQuickPrompt
+    ) {
+      setSelectedQuickPrompt(sidepanelChatHandoff.selectedQuickPrompt);
+    }
+    if (
+      sidepanelChatHandoff.chatMode &&
+      sidepanelChatHandoff.chatMode !== chatMode
+    ) {
+      setChatMode(sidepanelChatHandoff.chatMode);
+    }
+    if (
+      typeof sidepanelChatHandoff.webSearch === "boolean" &&
+      sidepanelChatHandoff.webSearch !== webSearch
+    ) {
+      setWebSearch(sidepanelChatHandoff.webSearch);
+    }
+    if (
+      sidepanelChatHandoff.toolChoice &&
+      sidepanelChatHandoff.toolChoice !== toolChoice
+    ) {
+      setToolChoice(sidepanelChatHandoff.toolChoice);
+    }
+    if (
+      typeof sidepanelChatHandoff.temporaryChat === "boolean" &&
+      sidepanelChatHandoff.temporaryChat !== temporaryChat
+    ) {
+      setTemporaryChat(sidepanelChatHandoff.temporaryChat);
+    }
+    if (
+      typeof sidepanelChatHandoff.useOCR === "boolean" &&
+      sidepanelChatHandoff.useOCR !== useOCR
+    ) {
+      setUseOCR(sidepanelChatHandoff.useOCR);
+    }
+
+    if (sidepanelChatHandoff.draft?.trim()) {
+      requestAnimationFrame(() => {
+        window.dispatchEvent(
+          new CustomEvent("tldw:set-composer-message", {
+            detail: {
+              message: sidepanelChatHandoff.draft,
+              ifEmptyOnly: true,
+            },
+          }),
+        );
+      });
+    }
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+      const nextQuery = url.searchParams.toString();
+      const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${url.hash}`;
+      window.history.replaceState(window.history.state, "", nextPath);
+    }
+  }, [
+    chatMode,
+    playgroundReady,
+    selectedModel,
+    selectedQuickPrompt,
+    selectedSystemPrompt,
+    serverChatId,
+    setChatMode,
+    setSelectedModel,
+    setSelectedQuickPrompt,
+    setSelectedSystemPrompt,
+    setServerChatId,
+    setTemporaryChat,
+    setToolChoice,
+    setUseOCR,
+    setWebSearch,
+    sidepanelChatHandoff,
+    temporaryChat,
+    toolChoice,
+    useOCR,
+    webSearch,
   ]);
 
   const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(
@@ -1779,7 +1907,9 @@ export const Playground = () => {
           <div
             ref={composerDockRef}
             data-testid={
-              stickyChatInput ? "playground-chat-composer-dock" : undefined
+              stickyChatInput
+                ? "playground-chat-composer-dock"
+                : "playground-chat-composer-region"
             }
             className={`relative w-full shrink-0 ${
               stickyChatInput
@@ -1869,9 +1999,15 @@ export const Playground = () => {
               ) as string
             }
             onClick={openArtifactsFromEdge}
-            className="absolute right-2 top-20 z-30 inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-muted shadow-sm transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            className="absolute right-0 top-1/2 z-40 inline-flex h-32 w-10 -translate-y-1/2 flex-col items-center justify-center gap-2 rounded-l-lg border border-r-0 border-border bg-surface/95 text-text-muted shadow-lg backdrop-blur transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           >
             <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+            <span
+              aria-hidden="true"
+              className="text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]"
+            >
+              Artifacts
+            </span>
           </button>
         )}
         {artifactsOpen && (
