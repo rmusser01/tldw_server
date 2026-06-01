@@ -1,7 +1,7 @@
 ---
 id: TASK-495
 title: Implement OpenUI dynamic chat rendering
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-06-01 15:57
@@ -64,12 +64,12 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 0 runtime feasibility completed and recorded before OpenUI dependency use
-- [ ] #2 Dynamic UI envelope/types/validation/persistence implemented with test-first coverage
-- [ ] #3 /chat supports temporary OpenUI request mode and active rendering only on opted-in web chat surface
-- [ ] #4 OpenUI actions round-trip as visible user messages with host-attached provenance metadata
-- [ ] #5 Extension sidepanel and workspace render source fallback unless explicitly enabled later
-- [ ] #6 Focused unit/build/browser/security verification completed or documented
+- [x] #1 Task 0 runtime feasibility completed and recorded before OpenUI dependency use
+- [x] #2 Dynamic UI envelope/types/validation/persistence implemented with test-first coverage
+- [x] #3 /chat supports temporary OpenUI request mode and active rendering only on opted-in web chat surface
+- [x] #4 OpenUI actions round-trip as visible user messages with host-attached provenance metadata
+- [x] #5 Extension sidepanel and workspace render source fallback unless explicitly enabled later
+- [x] #6 Focused unit/build/browser/security verification completed or documented
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -102,15 +102,17 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Tasks 0-1 complete. Task 0 committed OpenUI runtime feasibility review and dependency gate in ec3e71c6b7, with follow-up Backlog status commit ef2035486a. Task 1 added Dynamic UI shared types, validation helpers, source preflight, action normalization, sensitive-value blocking, and focused tests across commits 2e08f1e38c, 8ec5a81a2b, and 69d1d36890. Focused utility suite passes with 17 tests. Task 1 passed spec-compliance and code-quality review.
+Tasks 0-9 complete. Implemented the OpenUI Dynamic UI path behind the shared Dynamic UI envelope: runtime feasibility review, validation/preflight helpers, metadata persistence/hydration, registry/source fallback, real OpenUI renderer adapter on the opted-in web chat surface, one-send `/chat` OpenUI request mode, OpenUI prompt/metadata tagging through the chat pipeline, host-side action bridge with sensitive-value blocking, and safe fallback behavior for workspace and extension sidepanel surfaces.
+
+Verification recorded across the task: focused unit suites pass for utilities, renderer, persistence, pipeline, action bridge, `/chat` control, and workspace/sidepanel fallbacks; final focused suite passed 48/48. `/chat` Playwright smoke passed 1/1 outside the sandbox after sandboxed dev-server port binding failed. WebUI `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run build:dev` passed outside the sandbox with known documentation glob/traced-file warnings and token-sync OK. Extension `bun run compile` passed; `bun run build:chrome:dev` still hangs after WXT/Vite startup and is documented as a build-runner caveat while extension OpenUI rendering remains fallback-only. Package-wide `bunx tsc --noEmit --pretty false` still fails on existing baseline errors, with task-specific fixes applied so the new Task 8 fallback tests no longer appear. Bandit skipped because this implementation touched frontend/docs/Backlog files only, with no Python files modified by this task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
