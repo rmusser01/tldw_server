@@ -37,6 +37,11 @@ modified_files:
 - apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts
 - apps/packages/ui/src/hooks/chat/useChatActions.ts
 - apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts
+- apps/packages/ui/src/hooks/chat/useDynamicUIActionBridge.ts
+- apps/packages/ui/src/hooks/chat/__tests__/useDynamicUIActionBridge.test.tsx
+- apps/packages/ui/src/hooks/chat/__tests__/useChatActions.dynamic-ui-action.integration.test.tsx
+- apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx
+- apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundChat.dynamic-ui-action.guard.test.ts
 - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
@@ -71,6 +76,8 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 2026-06-01 Task 4 Bandit: not applicable for this slice because touched files are TypeScript/TSX, package manifests/lockfile, and Backlog markdown only; no Python code paths were modified.
 
 2026-06-01 Task 5: added OpenUI request-mode prompt injection and metadata tagging in the chat pipeline. Red command: `bunx vitest run src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts` failed for the expected missing OpenUI prompt injection. Green focused command passed 22/22 tests: `bunx vitest run src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts src/utils/__tests__/dynamic-ui.test.ts`. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors; after touched-file fixes there are no new errors for Task 5 files, while an existing error remains in `chatModePipeline.conversation-id.test.ts`. Bandit not applicable because Task 5 touched TypeScript/TSX and markdown only.
+
+2026-06-01 Task 6: added the OpenUI action bridge, conservative sensitive-value blocking, `/chat` bridge wiring, and submit-path provenance coverage. Red commands: `bunx vitest run src/hooks/chat/__tests__/useDynamicUIActionBridge.test.tsx` failed on missing hook, and `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundChat.dynamic-ui-action.guard.test.ts` failed on missing `/chat` bridge wiring. Green focused command passed 9/9 tests: `bunx vitest run src/hooks/chat/__tests__/useDynamicUIActionBridge.test.tsx src/hooks/chat/__tests__/useChatActions.dynamic-ui-action.integration.test.tsx src/components/Common/DynamicUI/__tests__/DynamicMessageRenderer.test.tsx src/components/Option/Playground/__tests__/PlaygroundChat.dynamic-ui-action.guard.test.ts`. Package `bunx tsc --noEmit --pretty false` still fails on existing baseline errors; after fixing the Task 6 fixture type, no Task 6 touched files remain in the typecheck output. Bandit not applicable because Task 6 touched TypeScript/TSX and markdown only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
