@@ -16,4 +16,16 @@ describe("dynamic UI surface guard", () => {
     const source = readSource("../../../Option/Playground/PlaygroundChat.tsx")
     expect(source).toContain('dynamicUISurface="web-chat"')
   })
+
+  it("keeps compare cluster messages in the main /chat dynamic UI surface", () => {
+    const chatSource = readSource("../../../Option/Playground/PlaygroundChat.tsx")
+    const compareSource = readSource(
+      "../../../Option/Playground/PlaygroundCompareCluster.tsx"
+    )
+
+    expect(chatSource).toContain("dynamicUISurface=\"web-chat\"")
+    expect(chatSource).toContain("onDynamicUIAction={onDynamicUIAction}")
+    expect(compareSource).toContain("dynamicUISurface={dynamicUISurface}")
+    expect(compareSource).toContain("onDynamicUIAction={onDynamicUIAction}")
+  })
 })
