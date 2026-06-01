@@ -317,6 +317,8 @@ export const SidePanelBody = ({
                   moodTopic={message.moodTopic ?? null}
                   variants={message.variants}
                   activeVariantIndex={message.activeVariantIndex}
+                  metadataExtra={message.metadataExtra}
+                  dynamicUISurface="extension-sidepanel"
                   onSwipePrev={() => handleSwipePrev(message.id)}
                   onSwipeNext={() => handleSwipeNext(message.id)}
                 />
