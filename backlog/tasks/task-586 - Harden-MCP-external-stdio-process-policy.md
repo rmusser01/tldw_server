@@ -9,6 +9,7 @@ labels:
 priority: High
 documentation:
 - Docs/superpowers/specs/2026-06-01-mcp-stdio-process-policy-design.md
+- Docs/superpowers/plans/2026-06-01-mcp-stdio-process-policy-implementation-plan.md
 ---
 
 ## Description
@@ -24,7 +25,7 @@ Add explicit process-execution policy for standalone MCP external stdio transpor
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design phase updated after review: the spec now requires a sibling process_policy module, explicit PATH trust semantics, JSON/TOML coercion validation, Windows/POSIX path normalization guidance, policy-aware env/PATH interaction, default factory identity preservation when no custom policy is configured, and runtime-manager redaction/status coverage for policy-denied starts.
+Implementation plan saved at Docs/superpowers/plans/2026-06-01-mcp-stdio-process-policy-implementation-plan.md. Stages: add process_policy helper tests/module, wire stdio transport enforcement, add gateway config/CLI wiring, add runtime-manager redaction coverage, then run targeted pytest and Bandit.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
