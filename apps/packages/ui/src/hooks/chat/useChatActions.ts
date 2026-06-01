@@ -985,14 +985,18 @@ export const useChatActions = ({
           if (userContent.length > 0) {
             await tldwClient.addChatMessage(cid, {
               role: "user",
-              content: userContent
+              content: userContent,
+              ...(payload.userMetadataExtra
+                ? { metadata_extra: payload.userMetadataExtra }
+                : {})
             })
           }
 
           if (assistantContent.length > 0) {
             await tldwClient.addChatMessage(cid, {
               role: "assistant",
-              content: assistantContent
+              content: assistantContent,
+              metadata_extra: payload.assistantMetadataExtra
             })
           }
         } catch {

@@ -127,6 +127,7 @@ export const saveMessage = async ({
   source,
   discoSkillComment,
   generationInfo,
+  metadataExtra,
   message_type,
   clusterId,
   modelId,
@@ -152,6 +153,7 @@ export const saveMessage = async ({
   clusterId?: string
   modelId?: string
   generationInfo?: any
+  metadataExtra?: Record<string, unknown>
   reasoning_time_taken?: number
   modelName?: string
   modelImage?: string
@@ -181,6 +183,7 @@ export const saveMessage = async ({
     clusterId,
     modelId,
     generationInfo: generationInfo,
+    metadataExtra,
     reasoning_time_taken,
     modelName,
     modelImage,
@@ -227,6 +230,7 @@ const buildVariantFromHistory = (message: Message): MessageVariant => ({
   sources: message.sources ?? [],
   images: message.images ?? [],
   generationInfo: message.generationInfo,
+  metadataExtra: message.metadataExtra as MessageVariant["metadataExtra"],
   reasoning_time_taken: message.reasoning_time_taken,
   createdAt: message.createdAt,
   serverMessageId: message.serverMessageId,
@@ -285,6 +289,7 @@ export const formatToMessage = (messages: MessageHistory): MessageType[] => {
       modelId: message?.modelId,
       parentMessageId: message?.parent_message_id ?? null,
       generationInfo: message?.generationInfo,
+      metadataExtra: message?.metadataExtra as MessageType["metadataExtra"],
       reasoning_time_taken: message?.reasoning_time_taken,
       modelName: message?.modelName,
       modelImage: message?.modelImage,

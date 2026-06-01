@@ -17,4 +17,23 @@ describe("useChatActions persist mirror guard", () => {
       "serverMessagesAlreadyPersisted: Boolean(activeChatId) && !temporaryChat"
     )
   })
+
+  it("mirrors dynamic UI assistant metadata when saving server chat turns", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "..", "useChatActions.ts"),
+      "utf8"
+    )
+
+    expect(source).toContain("metadata_extra: payload.assistantMetadataExtra")
+  })
+
+  it("mirrors user metadata only when present while saving server chat turns", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "..", "useChatActions.ts"),
+      "utf8"
+    )
+
+    expect(source).toContain("metadata_extra: payload.userMetadataExtra")
+    expect(source).toContain("...(payload.userMetadataExtra")
+  })
 })

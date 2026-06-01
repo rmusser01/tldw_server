@@ -24,6 +24,7 @@ import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   parseImageGenerationEventMirrorContent
 } from "@/utils/image-generation-chat"
+import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import {
   characterToAssistantSelection,
   personaToAssistantSelection
@@ -348,8 +349,17 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
     const metadataExtraCandidate =
       (m as unknown as { metadata_extra?: unknown }).metadata_extra ??
       (meta?.metadata_extra as unknown)
-    const metadataExtra = isRecord(metadataExtraCandidate)
+    const metadataBase = isRecord(metadataExtraCandidate)
       ? metadataExtraCandidate
+      : undefined
+    const dynamicUI = normalizeDynamicUIEnvelope(metadataBase?.dynamic_ui)
+    const metadataExtra: Message["metadataExtra"] | undefined = metadataBase
+      ? (() => {
+          const { dynamic_ui: _invalidDynamicUI, ...rest } = metadataBase
+          return (dynamicUI
+            ? { ...rest, dynamic_ui: dynamicUI }
+            : rest) as Message["metadataExtra"]
+        })()
       : undefined
     const speakerCharacterIdRaw = metadataExtra?.speaker_character_id
     const speakerCharacterId =

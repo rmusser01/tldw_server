@@ -393,6 +393,60 @@ describe("fetchAllServerChatMessages", () => {
 })
 
 describe("mapServerChatMessagesToPlaygroundMessages", () => {
+  it("preserves valid dynamic UI metadata from server messages", () => {
+    const [message] = mapServerChatMessagesToPlaygroundMessages({
+      assistantName: "Assistant",
+      characterId: null,
+      serverMessages: [
+        {
+          id: "server-1",
+          role: "assistant",
+          content: "root = <Card />",
+          created_at: "2026-06-01T00:00:00.000Z",
+          metadata_extra: {
+            dynamic_ui: {
+              renderer: "openui",
+              version: "v1",
+              source: "root = <Card />"
+            }
+          }
+        }
+      ]
+    })
+
+    expect(message.metadataExtra?.dynamic_ui).toMatchObject({
+      renderer: "openui",
+      source: "root = <Card />"
+    })
+  })
+
+  it("omits invalid dynamic UI metadata while preserving unrelated metadata", () => {
+    const [message] = mapServerChatMessagesToPlaygroundMessages({
+      assistantName: "Assistant",
+      characterId: null,
+      serverMessages: [
+        {
+          id: "server-1",
+          role: "assistant",
+          content: "not openui",
+          created_at: "2026-06-01T00:00:00.000Z",
+          metadata_extra: {
+            dynamic_ui: {
+              renderer: "openui",
+              version: "v2",
+              source: ""
+            },
+            trace_id: "trace-1"
+          }
+        }
+      ]
+    })
+
+    expect(message.metadataExtra).toEqual({
+      trace_id: "trace-1"
+    })
+  })
+
   it("maps mirrored image event messages into assistant image event cards", () => {
     const mirroredContent = buildImageGenerationEventMirrorContent({
       kind: "image_generation_event",
