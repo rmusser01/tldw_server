@@ -846,7 +846,7 @@ class GatewayExternalRuntimeManager:
                 f"External server {operation} failed",
                 reason_code=failure_reason_code,
                 server_id=server.id,
-            ) from None
+            ) from exc
         return self._installer_payload(
             payload,
             server=server,
