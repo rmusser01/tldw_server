@@ -10,7 +10,7 @@ Notes_Graph builds bounded graph views over notes using manual note links, wikil
 - `formatters.py` converts graph responses to Cytoscape-compatible JSON.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/notes_graph.py`.
 - Related schemas: `tldw_Server_API/app/api/v1/schemas/notes_graph.py`.
-- Related tests: `tldw_Server_API/tests/Notes_Graph/unit/`.
+- Related tests: `tldw_Server_API/tests/Notes_Graph/unit/` and `tldw_Server_API/tests/Notes_Graph/integration/test_graph_endpoint.py`.
 
 ## Responsibilities
 
@@ -47,7 +47,7 @@ Notes_Graph builds bounded graph views over notes using manual note links, wikil
 ## Testing
 
 - Unit tests for the parser, cache, and graph service live under `tldw_Server_API/tests/Notes_Graph/unit/`.
-- Endpoint behavior is tied to `tldw_Server_API/app/api/v1/endpoints/notes_graph.py`; no separate endpoint test path was identified in this pass.
+- Endpoint integration coverage for `/graph` and `/neighbors` lives in `tldw_Server_API/tests/Notes_Graph/integration/test_graph_endpoint.py`.
 
 ## Gotchas
 
