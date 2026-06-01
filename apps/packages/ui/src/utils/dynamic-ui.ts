@@ -60,6 +60,11 @@ const keySegments = (key: string): string[] =>
       const normalized = segment.toLowerCase()
       return normalized === "apikey" ? ["api", "key"] : [normalized]
     })
+    .map((segment) => {
+      if (segment === "authorization") return "auth"
+      if (segment.endsWith("s")) return segment.slice(0, -1)
+      return segment
+    })
     .filter(Boolean)
 
 const isSensitiveActionValueKey = (key: string): boolean =>
@@ -82,12 +87,14 @@ export const normalizeDynamicUIEnvelope = (value: unknown): DynamicUIEnvelope | 
 
   const preflight = preflightOpenUISource(value.source)
   if (!preflight.ok || typeof value.source !== "string") return null
+  const hasState = Object.prototype.hasOwnProperty.call(value, "state") && value.state !== undefined
+  if (hasState && (!isPlainObject(value.state) || !isStrictJSONValue(value.state))) return null
 
   return {
     renderer: "openui",
     version: "v1",
     source: value.source.trim(),
-    ...(isRecord(value.state) ? { state: value.state } : {}),
+    ...(hasState ? { state: value.state as Record<string, unknown> } : {}),
     ...(Array.isArray(value.capabilities)
       ? { capabilities: value.capabilities.filter((entry): entry is string => typeof entry === "string") }
       : {})
@@ -133,7 +140,7 @@ export const normalizeDynamicUIActionPayload = (
 }
 
 export const shouldBlockDynamicUIActionValues = (value: unknown, depth = 0): boolean => {
-  if (depth > MAX_JSON_DEPTH) return false
+  if (depth > MAX_JSON_DEPTH) return true
   if (Array.isArray(value)) {
     return value.some((entry) => shouldBlockDynamicUIActionValues(entry, depth + 1))
   }
