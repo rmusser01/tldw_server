@@ -96,6 +96,22 @@ _EXTERNAL_RUNTIME_STATUS_CODES = {
     "invalid_external_runtime_request": 422,
 }
 _EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
+_PROFILE_MANAGEMENT_PUBLIC_ERRORS = {
+    "profile_store_unavailable": "Profile store unavailable",
+    "assignment_store_unavailable": "Profile assignment store unavailable",
+}
+_EXTERNAL_REGISTRY_PUBLIC_ERRORS = {
+    "external_registry_store_unavailable": "External registry store unavailable",
+    "credential_grant_store_unavailable": "Credential grant store unavailable",
+}
+_EXTERNAL_RUNTIME_PUBLIC_ERRORS = {
+    "external_server_start_failed": "External server start failed",
+    "external_server_stop_failed": "External server stop failed",
+    "external_server_discovery_failed": "External server discovery failed",
+    "external_server_transport_unavailable": "External server transport unavailable",
+    "external_tool_call_failed": "External tool call failed",
+    "credential_broker_unavailable": "Credential broker unavailable",
+}
 
 
 class DuplicatePresetRequest(BaseModel):
@@ -358,7 +374,7 @@ def _profile_management_error_response(exc: GatewayProfileManagementError) -> JS
 
     return JSONResponse(
         status_code=_PROFILE_MANAGEMENT_STATUS_CODES.get(exc.reason_code, 500),
-        content=exc.to_payload(),
+        content=_profile_management_error_payload(exc),
     )
 
 
@@ -369,7 +385,7 @@ def _external_registry_error_response(
 
     return JSONResponse(
         status_code=_EXTERNAL_REGISTRY_STATUS_CODES.get(exc.reason_code, 500),
-        content=exc.to_payload(),
+        content=_external_registry_error_payload(exc),
     )
 
 
@@ -380,8 +396,60 @@ def _external_runtime_error_response(
 
     return JSONResponse(
         status_code=_EXTERNAL_RUNTIME_STATUS_CODES.get(exc.reason_code, 500),
-        content=exc.to_payload(),
+        content=_external_runtime_error_payload(exc),
     )
+
+
+def _profile_management_error_payload(exc: GatewayProfileManagementError) -> dict[str, Any]:
+    """Return a public profile-management error payload without raw exception text."""
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": _PROFILE_MANAGEMENT_PUBLIC_ERRORS.get(
+            exc.reason_code,
+            "Gateway profile management request failed",
+        ),
+        "reason_code": exc.reason_code,
+    }
+    if exc.profile_id is not None:
+        payload["profile_id"] = exc.profile_id
+    if exc.preset_id is not None:
+        payload["preset_id"] = exc.preset_id
+    return payload
+
+
+def _external_registry_error_payload(
+    exc: GatewayExternalRegistryManagementError,
+) -> dict[str, Any]:
+    """Return a public external-registry error payload without raw exception text."""
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": _EXTERNAL_REGISTRY_PUBLIC_ERRORS.get(
+            exc.reason_code,
+            "Gateway external registry request failed",
+        ),
+        "reason_code": exc.reason_code,
+    }
+    if exc.server_id is not None:
+        payload["server_id"] = exc.server_id
+    return payload
+
+
+def _external_runtime_error_payload(exc: GatewayExternalRuntimeError) -> dict[str, Any]:
+    """Return a public external-runtime error payload without raw exception text."""
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": _EXTERNAL_RUNTIME_PUBLIC_ERRORS.get(
+            exc.reason_code,
+            "Gateway external runtime request failed",
+        ),
+        "reason_code": exc.reason_code,
+    }
+    if exc.server_id is not None:
+        payload["server_id"] = exc.server_id
+    return payload
 
 
 def _external_registry_store_unavailable_response(
