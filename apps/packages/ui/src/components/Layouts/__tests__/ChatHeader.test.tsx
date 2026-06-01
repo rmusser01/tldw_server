@@ -111,7 +111,9 @@ describe("ChatHeader shortcut toggle", () => {
     const homeButton = screen.getByRole("button", { name: "Companion Home" })
     const signpostButton = screen.getByRole("button", { name: "Show shortcuts" })
     const headerBrand = homeButton.closest(".flex.items-center.gap-2.text-text")
-    const headerButtons = Array.from(headerBrand?.querySelectorAll("button") ?? [])
+    const headerButtons: HTMLElement[] = Array.from(
+      headerBrand?.querySelectorAll("button") ?? []
+    )
 
     expect(headerBrand).toBeTruthy()
     expect(headerBrand).toContainElement(homeButton)
