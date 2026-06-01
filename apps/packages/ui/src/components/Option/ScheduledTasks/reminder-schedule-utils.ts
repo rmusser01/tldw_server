@@ -25,6 +25,20 @@ const WEEKDAY_MAP: Record<string, ReminderWeekdayToken> = {
 }
 
 const CRON_TOKEN_PATTERN = /^[A-Za-z0-9*#/,\-]+$/
+const MONTH_MAP: Record<string, number> = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  SEP: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12
+}
 const WEEKDAY_LABELS: Record<ReminderWeekdayToken, string> = {
   SUN: "Sunday",
   MON: "Monday",
@@ -64,6 +78,140 @@ export const buildWeeklyCron = (
   minute: unknown
 ): string => {
   return `${clampInteger(minute, 0, 59)} ${clampInteger(hour, 0, 23)} * * ${normalizeReminderWeekday(weekday)}`
+}
+
+type CronFieldOptions = {
+  label: string
+  min: number
+  max: number
+  names?: Record<string, unknown>
+  allowNthWeekday?: boolean
+}
+
+const parseCronFieldValue = (
+  value: string,
+  options: CronFieldOptions
+): CronValidationResult => {
+  const upperValue = value.toUpperCase()
+  if (options.names?.[upperValue] !== undefined) {
+    return { valid: true, error: null }
+  }
+
+  if (!/^\d+$/.test(value)) {
+    return {
+      valid: false,
+      error: `Cron ${options.label} must be a number, range, step, list, or wildcard.`
+    }
+  }
+
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < options.min || parsed > options.max) {
+    return {
+      valid: false,
+      error: `Cron ${options.label} must be between ${options.min} and ${options.max}.`
+    }
+  }
+
+  return { valid: true, error: null }
+}
+
+const validateCronFieldBase = (
+  base: string,
+  options: CronFieldOptions
+): CronValidationResult => {
+  if (base === "*") {
+    return { valid: true, error: null }
+  }
+
+  if (options.allowNthWeekday && base.includes("#")) {
+    const [weekday, nth, extra] = base.split("#")
+    if (extra !== undefined || !weekday || !nth) {
+      return {
+        valid: false,
+        error: "Cron day of week nth-weekday syntax must look like mon#2."
+      }
+    }
+
+    const weekdayResult = parseCronFieldValue(weekday, options)
+    if (!weekdayResult.valid) return weekdayResult
+
+    const nthNumber = Number(nth)
+    if (!Number.isInteger(nthNumber) || nthNumber < 1 || nthNumber > 5) {
+      return {
+        valid: false,
+        error: "Cron day of week nth-weekday value must be between 1 and 5."
+      }
+    }
+    return { valid: true, error: null }
+  }
+
+  if (base.includes("-")) {
+    const [start, end, extra] = base.split("-")
+    if (extra !== undefined || !start || !end) {
+      return {
+        valid: false,
+        error: `Cron ${options.label} range must look like ${options.min}-${options.max}.`
+      }
+    }
+
+    const startResult = parseCronFieldValue(start, options)
+    if (!startResult.valid) return startResult
+    const endResult = parseCronFieldValue(end, options)
+    if (!endResult.valid) return endResult
+
+    if (/^\d+$/.test(start) && /^\d+$/.test(end) && Number(start) > Number(end)) {
+      return {
+        valid: false,
+        error: `Cron ${options.label} range start must be less than or equal to the end.`
+      }
+    }
+    return { valid: true, error: null }
+  }
+
+  return parseCronFieldValue(base, options)
+}
+
+const validateCronField = (
+  field: string,
+  options: CronFieldOptions
+): CronValidationResult => {
+  if (!field) {
+    return {
+      valid: false,
+      error: `Cron ${options.label} is required.`
+    }
+  }
+
+  for (const item of field.split(",")) {
+    if (!item) {
+      return {
+        valid: false,
+        error: `Cron ${options.label} list contains an empty value.`
+      }
+    }
+
+    const [base, step, extra] = item.split("/")
+    if (extra !== undefined || !base) {
+      return {
+        valid: false,
+        error: `Cron ${options.label} step must look like */5 or 1-10/2.`
+      }
+    }
+
+    if (step !== undefined) {
+      if (!/^\d+$/.test(step) || Number(step) < 1) {
+        return {
+          valid: false,
+          error: `Cron ${options.label} step must be a positive number.`
+        }
+      }
+    }
+
+    const baseResult = validateCronFieldBase(base, options)
+    if (!baseResult.valid) return baseResult
+  }
+
+  return { valid: true, error: null }
 }
 
 export const datetimeLocalToIsoString = (value: string | null | undefined): string | null => {
@@ -109,7 +257,41 @@ export const validateCronExpression = (
       error: "Cron tokens can only include letters, numbers, *, /, -, #, and comma."
     }
   }
+
+  const [minute, hour, day, month, dayOfWeek] = fields
+  const fieldValidations = [
+    validateCronField(minute, { label: "minute", min: 0, max: 59 }),
+    validateCronField(hour, { label: "hour", min: 0, max: 23 }),
+    validateCronField(day, { label: "day", min: 1, max: 31 }),
+    validateCronField(month, { label: "month", min: 1, max: 12, names: MONTH_MAP }),
+    validateCronField(dayOfWeek, {
+      label: "day of week",
+      min: 0,
+      max: 7,
+      names: WEEKDAY_MAP,
+      allowNthWeekday: true
+    })
+  ]
+  const invalidField = fieldValidations.find((result) => !result.valid)
+  if (invalidField) return invalidField
+
   return { valid: true, error: null }
+}
+
+export const validateReminderTimezone = (
+  timezone: string | null | undefined
+): CronValidationResult => {
+  const normalized = timezone?.trim() || ""
+  if (!normalized) {
+    return { valid: false, error: "Timezone is required for recurring reminders" }
+  }
+
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: normalized }).format(new Date())
+    return { valid: true, error: null }
+  } catch {
+    return { valid: false, error: "Timezone must be a valid IANA timezone." }
+  }
 }
 
 export const buildReminderCron = (

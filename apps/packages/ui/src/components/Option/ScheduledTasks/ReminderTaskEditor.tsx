@@ -10,7 +10,8 @@ import {
   datetimeLocalToIsoString,
   getDefaultReminderTimezone,
   isoStringToDatetimeLocal,
-  validateCronExpression
+  validateCronExpression,
+  validateReminderTimezone
 } from "./reminder-schedule-utils"
 
 type ReminderTaskEditorValues = {
@@ -90,7 +91,11 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
       return
     }
     const cronValidation = validateCronExpression(cron)
-    if (values.schedule_kind === "recurring" && (!cron || !timezone || !cronValidation.valid)) {
+    const timezoneValidation = validateReminderTimezone(timezone)
+    if (
+      values.schedule_kind === "recurring" &&
+      (!cron || !timezone || !cronValidation.valid || !timezoneValidation.valid)
+    ) {
       form.setFields([
         {
           name: "cron",
@@ -102,7 +107,11 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
         },
         {
           name: "timezone",
-          errors: !timezone ? ["Timezone is required for recurring reminders"] : []
+          errors: !timezone
+            ? ["Timezone is required for recurring reminders"]
+            : !timezoneValidation.valid
+              ? [timezoneValidation.error]
+              : []
         }
       ])
       return

@@ -736,6 +736,38 @@ describe("ScheduledTasksPage", () => {
     expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
   })
 
+  it("does not create a recurring reminder with scheduler-invalid cron or timezone", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
+    await user.type(await screen.findByRole("textbox", { name: "Title" }), "Invalid recurring reminder")
+    fireEvent.click(screen.getByText("Repeat"))
+    await user.click(await screen.findByRole("combobox", { name: "Repeat preset" }))
+    await user.click(await screen.findByText("Custom schedule"))
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom cron" }), {
+      target: { value: "99 99 * * *" }
+    })
+    fireEvent.change(screen.getByRole("textbox", { name: "Timezone" }), {
+      target: { value: "Mars/Olympus" }
+    })
+    await user.click(screen.getByRole("button", { name: "Save reminder" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
+    })
+    expect(screen.getAllByText("Cron minute must be between 0 and 59.").length).toBeGreaterThan(0)
+    expect(screen.getByText("Timezone must be a valid IANA timezone.")).toBeInTheDocument()
+  })
+
   it("does not create a one-time reminder with whitespace-only run_at", async () => {
     const user = userEvent.setup()
 

@@ -6,7 +6,8 @@ import {
   datetimeLocalToIsoString,
   getDefaultReminderTimezone,
   getRecurringPreviewCopy,
-  validateCronExpression
+  validateCronExpression,
+  validateReminderTimezone
 } from "../reminder-schedule-utils"
 
 describe("reminder schedule utilities", () => {
@@ -46,6 +47,31 @@ describe("reminder schedule utilities", () => {
     expect(validateCronExpression("0 9 * * ?")).toEqual({
       valid: false,
       error: "Cron field '?' is not supported by the scheduler."
+    })
+  })
+
+  it("rejects scheduler-invalid cron ranges", () => {
+    expect(validateCronExpression("99 99 * * *")).toEqual({
+      valid: false,
+      error: "Cron minute must be between 0 and 59."
+    })
+  })
+
+  it("rejects non-cron words in numeric scheduler fields", () => {
+    expect(validateCronExpression("banana banana * * *")).toEqual({
+      valid: false,
+      error: "Cron minute must be a number, range, step, list, or wildcard."
+    })
+  })
+
+  it("validates reminder timezones with browser Intl support", () => {
+    expect(validateReminderTimezone("America/Los_Angeles")).toEqual({
+      valid: true,
+      error: null
+    })
+    expect(validateReminderTimezone("Mars/Olympus")).toEqual({
+      valid: false,
+      error: "Timezone must be a valid IANA timezone."
     })
   })
 

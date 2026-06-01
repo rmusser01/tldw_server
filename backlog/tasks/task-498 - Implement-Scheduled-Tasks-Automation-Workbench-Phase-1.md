@@ -28,9 +28,13 @@ documentation:
 - 'Task 6: extension scheduled-tasks E2E copy assertion updated to the new workbench
   copy; route/component Vitest passed; extension E2E not run locally because prerequisites
   are optional for this slice.'
+- 'Final review follow-up: strengthened recurring reminder validation for invalid
+  cron ranges/words and invalid IANA timezones; focused utility/page Vitest passed
+  33 tests.'
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ReminderTaskEditor.tsx
 - apps/packages/ui/src/components/Option/ScheduledTasks/reminder-schedule-utils.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
