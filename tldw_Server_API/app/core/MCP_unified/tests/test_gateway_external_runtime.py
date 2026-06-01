@@ -281,6 +281,126 @@ class UnsupportedInstaller(ExternalServerInstaller):
         return {"available": False, "server_id": server.id}
 
 
+class SuccessfulInstaller(ExternalServerInstaller):
+    """Installer fake that returns rich public and secret-looking metadata."""
+
+    def __init__(self) -> None:
+        self.install_calls: list[tuple[str, Any]] = []
+        self.update_calls: list[tuple[str, Any]] = []
+
+    async def install_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return a successful install payload with nested sensitive fields."""
+        self.install_calls.append((server.id, context))
+        return self._payload(
+            server.id,
+            reason_code="external_server_installed",
+            version="1.2.3",
+        )
+
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return a successful update payload with nested sensitive fields."""
+        self.update_calls.append((server.id, context))
+        return self._payload(
+            server.id,
+            reason_code="external_server_updated",
+            installed_version="1.2.4",
+        )
+
+    async def get_status(
+        self,
+        server: ExternalServerDefinition,
+    ) -> dict[str, Any]:
+        """Return available fake installer status with nested sensitive fields."""
+        return self._payload(
+            server.id,
+            ok=True,
+            reason_code="external_server_installer_available",
+            latest_version="1.2.4",
+        )
+
+    @staticmethod
+    def _payload(
+        server_id: str,
+        *,
+        reason_code: str,
+        ok: bool = True,
+        version: str | None = None,
+        installed_version: str | None = None,
+        latest_version: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "available": True,
+            "reason_code": reason_code,
+            "server_id": server_id,
+            "installer": "fake",
+            "message": "ready",
+            "details": {
+                "channel": "stable",
+                "authorization": "Bearer do-not-leak",
+                "headers": {"Authorization": "Bearer do-not-leak"},
+                "env": {"TOKEN": "do-not-leak-env"},
+                "nested": [
+                    {
+                        "safe": "kept",
+                        "password": "do-not-leak-password",
+                    }
+                ],
+            },
+            "command": ["do-not-leak-command"],
+            "credential_slots": ["api_key"],
+        }
+        if version is not None:
+            payload["version"] = version
+        if installed_version is not None:
+            payload["installed_version"] = installed_version
+        if latest_version is not None:
+            payload["latest_version"] = latest_version
+        return payload
+
+
+class ExplodingInstaller(ExternalServerInstaller):
+    """Installer fake that raises from all adapter methods."""
+
+    async def install_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Raise a failure containing text that must not become public."""
+        del server, context
+        raise RuntimeError("install failed with do-not-leak-token")
+
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Raise a failure containing text that must not become public."""
+        del server, context
+        raise RuntimeError("update failed with do-not-leak-token")
+
+    async def get_status(
+        self,
+        server: ExternalServerDefinition,
+    ) -> dict[str, Any]:
+        """Raise a failure containing text that must not become public."""
+        del server
+        raise RuntimeError("status failed with do-not-leak-token")
+
+
 def _server(**overrides: Any) -> ExternalServerDefinition:
     values: dict[str, Any] = {
         "id": "research",
@@ -1026,6 +1146,81 @@ async def test_external_runtime_default_install_update_are_not_configured() -> N
 
 
 @pytest.mark.asyncio
+async def test_external_runtime_default_installer_status_is_not_configured() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+    )
+
+    rows = await manager.list_runtime_servers()
+
+    assert rows["servers"][0]["installer"] == {
+        "available": False,
+        "reason_code": "external_server_installer_not_configured",
+        "server_id": "research",
+    }
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_status_is_sanitized() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+        installer=SuccessfulInstaller(),
+    )
+
+    rows = await manager.list_runtime_servers()
+
+    installer = rows["servers"][0]["installer"]
+    assert installer == {
+        "available": True,
+        "reason_code": "external_server_installer_available",
+        "server_id": "research",
+        "installer": "fake",
+        "latest_version": "1.2.4",
+        "message": "ready",
+        "details": {
+            "channel": "stable",
+            "nested": [{"safe": "kept"}],
+        },
+    }
+    assert "do-not-leak" not in json.dumps(installer, sort_keys=True)
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_status_failure_is_row_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(gateway_external_runtime, "logger", fake_logger)
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+        installer=ExplodingInstaller(),
+    )
+
+    rows = await manager.list_runtime_servers()
+
+    assert rows["servers"][0]["installer"] == {
+        "available": False,
+        "reason_code": "external_server_installer_status_unavailable",
+        "server_id": "research",
+        "error_type": "RuntimeError",
+    }
+    assert "do-not-leak" not in json.dumps(rows, sort_keys=True)
+    assert fake_logger.opt_calls == [{"exception": True}]
+    assert fake_logger.error_calls == [
+        (
+            "External installer status failed server_id={!r} error_type={!r}",
+            ("research", "RuntimeError"),
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_external_runtime_installer_unsupported_does_not_mutate_runtime_state() -> None:
     store = InMemoryExternalRegistryStore([_server()])
     transport = RecordingExternalTransport(
@@ -1054,3 +1249,113 @@ async def test_external_runtime_installer_unsupported_does_not_mutate_runtime_st
     assert transport.close_count == 0
     assert rows["servers"][0]["status"] == "healthy"
     assert [tool.virtual_name for tool in tools] == ["ext.research.search"]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_operations_reject_disabled_and_missing_servers() -> None:
+    store = InMemoryExternalRegistryStore([_server(enabled=False)])
+    installer = SuccessfulInstaller()
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+        installer=installer,
+    )
+
+    with pytest.raises(GatewayExternalRuntimeError) as disabled_exc:
+        await manager.install_server("research")
+    with pytest.raises(GatewayExternalRuntimeError) as missing_exc:
+        await manager.update_server("missing")
+
+    assert disabled_exc.value.reason_code == "external_server_disabled"
+    assert missing_exc.value.reason_code == "external_server_not_found"
+    assert installer.install_calls == []
+    assert installer.update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_operations_are_sanitized() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    installer = SuccessfulInstaller()
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+        installer=installer,
+    )
+
+    install = await manager.install_server("research", context={"request_id": "install"})
+    update = await manager.update_server("research", context={"request_id": "update"})
+
+    assert install == {
+        "ok": True,
+        "available": True,
+        "reason_code": "external_server_installed",
+        "server_id": "research",
+        "installer": "fake",
+        "version": "1.2.3",
+        "message": "ready",
+        "details": {
+            "channel": "stable",
+            "nested": [{"safe": "kept"}],
+        },
+    }
+    assert update == {
+        "ok": True,
+        "available": True,
+        "reason_code": "external_server_updated",
+        "server_id": "research",
+        "installer": "fake",
+        "installed_version": "1.2.4",
+        "message": "ready",
+        "details": {
+            "channel": "stable",
+            "nested": [{"safe": "kept"}],
+        },
+    }
+    assert installer.install_calls == [("research", {"request_id": "install"})]
+    assert installer.update_calls == [("research", {"request_id": "update"})]
+    assert "do-not-leak" not in json.dumps(
+        {"install": install, "update": update},
+        sort_keys=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_operation_failures_are_wrapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(gateway_external_runtime, "logger", fake_logger)
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+        installer=ExplodingInstaller(),
+    )
+
+    with pytest.raises(GatewayExternalRuntimeError) as install_exc:
+        await manager.install_server("research")
+    with pytest.raises(GatewayExternalRuntimeError) as update_exc:
+        await manager.update_server("research")
+
+    assert install_exc.value.reason_code == "external_server_install_failed"
+    assert install_exc.value.server_id == "research"
+    assert str(install_exc.value) == "External server install failed"
+    assert update_exc.value.reason_code == "external_server_update_failed"
+    assert update_exc.value.server_id == "research"
+    assert str(update_exc.value) == "External server update failed"
+    public_payloads = {
+        "install": install_exc.value.to_payload(),
+        "update": update_exc.value.to_payload(),
+    }
+    assert "do-not-leak" not in json.dumps(public_payloads, sort_keys=True)
+    assert fake_logger.opt_calls == [{"exception": True}, {"exception": True}]
+    assert fake_logger.error_calls == [
+        (
+            "External installer operation failed operation={!r} server_id={!r} error_type={!r}",
+            ("install", "research", "RuntimeError"),
+        ),
+        (
+            "External installer operation failed operation={!r} server_id={!r} error_type={!r}",
+            ("update", "research", "RuntimeError"),
+        ),
+    ]

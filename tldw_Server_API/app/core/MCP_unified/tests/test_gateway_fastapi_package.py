@@ -572,7 +572,17 @@ class _ExternalRuntimeManagerDouble:
         self.calls.append(("list_runtime_servers", (), {}))
         return {
             "ok": True,
-            "servers": [{"id": "research", "status": "healthy"}],
+            "servers": [
+                {
+                    "id": "research",
+                    "status": "healthy",
+                    "installer": {
+                        "available": False,
+                        "reason_code": "external_server_installer_not_configured",
+                        "server_id": "research",
+                    },
+                }
+            ],
         }
 
     async def start_server(self, server_id: str) -> dict[str, Any]:
@@ -1640,7 +1650,17 @@ def test_gateway_external_runtime_management_routes_mount_with_manager() -> None
         updated = client.post("/mcp/external-servers/research/update")
 
     assert listed.status_code == 200
-    assert listed.json()["servers"] == [{"id": "research", "status": "healthy"}]
+    assert listed.json()["servers"] == [
+        {
+            "id": "research",
+            "status": "healthy",
+            "installer": {
+                "available": False,
+                "reason_code": "external_server_installer_not_configured",
+                "server_id": "research",
+            },
+        }
+    ]
     assert started.json()["reason_code"] == "external_server_started"
     assert stopped.json()["reason_code"] == "external_server_stopped"
     assert refreshed_all.json()["server_id"] is None
@@ -1731,6 +1751,21 @@ def test_gateway_external_runtime_routes_have_pydantic_response_models() -> None
     for (path, method), expected_ref in expected_refs.items():
         schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
         assert schema == {"$ref": expected_ref}
+
+
+def test_gateway_external_runtime_response_models_document_installer_fields() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=_ExternalRuntimeManagerDouble(),
+    )
+
+    schemas = app.openapi()["components"]["schemas"]
+
+    status_props = schemas["ExternalRuntimeServerStatusResponse"]["properties"]
+    operation_props = schemas["ExternalRuntimeOperationResponse"]["properties"]
+    assert "installer" in status_props
+    assert "available" in operation_props
 
 
 def test_gateway_external_runtime_management_enabled_without_manager_raises() -> None:

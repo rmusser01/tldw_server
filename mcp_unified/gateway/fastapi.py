@@ -237,6 +237,7 @@ class ExternalRuntimeServerStatusResponse(BaseModel):
     tool_count: int | None = None
     checks: dict[str, Any] | None = None
     last_error: str | None = None
+    installer: dict[str, Any] | None = None
 
 
 class ExternalRuntimeServerListResponse(BaseModel):
@@ -257,6 +258,15 @@ class ExternalRuntimeOperationResponse(BaseModel):
     ok: bool
     reason_code: str
     server_id: str | None = None
+    available: bool | None = None
+    installer: str | None = None
+    version: str | None = None
+    installed_version: str | None = None
+    latest_version: str | None = None
+    message: str | None = None
+    details: dict[str, Any] | None = None
+    required_fields: list[str] | None = None
+    warnings: list[Any] | None = None
     error: str | None = None
     errors: dict[str, Any] | None = None
 
