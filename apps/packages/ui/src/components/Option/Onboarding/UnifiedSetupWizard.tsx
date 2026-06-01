@@ -6,6 +6,7 @@ import type {
   FirstRunMetadata,
   FirstRunState,
   FirstRunStepUpdateRequest,
+  SetupProviderSaveResponse,
 } from "@/types/setup-onboarding";
 import { SetupPathStep } from "./steps/SetupPathStep";
 import { PrivacySecurityStep } from "./steps/PrivacySecurityStep";
@@ -13,6 +14,8 @@ import { MultiUserExitPanel } from "./steps/MultiUserExitPanel";
 import {
   ProviderSetupStep,
   type ProviderSelection,
+  type ProviderSavedPayloadFingerprintState,
+  type ProviderValidationViewState,
 } from "./steps/ProviderSetupStep";
 import { IngestDefaultsStep } from "./steps/IngestDefaultsStep";
 import { AudioSetupStep } from "./steps/AudioSetupStep";
@@ -57,13 +60,19 @@ const providerSelectionFromState = (
   const data = state?.step_data?.providers;
   const provider = data?.default_provider;
   const model = data?.default_model;
+  const credentialConfigured =
+    data?.default_provider_credential_configured === true;
   if (typeof provider === "string" && typeof model === "string") {
-    return { provider, model };
+    return { provider, model, credential_configured: credentialConfigured };
   }
   const firstChatProvider = state?.first_chat?.provider;
   const firstChatModel = state?.first_chat?.model;
   if (firstChatProvider && firstChatModel) {
-    return { provider: firstChatProvider, model: firstChatModel };
+    return {
+      provider: firstChatProvider,
+      model: firstChatModel,
+      credential_configured: credentialConfigured,
+    };
   }
   return null;
 };
@@ -86,6 +95,7 @@ export function UnifiedSetupWizard({
     saveStep,
     skip,
     saveProvider,
+    validateProvider,
     saveIngestDefaults,
     saveAudioDefaults,
     saveOptionalAdvanced,
@@ -103,6 +113,23 @@ export function UnifiedSetupWizard({
     React.useState<ProviderSelection | null>(() =>
       providerSelectionFromState(initialState),
     );
+  const [providerSavedProviders, setProviderSavedProviders] = React.useState<
+    Record<string, SetupProviderSaveResponse>
+  >({});
+  const [
+    providerSavedPayloadFingerprints,
+    setProviderSavedPayloadFingerprints,
+  ] = React.useState<ProviderSavedPayloadFingerprintState>({});
+  const [providerSavedDefaultProvider, setProviderSavedDefaultProvider] =
+    React.useState<string | null>(() =>
+      providerSelectionFromState(initialState)?.provider ?? null,
+    );
+  const [providerValidationState, setProviderValidationState] = React.useState<
+    Record<string, ProviderValidationViewState>
+  >({});
+  const [providerEditRevisions, setProviderEditRevisions] = React.useState<
+    Record<string, number>
+  >({});
   const [savingStep, setSavingStep] = React.useState(false);
   const [stepError, setStepError] = React.useState<string | null>(null);
 
@@ -206,6 +233,9 @@ export function UnifiedSetupWizard({
             acknowledged: true,
             default_provider: selection.provider,
             default_model: selection.model,
+            default_provider_credential_configured: Boolean(
+              selection.credential_configured,
+            ),
           },
         });
         if (!nextState) return;
@@ -342,7 +372,20 @@ export function UnifiedSetupWizard({
           <ProviderSetupStep
             providers={providerCatalog}
             initialSelection={providerSelection}
+            savedProviders={providerSavedProviders}
+            savedPayloadFingerprints={providerSavedPayloadFingerprints}
+            savedDefaultProvider={providerSavedDefaultProvider}
+            validationState={providerValidationState}
+            providerEditRevisions={providerEditRevisions}
             onSaveProvider={saveProvider}
+            onValidateProvider={validateProvider}
+            onSavedProvidersChange={setProviderSavedProviders}
+            onSavedPayloadFingerprintsChange={
+              setProviderSavedPayloadFingerprints
+            }
+            onSavedDefaultProviderChange={setProviderSavedDefaultProvider}
+            onValidationStateChange={setProviderValidationState}
+            onProviderEditRevisionsChange={setProviderEditRevisions}
             onContinue={handleProviderContinue}
             onBack={() => setStep("privacy_security")}
           />

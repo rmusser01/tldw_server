@@ -174,6 +174,7 @@ class SetupProviderSaveResponse(BaseModel):
     provider_key: str
     status: SetupProviderSaveStatus
     masked_api_key: str | None = None
+    credential_configured: bool = False
     base_url: str | None = None
     model: str | None = None
     make_default: bool = False
@@ -190,6 +191,8 @@ class SetupProviderValidationResponse(BaseModel):
     failure_category: str | None = None
     message: str | None = None
     models: list[str] = Field(default_factory=list)
+    validation_level: str | None = None
+    can_gate_first_chat: bool = False
 
 
 class SetupCompleteRequest(BaseModel):

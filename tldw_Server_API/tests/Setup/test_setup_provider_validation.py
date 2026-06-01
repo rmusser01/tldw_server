@@ -1,5 +1,11 @@
+from configparser import ConfigParser
+
 import httpx
 import pytest
+from fastapi import HTTPException
+
+from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
+from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderSaveRequest
 
 from tldw_Server_API.app.core.Setup import provider_validation
 from tldw_Server_API.app.core.Setup.provider_validation import (
@@ -57,6 +63,14 @@ def _fail_client_creation():
     pytest.fail("disallowed local provider endpoint should be rejected before httpx client creation")
 
 
+def _config_with_openai_key(raw_key: str) -> ConfigParser:
+    parser = ConfigParser()
+    parser.optionxform = str
+    parser.add_section("API")
+    parser.set("API", "openai_api_key", raw_key)
+    return parser
+
+
 @pytest.mark.asyncio
 async def test_unreachable_local_endpoint_maps_to_unreachable(monkeypatch):
     fake_client = _FakeAsyncClient(error=TimeoutError("raw timeout details"))
@@ -96,6 +110,28 @@ async def test_openai_models_shape_maps_to_ready(monkeypatch):
     assert response.status == "ready"
     assert response.models == ["local-model"]
     assert fake_client.requests == [("http://127.0.0.1:11434/v1/models", {})]
+
+
+@pytest.mark.asyncio
+async def test_openai_models_shape_ready_can_gate_first_chat(monkeypatch):
+    fake_client = _FakeAsyncClient(
+        response=_FakeResponse(
+            200,
+            {"object": "list", "data": [{"id": "local-model", "object": "model"}]},
+        )
+    )
+    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="ollama",
+            base_url="http://127.0.0.1:11434/v1",
+        )
+    )
+
+    assert response.status == "ready"
+    assert response.validation_level == "live_non_generative"
+    assert response.can_gate_first_chat is True
 
 
 @pytest.mark.asyncio
@@ -387,6 +423,8 @@ def test_hosted_provider_validation_accepts_plausible_openai_key_without_echo():
 
     assert response.status == "accepted"
     assert response.failure_category is None
+    assert response.validation_level == "local_syntax"
+    assert response.can_gate_first_chat is True
     assert raw_key not in response.model_dump_json()
 
 
@@ -399,6 +437,7 @@ def test_hosted_provider_validation_rejects_malformed_openai_key_without_echo():
 
     assert response.status == "failed"
     assert response.failure_category == "provider_api_key_invalid"
+    assert response.can_gate_first_chat is False
     assert raw_key not in response.model_dump_json()
 
 
@@ -409,3 +448,77 @@ def test_hosted_provider_validation_accepts_other_hosted_nonblank_key():
 
     assert response.status == "accepted"
     assert response.failure_category is None
+
+
+@pytest.mark.asyncio
+async def test_hosted_provider_save_uses_existing_key_for_model_update_without_echo(
+    monkeypatch,
+):
+    raw_existing_key = "configured-provider-key"
+    updates_seen = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "_load_config_parser",
+        lambda: _config_with_openai_key(raw_existing_key),
+    )
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "update_config",
+        lambda updates: updates_seen.append(updates),
+    )
+    monkeypatch.setattr(
+        setup_endpoint,
+        "_refresh_runtime_config_cache",
+        lambda _context: True,
+    )
+
+    response = await setup_endpoint.save_first_run_provider(
+        SetupProviderSaveRequest(
+            provider_key="openai",
+            model="gpt-4.1",
+            make_default=True,
+        )
+    )
+
+    assert response.status == "saved"
+    assert response.credential_configured is True
+    assert response.masked_api_key is None
+    assert response.model == "gpt-4.1"
+    assert raw_existing_key not in response.model_dump_json()
+    assert updates_seen == [
+        {
+            "API": {
+                "openai_model": "gpt-4.1",
+                "default_api": "openai",
+            }
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hosted_provider_save_without_raw_key_rejects_missing_existing_key(
+    monkeypatch,
+):
+    def fail_update_config(_updates):
+        pytest.fail(
+            "hosted provider save without configured credentials must not write config"
+        )
+
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "_load_config_parser",
+        lambda: _config_with_openai_key("your_api_key_here"),
+    )
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", fail_update_config)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await setup_endpoint.save_first_run_provider(
+            SetupProviderSaveRequest(
+                provider_key="openai",
+                model="gpt-4.1",
+                make_default=True,
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "provider_api_key_required"

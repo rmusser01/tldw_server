@@ -1029,6 +1029,8 @@ def test_first_run_provider_validate_returns_typed_response_without_token_echo(
         "failure_category": None,
         "message": None,
         "models": ["local-model"],
+        "validation_level": None,
+        "can_gate_first_chat": False,
     }
     assert raw_token not in str(body)
 
@@ -1849,6 +1851,66 @@ def test_first_run_state_persists_allowed_public_step_data(
     assert providers_data["acknowledged"] is True
     assert providers_data["default_provider"] == "openai"
     assert providers_data["default_model"] == "gpt-4.1-mini"
+
+
+def test_first_run_state_persists_provider_credential_configured_marker(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "providers",
+            "data": {
+                "acknowledged": True,
+                "default_provider": "openai",
+                "default_model": "gpt-4.1-mini",
+                "default_provider_credential_configured": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    providers_data = response.json()["step_data"]["providers"]
+    assert providers_data["default_provider_credential_configured"] is True
+
+    state_response = setup_client.get("/api/v1/setup/first-run/state")
+    assert state_response.status_code == 200
+    persisted_provider_data = state_response.json()["step_data"]["providers"]
+    assert persisted_provider_data["default_provider_credential_configured"] is True
+
+
+def test_first_run_state_rejects_real_provider_credential_step_data(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "providers",
+            "data": {
+                "acknowledged": True,
+                "default_provider": "openai",
+                "provider_credential": "raw-provider-secret",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported_first_run_step_data"
+    state_response = setup_client.get("/api/v1/setup/first-run/state")
+    assert state_response.status_code == 200
+    assert "raw-provider-secret" not in str(state_response.json())
 
 
 def test_first_run_state_get_projects_only_public_step_data(

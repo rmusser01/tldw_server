@@ -448,6 +448,19 @@ def _is_placeholder(value: str) -> bool:
     return value.strip() in PLACEHOLDER_VALUES
 
 
+def is_secret_configured(section: str, key: str) -> bool:
+    """Return True when a secret config field has a non-placeholder value."""
+    if not section or not key:
+        return False
+
+    parser = _load_config_parser()
+    if not parser.has_option(section, key):
+        return False
+
+    value = parser.get(section, key, fallback="")
+    return bool(value.strip()) and not _is_placeholder(value)
+
+
 def get_setup_flags(config: ConfigParser | None = None) -> dict[str, bool]:
     """Return the setup enablement and completion flags."""
     parser = config or _load_config_parser()

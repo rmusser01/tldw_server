@@ -9,6 +9,7 @@ const setupHookMocks = vi.hoisted(() => ({
   loadProviderCatalog: vi.fn(),
   loadAudioRecommendations: vi.fn(),
   saveProvider: vi.fn(),
+  validateProvider: vi.fn(),
   saveIngestDefaults: vi.fn(),
   saveAudioDefaults: vi.fn(),
   saveOptionalAdvanced: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     saveStep: setupHookMocks.saveStep,
     skip: setupHookMocks.skip,
     saveProvider: setupHookMocks.saveProvider,
+    validateProvider: setupHookMocks.validateProvider,
     saveIngestDefaults: setupHookMocks.saveIngestDefaults,
     saveAudioDefaults: setupHookMocks.saveAudioDefaults,
     saveOptionalAdvanced: setupHookMocks.saveOptionalAdvanced,
@@ -75,9 +77,23 @@ describe("UnifiedSetupWizard", () => {
     setupHookMocks.skip.mockReset();
     setupHookMocks.loadProviderCatalog.mockReset().mockResolvedValue([]);
     setupHookMocks.loadAudioRecommendations.mockReset().mockResolvedValue([]);
-    setupHookMocks.saveProvider.mockReset().mockResolvedValue({
+    setupHookMocks.saveProvider
+      .mockReset()
+      .mockImplementation(async (payload) => ({
+        provider_key: payload.provider_key,
+        status: "saved",
+        masked_api_key: payload.api_key ? "saved-key-present" : null,
+        credential_configured: true,
+        model: payload.model,
+        make_default: payload.make_default,
+      }));
+    setupHookMocks.validateProvider.mockReset().mockResolvedValue({
       provider_key: "openai",
-      status: "saved",
+      status: "accepted",
+      message: "Format accepted; first chat verifies the provider.",
+      models: [],
+      validation_level: "local_syntax",
+      can_gate_first_chat: true,
     });
     setupHookMocks.saveIngestDefaults.mockReset().mockResolvedValue({
       status: "saved",
@@ -296,6 +312,7 @@ describe("UnifiedSetupWizard", () => {
               acknowledged: true,
               default_provider: "openai",
               default_model: "gpt-4.1-mini",
+              default_provider_credential_configured: true,
             },
           },
           acknowledged_steps: [],
@@ -309,6 +326,362 @@ describe("UnifiedSetupWizard", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/select openai/i)).toBeChecked();
     expect(screen.getByLabelText(/default model/i)).toHaveValue("gpt-4.1-mini");
+  });
+
+  it("validates and saves the default provider before recording provider setup progress", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: ["setup_path", "privacy_security"],
+          skipped_steps: [],
+          step_data: {},
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/select openai/i));
+    fireEvent.change(screen.getByLabelText(/openai api key/i), {
+      target: { value: "test-api-key-value" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1-mini" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.validateProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider_key: "openai",
+          api_key: "test-api-key-value",
+          model: "gpt-4.1-mini",
+          make_default: true,
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+    await screen.findByText(/saved as saved-key-present/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.saveStep).toHaveBeenCalledWith({
+        step: "providers",
+        data: {
+          acknowledged: true,
+          default_provider: "openai",
+          default_model: "gpt-4.1-mini",
+          default_provider_credential_configured: true,
+        },
+      });
+    });
+  });
+
+  it("keeps validated provider gate available after back navigation", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: ["setup_path", "privacy_security"],
+          skipped_steps: [],
+          step_data: {},
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/select openai/i));
+    fireEvent.change(screen.getByLabelText(/openai api key/i), {
+      target: { value: "test-api-key-value" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1-mini" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+    await screen.findByText(/first chat verifies/i);
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+    await screen.findByText(/saved as saved-key-present/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /ingest defaults/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /back/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/openai api key/i)).toHaveValue("");
+    const validateCallsAfterBack =
+      setupHookMocks.validateProvider.mock.calls.length;
+
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /ingest defaults/i }),
+    ).toBeInTheDocument();
+    expect(setupHookMocks.validateProvider).toHaveBeenCalledTimes(
+      validateCallsAfterBack,
+    );
+  });
+
+  it("revalidates saved hosted credentials after a model-only edit without re-pasting the key", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    setupHookMocks.validateProvider.mockImplementation(async (payload) => {
+      if (!payload.api_key) {
+        return {
+          provider_key: "openai",
+          status: "failed",
+          failure_category: "provider_api_key_required",
+          message: "Provider API key is required.",
+          models: [],
+          can_gate_first_chat: false,
+        };
+      }
+      return {
+        provider_key: "openai",
+        status: "accepted",
+        message: "Format accepted; first chat verifies the provider.",
+        models: [],
+        validation_level: "local_syntax",
+        can_gate_first_chat: true,
+      };
+    });
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: ["setup_path", "privacy_security"],
+          skipped_steps: [],
+          step_data: {},
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/select openai/i));
+    fireEvent.change(screen.getByLabelText(/openai api key/i), {
+      target: { value: "test-api-key-value" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1-mini" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+    await screen.findByText(/first chat verifies/i);
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+    await screen.findByText(/saved as saved-key-present/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    expect(
+      await screen.findByRole("heading", { name: /ingest defaults/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /back/i }));
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/openai api key/i)).toHaveValue("");
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1" },
+    });
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+    expect(
+      await screen.findByText(/saved credentials are present/i),
+    ).toBeInTheDocument();
+    expect(setupHookMocks.validateProvider).toHaveBeenCalledTimes(1);
+    expect(setupHookMocks.validateProvider).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provider_key: "openai",
+        api_key: "test-api-key-value",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+    await waitFor(() => {
+      expect(setupHookMocks.saveProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider_key: "openai",
+          api_key: null,
+          model: "gpt-4.1",
+          make_default: true,
+        }),
+      );
+    });
+
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /ingest defaults/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("resumes first chat and revalidates saved hosted credentials after provider edits", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    setupHookMocks.validateProvider.mockImplementation(async (payload) => {
+      if (!payload.api_key) {
+        return {
+          provider_key: "openai",
+          status: "failed",
+          failure_category: "provider_api_key_required",
+          message: "Provider API key is required.",
+          models: [],
+          can_gate_first_chat: false,
+        };
+      }
+      return {
+        provider_key: "openai",
+        status: "accepted",
+        message: "Format accepted; first chat verifies the provider.",
+        models: [],
+        validation_level: "local_syntax",
+        can_gate_first_chat: true,
+      };
+    });
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+              default_provider_credential_configured: true,
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /first chat/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /back to providers/i }));
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/openai api key/i)).toHaveValue("");
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+    expect(
+      await screen.findByText(/saved credentials are present/i),
+    ).toBeInTheDocument();
+    expect(setupHookMocks.validateProvider).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+    await waitFor(() => {
+      expect(setupHookMocks.saveProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider_key: "openai",
+          api_key: null,
+          model: "gpt-4.1",
+          make_default: true,
+        }),
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /ingest defaults/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not infer saved hosted credentials when resumed state lacks the marker", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    setupHookMocks.validateProvider.mockImplementation(async (payload) => {
+      if (!payload.api_key) {
+        return {
+          provider_key: "openai",
+          status: "failed",
+          failure_category: "provider_api_key_required",
+          message: "Provider API key is required.",
+          models: [],
+          can_gate_first_chat: false,
+        };
+      }
+      return {
+        provider_key: "openai",
+        status: "accepted",
+        message: "Format accepted; first chat verifies the provider.",
+        models: [],
+        validation_level: "local_syntax",
+        can_gate_first_chat: true,
+      };
+    });
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /back to providers/i }));
+    expect(
+      await screen.findByRole("heading", { name: /chat provider/i }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+
+    expect(
+      await screen.findByText(/provider_api_key_required/i),
+    ).toBeInTheDocument();
+    expect(setupHookMocks.validateProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_key: "openai",
+        api_key: null,
+        model: "gpt-4.1",
+      }),
+    );
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
   });
 
   it("shows a non-blocking warning when audio recommendations fail to load", async () => {

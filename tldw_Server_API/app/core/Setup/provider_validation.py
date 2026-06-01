@@ -163,6 +163,8 @@ def validate_hosted_provider_credentials(
         provider_key=provider_key,
         status=VALIDATION_STATUS_ACCEPTED,
         message="Provider credentials passed local syntax checks.",
+        validation_level="local_syntax",
+        can_gate_first_chat=True,
     )
 
 
@@ -226,6 +228,8 @@ async def validate_local_openai_endpoint(
         provider_key=payload.provider_key,
         status=VALIDATION_STATUS_READY,
         models=model_ids,
+        validation_level="live_non_generative",
+        can_gate_first_chat=True,
     )
 
 
@@ -292,4 +296,6 @@ async def validate_native_kobold_endpoint(
     return SetupProviderValidationResponse(
         provider_key=payload.provider_key,
         status=VALIDATION_STATUS_READY,
+        validation_level="live_endpoint_shape",
+        can_gate_first_chat=True,
     )
