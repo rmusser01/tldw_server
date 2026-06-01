@@ -17,7 +17,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create a design spec for addressing the Codeslop Vibecheck findings across tldw_Server_API: consolidate Media DB update invariants, move Jobs event SQL behind JobManager public APIs, and move document workspace table ownership into Media DB repositories/migrations while preserving external HTTP API compatibility.
+Create a design spec for addressing the Codeslop Vibecheck findings across tldw_Server_API: derive minimal-test router metadata from production RouterSpec definitions, consolidate Media DB update invariants, move Jobs event SQL behind JobManager public APIs, move document workspace table ownership into Media DB repositories/migrations, and move prototype promotion review decisions behind a public service method while preserving external HTTP API compatibility. Worker lifecycle state consolidation is explicitly out of scope for this series.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -36,7 +36,7 @@ Create a design spec for addressing the Codeslop Vibecheck findings across tldw_
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and revised at Docs/superpowers/specs/2026-06-01-api-boundary-remediation-design.md. Initial and second spec review subagents both approved it with no blocking issues. The revision clarifies Media DB post-commit hook ownership, identical-content compatibility behavior, document workspace migration ownership, Jobs event normalization, and explicit smoke checks. Verification is documentation-only: no code tests or Bandit were run because this task only changes the design spec and Backlog tracking record. Implementation planning should name the preferred Media DB update method and keep each rollout stage separately verifiable.
+Design spec amended at Docs/superpowers/specs/2026-06-01-api-boundary-remediation-design.md to include two additional verified findings in the remediation series: deriving minimal-test router metadata from production RouterSpec definitions, and moving prototype promotion review authorization/state transitions behind a public service method. The worker lifecycle state consolidation finding is explicitly documented as out of scope for this series. Local verification passed: git diff --check on the touched spec/task files produced no output, and the stale wording/placeholder rg scan returned no matches. No code tests or Bandit were run because this amendment only changes documentation and Backlog tracking. The subagent spec-review gate was not rerun in this turn because the current agent-delegation tool requires explicit user delegation permission.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
