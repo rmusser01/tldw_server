@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-01
 **Surface:** WebUI `/chat`, extension sidepanel chat, shared chat workspace surfaces
-**Status:** Approved in-session, pending spec review
+**Status:** Approved in-session and spec-reviewed
 **Backlog:** TASK-491
 **Reference:** https://github.com/pewdiepie-archdaemon/odysseus/pull/151
 
@@ -49,6 +49,10 @@ Recommended initial mode:
 3. support a source fallback;
 4. support validated OpenUI action submission back into chat;
 5. add streaming preview only after the renderer and persistence path are stable.
+
+V1 scope decision: OpenUI mode is a **temporary composer/request mode**, not a per-chat-session setting. The user opts into OpenUI for an outgoing request. If that request succeeds, only the resulting assistant message is tagged as dynamic UI. Reloading the chat preserves the tagged assistant message, but it does not automatically put the composer back into OpenUI mode.
+
+V1 surface decision: active OpenUI generation and rendering are enabled first on `/chat`. The renderer is implemented in shared `apps/packages/ui` code, but extension sidepanel and workspace surfaces may show source fallback until CSP, layout, and build checks pass. This keeps the implementation portable without forcing all surfaces to be enabled in the first slice.
 
 ## Non-Goals
 
@@ -114,6 +118,10 @@ Field meanings:
 
 Rendering must key from metadata first, not text sniffing. Text/source detection can be an import helper or dev convenience, but it must not be the durable persisted contract.
 
+For OpenUI v1, `source` is the OpenUI Lang source string consumed by the OpenUI React renderer adapter. The `version` field refers to this repository's dynamic UI metadata contract, not necessarily the installed OpenUI package version.
+
+V1 writer decision: the frontend tags the completed assistant message when the request was sent with OpenUI mode enabled. The backend should preserve this data through the existing `metadata_extra`/message metadata path. If implementation planning finds that a save endpoint drops opaque metadata, the required backend work is an additive persistence fix, not a separate OpenUI generation endpoint.
+
 ## Architecture
 
 Add a shared `DynamicMessageRenderer` inside `apps/packages/ui`. This component receives a chat message, inspects `metadataExtra.dynamic_ui`, and renders through a registry.
@@ -169,6 +177,13 @@ Responsibilities:
 
 The control can start as a compact toggle or segmented mode in the existing chat controls. Implementation planning should pick the exact placement based on the current `PlaygroundForm` and settings UI.
 
+The control is transient in v1:
+
+- enabled state applies to the next send path;
+- a completed OpenUI response receives dynamic metadata;
+- the composer does not persist OpenUI mode as chat-session state;
+- a saved OpenUI message continues to render from metadata after reload.
+
 ### Dynamic Action Bridge
 
 Responsibilities:
@@ -184,12 +199,43 @@ Conceptual action payload:
 ```ts
 {
   renderer: "openui",
-  messageId: "...",
+  sourceMessageId: "...",
   actionId: "...",
   actionType: "submit",
   values: {}
 }
 ```
+
+Validated actions become a visible user message plus metadata. The visible body should be understandable without hidden state, for example:
+
+```text
+OpenUI action: submit <actionId>
+
+Submitted values:
+- field_name: value
+```
+
+The user message should also carry provenance metadata:
+
+```ts
+metadataExtra.dynamic_ui_action = {
+  renderer: "openui",
+  sourceMessageId: "...",
+  actionId: "...",
+  actionType: "submit",
+  values: {},
+  submittedAt: "..."
+}
+```
+
+Validation requirements:
+
+- `renderer` must be `openui` for the v1 adapter;
+- `sourceMessageId` must refer to a message in the current conversation;
+- `actionId` and `actionType` must be bounded strings;
+- `actionType` must be one of the supported v1 action types, initially `submit`;
+- `values` must be a JSON-serializable object within configured depth and size limits;
+- values are treated as untrusted user input and are serialized into a normal chat turn before sending.
 
 ## Data Flow
 
@@ -216,6 +262,8 @@ The prompt layer needs:
 
 The backend should not add an OpenAI-only `/api/openui/generate` equivalent as the main path. If a future document-generation endpoint is needed, it should still use the project provider abstraction and the same dynamic UI metadata contract.
 
+For v1, OpenUI prompt insertion is owned by the frontend chat send path because OpenUI is a temporary composer/request mode. The prompt text should still be centralized in a shared helper so backend ownership can be introduced later without changing the product contract.
+
 ## Rendering Policy
 
 Use metadata-driven rendering:
@@ -240,6 +288,13 @@ Dynamic UI metadata must survive:
 - export/import paths when those paths include message metadata.
 
 The renderer source should remain inspectable. A saved dynamic message should never become opaque UI with no readable source.
+
+V1 persistence responsibility is intentionally narrow:
+
+- frontend creates the `dynamic_ui` envelope for completed OpenUI-mode responses;
+- backend stores and returns the envelope as message metadata;
+- frontend hydration restores the envelope into `Message.metadataExtra`;
+- no backend OpenUI generation endpoint is required for the first slice.
 
 ## Artifact Rail Relationship
 
@@ -293,7 +348,7 @@ Automated coverage should include:
 4. OpenUI render failure does not break normal message rendering;
 5. dynamic action payload validation accepts expected OpenUI form submissions and rejects malformed payloads;
 6. action submission produces the expected normal user message shape;
-7. saved/reloaded dynamic messages render consistently in `/chat`, sidepanel chat, and workspace chat;
+7. saved/reloaded dynamic messages render or source-fallback consistently in `/chat`, sidepanel chat, and workspace chat based on each surface's capability flag;
 8. extension build does not violate import/CSP assumptions;
 9. existing Markdown, code, reasoning, and artifact rendering behavior remains unchanged.
 
@@ -319,8 +374,8 @@ Manual QA should cover:
 
 ### Stage 2: OpenUI Chat Mode
 
-- Add user-facing OpenUI mode control.
-- Inject OpenUI instructions through the existing chat/provider path.
+- Add user-facing temporary OpenUI request-mode control on `/chat`.
+- Inject OpenUI instructions through the existing frontend chat/provider path.
 - Save completed responses with OpenUI metadata.
 - Rehydrate saved messages with dynamic UI metadata.
 
@@ -333,17 +388,17 @@ Manual QA should cover:
 
 ### Stage 4: Shared Surface Expansion
 
-- Enable the renderer in sidepanel/workspace surfaces after CSP and layout checks.
+- Enable active rendering in sidepanel/workspace surfaces after CSP and layout checks.
 - Add artifact rail open/pin support for dynamic UI messages.
 - Add streaming preview if final rendering proves stable.
 
-## Open Questions For Implementation Planning
+## Implementation Planning Decisions
+
+These are expected planning decisions, not unresolved design blockers. They determine file ownership, UI placement, and rollout ordering after this product contract is accepted.
 
 1. Where should the first OpenUI mode control live in the current `/chat` controls?
-2. Should OpenUI mode be per-message, per-chat-session, or a temporary composer mode in the first slice?
-3. Should dynamic UI metadata be written by the frontend after a successful OpenUI-mode completion, or returned by the backend as part of message persistence?
-4. Which provider abstraction layer should own the reusable OpenUI system/developer prompt?
-5. Should sidepanel OpenUI rendering be enabled in v1 or explicitly source-fallback until CSP testing passes?
+2. Which provider abstraction layer should eventually own the reusable OpenUI system/developer prompt after the frontend-owned v1?
+3. Should sidepanel OpenUI rendering be enabled immediately after CSP tests pass, or remain source-fallback until artifact rail support is also ready?
 
 ## Acceptance Criteria
 
@@ -352,4 +407,3 @@ Manual QA should cover:
 - `/chat`, extension sidepanel chat, and workspace chat are addressed as shared surfaces.
 - Persistence, action round-trip, source fallback, feature gating, and extension safety are covered.
 - The design avoids PR #151 implementation choices that do not fit this repository.
-

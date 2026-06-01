@@ -8,6 +8,7 @@ documentation:
 - Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
 modified_files:
 - Docs/superpowers/specs/2026-06-01-openui-dynamic-chat-rendering-design.md
+- backlog/tasks/task-491 - Design-OpenUI-dynamic-chat-rendering-support.md
 ---
 
 ## Description
@@ -29,7 +30,7 @@ Create an approved design spec for supporting OpenUI as the first renderer in a 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Design spec written and reviewed for OpenUI as the first renderer in a shared dynamic UI chat rendering layer. V1 decisions: temporary /chat composer/request mode, frontend-tagged metadata preserved through existing persistence, final render before streaming preview, source fallback outside enabled surfaces, and validated OpenUI action round-trips as normal user messages with provenance metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
