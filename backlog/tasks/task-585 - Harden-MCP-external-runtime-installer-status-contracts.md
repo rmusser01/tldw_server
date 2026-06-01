@@ -4,7 +4,7 @@ title: Harden MCP external runtime installer status contracts
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 03:58'
+updated_date: '2026-06-01 04:14'
 labels:
   - mcp-unified
   - external-runtime
@@ -38,15 +38,13 @@ Docs/superpowers/plans/2026-06-01-mcp-external-runtime-installer-status-plan.md
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-['Design approved by user on 2026-06-01.', 'Real third-party install/update execution, durable lifecycle CLI controls, frontend changes, and WebSocket upstream transport are out of scope for this slice.']
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Design approved by user on 2026-06-01. Real third-party install/update execution, durable lifecycle CLI controls, frontend changes, and WebSocket upstream transport are out of scope. PR #2209 review follow-up addressed Qodo/cubic secret-logging feedback, Qodo helper-docstring feedback, and Qodo installer-status timeout feedback after rebasing on latest dev.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented stable, sanitized installer status and install/update operation contracts for the standalone MCP gateway external runtime. Runtime status rows now include best-effort installer capability metadata, install/update adapter payloads are normalized and redacted, adapter failures are logged internally and surfaced through deterministic reason codes, and FastAPI response models document the new fields. Verification: focused gateway pytest suite passed (168 tests), Ruff passed on touched Python files, Bandit passed on touched gateway source with JSON output at /tmp/bandit_mcp_external_runtime_installer_status.json, and git diff --check passed. Out of scope remains real third-party package-manager execution, durable CLI lifecycle controls, frontend changes, and WebSocket upstream transport.
+Implemented stable, sanitized installer status and install/update operation contracts for the standalone MCP gateway external runtime. PR review follow-up removed raw traceback logging for installer adapter failures, suppressed raw adapter exception context from wrapped operation errors, added a bounded installer status timeout with a timeout-specific reason code, and documented the installer helper intent. Verification: focused gateway pytest suite passed (169 tests), Ruff passed on touched Python files, Bandit passed on touched gateway source with JSON output at /tmp/bandit_mcp_external_runtime_installer_status.json, and git diff --check passed. Out of scope remains real third-party package-manager execution, durable CLI lifecycle controls, frontend changes, and WebSocket upstream transport.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

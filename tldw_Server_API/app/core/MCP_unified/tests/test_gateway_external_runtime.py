@@ -401,6 +401,39 @@ class ExplodingInstaller(ExternalServerInstaller):
         raise RuntimeError("status failed with do-not-leak-token")
 
 
+class HangingInstaller(ExternalServerInstaller):
+    """Installer fake that never returns status for timeout coverage."""
+
+    async def install_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return an unused install payload."""
+        del context
+        return {"ok": True, "available": True, "server_id": server.id}
+
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return an unused update payload."""
+        del context
+        return {"ok": True, "available": True, "server_id": server.id}
+
+    async def get_status(
+        self,
+        server: ExternalServerDefinition,
+    ) -> dict[str, Any]:
+        """Block until cancelled by the runtime status timeout."""
+        del server
+        await asyncio.Event().wait()
+        return {"available": True}
+
+
 def _server(**overrides: Any) -> ExternalServerDefinition:
     values: dict[str, Any] = {
         "id": "research",
@@ -1211,11 +1244,43 @@ async def test_external_runtime_installer_status_failure_is_row_scoped(
         "error_type": "RuntimeError",
     }
     assert "do-not-leak" not in json.dumps(rows, sort_keys=True)
-    assert fake_logger.opt_calls == [{"exception": True}]
+    assert fake_logger.opt_calls == []
     assert fake_logger.error_calls == [
         (
             "External installer status failed server_id={!r} error_type={!r}",
             ("research", "RuntimeError"),
+        )
+    ]
+    assert "do-not-leak" not in json.dumps(fake_logger.error_calls, sort_keys=True)
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_status_timeout_is_row_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(gateway_external_runtime, "logger", fake_logger)
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+        installer=HangingInstaller(),
+        installer_status_timeout_seconds=0.01,
+    )
+
+    rows = await asyncio.wait_for(manager.list_runtime_servers(), timeout=0.2)
+
+    assert rows["servers"][0]["installer"] == {
+        "available": False,
+        "reason_code": "external_server_installer_status_timeout",
+        "server_id": "research",
+        "error_type": "TimeoutError",
+    }
+    assert fake_logger.opt_calls == []
+    assert fake_logger.error_calls == [
+        (
+            "External installer status timed out server_id={!r}",
+            ("research",),
         )
     ]
 
@@ -1340,15 +1405,19 @@ async def test_external_runtime_installer_operation_failures_are_wrapped(
     assert install_exc.value.reason_code == "external_server_install_failed"
     assert install_exc.value.server_id == "research"
     assert str(install_exc.value) == "External server install failed"
+    assert install_exc.value.__cause__ is None
+    assert install_exc.value.__suppress_context__ is True
     assert update_exc.value.reason_code == "external_server_update_failed"
     assert update_exc.value.server_id == "research"
     assert str(update_exc.value) == "External server update failed"
+    assert update_exc.value.__cause__ is None
+    assert update_exc.value.__suppress_context__ is True
     public_payloads = {
         "install": install_exc.value.to_payload(),
         "update": update_exc.value.to_payload(),
     }
     assert "do-not-leak" not in json.dumps(public_payloads, sort_keys=True)
-    assert fake_logger.opt_calls == [{"exception": True}, {"exception": True}]
+    assert fake_logger.opt_calls == []
     assert fake_logger.error_calls == [
         (
             "External installer operation failed operation={!r} server_id={!r} error_type={!r}",
@@ -1359,3 +1428,4 @@ async def test_external_runtime_installer_operation_failures_are_wrapped(
             ("update", "research", "RuntimeError"),
         ),
     ]
+    assert "do-not-leak" not in json.dumps(fake_logger.error_calls, sort_keys=True)

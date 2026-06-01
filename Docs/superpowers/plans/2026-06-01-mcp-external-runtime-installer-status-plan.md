@@ -31,7 +31,7 @@ Expected: FAIL because runtime rows do not include `installer` status yet.
 
 - [ ] **Step 3: Implement minimal status support**
 
-Add a private manager helper that calls `self._installer.get_status(server.model_copy(deep=True))`, sanitizes the payload, applies defaults, catches unexpected exceptions, logs them, and returns a stable unavailable status.
+Add a private manager helper that calls `self._installer.get_status(server.model_copy(deep=True))` with a bounded timeout, sanitizes the payload, applies defaults, catches unexpected exceptions, logs only sanitized diagnostic fields, and returns a stable unavailable status.
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
@@ -48,7 +48,7 @@ Run the same pytest command and confirm it passes.
 Add tests that:
 - Successful fake install/update payloads preserve safe public metadata and apply default fields.
 - Nested secret-looking values are removed from operation payloads.
-- Adapter exceptions are logged and raised as `GatewayExternalRuntimeError` with install/update-specific reason codes.
+- Adapter exceptions are logged without traceback/raw exception text and raised as `GatewayExternalRuntimeError` with install/update-specific reason codes.
 
 - [ ] **Step 2: Run tests to verify RED**
 
@@ -58,7 +58,7 @@ Expected: FAIL because operation payload redaction and adapter exception wrappin
 
 - [ ] **Step 3: Implement minimal operation normalization**
 
-Centralize installer operation calls, reuse the sanitizer, keep default no-op behavior unchanged, and avoid raw exception text in public errors.
+Centralize installer operation calls, reuse the sanitizer, keep default no-op behavior unchanged, and avoid raw exception text in public errors or logs.
 
 - [ ] **Step 4: Run tests to verify GREEN**
 

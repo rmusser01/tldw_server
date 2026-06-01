@@ -61,6 +61,7 @@ _INSTALLER_SENSITIVE_KEY_TOKENS = (
     "argv",
 )
 _UNSAFE_INSTALLER_VALUE = object()
+_DEFAULT_INSTALLER_STATUS_TIMEOUT_SECONDS = 2.0
 
 
 class GatewayExternalRuntimeError(RuntimeError):
@@ -117,12 +118,14 @@ class GatewayExternalRuntimeManager:
         audit_store: AuditStore | None = None,
         credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
         installer: ExternalServerInstaller | None = None,
+        installer_status_timeout_seconds: float = _DEFAULT_INSTALLER_STATUS_TIMEOUT_SECONDS,
     ) -> None:
         self._external_registry_store = external_registry_store
         self._transport_factory = transport_factory
         self._audit_store = audit_store
         self._credential_broker = credential_broker
         self._installer = installer or NullExternalServerInstaller()
+        self._installer_status_timeout_seconds = installer_status_timeout_seconds
         self._servers: dict[str, ExternalServerDefinition] = {}
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
@@ -782,10 +785,26 @@ class GatewayExternalRuntimeManager:
         self,
         server: ExternalServerDefinition,
     ) -> dict[str, Any]:
+        """Return sanitized best-effort installer status for one server row."""
+
         try:
-            payload = await self._installer.get_status(server.model_copy(deep=True))
+            payload = await asyncio.wait_for(
+                self._installer.get_status(server.model_copy(deep=True)),
+                timeout=self._installer_status_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "External installer status timed out server_id={!r}",
+                server.id,
+            )
+            return {
+                "available": False,
+                "reason_code": "external_server_installer_status_timeout",
+                "server_id": server.id,
+                "error_type": "TimeoutError",
+            }
         except Exception as exc:  # noqa: BLE001 - installer adapters are optional.
-            logger.opt(exception=True).error(
+            logger.error(
                 "External installer status failed server_id={!r} error_type={!r}",
                 server.id,
                 type(exc).__name__,
@@ -812,10 +831,12 @@ class GatewayExternalRuntimeManager:
         fallback_reason_code: str,
         failure_reason_code: str,
     ) -> dict[str, Any]:
+        """Run one installer operation and expose only sanitized public metadata."""
+
         try:
             payload = await callback()
         except Exception as exc:  # noqa: BLE001 - installer adapters define failures.
-            logger.opt(exception=True).error(
+            logger.error(
                 "External installer operation failed operation={!r} server_id={!r} error_type={!r}",
                 operation,
                 server.id,
@@ -825,7 +846,7 @@ class GatewayExternalRuntimeManager:
                 f"External server {operation} failed",
                 reason_code=failure_reason_code,
                 server_id=server.id,
-            ) from exc
+            ) from None
         return self._installer_payload(
             payload,
             server=server,
@@ -841,6 +862,8 @@ class GatewayExternalRuntimeManager:
         fallback_reason_code: str,
         include_ok: bool = True,
     ) -> dict[str, Any]:
+        """Normalize an installer adapter payload into the public gateway shape."""
+
         result = cls._sanitize_installer_payload(payload or {})
         if include_ok:
             result.setdefault("ok", False)
@@ -853,6 +876,8 @@ class GatewayExternalRuntimeManager:
 
     @classmethod
     def _sanitize_installer_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return only allowlisted installer fields with nested sensitive keys removed."""
+
         sanitized: dict[str, Any] = {}
         for key, value in payload.items():
             normalized_key = str(key)
@@ -867,6 +892,8 @@ class GatewayExternalRuntimeManager:
 
     @classmethod
     def _sanitize_installer_value(cls, value: Any) -> Any:
+        """Recursively sanitize installer payload values into JSON-safe public data."""
+
         if isinstance(value, dict):
             sanitized: dict[str, Any] = {}
             for key, child in value.items():
@@ -893,6 +920,8 @@ class GatewayExternalRuntimeManager:
 
     @staticmethod
     def _is_sensitive_installer_key(key: str) -> bool:
+        """Return true when a key name suggests credentials or command material."""
+
         lowered = key.strip().lower()
         return any(token in lowered for token in _INSTALLER_SENSITIVE_KEY_TOKENS)
 
