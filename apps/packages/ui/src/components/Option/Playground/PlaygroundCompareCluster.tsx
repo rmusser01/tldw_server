@@ -15,6 +15,7 @@ import {
   computeNormalizedPreviewBudget
 } from "./compare-normalized-preview"
 import { computeResponseDiffPreview } from "./compare-response-diff"
+import type { DynamicUISurface } from "@/types/dynamic-ui"
 
 type CompareBlock = {
   kind: "compare"
@@ -52,6 +53,8 @@ type PlaygroundCompareClusterProps = {
   compareContinuationModeByCluster: Record<string, string | undefined>
   compareSplitChats: Record<string, Record<string, string>>
   compareMaxModels?: number
+  dynamicUISurface?: DynamicUISurface
+  onDynamicUIAction?: (payload: unknown) => void
   modelMetaById: Map<string, { label: string; provider: string }>
   getTokenCount: (generationInfo?: any) => number | null
   getPreviousUserMessage: (index: number) => any
@@ -184,6 +187,8 @@ export const PlaygroundCompareCluster = ({
   compareContinuationModeByCluster,
   compareSplitChats,
   compareMaxModels,
+  dynamicUISurface,
+  onDynamicUIAction,
   modelMetaById,
   getTokenCount,
   getPreviousUserMessage,
@@ -452,6 +457,8 @@ export const PlaygroundCompareCluster = ({
         messageId={userMessage.id}
         pinned={Boolean(userMessage.pinned)}
         metadataExtra={userMessage.metadataExtra}
+        dynamicUISurface={dynamicUISurface}
+        onDynamicUIAction={onDynamicUIAction}
         researchActions={buildMessageResearchActions(userMessage.metadataExtra)}
         discoSkillComment={userMessage.discoSkillComment}
         historyId={stableHistoryId ?? undefined}
@@ -993,6 +1000,8 @@ export const PlaygroundCompareCluster = ({
                 messageId={message.id}
                 pinned={Boolean(message.pinned)}
                 metadataExtra={message.metadataExtra}
+                dynamicUISurface={dynamicUISurface}
+                onDynamicUIAction={onDynamicUIAction}
                 researchActions={buildMessageResearchActions(message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
