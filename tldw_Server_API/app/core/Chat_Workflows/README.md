@@ -15,7 +15,7 @@ Chat_Workflows implements template-driven multi-step chat workflows and moderate
 ## Responsibilities
 
 - Create, list, retrieve, update, and delete workflow templates.
-- Generate draft templates from user goals and optional content sources.
+- Generate draft templates from user goals, an optional base question, and the desired step count.
 - Start workflow runs and track active, completed, or canceled state.
 - Render current workflow questions and record answers.
 - Run moderated dialogue rounds with debate and moderator model selections.
@@ -35,7 +35,7 @@ Chat_Workflows implements template-driven multi-step chat workflows and moderate
 - `chat_workflows_deps.py` resolves the per-user chat workflows database path through `DatabasePaths` and caches database instances.
 - Persistence is handled by `ChatWorkflowsDatabase` in the DB management layer.
 - LLM calls route through the shared Chat module, including `chat_orchestrator.chat_api_call_async`.
-- Content-backed draft or run behavior connects through the chat workflows content backend dependency.
+- Context reference fields are preserved in schemas, templates, and runs, but current draft generation does not resolve content sources or pass `context_refs` into the service; run start stores `selected_context_refs` with an empty `resolved_context_snapshot`.
 - API schemas define LLM selection, dialogue config, template steps, draft requests, run requests, answers, rounds, transcripts, and continue-chat responses.
 
 ## Extension Points
@@ -44,7 +44,7 @@ Chat_Workflows implements template-driven multi-step chat workflows and moderate
 - Add a new dialogue policy in `dialogue_orchestrator.py`.
 - Change step rendering in `question_renderer.py`.
 - Extend run lifecycle behavior in `service.py` before changing endpoint handlers.
-- Add content-source support by inspecting `chat_workflows_deps.py` and the service draft-generation path first.
+- If adding context source resolution, start in the service and dependency path around `service.py`, `chat_workflows_deps.py`, and the endpoint draft/run handlers.
 
 ## Testing
 
