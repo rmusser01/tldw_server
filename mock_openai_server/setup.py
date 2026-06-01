@@ -25,18 +25,17 @@ setup(
         "Topic :: Software Development :: Testing",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     install_requires=[
         "fastapi>=0.100.0",
         "uvicorn[standard]>=0.23.0",
         "pydantic>=2.0.0",
         "pyyaml>=6.0",
-        "python-multipart>=0.0.6",
+        "python-multipart>=0.0.27",
     ],
     extras_require={
         "dev": [
