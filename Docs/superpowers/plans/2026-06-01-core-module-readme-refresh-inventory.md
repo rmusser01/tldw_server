@@ -13,27 +13,27 @@ Design: Docs/superpowers/specs/2026-06-01-core-module-readme-refresh-design.md
 
 | Module | README status | Evidence status | Evidence inspected | Related endpoints/schemas/tests | Phase 2 priority | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Agent_Client_Protocol | missing | not inspected | Pending. | Pending. | high | Protocol surface; prioritize for source-backed orientation. |
-| Agent_Orchestration | missing | not inspected | Pending. | Pending. | high | Orchestration module; prioritize for source-backed orientation. |
-| Audio | missing | not inspected | Pending. | Pending. | medium | Feature module; inspect with related audio API and tests. |
-| Audiobooks | missing | not inspected | Pending. | Pending. | medium | Feature module; inspect with ingestion and audio flows. |
+| Agent_Client_Protocol | created | inspected | Source: `app/core/Agent_Client_Protocol/{agent_registry.py,runner_client.py,sandbox_runner_client.py,config.py,events.py,event_bus.py,governance_filter.py,adapters/,consumers/,multiplex/}`; API/schema/docs inspected. | Endpoint: `app/api/v1/endpoints/agent_client_protocol.py` (`/acp`); schema: `app/api/v1/schemas/agent_client_protocol.py`; tests: `tests/Agent_Client_Protocol/`. | high | Protocol surface; prioritize for source-backed orientation. |
+| Agent_Orchestration | created | inspected | Source: `app/core/Agent_Orchestration/{models.py,orchestration_service.py,completion_signals.py,artifact_promotion.py}`; DB and docs inspected. | Endpoint: `app/api/v1/endpoints/agent_orchestration.py` (`/agent-orchestration`); DB: `app/core/DB_Management/Orchestration_DB.py`; tests: `tests/Agent_Orchestration/`. | high | Orchestration module; prioritize for source-backed orientation. |
+| Audio | created | inspected | Source: `app/core/Audio/{transcription_service.py,tts_service.py,streaming_service.py,quota_helpers.py,tokenizer_service.py,dictation_error_taxonomy.py}`; audio endpoint package inspected. | Endpoints: `app/api/v1/endpoints/audio/`; schemas: `audio_schemas.py`, `audio_health.py`, `audio_presets.py`; tests: `tests/Audio/`, `tests/AudioJobs/`. | medium | Feature module; inspect with related audio API and tests. |
+| Audiobooks | created | inspected | Source: `app/core/Audiobooks/{tag_parser.py,subtitle_generator.py,subtitle_parser.py,alignment_utils.py}`; audiobook endpoint and schemas inspected. | Endpoint: `app/api/v1/endpoints/audio/audiobooks.py` (`/audiobooks`); schema: `app/api/v1/schemas/audiobook_schemas.py`; tests: `tests/Audiobooks/`. | medium | Feature module; inspect with ingestion and audio flows. |
 | Audit | existing | not inspected | Pending. | Pending. | high | Operational and security-sensitive module. |
 | AuthNZ | existing | not inspected | Pending. | Pending. | high | Security-sensitive authentication and authorization module. |
 | Billing | existing | not inspected | Pending. | Pending. | high | Operational account and usage module. |
 | Character_Chat | existing | not inspected | Pending. | Pending. | medium | Feature module with chat-facing behavior. |
 | Chat | existing | not inspected | Pending. | Pending. | high | Broad user-facing LLM module. |
-| Chat_Workflows | missing | not inspected | Pending. | Pending. | high | Chat orchestration module. |
+| Chat_Workflows | created | inspected | Source: `app/core/Chat_Workflows/{service.py,dialogue_orchestrator.py,question_renderer.py}`; dependency and DB paths inspected. | Endpoint: `app/api/v1/endpoints/chat_workflows.py` (`/api/v1/chat-workflows`); schema: `app/api/v1/schemas/chat_workflows.py`; deps: `app/api/v1/API_Deps/chat_workflows_deps.py`; tests: `tests/Chat_Workflows/`. | high | Chat orchestration module. |
 | Chatbooks | existing | not inspected | Pending. | Pending. | high | Import/export and background data workflow module. |
 | Chunking | existing | not inspected | Pending. | Pending. | medium | Shared processing helper used by ingestion and retrieval. |
 | Claims_Extraction | existing | not inspected | Pending. | Pending. | medium | Feature module for extraction workflows. |
-| CodeGraph | missing | not inspected | Pending. | Pending. | high | Data graph and code-analysis module. |
+| CodeGraph | created | inspected | Source: `app/core/CodeGraph/{workspace.py,config.py,indexer.py,language_registry.py,context.py,jobs.py,jobs_worker.py,extractors/}`; MCP and DB surfaces inspected. | MCP: `app/core/MCP_unified/modules/implementations/codegraph_module.py`; DB: `app/core/DB_Management/codegraph/repository.py`; docs: `Docs/MCP/Unified/CodeGraph.md`; tests: `tests/CodeGraph/`. | high | Data graph and code-analysis module. |
 | Collections | existing | not inspected | Pending. | Pending. | medium | Feature module for grouped user content. |
 | DB_Management | existing | not inspected | Pending. | Pending. | high | Core database and persistence module. |
-| Data_Tables | missing | not inspected | Pending. | Pending. | high | Data-management feature module. |
+| Data_Tables | created | inspected | Source: `app/core/Data_Tables/jobs_worker.py`; endpoint, schemas, sidecar docs, LLM/RAG/DB connections inspected. | Endpoint: `app/api/v1/endpoints/data_tables.py` (`/data-tables`); schema: `app/api/v1/schemas/data_tables_schemas.py`; tests: `tests/DataTables/`. | high | Data-management feature module. |
 | Embeddings | existing | not inspected | Pending. | Pending. | high | Shared vector and provider integration module. |
 | Evaluations | existing | not inspected | Pending. | Pending. | high | Broad evaluation workflow module. |
 | External_Sources | existing | not inspected | Pending. | Pending. | high | External provider and ingestion boundary. |
-| File_Artifacts | missing | not inspected | Pending. | Pending. | high | Storage and artifact-management module. |
+| File_Artifacts | created | inspected | Source: `app/core/File_Artifacts/{file_artifacts_service.py,adapter_registry.py,jobs_worker.py,metrics.py,adapters/}`; endpoint, schemas, storage docs inspected. | Endpoint: `app/api/v1/endpoints/files.py` (`/files`); schema: `app/api/v1/schemas/file_artifacts_schemas.py`; tests: `tests/FileArtifacts/`, `tests/Files/`, `tests/Storage/test_file_artifacts_storage_integration.py`. | high | Storage and artifact-management module. |
 | Flashcards | existing | not inspected | Pending. | Pending. | medium | Feature module for study content. |
 | Governance | missing | not inspected | Pending. | Pending. | high | Policy and governance module. |
 | Image_Generation | missing | not inspected | Pending. | Pending. | medium | Feature module with provider integration. |
