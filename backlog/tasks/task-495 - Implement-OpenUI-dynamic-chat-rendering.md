@@ -16,6 +16,9 @@ modified_files:
 - apps/tldw-frontend/package.json
 - apps/packages/ui/package.json
 - apps/bun.lock
+- apps/packages/ui/src/types/dynamic-ui.ts
+- apps/packages/ui/src/utils/dynamic-ui.ts
+- apps/packages/ui/src/utils/__tests__/dynamic-ui.test.ts
 - backlog/tasks/task-495 - Implement-OpenUI-dynamic-chat-rendering.md
 ---
 
@@ -44,7 +47,7 @@ Execute the approved implementation plan for OpenUI dynamic chat rendering. Scop
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 0 complete: OpenUI runtime feasibility audit completed with conditional PASS, package manifests updated for WebUI/shared UI, extension dependency intentionally deferred due React 18.2 peer mismatch, and lockfile updated via `bun install --ignore-scripts` because normal workspace postinstall hangs in existing `wxt-prepare` behavior. Baseline Task 1 test command failed with no test files found as expected. Task 0 committed in ec3e71c6b7 and passed spec-compliance plus code-quality review.
+Tasks 0-1 complete. Task 0 committed OpenUI runtime feasibility review and dependency gate in ec3e71c6b7, with follow-up Backlog status commit ef2035486a. Task 1 added Dynamic UI shared types, validation helpers, source preflight, action normalization, sensitive-value blocking, and focused tests across commits 2e08f1e38c, 8ec5a81a2b, and 69d1d36890. Focused utility suite passes with 17 tests. Task 1 passed spec-compliance and code-quality review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
