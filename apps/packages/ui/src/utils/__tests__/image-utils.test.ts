@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { createImageDataUrl, validateAndCreateImageDataUrl } from "../image-utils"
+import {
+  createImageDataUrl,
+  inferImageAttachmentMimeType,
+  normalizeImageDataUrlMime,
+  validateAndCreateImageDataUrl
+} from "../image-utils"
 
 const ONE_PIXEL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE/wH+J6m3XQAAAABJRU5ErkJggg=="
@@ -33,5 +38,33 @@ describe("image utils", () => {
     expect(validateAndCreateImageDataUrl(`data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`)).toBe(
       ""
     )
+  })
+
+  it("infers attachment image MIME type from filenames when browsers provide generic MIME", () => {
+    expect(
+      inferImageAttachmentMimeType({
+        name: "scan.HEIC",
+        type: "application/octet-stream"
+      })
+    ).toBe("image/heic")
+    expect(inferImageAttachmentMimeType({ name: "photo.jpg", type: "" })).toBe(
+      "image/jpeg"
+    )
+    expect(inferImageAttachmentMimeType({ name: "png", type: "" })).toBeNull()
+    expect(
+      inferImageAttachmentMimeType({
+        name: "photo.png",
+        type: "application/zip"
+      })
+    ).toBeNull()
+  })
+
+  it("normalizes generic image data URLs with the inferred attachment MIME", () => {
+    expect(
+      normalizeImageDataUrlMime(
+        "data:application/octet-stream;base64,ZmFrZQ==",
+        "image/jpeg"
+      )
+    ).toBe("data:image/jpeg;base64,ZmFrZQ==")
   })
 })

@@ -5,6 +5,74 @@ export const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/webp"
 ])
 
+export const IMAGE_ATTACHMENT_MIME_BY_EXTENSION = new Map<string, string>([
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
+  ["gif", "image/gif"],
+  ["heic", "image/heic"],
+  ["heif", "image/heif"],
+  ["ico", "image/x-icon"],
+  ["jpeg", "image/jpeg"],
+  ["jpg", "image/jpeg"],
+  ["png", "image/png"],
+  ["svg", "image/svg+xml"],
+  ["tif", "image/tiff"],
+  ["tiff", "image/tiff"],
+  ["webp", "image/webp"]
+])
+
+export const IMAGE_ATTACHMENT_MIME_TYPES = new Set<string>([
+  ...IMAGE_ATTACHMENT_MIME_BY_EXTENSION.values(),
+  "image/ico",
+  "image/jpg"
+])
+
+export const GENERIC_IMAGE_FALLBACK_MIME_TYPES = new Set([
+  "",
+  "application/octet-stream"
+])
+
+export interface ImageAttachmentFileLike {
+  name: string
+  type?: string | null
+}
+
+function getFileExtension(fileName: string): string | null {
+  const dotIndex = fileName.lastIndexOf(".")
+  if (dotIndex <= 0 || dotIndex === fileName.length - 1) return null
+
+  return fileName.slice(dotIndex + 1).toLowerCase()
+}
+
+export function normalizeAttachmentMimeType(
+  mimeType: string | null | undefined
+): string {
+  return typeof mimeType === "string" ? mimeType.trim().toLowerCase() : ""
+}
+
+export function inferImageAttachmentMimeType(
+  file: ImageAttachmentFileLike
+): string | null {
+  const fileType = normalizeAttachmentMimeType(file.type)
+  if (fileType.startsWith("image/")) return fileType
+  if (!GENERIC_IMAGE_FALLBACK_MIME_TYPES.has(fileType)) return null
+
+  const extension = getFileExtension(file.name)
+  return extension ? IMAGE_ATTACHMENT_MIME_BY_EXTENSION.get(extension) ?? null : null
+}
+
+export function normalizeImageDataUrlMime(
+  dataUrl: string,
+  mimeType: string
+): string {
+  if (dataUrl.toLowerCase().startsWith("data:image/")) return dataUrl
+
+  const commaIndex = dataUrl.indexOf(",")
+  if (commaIndex === -1) return dataUrl
+
+  return `data:${mimeType};base64,${dataUrl.slice(commaIndex + 1)}`
+}
+
 function isBase64ImageChar(code: number): boolean {
   return (
     (code >= 0x41 && code <= 0x5a) || // A-Z
