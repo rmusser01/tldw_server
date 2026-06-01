@@ -4,7 +4,7 @@ title: Create canonical user-facing documentation map
 status: In Progress
 assignee: []
 created_date: '2026-06-01 05:24'
-updated_date: '2026-06-01 05:25'
+updated_date: '2026-06-01 06:19'
 labels: []
 dependencies: []
 documentation:
@@ -33,6 +33,8 @@ Design and implement the first documentation IA slice: a canonical public user d
 
 <!-- SECTION:NOTES:BEGIN -->
 Approved brainstorming design written to Docs/superpowers/specs/2026-06-01-user-docs-map-design.md. Scope is canonical Docs/User_Guides hub, optional feature map, MkDocs nav, README pointer, and extension docs pointer; WebUI documentation behavior is deferred.
+
+Design review before implementation planning tightened the spec around public link targets, MkDocs Home behavior, exact MkDocs build command, and generated Docs/Published commit policy.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

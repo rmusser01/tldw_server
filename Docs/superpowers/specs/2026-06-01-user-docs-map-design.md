@@ -53,6 +53,15 @@ Supporting entry points should point to the canonical hub:
 
 The WebUI `/documentation` route remains a convenience browser for documentation files. It is not the source of truth for the first documentation IA cleanup.
 
+## Link Targets
+
+The implementation should distinguish source-file links from published-site links:
+
+- Repository Markdown, such as `README.md`, can link to `Docs/User_Guides/index.md`.
+- MkDocs nav entries must use paths relative to `Docs/Published/`, such as `User_Guides/index.md`.
+- Extension VitePress pages should not use fragile relative links that walk out of the extension docs root. They should link to the public MkDocs URL for the canonical hub, currently `https://rmusser01.github.io/tldw_server/User_Guides/`, or to a GitHub source URL if a public docs URL is not available in the target environment.
+- The public MkDocs hub should prefer links to content that is included in the published docs set. If a useful extension-only page exists only under `apps/extension/docs`, link to a GitHub source page or defer that link until the page has a public docs home.
+
 ## Information Architecture
 
 The user guide hub should be written as a map, not a flat list. It should start with a short statement explaining that this is the place to orient around the server API, WebUI, browser extension, and admin/operator docs.
@@ -123,6 +132,12 @@ The first implementation plan should decide whether the separate page is needed 
 
 The nav should be selective. It should not list every existing guide.
 
+Recommended nav behavior:
+
+- Make `Home` point to `User_Guides/index.md` so the public docs landing page is the documentation map.
+- Keep `Getting Started` as its own top-level nav item immediately after `Home`.
+- If changing `Home` is too disruptive during implementation, keep `Home` as `Getting_Started/README.md` but add a prominent first-screen link from that page to `User_Guides/index.md`.
+
 ## README Linkage
 
 `README.md` should keep its quickstart role, but it needs a prominent pointer to the canonical documentation map near the existing Start Here or Documentation sections.
@@ -140,9 +155,9 @@ The extension docs can still describe extension-specific setup and browser behav
 The implementation slice should verify:
 
 - `bash Helper_Scripts/refresh_docs_published.sh` completes.
-- `mkdocs build` completes from the docs configuration used by the repository.
+- `source .venv/bin/activate && python -m mkdocs build -f Docs/mkdocs.yml` completes, or the implementation records that MkDocs is not installed in the active environment.
 - Changed Markdown links are checked where practical.
-- No manual edits are made under `Docs/Published/` except generated refresh output.
+- No manual edits are made under `Docs/Published/`; if `Helper_Scripts/refresh_docs_published.sh` changes generated files, commit those generated changes with the source docs changes.
 - Bandit is recorded as not applicable for docs-only edits unless code is touched.
 
 ## Open Questions Resolved During Brainstorming
