@@ -2244,6 +2244,7 @@ def test_gateway_config_sqlite_bootstrap_exposes_external_registry_manager(
         response = client.get("/mcp/external-servers")
 
     assert bootstrap.external_registry_manager is not None
+    assert bootstrap.external_runtime_manager is None
     assert bootstrap.external_registry_manager.external_registry_store is bootstrap.profile_store
     assert bootstrap.external_registry_manager.credential_grant_store is bootstrap.profile_store
     assert response.status_code == 200
@@ -2253,6 +2254,215 @@ def test_gateway_config_sqlite_bootstrap_exposes_external_registry_manager(
         "store": {"kind": "sqlite", "persistent": True},
     }
     asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_config_bootstrap_builds_stdio_external_runtime_manager(
+    tmp_path: Path,
+) -> None:
+    """Opt-in runtime config should wire the package stdio transport factory."""
+
+    from mcp_unified.federation import create_external_transport
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeManager
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(enabled=True),
+            ),
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+
+        assert isinstance(manager, GatewayExternalRuntimeManager)
+        assert manager._transport_factory is create_external_transport
+        assert bootstrap.external_registry_manager is not None
+        assert bootstrap.external_registry_manager.external_registry_store is bootstrap.profile_store
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_config_bootstrap_default_factory_rejects_unsupported_transport(
+    tmp_path: Path,
+) -> None:
+    """Unsupported server transports should fail at runtime start, not bootstrap."""
+
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(enabled=True),
+            ),
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        asyncio.run(
+            bootstrap.profile_store.create_server(
+                ExternalServerDefinition(
+                    id="remote-docs",
+                    name="Remote Docs",
+                    transport="websocket",
+                    url="wss://example.invalid/mcp",
+                )
+            )
+        )
+
+        with pytest.raises(GatewayExternalRuntimeError) as exc_info:
+            asyncio.run(manager.start_server("remote-docs"))
+
+        assert exc_info.value.reason_code == "external_server_start_failed"
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_config_bootstrap_external_runtime_uses_injected_transport_factory(
+    tmp_path: Path,
+) -> None:
+    """Caller-injected transport factories should override the package default."""
+
+    from mcp_unified.federation.models import ExternalToolDefinition
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    class RecordingTransport:
+        transport_name = "recording"
+
+        def __init__(self, server_id: str) -> None:
+            self.server_id = server_id
+            self.connected = False
+            self.close_count = 0
+
+        async def connect(self) -> None:
+            self.connected = True
+
+        async def close(self) -> None:
+            self.close_count += 1
+            self.connected = False
+
+        async def health_check(self) -> dict[str, bool]:
+            return {
+                "configured": True,
+                "connected": self.connected,
+                "initialized": self.connected,
+            }
+
+        async def list_tools(self) -> list[ExternalToolDefinition]:
+            return [ExternalToolDefinition(name="search", description="Search")]
+
+        async def call_tool(
+            self,
+            tool_name: str,
+            arguments: dict[str, Any],
+            *,
+            context: Any = None,
+            runtime_auth: Any = None,
+        ) -> dict[str, Any]:
+            del tool_name, arguments, context, runtime_auth
+            return {"content": []}
+
+    transports: list[RecordingTransport] = []
+
+    def factory(server: ExternalServerDefinition) -> RecordingTransport:
+        transport = RecordingTransport(server.id)
+        transports.append(transport)
+        return transport
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(enabled=True),
+            ),
+            external_transport_factory=factory,
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        asyncio.run(
+            bootstrap.profile_store.create_server(
+                ExternalServerDefinition(
+                    id="research",
+                    name="Research",
+                    transport="stdio",
+                    command=["fake-mcp-server"],
+                )
+            )
+        )
+
+        payload = asyncio.run(manager.start_server("research"))
+        stop_payload = asyncio.run(manager.stop_server("research"))
+
+        assert payload["ok"] is True
+        assert payload["tool_count"] == 1
+        assert stop_payload["reason_code"] == "external_server_stopped"
+        assert [transport.server_id for transport in transports] == ["research"]
+        assert transports[0].close_count == 1
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_config_bootstrap_rejects_unsupported_external_runtime_factory() -> None:
+    """Reject unsupported transport factory selectors instead of silently degrading."""
+
+    from mcp_unified.gateway.config import GatewayExternalRuntimeBootstrapConfig
+
+    with pytest.raises(ValueError, match="Unsupported gateway external runtime factory"):
+        GatewayExternalRuntimeBootstrapConfig(
+            enabled=True,
+            transport_factory="websocket",  # type: ignore[arg-type]
+        )
+
+
+def test_gateway_config_bootstrap_rejects_external_runtime_without_registry_store() -> None:
+    """Runtime management requires an external registry-capable store."""
+
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+
+    with pytest.raises(ValueError, match="external runtime management requires"):
+        asyncio.run(
+            bootstrap_profile_gateway_from_config(
+                _MultiToolGatewayRuntime(),
+                GatewayProfileBootstrapConfig(
+                    external_runtime=GatewayExternalRuntimeBootstrapConfig(enabled=True),
+                ),
+            )
+        )
 
 
 def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Path) -> None:

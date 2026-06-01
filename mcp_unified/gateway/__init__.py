@@ -9,6 +9,7 @@ from .bootstrap import (
 )
 from .config import (
     GatewayConfigFormat,
+    GatewayExternalRuntimeBootstrapConfig,
     GatewayProfileBootstrapConfig,
     GatewayProfileStoreConfig,
     GatewayProfileStoreKind,
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 __all__ = [
     "GatewayPolicyDenied",
     "GatewayConfigFormat",
+    "GatewayExternalRuntimeBootstrapConfig",
     "GatewayExternalRuntimeError",
     "GatewayExternalRuntimeManager",
     "GatewayProfileBootstrap",

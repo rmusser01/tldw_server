@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from mcp_unified.interfaces.storage import (
     AuditStore,
@@ -27,12 +27,22 @@ from .external_registry import GatewayExternalRegistryManager, GatewayStoreMetad
 from .profiles import GatewayProfileStoreMetadata
 from .runtime import GatewayRuntime
 
+if TYPE_CHECKING:
+    from mcp_unified.federation.installers import ExternalServerInstaller
+    from mcp_unified.federation.transports import ExternalFederationTransport
+    from mcp_unified.gateway.external_runtime import (
+        ExternalCredentialBroker,
+        GatewayExternalRuntimeManager,
+    )
+    from mcp_unified.storage.models import ExternalServerDefinition
+
 try:  # pragma: no cover - Python <3.11 fallback is exercised only on older runtimes.
     import tomllib as _tomllib
 except ModuleNotFoundError:  # pragma: no cover - defensive for unsupported runtimes.
     _tomllib = None
 
 GatewayConfigFormat = Literal["json", "toml"]
+GatewayExternalRuntimeFactoryKind = Literal["stdio"]
 GatewayProfileStoreKind = Literal["memory", "sqlite"]
 
 
@@ -60,6 +70,32 @@ class GatewayProfileStoreConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class GatewayExternalRuntimeBootstrapConfig:
+    """External runtime manager bootstrap selection for standalone gateways."""
+
+    enabled: bool = False
+    transport_factory: GatewayExternalRuntimeFactoryKind = "stdio"
+
+    def __post_init__(self) -> None:
+        """Validate and normalize the configured runtime factory selector."""
+
+        if not isinstance(self.enabled, bool):
+            raise ValueError("external_runtime.enabled must be a boolean")
+
+        normalized_factory = str(self.transport_factory).strip().lower()
+        if normalized_factory != "stdio":
+            raise ValueError(
+                "Unsupported gateway external runtime factory: "
+                f"{self.transport_factory!r}"
+            )
+        object.__setattr__(
+            self,
+            "transport_factory",
+            cast(GatewayExternalRuntimeFactoryKind, normalized_factory),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GatewayProfileBootstrapConfig:
     """Profile bootstrap configuration for a standalone gateway runtime."""
 
@@ -69,6 +105,9 @@ class GatewayProfileBootstrapConfig:
     profiles: Iterable[MCPProfile | Mapping[str, Any]] = field(default_factory=tuple)
     default_profile_id: str | None = None
     default_preset_id: str | None = None
+    external_runtime: GatewayExternalRuntimeBootstrapConfig | Mapping[str, Any] = field(
+        default_factory=GatewayExternalRuntimeBootstrapConfig
+    )
 
     def __post_init__(self) -> None:
         """Normalize nested config values into copy-isolated profile data."""
@@ -79,7 +118,17 @@ class GatewayProfileBootstrapConfig:
         elif not isinstance(store, GatewayProfileStoreConfig):
             raise TypeError("store must be a GatewayProfileStoreConfig or mapping")
 
+        external_runtime = self.external_runtime
+        if isinstance(external_runtime, Mapping):
+            external_runtime = GatewayExternalRuntimeBootstrapConfig(**external_runtime)
+        elif not isinstance(external_runtime, GatewayExternalRuntimeBootstrapConfig):
+            raise TypeError(
+                "external_runtime must be a "
+                "GatewayExternalRuntimeBootstrapConfig or mapping"
+            )
+
         object.__setattr__(self, "store", store)
+        object.__setattr__(self, "external_runtime", external_runtime)
         object.__setattr__(
             self,
             "profiles",
@@ -113,6 +162,12 @@ class ExternalRegistryStorageConfigurationError(ValueError):
     reason_code = "external_registry_store_unavailable"
 
 
+class ExternalRuntimeConfigurationError(ValueError):
+    """Raised when configured storage cannot support external runtime management."""
+
+    reason_code = "external_runtime_store_unavailable"
+
+
 async def bootstrap_profile_gateway_from_config(
     backend: GatewayRuntime,
     config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None = None,
@@ -120,6 +175,14 @@ async def bootstrap_profile_gateway_from_config(
     profile_store: ProfileStore | None = None,
     assignment_store: ProfileAssignmentStore | None = None,
     audit_store: AuditStore | None = None,
+    external_runtime_manager: GatewayExternalRuntimeManager | None = None,
+    external_transport_factory: Callable[
+        [ExternalServerDefinition],
+        ExternalFederationTransport,
+    ]
+    | None = None,
+    credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
+    external_installer: ExternalServerInstaller | None = None,
 ) -> GatewayProfileBootstrap:
     """Build a profile-aware gateway runtime from explicit gateway config."""
 
@@ -131,6 +194,7 @@ async def bootstrap_profile_gateway_from_config(
         audit_store=audit_store,
     )
     external_registry_manager: GatewayExternalRegistryManager | None = None
+    external_storage: GatewayExternalRegistryStorageBundle | None = None
     if _supports_external_registry_store(storage.profile_store):
         external_storage = build_gateway_external_registry_storage(
             resolved_config.store,
@@ -139,6 +203,23 @@ async def bootstrap_profile_gateway_from_config(
         )
         external_registry_manager = external_registry_manager_from_storage(
             external_storage,
+        )
+
+    resolved_external_runtime_manager = external_runtime_manager
+    if (
+        resolved_external_runtime_manager is None
+        and resolved_config.external_runtime.enabled
+    ):
+        if external_storage is None:
+            raise ExternalRuntimeConfigurationError(
+                "external runtime management requires sqlite or an injected "
+                "external registry-capable profile store"
+            )
+        resolved_external_runtime_manager = external_runtime_manager_from_storage(
+            external_storage,
+            transport_factory=external_transport_factory,
+            credential_broker=credential_broker,
+            installer=external_installer,
         )
 
     return await bootstrap_profile_gateway(
@@ -151,6 +232,7 @@ async def bootstrap_profile_gateway_from_config(
         default_profile_id=resolved_config.default_profile_id,
         default_preset_id=resolved_config.default_preset_id,
         external_registry_manager=external_registry_manager,
+        external_runtime_manager=resolved_external_runtime_manager,
     )
 
 
@@ -275,6 +357,32 @@ def external_registry_manager_from_storage(
         credential_grant_store=bundle.credential_grant_store,
         audit_store=bundle.audit_store,
         store_metadata=bundle.metadata,
+    )
+
+
+def external_runtime_manager_from_storage(
+    bundle: GatewayExternalRegistryStorageBundle,
+    *,
+    transport_factory: Callable[
+        [ExternalServerDefinition],
+        ExternalFederationTransport,
+    ]
+    | None = None,
+    credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
+    installer: ExternalServerInstaller | None = None,
+) -> GatewayExternalRuntimeManager:
+    """Build an external runtime manager from resolved storage dependencies."""
+
+    from mcp_unified.federation import create_external_transport
+
+    from .external_runtime import GatewayExternalRuntimeManager
+
+    return GatewayExternalRuntimeManager(
+        external_registry_store=bundle.external_registry_store,
+        transport_factory=transport_factory or create_external_transport,
+        audit_store=bundle.audit_store,
+        credential_broker=credential_broker,
+        installer=installer,
     )
 
 
@@ -516,6 +624,8 @@ def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
 
 __all__ = [
     "GatewayConfigFormat",
+    "GatewayExternalRuntimeBootstrapConfig",
+    "GatewayExternalRuntimeFactoryKind",
     "GatewayExternalRegistryStorageBundle",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileStoreConfig",
@@ -525,5 +635,6 @@ __all__ = [
     "build_gateway_external_registry_storage",
     "build_gateway_profile_storage",
     "external_registry_manager_from_storage",
+    "external_runtime_manager_from_storage",
     "load_gateway_profile_bootstrap_config",
 ]
