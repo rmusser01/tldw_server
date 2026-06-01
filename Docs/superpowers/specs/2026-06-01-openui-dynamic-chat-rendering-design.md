@@ -44,6 +44,7 @@ This means OpenUI support is literal, but the persistence and rendering contract
 
 Recommended initial mode:
 
+0. verify the OpenUI runtime can be safely bundled and rendered in the target WebUI environment;
 1. final-render OpenUI after the assistant response completes;
 2. persist explicit dynamic metadata with the assistant message;
 3. support a source fallback;
@@ -122,6 +123,8 @@ For OpenUI v1, `source` is the OpenUI Lang source string consumed by the OpenUI 
 
 V1 writer decision: the frontend tags the completed assistant message when the request was sent with OpenUI mode enabled. The backend should preserve this data through the existing `metadata_extra`/message metadata path. If implementation planning finds that a save endpoint drops opaque metadata, the required backend work is an additive persistence fix, not a separate OpenUI generation endpoint.
 
+Do not tag a message with `metadataExtra.dynamic_ui` solely because OpenUI mode was requested. The completed assistant content must first pass the OpenUI adapter's source preflight. If the model returns plain text, a refusal, partial/incomplete OpenUI, or source the adapter rejects, save it as a normal assistant message and preserve a non-rendering request/failure note only if useful for debugging.
+
 ## Architecture
 
 Add a shared `DynamicMessageRenderer` inside `apps/packages/ui`. This component receives a chat message, inspects `metadataExtra.dynamic_ui`, and renders through a registry.
@@ -165,6 +168,8 @@ Responsibilities:
 - translate app theme tokens into OpenUI-compatible theme variables;
 - report user actions through the shared dynamic action callback;
 - degrade cleanly in extension contexts if a capability is unavailable.
+
+Before enabling the adapter, implementation planning must verify the exact OpenUI package/runtime, license, bundle impact, dynamic code-evaluation behavior, CSP compatibility, and component allowlist behavior. If the runtime requires unsafe evaluation or CSP exceptions that are not acceptable for this project, the feature should remain behind source fallback until a safer adapter path exists.
 
 ### OpenUI Mode Control
 
@@ -235,7 +240,9 @@ Validation requirements:
 - `actionId` and `actionType` must be bounded strings;
 - `actionType` must be one of the supported v1 action types, initially `submit`;
 - `values` must be a JSON-serializable object within configured depth and size limits;
-- values are treated as untrusted user input and are serialized into a normal chat turn before sending.
+- file/blob values are out of scope for v1;
+- values are treated as untrusted user input and are serialized into a normal chat turn before sending;
+- sensitive-looking fields such as password, token, secret, credential, key, or auth values must be blocked or require explicit confirmation before they are serialized into the visible chat history.
 
 ## Data Flow
 
@@ -263,6 +270,8 @@ The prompt layer needs:
 The backend should not add an OpenAI-only `/api/openui/generate` equivalent as the main path. If a future document-generation endpoint is needed, it should still use the project provider abstraction and the same dynamic UI metadata contract.
 
 For v1, OpenUI prompt insertion is owned by the frontend chat send path because OpenUI is a temporary composer/request mode. The prompt text should still be centralized in a shared helper so backend ownership can be introduced later without changing the product contract.
+
+The OpenUI instruction should behave as an app-owned rendering contract, not as user content. It must not overwrite the user's existing system prompt, character/persona overlay, RAG/context injection, or attachments. The send path should place it at the highest-priority role supported by the existing provider abstraction, falling back to the established system-prompt assembly behavior for providers that do not support a distinct developer instruction role.
 
 ## Rendering Policy
 
@@ -364,6 +373,14 @@ Manual QA should cover:
 
 ## Rollout Plan
 
+### Stage 0: Runtime Feasibility Gate
+
+- Confirm the exact OpenUI runtime package/import path.
+- Confirm license, bundle size, CSP behavior, and dynamic evaluation behavior.
+- Confirm that the adapter can render through an allowlisted component set.
+- Confirm `/chat` can load the adapter without SSR/build regressions.
+- Keep the renderer disabled/source-fallback if this gate fails.
+
 ### Stage 1: Contract And Final Render
 
 - Add dynamic UI metadata types.
@@ -386,10 +403,16 @@ Manual QA should cover:
 - Convert supported actions into normal user chat turns.
 - Add regression coverage for form submission.
 
-### Stage 4: Shared Surface Expansion
+### Stage 4a: Shared Surface Expansion
 
 - Enable active rendering in sidepanel/workspace surfaces after CSP and layout checks.
+
+### Stage 4b: Artifact Rail Support
+
 - Add artifact rail open/pin support for dynamic UI messages.
+
+### Stage 4c: Streaming Preview
+
 - Add streaming preview if final rendering proves stable.
 
 ## Implementation Planning Decisions

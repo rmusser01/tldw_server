@@ -30,7 +30,7 @@ Create an approved design spec for supporting OpenUI as the first renderer in a 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and reviewed for OpenUI as the first renderer in a shared dynamic UI chat rendering layer. V1 decisions: temporary /chat composer/request mode, frontend-tagged metadata preserved through existing persistence, final render before streaming preview, source fallback outside enabled surfaces, and validated OpenUI action round-trips as normal user messages with provenance metadata.
+Design spec written and reviewed for OpenUI as the first renderer in a shared dynamic UI chat rendering layer. V1 decisions: temporary /chat composer/request mode, frontend-tagged metadata preserved through existing persistence after OpenUI source preflight, final render before streaming preview, source fallback outside enabled surfaces, runtime/CSP feasibility gate before adapter enablement, and validated OpenUI action round-trips as normal user messages with provenance metadata and sensitive-field safeguards.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
