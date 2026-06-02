@@ -29,7 +29,6 @@ import {
   type ChatCompletionRequest
 } from "@/services/tldw/TldwApiClient"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
-import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
 
 const request: ChatCompletionRequest = {
   model: "auto",

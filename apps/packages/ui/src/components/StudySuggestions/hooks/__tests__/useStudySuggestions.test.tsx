@@ -11,7 +11,6 @@ import {
   refreshStudySuggestionSnapshot,
   type StudySuggestionSnapshotResponse
 } from "@/services/studySuggestions"
-import type { StudySuggestionSnapshotResponse } from "@/services/studySuggestions"
 
 vi.mock("@/hooks/useServerOnline", () => ({
   useServerOnline: () => true
