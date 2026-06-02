@@ -643,6 +643,51 @@ class TestResponseManager:
             [0.01, 0.02, 0.03, 0.04],
         ]
 
+    def test_cached_chat_fixture_keeps_request_model_dynamic(self, tmp_path):
+        """Test cached response fixtures are not mutated by model echoing."""
+        responses_dir = tmp_path / "responses"
+        chat_dir = responses_dir / "chat"
+        chat_dir.mkdir(parents=True)
+        (chat_dir / "default.json").write_text(
+            json.dumps(
+                {
+                    "id": "chatcmpl-dynamic-model",
+                    "object": "chat.completion",
+                    "created": 1770000000,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "dynamic model response",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 4,
+                        "completion_tokens": 4,
+                        "total_tokens": 8,
+                    },
+                }
+            ),
+            encoding="utf8",
+        )
+
+        manager = ResponseManager(responses_dir=responses_dir)
+
+        hosted = manager.generate_chat_response(
+            {"model": "gpt-4.1-mini", "messages": []},
+            "chat/default.json",
+        )
+        local = manager.generate_chat_response(
+            {"model": "local-uat-chat", "messages": []},
+            "chat/default.json",
+        )
+
+        assert hosted.model == "gpt-4.1-mini"
+        assert local.model == "local-uat-chat"
+
 
 class TestErrorHandling:
     """Test error handling and simulation."""

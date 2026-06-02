@@ -5,6 +5,7 @@ Handles loading response templates and generating appropriate responses.
 """
 
 import json
+from copy import deepcopy
 import random
 import time
 import uuid
@@ -48,7 +49,7 @@ class ResponseManager:
         # Cache responses to avoid repeated file reads
         cache_key = str(file_path)
         if cache_key in self.response_cache:
-            return self.response_cache[cache_key]
+            return deepcopy(self.response_cache[cache_key])
 
         if not file_path.exists():
             # Return a default response if file not found
@@ -63,7 +64,7 @@ class ResponseManager:
 
             response = json.loads(content)
             self.response_cache[cache_key] = response
-            return response
+            return deepcopy(response)
 
     def get_template_vars(self) -> Dict[str, Any]:
         """Get template variables for response substitution."""
