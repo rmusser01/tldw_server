@@ -489,6 +489,60 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(mockAddMedia.mock.calls[0]?.[1]).not.toHaveProperty("embedding_model")
   })
 
+  it("classifies recognized video hosts by parsed hostname", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    mockAddMedia.mockResolvedValueOnce({
+      results: [{ media_id: 9002, title: "Video" }]
+    })
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("https://example.com/article or YouTube URL"),
+      {
+        target: { value: "https://www.youtube.com/watch?v=demo" }
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+
+    await waitFor(() => {
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaId: 9002,
+          type: "video"
+        })
+      )
+    })
+  })
+
+  it("does not classify spoofed video-domain substrings as video hosts", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    mockAddMedia.mockResolvedValueOnce({
+      results: [{ media_id: 9003, title: "Spoofed URL" }]
+    })
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("https://example.com/article or YouTube URL"),
+      {
+        target: {
+          value: "https://example.com/watch?next=https://youtube.com/watch?v=demo"
+        }
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+
+    await waitFor(() => {
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaId: 9003,
+          type: "website"
+        })
+      )
+    })
+  })
+
   it("renders search snippets and favicon hints in web results", async () => {
     workspaceStoreState.addSourceModalTab = "search"
     mockWebSearch.mockResolvedValueOnce({

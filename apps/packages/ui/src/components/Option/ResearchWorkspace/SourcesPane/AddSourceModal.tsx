@@ -1840,6 +1840,11 @@ const ExistingTab: React.FC<{
   )
 }
 
+const VIDEO_SOURCE_HOSTS = ["youtube.com", "youtu.be", "vimeo.com"] as const
+
+const hostnameMatchesDomain = (hostname: string, domain: string): boolean =>
+  hostname === domain || hostname.endsWith(`.${domain}`)
+
 // Helper functions
 function getSourceTypeFromFile(file: File): WorkspaceSourceType {
   const ext = file.name.split(".").pop()?.toLowerCase() || ""
@@ -1858,17 +1863,22 @@ function getSourceTypeFromFile(file: File): WorkspaceSourceType {
 }
 
 function getSourceTypeFromUrl(url: string): WorkspaceSourceType {
-  const urlLower = url.toLowerCase()
-  if (
-    urlLower.includes("youtube.com") ||
-    urlLower.includes("youtu.be") ||
-    urlLower.includes("vimeo.com")
-  ) {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return "website"
+  }
+
+  const hostname = parsed.hostname.toLowerCase()
+  if (VIDEO_SOURCE_HOSTS.some((domain) => hostnameMatchesDomain(hostname, domain))) {
     return "video"
   }
-  if (urlLower.endsWith(".pdf")) return "pdf"
-  if (urlLower.match(/\.(mp3|wav|m4a|ogg|flac)$/)) return "audio"
-  if (urlLower.match(/\.(mp4|webm|mkv|avi|mov)$/)) return "video"
+
+  const pathname = parsed.pathname.toLowerCase()
+  if (pathname.endsWith(".pdf")) return "pdf"
+  if (pathname.match(/\.(mp3|wav|m4a|ogg|flac)$/)) return "audio"
+  if (pathname.match(/\.(mp4|webm|mkv|avi|mov)$/)) return "video"
 
   return "website"
 }
