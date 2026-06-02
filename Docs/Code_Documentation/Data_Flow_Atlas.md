@@ -1151,9 +1151,9 @@ flowchart LR
 
 ### Characters And Workspaces
 
-**Purpose:** Manage character cards, character chat sessions/messages/memory, workspace sources/artifacts/notes, and their handoff into chat and LLM generation.
+**Purpose:** Manage character cards, character chat sessions/messages/memory, workspace sources/artifacts/notes, workspace migrations, and their handoff into chat and LLM generation.
 
-**Primary entrypoints:** Character endpoints, character session/message/memory routes, workspace CRUD, workspace sources/artifacts/notes/capabilities/status routes, and prototype workspace/session routes.
+**Primary entrypoints:** Character endpoints, character session/message/memory routes, workspace CRUD, workspace sources/artifacts/notes/capabilities/status routes, workspace migration session/chunk/finalize/client-delete-ack routes, and prototype workspace/session routes.
 
 ```mermaid
 flowchart LR
@@ -1162,18 +1162,21 @@ flowchart LR
         Sessions[Character sessions/messages/memory]
         Workspaces[Workspaces]
         Sources[Workspace sources, artifacts, notes]
+        Migrations[Workspace migrations]
         Prototype[Prototype workspaces and branch sessions]
     end
 
     subgraph Core["Core services"]
         CharCore[Character_Chat modules]
         WorkspaceCore[Workspace capability and DB helpers]
+        MigrationCore[Migration session and chunk protocol]
         ProtoCore[Prototype workspace orchestration]
         ChatHandoff[Chat orchestration handoff]
     end
 
     subgraph Storage
         ChaCha[Per-user ChaChaNotes DB]
+        MigrationTables[Workspace migration sessions and chunks]
         AuthDB[AuthNZ prototype workspace repos]
         Jobs[Jobs for branch/source bootstrap]
     end
@@ -1187,6 +1190,8 @@ flowchart LR
     Sessions --> CharCore --> ChaCha
     Workspaces --> WorkspaceCore --> ChaCha
     Sources --> WorkspaceCore --> ChaCha
+    Migrations --> MigrationCore --> MigrationTables --> ChaCha
+    MigrationCore --> WorkspaceCore
     Prototype --> ProtoCore --> AuthDB
     Prototype --> Jobs
     CharCore --> ChatHandoff
@@ -1195,9 +1200,9 @@ flowchart LR
     ChatHandoff --> LLM
 ```
 
-**Key storage/provider touchpoints:** Characters, sessions, messages, memories, workspaces, workspace sources, artifacts, and notes live primarily in the per-user ChaChaNotes DB. Prototype workspace collaboration uses AuthNZ repository storage and Jobs for branch/session bootstrap. Character and workspace context can be passed to chat orchestration, which then calls RAG and LLM providers.
+**Key storage/provider touchpoints:** Characters, sessions, messages, memories, workspaces, workspace sources, artifacts, notes, and workspace migration records live primarily in the per-user ChaChaNotes DB. Workspace migrations create or reuse a target workspace, record migration sessions and declared chunks, accept idempotent chunk receipts, finalize only after all chunks are present, and track client legacy-delete acknowledgement state. Prototype workspace collaboration uses AuthNZ repository storage and Jobs for branch/session bootstrap. Character and workspace context can be passed to chat orchestration, which then calls RAG and LLM providers.
 
-**Where to look in code:** `app/api/v1/endpoints/characters_endpoint.py`, `app/api/v1/endpoints/workspaces.py`, `app/api/v1/endpoints/prototype_workspaces.py`, `app/core/Character_Chat/`, `app/core/Workspaces/`, `app/core/Prototype_Workspaces/`, `app/core/DB_Management/ChaChaNotes_DB.py`, and chat orchestration modules.
+**Where to look in code:** `app/api/v1/endpoints/characters_endpoint.py`, `app/api/v1/endpoints/workspaces.py`, `app/api/v1/endpoints/workspace_migrations.py`, `app/api/v1/endpoints/prototype_workspaces.py`, `app/core/Character_Chat/`, `app/core/Workspaces/`, `app/core/Prototype_Workspaces/`, workspace migration schema/methods in `app/core/DB_Management/ChaChaNotes_DB.py`, and chat orchestration modules.
 
 ### Integrations And Connectors
 
