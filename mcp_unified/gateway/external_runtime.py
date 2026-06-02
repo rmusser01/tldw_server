@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import traceback
 from collections.abc import Callable, Iterable
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -441,6 +442,12 @@ class GatewayExternalRuntimeManager:
                 for name in sorted(self._virtual_tools)
             ]
 
+    async def has_virtual_tool(self, virtual_tool_name: str) -> bool:
+        """Return whether an active virtual tool exists without copying the catalog."""
+
+        async with self._lock:
+            return virtual_tool_name in self._virtual_tools
+
     async def install_server(
         self,
         server_id: str,
@@ -804,10 +811,12 @@ class GatewayExternalRuntimeManager:
                 "error_type": "TimeoutError",
             }
         except Exception as exc:  # noqa: BLE001 - installer adapters are optional.
+            traceback_frames = self._traceback_frames(exc)
             logger.error(
-                "External installer status failed server_id={!r} error_type={!r}",
+                "External installer status failed server_id={!r} error_type={!r} traceback_frames={!r}",
                 server.id,
                 type(exc).__name__,
+                traceback_frames,
             )
             return {
                 "available": False,
@@ -836,17 +845,19 @@ class GatewayExternalRuntimeManager:
         try:
             payload = await callback()
         except Exception as exc:  # noqa: BLE001 - installer adapters define failures.
+            traceback_frames = self._traceback_frames(exc)
             logger.error(
-                "External installer operation failed operation={!r} server_id={!r} error_type={!r}",
+                "External installer operation failed operation={!r} server_id={!r} error_type={!r} traceback_frames={!r}",
                 operation,
                 server.id,
                 type(exc).__name__,
+                traceback_frames,
             )
             raise GatewayExternalRuntimeError(
                 f"External server {operation} failed",
                 reason_code=failure_reason_code,
                 server_id=server.id,
-            ) from exc
+            ) from self._sanitized_exception_cause(exc)
         return self._installer_payload(
             payload,
             server=server,
@@ -1350,6 +1361,25 @@ class GatewayExternalRuntimeManager:
         message = str(exc).strip()
         error_type = type(exc).__name__
         return f"{error_type}: {message}" if message else error_type
+
+    @staticmethod
+    def _traceback_frames(exc: BaseException) -> list[dict[str, Any]]:
+        """Return traceback frame locations without exception messages or source text."""
+
+        return [
+            {
+                "function": frame.name,
+                "line": frame.lineno,
+                "path": frame.filename,
+            }
+            for frame in traceback.extract_tb(exc.__traceback__)
+        ]
+
+    @staticmethod
+    def _sanitized_exception_cause(exc: BaseException) -> RuntimeError:
+        """Return a chainable cause that preserves error type without secret text."""
+
+        return RuntimeError(type(exc).__name__)
 
     @staticmethod
     def _virtual_tool_name(server_id: str, tool_name: str) -> str:

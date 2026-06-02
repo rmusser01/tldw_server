@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         GatewayExternalRuntimeError,
         GatewayExternalRuntimeManager,
     )
+    from .external_runtime_adapter import ExternalRuntimeGatewayRuntime
     from .fastapi import create_gateway_app, create_gateway_router
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "GatewayExternalRuntimeLifecycleConfig",
     "GatewayExternalRuntimeError",
     "GatewayExternalRuntimeManager",
+    "ExternalRuntimeGatewayRuntime",
     "GatewayProfileBootstrap",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileManagementError",
@@ -81,4 +83,8 @@ def __getattr__(name: str) -> Any:
             "GatewayExternalRuntimeError": GatewayExternalRuntimeError,
             "GatewayExternalRuntimeManager": GatewayExternalRuntimeManager,
         }[name]
+    if name == "ExternalRuntimeGatewayRuntime":
+        from .external_runtime_adapter import ExternalRuntimeGatewayRuntime
+
+        return ExternalRuntimeGatewayRuntime
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
