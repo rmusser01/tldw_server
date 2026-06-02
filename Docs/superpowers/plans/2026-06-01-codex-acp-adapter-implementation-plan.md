@@ -1220,7 +1220,7 @@ Actual verification:
 - `git diff --check` passed.
 - UI package typecheck with `NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc --noEmit --project tsconfig.json` failed on existing non-ACP errors in QuickIngest, Layout, Playground, Sidepanel, onboarding, option-index, and quick-ingest-open files; no errors were reported for the ACP files changed in this task.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```bash
 git add apps/packages/ui/src/services/acp/types.ts \
