@@ -60,7 +60,7 @@ import {
 } from "@/store/model";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
-import { ChevronDown, Keyboard, Search, X } from "lucide-react";
+import { ChevronDown, Keyboard, PanelRightOpen, Search, X } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
@@ -71,7 +71,7 @@ import { useSetting } from "@/hooks/useSetting";
 import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { useMcpToolsStore } from "@/store/mcp-tools";
-import { useMobile } from "@/hooks/useMediaQuery";
+import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
@@ -111,6 +111,10 @@ import {
   SETTINGS_HISTORY_ID_PARAM,
   SETTINGS_SERVER_CHAT_ID_PARAM,
 } from "@/utils/settings-return";
+import {
+  decodeSidepanelChatWebUiHandoff,
+  SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
+} from "@/services/tldw/sidepanel-chat-webui-handoff";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -134,6 +138,20 @@ import {
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
+
+const readSidepanelChatWebUiHandoffFromLocation = () => {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(
+    window.location.hash.startsWith("#")
+      ? window.location.hash.slice(1)
+      : window.location.hash,
+  );
+  return decodeSidepanelChatWebUiHandoff(
+    hashParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) ??
+      params.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
+  );
+};
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
@@ -221,6 +239,8 @@ const normalizeChatWorkflowMode = (
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
+  const pendingArtifactsPanelFocusRef = React.useRef(false);
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
   const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null);
@@ -262,6 +282,7 @@ export const Playground = () => {
     DEFAULT_CHAT_SETTINGS.stickyChatInput,
   );
   const isMobileViewport = useMobile();
+  const isDesktopViewport = useDesktop();
   const location = useLocation();
   const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
     ? "focus"
@@ -347,6 +368,12 @@ export const Playground = () => {
     setServerChatId,
     contextFiles,
     setContextFiles,
+    chatMode,
+    setChatMode,
+    setWebSearch,
+    setTemporaryChat,
+    useOCR,
+    setUseOCR,
     createChatBranch,
     streaming,
     isProcessing,
@@ -491,6 +518,7 @@ export const Playground = () => {
     typeof setTimeout
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
+  const sidepanelHandoffAppliedRef = React.useRef(false);
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
   const routeCharacterIntentRequestRef = React.useRef(0);
@@ -1270,6 +1298,9 @@ export const Playground = () => {
     if (routeCharacterIntentId) {
       return;
     }
+    if (readSidepanelChatWebUiHandoffFromLocation()) {
+      return;
+    }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
     const isEnabled = await webUIResumeLastChat();
@@ -1382,6 +1413,7 @@ export const Playground = () => {
         historyId: null as string | null,
         serverChatId: null as string | null,
         researchReturnRunId: null as string | null,
+        sidepanelHandoff: null,
       };
     }
     const params = new URLSearchParams(window.location.search);
@@ -1390,13 +1422,15 @@ export const Playground = () => {
       params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
     const researchReturnRunId =
       params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
-    return { historyId, serverChatId, researchReturnRunId };
+    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation();
+    return { historyId, serverChatId, researchReturnRunId, sidepanelHandoff };
   }, []);
 
   const returnHistoryIdFromSettings = settingsReturnContext.historyId;
   const returnServerChatIdFromSettings = settingsReturnContext.serverChatId;
   const returnResearchRunIdFromSettings =
     settingsReturnContext.researchReturnRunId;
+  const sidepanelChatHandoff = settingsReturnContext.sidepanelHandoff;
 
   React.useEffect(() => {
     if (!playgroundReady) return;
@@ -1475,6 +1509,147 @@ export const Playground = () => {
     serverChatId,
     setServerChatId,
     dismissedReturnedResearchRunId,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      !sidepanelChatHandoff ||
+      sidepanelHandoffAppliedRef.current
+    ) {
+      return;
+    }
+    sidepanelHandoffAppliedRef.current = true;
+
+    let cancelled = false;
+    const applySidepanelHandoff = async () => {
+      if (
+        sidepanelChatHandoff.historyId &&
+        sidepanelChatHandoff.historyId !== historyId
+      ) {
+        await loadLocalConversation(sidepanelChatHandoff.historyId);
+      }
+      if (cancelled) return;
+
+      if (
+        sidepanelChatHandoff.serverChatId &&
+        sidepanelChatHandoff.serverChatId !== serverChatId
+      ) {
+        setServerChatId(sidepanelChatHandoff.serverChatId);
+      }
+      if (
+        sidepanelChatHandoff.selectedModel &&
+        sidepanelChatHandoff.selectedModel !== selectedModel
+      ) {
+        setSelectedModel(sidepanelChatHandoff.selectedModel);
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(
+          sidepanelChatHandoff,
+          "selectedSystemPrompt",
+        )
+      ) {
+        const nextSystemPrompt =
+          sidepanelChatHandoff.selectedSystemPrompt ?? null;
+        if (nextSystemPrompt !== selectedSystemPrompt) {
+          setSelectedSystemPrompt(nextSystemPrompt);
+        }
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(
+          sidepanelChatHandoff,
+          "selectedQuickPrompt",
+        )
+      ) {
+        const nextQuickPrompt = sidepanelChatHandoff.selectedQuickPrompt ?? null;
+        if (nextQuickPrompt !== selectedQuickPrompt) {
+          setSelectedQuickPrompt(nextQuickPrompt);
+        }
+      }
+      if (
+        sidepanelChatHandoff.chatMode &&
+        sidepanelChatHandoff.chatMode !== chatMode
+      ) {
+        setChatMode(sidepanelChatHandoff.chatMode);
+      }
+      if (
+        typeof sidepanelChatHandoff.webSearch === "boolean" &&
+        sidepanelChatHandoff.webSearch !== webSearch
+      ) {
+        setWebSearch(sidepanelChatHandoff.webSearch);
+      }
+      if (
+        sidepanelChatHandoff.toolChoice &&
+        sidepanelChatHandoff.toolChoice !== toolChoice
+      ) {
+        setToolChoice(sidepanelChatHandoff.toolChoice);
+      }
+      if (
+        typeof sidepanelChatHandoff.temporaryChat === "boolean" &&
+        sidepanelChatHandoff.temporaryChat !== temporaryChat
+      ) {
+        setTemporaryChat(sidepanelChatHandoff.temporaryChat);
+      }
+      if (
+        typeof sidepanelChatHandoff.useOCR === "boolean" &&
+        sidepanelChatHandoff.useOCR !== useOCR
+      ) {
+        setUseOCR(sidepanelChatHandoff.useOCR);
+      }
+
+      if (sidepanelChatHandoff.draft?.trim()) {
+        requestAnimationFrame(() => {
+          window.dispatchEvent(
+            new CustomEvent("tldw:set-composer-message", {
+              detail: {
+                message: sidepanelChatHandoff.draft,
+                ifEmptyOnly: true,
+              },
+            }),
+          );
+        });
+      }
+
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        const hashParams = new URLSearchParams(
+          url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
+        );
+        hashParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        const nextQuery = url.searchParams.toString();
+        const nextHash = hashParams.toString();
+        const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${nextHash ? `#${nextHash}` : ""}`;
+        window.history.replaceState(window.history.state, "", nextPath);
+      }
+    };
+
+    void applySidepanelHandoff();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    chatMode,
+    historyId,
+    loadLocalConversation,
+    selectedModel,
+    selectedQuickPrompt,
+    selectedSystemPrompt,
+    serverChatId,
+    setChatMode,
+    setSelectedModel,
+    setSelectedQuickPrompt,
+    setSelectedSystemPrompt,
+    setServerChatId,
+    setTemporaryChat,
+    setToolChoice,
+    setUseOCR,
+    setWebSearch,
+    sidepanelChatHandoff,
+    temporaryChat,
+    toolChoice,
+    useOCR,
+    webSearch,
   ]);
 
   const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(
@@ -1665,6 +1840,8 @@ export const Playground = () => {
   const setArtifactsOpen = useArtifactsStore((state) => state.setOpen);
   const closeArtifacts = useArtifactsStore((state) => state.closeArtifact);
   const markArtifactsRead = useArtifactsStore((state) => state.markRead);
+  const shouldShowArtifactsEdgeExpand =
+    isDesktopViewport && Boolean(activeArtifact) && !artifactsOpen;
 
   const parentMeta =
     historyId && compareParentByHistory
@@ -1725,6 +1902,35 @@ export const Playground = () => {
       artifactsTriggerRef.current?.focus();
     });
   }, [closeArtifacts]);
+  const openArtifactsFromEdge = React.useCallback(() => {
+    if (!activeArtifact) return;
+    pendingArtifactsPanelFocusRef.current = true;
+    setArtifactsOpen(true);
+    markArtifactsRead();
+  }, [activeArtifact, markArtifactsRead, setArtifactsOpen]);
+
+  React.useEffect(() => {
+    if (!artifactsOpen || !pendingArtifactsPanelFocusRef.current) return;
+    pendingArtifactsPanelFocusRef.current = false;
+    const focusPanelClose = () => {
+      const closeButton = document.querySelector<HTMLButtonElement>(
+        '[data-testid="artifacts-panel-close"]',
+      );
+      if (closeButton) {
+        closeButton.focus();
+        return true;
+      }
+      return false;
+    };
+    window.requestAnimationFrame(() => {
+      if (focusPanelClose()) return;
+      window.setTimeout(() => {
+        if (!focusPanelClose()) {
+          artifactsTriggerRef.current?.focus();
+        }
+      }, 0);
+    });
+  }, [artifactsOpen]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1819,6 +2025,10 @@ export const Playground = () => {
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handleFocusArtifactsTrigger = () => {
+      if (artifactsEdgeExpandRef.current) {
+        artifactsEdgeExpandRef.current.focus();
+        return;
+      }
       artifactsTriggerRef.current?.focus();
     };
     window.addEventListener(
@@ -3044,7 +3254,10 @@ export const Playground = () => {
           rightRail={cockpitRightRail}
           statusStrip={cockpitStatusStrip}
         >
-          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            data-testid="playground-chat-shell"
+            className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+          >
             {parentMeta?.parentHistoryId && (
               <div className="flex w-full justify-center px-5 pt-2">
                 <div className="inline-flex flex-wrap items-center justify-center gap-2">
@@ -3451,7 +3664,9 @@ export const Playground = () => {
             <div
               ref={composerDockRef}
               data-testid={
-                stickyChatInput ? "playground-chat-composer-dock" : undefined
+                stickyChatInput
+                  ? "playground-chat-composer-dock"
+                  : "playground-chat-composer-region"
               }
               className={`relative w-full ${
                 mobileCockpitComposerConstrained
@@ -3543,6 +3758,35 @@ export const Playground = () => {
             </div>
           </div>
         </PlaygroundCockpitShell>
+        {shouldShowArtifactsEdgeExpand && (
+          <button
+            ref={artifactsEdgeExpandRef}
+            type="button"
+            data-testid="playground-artifacts-edge-expand"
+            aria-label={
+              t(
+                "playground:regions.expandArtifactsRail",
+                "Expand artifacts rail",
+              ) as string
+            }
+            title={
+              t(
+                "playground:regions.expandArtifactsRail",
+                "Expand artifacts rail",
+              ) as string
+            }
+            onClick={openArtifactsFromEdge}
+            className="absolute right-0 top-1/2 z-40 inline-flex h-32 w-10 -translate-y-1/2 flex-col items-center justify-center gap-2 rounded-l-lg border border-r-0 border-border bg-surface/95 text-text-muted shadow-lg backdrop-blur transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          >
+            <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+            <span
+              aria-hidden="true"
+              className="text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]"
+            >
+              Artifacts
+            </span>
+          </button>
+        )}
         {artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">

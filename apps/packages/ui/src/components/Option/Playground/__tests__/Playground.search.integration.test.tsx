@@ -4,6 +4,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { Playground } from "../Playground"
+import {
+  decodeSidepanelChatWebUiHandoff,
+  encodeSidepanelChatWebUiHandoff,
+  SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
+  SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
+} from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -15,12 +21,26 @@ const messageOptionState = vi.hoisted(() => ({
     historyId: "history-1",
     serverChatId: "chat-1",
     isLoading: false,
+    selectedModel: "model-1",
+    selectedSystemPrompt: "prompt-1",
+    selectedQuickPrompt: "quick-1",
+    chatMode: "normal",
+    webSearch: false,
+    toolChoice: "none",
+    temporaryChat: false,
+    useOCR: false,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
     setSelectedSystemPrompt: vi.fn(),
+    setSelectedQuickPrompt: vi.fn(),
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
+    setChatMode: vi.fn(),
+    setWebSearch: vi.fn(),
+    setToolChoice: vi.fn(),
+    setTemporaryChat: vi.fn(),
+    setUseOCR: vi.fn(),
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
@@ -56,6 +76,17 @@ const mobileViewportState = vi.hoisted(() => ({
   value: false
 }))
 
+const desktopViewportState = vi.hoisted(() => ({
+  value: true
+}))
+
+const artifactFixture = vi.hoisted(() => ({
+  id: "artifact-1",
+  title: "Generated table",
+  content: "a,b\n1,2",
+  kind: "table" as const
+}))
+
 const storeOptionState = vi.hoisted(() => ({
   value: {
     compareParentByHistory: {} as Record<
@@ -68,6 +99,13 @@ const storeOptionState = vi.hoisted(() => ({
 const routerState = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
+
+const chatSettingsState = vi.hoisted(() => ({
+  syncChatSettingsForServerChat: vi.fn(async () => null),
+  applyChatSettingsPatch: vi.fn(async () => null)
+}))
+
+const loadLocalConversationMock = vi.hoisted(() => vi.fn(async () => {}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -177,11 +215,19 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => mobileViewportState.value
+  useMobile: () => mobileViewportState.value,
+  useDesktop: () => desktopViewportState.value
+}))
+
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: (...args: unknown[]) =>
+    chatSettingsState.syncChatSettingsForServerChat(...args),
+  applyChatSettingsPatch: (...args: unknown[]) =>
+    chatSettingsState.applyChatSettingsPatch(...args)
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
-  useLoadLocalConversation: () => vi.fn(async () => {})
+  useLoadLocalConversation: () => loadLocalConversationMock
 }))
 
 vi.mock("../playground-shortcuts", () => ({
@@ -213,8 +259,24 @@ describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mobileViewportState.value = false
+    desktopViewportState.value = true
+    loadLocalConversationMock.mockClear()
+    messageOptionState.value.historyId = "history-1"
+    messageOptionState.value.serverChatId = "chat-1"
+    messageOptionState.value.selectedModel = "model-1"
+    messageOptionState.value.selectedSystemPrompt = "prompt-1"
+    messageOptionState.value.selectedQuickPrompt = "quick-1"
+    messageOptionState.value.chatMode = "normal"
+    messageOptionState.value.webSearch = false
+    messageOptionState.value.toolChoice = "none"
+    messageOptionState.value.temporaryChat = false
+    messageOptionState.value.useOCR = false
     artifactsState.value.isOpen = false
+    artifactsState.value.active = null
+    artifactsState.value.history = []
+    artifactsState.value.unreadCount = 0
     storeOptionState.value.compareParentByHistory = {}
+    window.history.replaceState(null, "", "/chat")
   })
 
   it("opens in-thread search on Cmd/Ctrl+F and forwards query to PlaygroundChat", async () => {
@@ -275,6 +337,56 @@ describe("Playground thread search integration", () => {
     expect(routerState.navigate).not.toHaveBeenCalled()
   })
 
+  it("shows a desktop right-edge artifacts expand button only when an artifact is active and the rail is closed", () => {
+    artifactsState.value.active = artifactFixture
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+
+    expect(
+      screen.getByRole("button", { name: "Expand artifacts rail" })
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("artifacts-panel")).not.toBeInTheDocument()
+  })
+
+  it("does not show the right-edge artifacts expand button without an active artifact", () => {
+    artifactsState.value.active = null
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+
+    expect(
+      screen.queryByRole("button", { name: "Expand artifacts rail" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("opens artifacts from the right edge and marks them read", () => {
+    artifactsState.value.active = artifactFixture
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Expand artifacts rail" }))
+
+    expect(artifactsState.value.setOpen).toHaveBeenCalledWith(true)
+    expect(artifactsState.value.markRead).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes artifact focus events to the edge button when the rail is closed", async () => {
+    artifactsState.value.active = artifactFixture
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+    const edgeButton = screen.getByRole("button", {
+      name: "Expand artifacts rail"
+    })
+
+    window.dispatchEvent(new CustomEvent("tldw:focus-artifacts-trigger"))
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(edgeButton)
+    })
+  })
+
   it("shows mobile artifacts sheet context and returns focus to trigger when closing", async () => {
     mobileViewportState.value = true
     artifactsState.value.isOpen = true
@@ -333,5 +445,61 @@ describe("Playground thread search integration", () => {
     })
 
     window.removeEventListener("tldw:open-history", onOpenHistory)
+  })
+
+  it("restores sidepanel WebUI handoff state from the URL fragment and clears the fragment", async () => {
+    messageOptionState.value.historyId = "history-1"
+    messageOptionState.value.serverChatId = null
+    messageOptionState.value.selectedSystemPrompt = "stale-system"
+    messageOptionState.value.selectedQuickPrompt = "stale-quick"
+
+    const encodedHandoff = encodeSidepanelChatWebUiHandoff({
+      source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+      createdAt: Date.now(),
+      draft: "continue from the sidepanel",
+      historyId: "history-handoff",
+      serverChatId: "server-handoff",
+      selectedSystemPrompt: null,
+      selectedQuickPrompt: "",
+      chatMode: "rag",
+      webSearch: true,
+      toolChoice: "auto",
+      temporaryChat: true,
+      useOCR: true
+    })
+    const hashParams = new URLSearchParams()
+    hashParams.set(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM, encodedHandoff)
+    window.history.replaceState(null, "", `/chat#${hashParams.toString()}`)
+    expect(decodeSidepanelChatWebUiHandoff(encodedHandoff)).toMatchObject({
+      historyId: "history-handoff"
+    })
+
+    render(<Playground />)
+
+    await waitFor(
+      () => {
+        expect(loadLocalConversationMock).toHaveBeenCalledWith(
+          "history-handoff"
+        )
+      },
+      { timeout: 5_000 }
+    )
+    await waitFor(() => {
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(
+        "server-handoff"
+      )
+    })
+    expect(
+      messageOptionState.value.setSelectedSystemPrompt
+    ).toHaveBeenCalledWith(null)
+    expect(messageOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
+      null
+    )
+    expect(messageOptionState.value.setChatMode).toHaveBeenCalledWith("rag")
+    expect(messageOptionState.value.setWebSearch).toHaveBeenCalledWith(true)
+    expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith("auto")
+    expect(messageOptionState.value.setTemporaryChat).toHaveBeenCalledWith(true)
+    expect(messageOptionState.value.setUseOCR).toHaveBeenCalledWith(true)
+    expect(window.location.hash).toBe("")
   })
 })

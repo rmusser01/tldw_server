@@ -25,4 +25,14 @@ describe("Layout chat sidebar reset signal", () => {
     expect(source).toContain("if (chatSidebarCollapsed) signalChatSidebarOpen()")
     expect(source).toContain('window.addEventListener("tldw:open-chat-sidebar", handler)')
   })
+
+  it("scopes chat desktop collapsed sidebar to an edge expand affordance", () => {
+    const source = readFileSync(layoutSourcePath, "utf8")
+
+    expect(source).toContain("useDesktop")
+    expect(source).toContain("useChatEdgeCollapse")
+    expect(source).toContain('data-testid="chat-sidebar-edge-expand"')
+    expect(source).toContain("isChatScreen && isDesktop")
+    expect(source).toContain("!useChatEdgeCollapse || !chatSidebarCollapsed")
+  })
 })
