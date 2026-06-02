@@ -101,7 +101,7 @@ jobs:
     timeout-minutes: 40
     env:
       TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
-      TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
+      TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "5000"
       TLDW_E2E_EXTENSION_HEADLESS: "0"
 
     steps:
@@ -143,5 +143,6 @@ jobs:
           name: research-workspace-extension-parity-artifacts
           if-no-files-found: ignore
           path: |
+            apps/extension/.workspace-parity-e2e-report.json
             apps/extension/test-results/**
             apps/extension/playwright-report/**
