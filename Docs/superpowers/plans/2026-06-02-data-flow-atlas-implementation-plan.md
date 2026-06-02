@@ -46,7 +46,7 @@ Do not modify backend code.
 - Read: `Docs/superpowers/plans/2026-06-02-data-flow-atlas-implementation-plan.md`
 - Update: `backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md`
 
-- [ ] **Step 1: Read the approved design spec**
+- [x] **Step 1: Read the approved design spec**
 
 Run:
 
@@ -56,7 +56,7 @@ sed -n '1,440p' Docs/superpowers/specs/2026-06-02-data-flow-atlas-design.md
 
 Expected: the spec describes the layered atlas, phased delivery, router coverage table, concrete router registration anchors, and verification requirements.
 
-- [ ] **Step 2: Check working tree state**
+- [x] **Step 2: Check working tree state**
 
 Run:
 
@@ -66,7 +66,7 @@ git status --short
 
 Expected: unrelated dirty files may exist. Do not revert or stage unrelated changes.
 
-- [ ] **Step 3: Confirm Backlog tracking task**
+- [x] **Step 3: Confirm Backlog tracking task**
 
 Use the Backlog MCP workflow. View `TASK-502`:
 
@@ -76,7 +76,7 @@ backlog task TASK-502 --plain
 
 Expected: `TASK-502` exists and remains the authoritative task for atlas implementation verification. Do not create a duplicate implementation task. `TASK-503` is only for this plan document.
 
-- [ ] **Step 4: Commit checkpoint**
+- [x] **Step 4: Commit checkpoint**
 
 No commit is required for read-only preflight unless a new Backlog task file was created.
 
@@ -97,7 +97,7 @@ Expected: commit only the Backlog task update.
 - Create: `Docs/Code_Documentation/Data_Flow_Atlas.md`
 - Update: `backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md`
 
-- [ ] **Step 1: Inspect nearby docs for tone and link style**
+- [x] **Step 1: Inspect nearby docs for tone and link style**
 
 Run:
 
@@ -109,7 +109,7 @@ sed -n '1,220p' Docs/Getting_Started/ARCHITECTURE.md
 
 Expected: existing docs use concise Markdown, Mermaid fences, and relative doc links.
 
-- [ ] **Step 2: Create the atlas skeleton**
+- [x] **Step 2: Create the atlas skeleton**
 
 Create `Docs/Code_Documentation/Data_Flow_Atlas.md` with these top-level sections:
 
@@ -149,7 +149,7 @@ Use this atlas as a flow map, not as an OpenAPI replacement. Route names, module
 
 Expected: the file exists and has the agreed structure.
 
-- [ ] **Step 3: Add section placeholders**
+- [x] **Step 3: Add section placeholders**
 
 Add placeholder headings for all later stages:
 
@@ -182,7 +182,7 @@ Add placeholder headings for all later stages:
 
 Expected: later stages can fill sections without changing the overall shape.
 
-- [ ] **Step 4: Run a skeleton text check**
+- [x] **Step 4: Run a skeleton text check**
 
 Run:
 
@@ -192,7 +192,7 @@ rg -n "Data Flow Atlas|System Context|Router Coverage Matrix|How To Update This 
 
 Expected: all required section names appear.
 
-- [ ] **Step 5: Commit foundation skeleton**
+- [x] **Step 5: Commit foundation skeleton**
 
 ```bash
 git add Docs/Code_Documentation/Data_Flow_Atlas.md 'backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md'
@@ -220,7 +220,7 @@ Expected: commit only the atlas skeleton and related Backlog task update.
 - Read: `Docs/Architecture.md`
 - Read: `Docs/Code_Documentation/Code_Map.md`
 
-- [ ] **Step 1: Inspect router registration anchors**
+- [x] **Step 1: Inspect router registration anchors**
 
 Run:
 
@@ -230,7 +230,7 @@ rg -n "def (include_router_idempotent|register_router_specs|register_all_routers
 
 Expected: output includes `include_router_idempotent`, `register_router_specs`, `register_all_routers`, `RouterSpec.resolve_router`, `append_imported_router_spec`, router group iterator functions, and minimal registration calls in `main.py`.
 
-- [ ] **Step 2: Add the System Context flowchart**
+- [x] **Step 2: Add the System Context flowchart**
 
 Add a Mermaid `flowchart LR` showing:
 
@@ -243,7 +243,7 @@ Add a Mermaid `flowchart LR` showing:
 
 Expected: the diagram keeps labels short and uses subgraphs.
 
-- [ ] **Step 3: Add the Request Lifecycle sequence diagram**
+- [x] **Step 3: Add the Request Lifecycle sequence diagram**
 
 Add a Mermaid `sequenceDiagram` from client to router registration, endpoint, dependencies, core module, storage/provider/worker, and response.
 
@@ -257,7 +257,7 @@ Must include these branches or notes:
 
 Expected: contributors can identify where cross-cutting concerns belong.
 
-- [ ] **Step 4: Add the Router Group Map**
+- [x] **Step 4: Add the Router Group Map**
 
 Add a Mermaid `flowchart TB` showing:
 
@@ -270,7 +270,7 @@ Add a Mermaid `flowchart TB` showing:
 
 Expected: the map shows registration/gating flow, not only filenames.
 
-- [ ] **Step 5: Add the Data Store Map**
+- [x] **Step 5: Add the Data Store Map**
 
 Add a Mermaid `flowchart LR` showing shared versus per-user storage:
 
@@ -285,7 +285,7 @@ Add a Mermaid `flowchart LR` showing shared versus per-user storage:
 
 Expected: storage ownership is clear enough for debugging data isolation issues.
 
-- [ ] **Step 6: Run foundation checks**
+- [x] **Step 6: Run foundation checks**
 
 Run:
 
@@ -295,7 +295,7 @@ rg -n "flowchart|sequenceDiagram|include_router_idempotent|register_router_specs
 
 Expected: all foundation map anchors appear.
 
-- [ ] **Step 7: Commit foundation maps**
+- [x] **Step 7: Commit foundation maps**
 
 ```bash
 git add Docs/Code_Documentation/Data_Flow_Atlas.md 'backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md'
@@ -315,7 +315,7 @@ Expected: commit only atlas updates and related Backlog task update.
 - Read selected files under `tldw_Server_API/app/core/`
 - Read module docs under `Docs/Code_Documentation/`, `Docs/STT-TTS/`, and `Docs/MCP/Unified/`
 
-- [ ] **Step 1: Inspect core flow anchors**
+- [x] **Step 1: Inspect core flow anchors**
 
 Run:
 
@@ -325,7 +325,7 @@ rg -n "chat/completions|audio/transcriptions|stream/transcribe|media/add|process
 
 Expected: output identifies representative endpoint/core/doc anchors for the core flow diagrams.
 
-- [ ] **Step 2: Add Auth And User Context**
+- [x] **Step 2: Add Auth And User Context**
 
 Add `Purpose`, `Primary entrypoints`, Mermaid diagram, storage/provider touchpoints, and code links.
 
@@ -341,7 +341,7 @@ Required content:
 
 Expected: the diagram distinguishes identity/auth storage from per-user content storage.
 
-- [ ] **Step 3: Add Media Ingestion**
+- [x] **Step 3: Add Media Ingestion**
 
 Required content:
 
@@ -355,7 +355,7 @@ Required content:
 
 Expected: the diagram explains how content becomes searchable/RAG-ready.
 
-- [ ] **Step 4: Add Audio STT/TTS**
+- [x] **Step 4: Add Audio STT/TTS**
 
 Required content:
 
@@ -368,7 +368,7 @@ Required content:
 
 Expected: file, streaming, and TTS paths are visually distinct.
 
-- [ ] **Step 5: Add Chunking And Embeddings**
+- [x] **Step 5: Add Chunking And Embeddings**
 
 Required content:
 
@@ -381,7 +381,7 @@ Required content:
 
 Expected: the diagram makes clear that chunking and embeddings can be API-triggered or ingestion-triggered.
 
-- [ ] **Step 6: Add RAG/Search**
+- [x] **Step 6: Add RAG/Search**
 
 Required content:
 
@@ -395,7 +395,7 @@ Required content:
 
 Expected: hybrid retrieval flow is clear.
 
-- [ ] **Step 7: Add Chat And LLM Provider Calls**
+- [x] **Step 7: Add Chat And LLM Provider Calls**
 
 Required content:
 
@@ -408,7 +408,7 @@ Required content:
 
 Expected: chat generation and retrieval are shown as related but separable paths.
 
-- [ ] **Step 8: Add Jobs And Scheduler**
+- [x] **Step 8: Add Jobs And Scheduler**
 
 Required content:
 
@@ -419,7 +419,7 @@ Required content:
 
 Expected: contributors understand when to use Jobs versus Scheduler.
 
-- [ ] **Step 9: Run core flow checks**
+- [x] **Step 9: Run core flow checks**
 
 Run:
 
@@ -429,7 +429,7 @@ rg -n "Auth And User Context|Media Ingestion|Audio STT/TTS|Chunking And Embeddin
 
 Expected: every core flow section and key term appears.
 
-- [ ] **Step 10: Commit core flows**
+- [x] **Step 10: Commit core flows**
 
 ```bash
 git add Docs/Code_Documentation/Data_Flow_Atlas.md 'backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md'
@@ -447,7 +447,7 @@ Expected: commit only atlas updates and related Backlog task update.
 - Update: `backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md`
 - Read selected endpoint/core docs for each domain
 
-- [ ] **Step 1: Inspect extended domain anchors**
+- [x] **Step 1: Inspect extended domain anchors**
 
 Run:
 
@@ -457,43 +457,43 @@ rg -n "evaluations|mcp|prompt_studio|chatbooks|notes|research|web_scraping|stora
 
 Expected: output identifies representative endpoint/core/doc anchors for extended maps.
 
-- [ ] **Step 2: Add Evaluations map**
+- [x] **Step 2: Add Evaluations map**
 
 Show recipes, datasets, runs, evaluator services, RAG eval hooks, LLM judge/provider calls, metrics/results persistence.
 
-- [ ] **Step 3: Add MCP Unified map**
+- [x] **Step 3: Add MCP Unified map**
 
 Show HTTP/WebSocket entrypoints, auth/RBAC, tool/module registry, domain dispatch, status/metrics/tool execution outputs.
 
-- [ ] **Step 4: Add Prompt Studio map**
+- [x] **Step 4: Add Prompt Studio map**
 
 Show projects, prompts, test cases, optimization/evaluation/status/WebSocket routes, prompt studio DB, provider calls, and job/background path where applicable.
 
-- [ ] **Step 5: Add Notes And Chatbooks map**
+- [x] **Step 5: Add Notes And Chatbooks map**
 
 Show notes/graph/web clipper, ChaChaNotes DB, chatbooks import/export, background job path, and generated artifacts/storage.
 
-- [ ] **Step 6: Add Research And Web Scraping map**
+- [x] **Step 6: Add Research And Web Scraping map**
 
 Show research routes, paper search, web search/scraping, external sources/connectors, ingestion handoff, Media DB/RAG handoff.
 
-- [ ] **Step 7: Add Storage, Files, And Outputs map**
+- [x] **Step 7: Add Storage, Files, And Outputs map**
 
 Show storage routes, user files/folders/trash/downloads, outputs/templates, generated file helpers, file storage, quotas, and signed download behavior where documented.
 
-- [ ] **Step 8: Add Admin, Ops, And Governance map**
+- [x] **Step 8: Add Admin, Ops, And Governance map**
 
 Show admin route group, monitoring/metrics/audit, orgs/billing/privileges, resource governor, jobs admin, config admin, and shared AuthNZ/usage storage.
 
-- [ ] **Step 9: Add Characters And Workspaces map**
+- [x] **Step 9: Add Characters And Workspaces map**
 
 Show character endpoints, character sessions/messages/memory, workspace routes/migrations, ChaChaNotes DB, chat/LLM handoff.
 
-- [ ] **Step 10: Add Integrations And Connectors map**
+- [x] **Step 10: Add Integrations And Connectors map**
 
 Show connectors, ingestion sources, Slack/Discord/Telegram/meetings, external providers, ingestion/research handoff, optional route gating.
 
-- [ ] **Step 11: Run extended domain checks**
+- [x] **Step 11: Run extended domain checks**
 
 Run:
 
@@ -503,7 +503,7 @@ rg -n "Evaluations|MCP Unified|Prompt Studio|Notes And Chatbooks|Research And We
 
 Expected: all extended domain maps appear.
 
-- [ ] **Step 12: Commit extended maps**
+- [x] **Step 12: Commit extended maps**
 
 ```bash
 git add Docs/Code_Documentation/Data_Flow_Atlas.md 'backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md'
@@ -522,7 +522,7 @@ Expected: commit only atlas updates and related Backlog task update.
 - Modify: `Docs/Code_Documentation/Code_Map.md`
 - Update: `backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md`
 
-- [ ] **Step 1: Build the router coverage matrix**
+- [x] **Step 1: Build the router coverage matrix**
 
 In `Data_Flow_Atlas.md`, add a compact table:
 
@@ -547,7 +547,7 @@ Include representative rows for:
 
 Expected: every domain group from the approved spec has a row.
 
-- [ ] **Step 2: Add the update checklist**
+- [x] **Step 2: Add the update checklist**
 
 Add a short checklist under `How To Update This Atlas`:
 
@@ -561,7 +561,7 @@ Add a short checklist under `How To Update This Atlas`:
 
 Expected: future maintainers have a low-friction update path.
 
-- [ ] **Step 3: Link from Architecture.md**
+- [x] **Step 3: Link from Architecture.md**
 
 Modify `Docs/Architecture.md` near the existing visual diagram/code-map sentence:
 
@@ -571,7 +571,7 @@ For detailed backend data flow and process diagrams, see `Docs/Code_Documentatio
 
 Expected: `Docs/Architecture.md` points readers to the atlas without becoming longer.
 
-- [ ] **Step 4: Link from Code_Map.md**
+- [x] **Step 4: Link from Code_Map.md**
 
 Modify `Docs/Code_Documentation/Code_Map.md` near the high-level architecture or key flows section:
 
@@ -581,7 +581,7 @@ For a deeper Mermaid atlas of request lifecycle, router groups, storage ownershi
 
 Expected: code-map readers can jump to the detailed atlas.
 
-- [ ] **Step 5: Run link checks**
+- [x] **Step 5: Run link checks**
 
 Run:
 
@@ -591,7 +591,7 @@ rg -n "Data_Flow_Atlas.md" Docs/Architecture.md Docs/Code_Documentation/Code_Map
 
 Expected: all three docs reference the atlas path.
 
-- [ ] **Step 6: Commit coverage and links**
+- [x] **Step 6: Commit coverage and links**
 
 ```bash
 git add Docs/Code_Documentation/Data_Flow_Atlas.md Docs/Architecture.md Docs/Code_Documentation/Code_Map.md 'backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md'
@@ -608,7 +608,7 @@ Expected: commit only atlas, link docs, and related Backlog task update.
 - Read: `Docs/Code_Documentation/Data_Flow_Atlas.md`
 - Modify: `backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md`
 
-- [ ] **Step 1: Check required sections and source anchors**
+- [x] **Step 1: Check required sections and source anchors**
 
 Run:
 
@@ -618,7 +618,7 @@ rg -n "System Context|Request Lifecycle|Router Group Map|Data Store Map|Router C
 
 Expected: all required sections and key anchors appear.
 
-- [ ] **Step 2: Check Mermaid fence count**
+- [x] **Step 2: Check Mermaid fence count**
 
 Run:
 
@@ -653,7 +653,7 @@ awk '
 
 Expected: command exits `0` and prints equal open/close counts.
 
-- [ ] **Step 3: Optionally render-check Mermaid if a renderer exists**
+- [x] **Step 3: Optionally render-check Mermaid if a renderer exists**
 
 Run:
 
@@ -663,7 +663,7 @@ command -v mmdc
 
 Expected: if this prints a path, run a local render check into `/tmp` and do not commit generated assets. If unavailable, record that Mermaid render-check was skipped because no local renderer was available.
 
-- [ ] **Step 4: Verify atlas links**
+- [x] **Step 4: Verify atlas links**
 
 Run:
 
@@ -673,7 +673,7 @@ rg -n "Data_Flow_Atlas.md" Docs/Architecture.md Docs/Code_Documentation/Code_Map
 
 Expected: all intended docs link to the atlas.
 
-- [ ] **Step 5: Verify router coverage against router group files**
+- [x] **Step 5: Verify router coverage against router group files**
 
 Run:
 
@@ -683,7 +683,7 @@ rg -n "ImportedRouterSpec|RouterSpec\\(|iter_.*router_specs|route_key=|log_name=
 
 Expected: manually compare the output to the router coverage matrix. Every major group/domain should be represented or explicitly grouped.
 
-- [ ] **Step 6: Record docs-only security handling**
+- [x] **Step 6: Record docs-only security handling**
 
 Update the Backlog task final summary:
 
@@ -693,7 +693,7 @@ Bandit skipped: documentation-only change; no Python code modified.
 
 Expected: security validation skip is explicit and justified.
 
-- [ ] **Step 7: Final status check**
+- [x] **Step 7: Final status check**
 
 Run:
 
@@ -703,7 +703,7 @@ git status --short Docs/Code_Documentation/Data_Flow_Atlas.md Docs/Architecture.
 
 Expected: only intended files are modified or staged.
 
-- [ ] **Step 8: Commit final verification update**
+- [x] **Step 8: Commit final verification update**
 
 ```bash
 git add 'backlog/tasks/task-502 - Design-tldw-Server-API-data-flow-atlas.md'
@@ -714,14 +714,14 @@ Expected: commit only final Backlog task update if all doc changes were already 
 
 ## Final Acceptance Criteria
 
-- [ ] `Docs/Code_Documentation/Data_Flow_Atlas.md` exists.
-- [ ] Atlas is Mermaid-only and contains no generated image assets.
-- [ ] Atlas includes system context, request lifecycle, router group map, data-store map, core flows, extended domain maps, router coverage matrix, and update checklist.
-- [ ] Atlas cites real code/doc anchors for router registration, endpoint groups, core modules, storage, providers, and workers.
-- [ ] `Docs/Architecture.md` links to the atlas.
-- [ ] `Docs/Code_Documentation/Code_Map.md` links to the atlas.
-- [ ] Router coverage matrix accounts for all major router groups/domains in the approved spec.
-- [ ] Markdown/Mermaid text checks were run.
-- [ ] Mermaid render-check was run when a local renderer existed, or the skip was recorded.
-- [ ] Bandit skip was recorded as documentation-only.
-- [ ] Backlog task records touched files, verification, known skips, and final summary.
+- [x] `Docs/Code_Documentation/Data_Flow_Atlas.md` exists.
+- [x] Atlas is Mermaid-only and contains no generated image assets.
+- [x] Atlas includes system context, request lifecycle, router group map, data-store map, core flows, extended domain maps, router coverage matrix, and update checklist.
+- [x] Atlas cites real code/doc anchors for router registration, endpoint groups, core modules, storage, providers, and workers.
+- [x] `Docs/Architecture.md` links to the atlas.
+- [x] `Docs/Code_Documentation/Code_Map.md` links to the atlas.
+- [x] Router coverage matrix accounts for all major router groups/domains in the approved spec.
+- [x] Markdown/Mermaid text checks were run.
+- [x] Mermaid render-check was run when a local renderer existed, or the skip was recorded.
+- [x] Bandit skip was recorded as documentation-only.
+- [x] Backlog task records touched files, verification, known skips, and final summary.

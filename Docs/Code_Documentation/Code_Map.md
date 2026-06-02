@@ -45,8 +45,8 @@ For a deeper Mermaid atlas of request lifecycle, router groups, storage ownershi
 ## API Surface (Selected)
 
 - Auth & Users: `auth.py`, `users.py`
-- Media: `media.py`, `media_embeddings.py`
-- Audio: `audio.py` (OpenAI-compatible STT + WebSocket streaming)
+- Media: `media/` endpoint package, `media_embeddings.py`
+- Audio: `audio/` endpoint package (OpenAI-compatible STT + WebSocket streaming)
 - Chunking: `chunking.py`, `chunking_templates.py`
 - Embeddings: `embeddings_v5_production_enhanced.py`, `vector_stores_openai.py`
 - RAG: `rag_unified.py`, `rag_health.py`, `workflows.py`
