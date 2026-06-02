@@ -198,7 +198,7 @@ This section highlights common flows a new contributor will likely touch.
 ### 5.1 Media Ingestion → Chunking → Embeddings → RAG
 
 1. Client calls one of the `POST /api/v1/media/process-*` endpoints (e.g., `/process-documents`, `/process-videos`, `/process-audios`) or `/api/v1/media/add` when also persisting to the Media DB.
-2. Endpoint in `app/api/v1/endpoints/media.py`:
+2. Endpoint package `app/api/v1/endpoints/media/`:
    - Validates input and resolves user/context.
    - Calls into `core/Ingestion_Media_Processing/`.
 3. Ingestion module:
