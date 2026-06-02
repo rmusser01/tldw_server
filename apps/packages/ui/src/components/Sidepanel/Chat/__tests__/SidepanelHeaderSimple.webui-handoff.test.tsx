@@ -85,9 +85,7 @@ describe("SidepanelHeaderSimple WebUI chat handoff", () => {
     const onOpenChatInWebUi = vi.fn().mockResolvedValue(undefined)
 
     render(
-      React.createElement(SidepanelHeaderSimple as React.ComponentType, {
-        onOpenChatInWebUi
-      })
+      <SidepanelHeaderSimple onOpenChatInWebUi={onOpenChatInWebUi} />
     )
 
     fireEvent.click(screen.getByTestId("chat-open-full-screen"))

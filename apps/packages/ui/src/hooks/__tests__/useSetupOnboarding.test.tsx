@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { FirstRunState } from "@/types/setup-onboarding"
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -108,7 +109,7 @@ describe("useSetupOnboarding", () => {
 
   it("continues the initial setup load across a remount", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const state = {
+    const state: FirstRunState = {
       status: "completed",
       completed_steps: ["first_chat"],
       skipped_steps: [],
