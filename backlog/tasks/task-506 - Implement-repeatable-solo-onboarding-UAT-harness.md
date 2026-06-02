@@ -16,6 +16,12 @@ documentation:
   because no ASGI transport is configured. Frontend baseline bunx vitest run __tests__/e2e-harness-readiness.guard.test.ts
   failed before tests because fresh worktree lacks local node dependencies (cannot
   resolve vitest/config and @vitejs/plugin-react).'
+- 'Task 1 complete at c277ba2ef9 + review fix 9a3cf52aea. Mock server suite: RUN_MOCK_OPENAI=1
+  /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest mock_openai_server/tests/test_server.py
+  -q => 23 passed'
+- 3 warnings. git diff --check clean. Frontend guard now runs after partial dependency
+  hydration but still fails on pre-existing e2e/smoke/stage4-axe-high-risk-routes.spec.ts
+  networkidle usage; not caused by Task 1.
 ---
 
 ## Description
