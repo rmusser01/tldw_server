@@ -4,7 +4,7 @@ title: Implement standalone MCP gateway admin auth and credential grant manageme
 status: To Do
 assignee: []
 created_date: ''
-updated_date: '2026-06-02 02:05'
+updated_date: '2026-06-02 02:20'
 labels:
   - mcp-unified
   - standalone-gateway
@@ -27,6 +27,9 @@ Add a package-owned admin auth seam plus credential-grant metadata manager, Fast
 - [ ] #4 Credential grants persist only broker references, slots, scopes, metadata, and provenance; secret-looking values are rejected or omitted before persistence.
 - [ ] #5 External-server delete guards continue to block deletion when enabled grants reference the server.
 - [ ] #6 Focused tests and Bandit on touched package files are recorded.
+- [ ] #7 Standalone config can enable admin auth and resolve the admin key from an environment variable without persisting the key.
+- [ ] #8 Credential-grant create rejects duplicate ids atomically instead of replacing existing grants.
+- [ ] #9 Admin auth errors return direct stable JSON payloads rather than framework-wrapped detail payloads.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,8 +50,8 @@ Docs/superpowers/plans/2026-06-02-mcp-gateway-admin-auth-credential-grants.md
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

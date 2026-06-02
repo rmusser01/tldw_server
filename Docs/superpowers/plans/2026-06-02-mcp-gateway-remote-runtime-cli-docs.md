@@ -4,7 +4,7 @@
 
 **Goal:** Add CLI commands that control external runtime lifecycle operations by calling a running standalone gateway, then document the end-to-end standalone admin workflow.
 
-**Architecture:** Keep process ownership clear: local CLI store commands edit persistent config, while remote runtime CLI commands call HTTP admin endpoints on an already-running gateway. Use a small package-owned remote admin client with stdlib HTTP transport unless the package already depends on an HTTP client; pass admin auth through headers from environment/config without logging secret values.
+**Architecture:** Keep process ownership clear: local CLI store commands edit persistent config, while remote runtime CLI commands call HTTP admin endpoints on an already-running gateway. `--gateway-url` is the gateway admin base URL, including whatever prefix the server mounted, for example `http://127.0.0.1:8000/mcp`; the client only trims trailing slashes and appends endpoint paths. Use a small package-owned remote admin client with stdlib HTTP transport unless the package already depends on an HTTP client; pass admin auth through headers from environment/config without logging secret values.
 
 **Tech Stack:** Python, argparse, stdlib `urllib.request` or existing HTTP client if already required, FastAPI admin routes, pytest, Bandit, Markdown docs.
 
@@ -26,9 +26,9 @@
 ## Acceptance Criteria
 
 - CLI can call a running gateway for runtime list/start/stop/restart/refresh/reconcile/install/update operations.
-- CLI runtime commands require an explicit `--gateway-url` or `MCP_UNIFIED_GATEWAY_URL`.
+- CLI runtime commands require an explicit `--gateway-url` or `MCP_UNIFIED_GATEWAY_URL`, and that URL is documented as the already-mounted gateway base path such as `http://host/mcp`.
 - Admin auth uses an environment-provided value such as `MCP_UNIFIED_GATEWAY_ADMIN_KEY`; command-line secret arguments are avoided.
-- CLI preserves the gateway JSON payloads and reason codes.
+- CLI preserves the gateway JSON payloads and reason codes for both successful responses and HTTP 4xx/5xx error bodies.
 - Docs explain local store commands versus remote runtime commands and include a safe credential-grant example.
 - No runtime CLI command starts an upstream process that becomes orphaned when the CLI exits.
 
@@ -39,7 +39,7 @@
 
 - [ ] **Step 1: Write URL normalization tests**
 
-Assert base URLs with or without trailing slash resolve paths such as `/mcp/external-servers/runtime` correctly.
+Assert base URLs with or without trailing slash resolve endpoint paths correctly. Treat `http://host/mcp` as the gateway base and resolve runtime list to `http://host/mcp/external-servers/runtime`; do not automatically add `/mcp` to `http://host` because gateway prefixes are configurable.
 
 - [ ] **Step 2: Write auth header tests**
 
@@ -49,7 +49,11 @@ Assert the remote client sends the configured admin header when `MCP_UNIFIED_GAT
 
 Use a fake request function to assert JSON payload passthrough for success and sanitized error envelopes for malformed responses or connection failures.
 
-- [ ] **Step 4: Run tests to verify they fail**
+- [ ] **Step 4: Write HTTP error preservation tests**
+
+Simulate stdlib `urllib.error.HTTPError` for 401, 404, and 503 responses with JSON bodies. Assert the CLI/client preserves gateway `reason_code`, `server_id`, and public `error` fields instead of replacing them with a generic connection error.
+
+- [ ] **Step 5: Run tests to verify they fail**
 
 Run:
 
@@ -78,9 +82,11 @@ class RemoteGatewayAdminConfig:
     timeout_seconds: float = 30.0
 ```
 
+Validate `gateway_url` is non-blank and has `http` or `https` scheme. Store the normalized base URL without a trailing slash; do not mutate path prefixes beyond trimming trailing slash.
+
 - [ ] **Step 2: Add request helper**
 
-Implement JSON GET/POST helpers. Prefer stdlib `urllib.request` to avoid a new runtime dependency unless the package already requires an HTTP client.
+Implement JSON GET/POST helpers. Prefer stdlib `urllib.request` to avoid a new runtime dependency unless the package already requires an HTTP client. When `urllib` raises `HTTPError`, read and parse the response body; if it is a JSON object, preserve that payload and exit non-zero from CLI handlers.
 
 - [ ] **Step 3: Add runtime methods**
 
@@ -141,6 +147,8 @@ Add helpers for:
 
 Avoid `--admin-key` to keep secrets out of process lists.
 
+Document and test that `--gateway-url` should include the gateway prefix. Example: `--gateway-url http://127.0.0.1:8000/mcp`.
+
 - [ ] **Step 3: Implement handlers**
 
 Call `RemoteGatewayAdminClient` methods and emit exactly one JSON object to stdout or stderr, matching existing CLI behavior.
@@ -172,6 +180,7 @@ Explain:
 - local config CLI commands versus remote runtime CLI commands.
 - credential grants as broker metadata, not secret storage.
 - admin auth setup and expected header/env vars.
+- why `--gateway-url` includes the mounted prefix and how that differs from a server origin URL.
 
 - [ ] **Step 2: Add safe examples**
 
@@ -183,6 +192,7 @@ Include examples for:
 - creating a credential grant with broker id and slot only.
 - exporting/importing a snapshot.
 - calling `runtime-list`, `runtime-start`, and `runtime-refresh`.
+- an HTTP error example showing the gateway `reason_code` preserved in CLI output.
 
 - [ ] **Step 3: Add operational cautions**
 

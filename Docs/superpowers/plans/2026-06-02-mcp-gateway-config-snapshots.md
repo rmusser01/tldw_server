@@ -4,7 +4,7 @@
 
 **Goal:** Add versioned standalone gateway config import/export snapshots for profiles, default assignment, external servers, and credential-grant metadata.
 
-**Architecture:** Introduce a package-owned snapshot model and manager that reads/writes through existing store protocols. Export produces secret-safe JSON snapshots; import validates references first, supports dry-run planning, and applies changes in dependency order without destructive replace semantics.
+**Architecture:** Introduce a package-owned snapshot model and manager that reads/writes through existing store protocols. Export produces secret-safe JSON snapshots by validating grant metadata/provenance plus external server command and URL fields for inline secret material. Import validates all references before the first write, supports dry-run planning, and applies changes in dependency order without destructive replace semantics; arbitrary injected stores are validate-first best-effort rather than transactionally atomic.
 
 **Tech Stack:** Python, Pydantic, existing `mcp_unified` store protocols, existing SQLite store, CLI JSON workflows, pytest, Bandit.
 
@@ -26,9 +26,10 @@
 ## Acceptance Criteria
 
 - Exported snapshots include schema version, profiles, default assignment, external servers, and credential grants.
-- Snapshot output contains no plaintext secrets and rejects secret-looking metadata/provenance.
+- Snapshot output contains no plaintext secrets and rejects secret-looking metadata/provenance, command arguments, URL userinfo, and sensitive URL query keys.
 - Import dry-run validates references and reports planned mutations without writing.
 - Import applies in safe order: profiles, default assignment, external servers, credential grants.
+- Import validates the whole snapshot before the first write and reports partial write failures explicitly; arbitrary injected stores are not promised transactional rollback.
 - Import defaults to upsert semantics and does not delete missing local records.
 - A snapshot exported from one SQLite store can be imported into a fresh SQLite store and exported again with equivalent semantic content.
 
@@ -60,7 +61,11 @@ Assert `import_snapshot(..., dry_run=True)` returns a mutation plan and leaves t
 
 Assert snapshot validation rejects metadata/provenance keys containing `secret`, `token`, `password`, `api_key`, `authorization`, `headers`, `env`, or `credential_value`.
 
-- [ ] **Step 4: Run tests to verify they fail**
+- [ ] **Step 4: Write external-server inline secret tests**
+
+Assert export/import validation rejects external server `command` args containing inline values such as `--token=abc`, `api_key=abc`, or `PASSWORD=abc`, URL userinfo such as `https://user:pass@example.test`, and URL query keys such as `?token=abc`. `env_allowlist` may still contain environment variable names because it does not contain values.
+
+- [ ] **Step 5: Run tests to verify they fail**
 
 Run:
 
@@ -90,7 +95,7 @@ class GatewayConfigSnapshot(BaseModel):
     credential_grants: list[CredentialGrant]
 ```
 
-Use model validators for deterministic ordering and secret-key rejection.
+Use model validators for deterministic ordering and secret-key rejection. Reuse the secret-key helper from `mcp_unified.gateway.credential_grants` and add snapshot-specific validators for external server command and URL fields.
 
 - [ ] **Step 2: Add manager dependencies**
 
@@ -98,7 +103,7 @@ Create `GatewayConfigSnapshotManager` with required stores: `profile_store`, `as
 
 - [ ] **Step 3: Implement export**
 
-Read all records through protocol methods, load only the default assignment from `GATEWAY_DEFAULT_ASSIGNMENT_ID`, sort lists by id, and return JSON-safe model dumps.
+Read all records through protocol methods, load only the default assignment from `GATEWAY_DEFAULT_ASSIGNMENT_ID`, sort lists by id, validate the full snapshot for secret safety, and return JSON-safe model dumps.
 
 - [ ] **Step 4: Run export tests**
 
@@ -118,7 +123,7 @@ Expected: pass.
 
 - [ ] **Step 1: Add mutation plan payload**
 
-Return planned actions such as `upsert_profile`, `set_default_assignment`, `upsert_external_server`, and `upsert_credential_grant` with target ids and counts.
+Return planned actions such as `upsert_profile`, `set_default_assignment`, `upsert_external_server`, and `upsert_credential_grant` with target ids and counts. Include enough detail for failures to identify which action failed without echoing raw snapshot payloads.
 
 - [ ] **Step 2: Add reference validation**
 
@@ -127,16 +132,22 @@ Validate:
 - default assignment profile exists in incoming snapshot or current store.
 - every grant profile exists in incoming snapshot or current store.
 - every grant external server exists in incoming snapshot or current store when `external_server_id` is set.
+- every referenced credential slot is present in the referenced external server definition when that server is known.
+- all secret-safety checks pass before any write begins.
 
-- [ ] **Step 3: Apply import in safe order**
+- [ ] **Step 3: Define atomicity behavior**
+
+Document in code comments and docs that the generic manager is validate-first best-effort: it validates the full snapshot before writing, then reports applied and failed action ids if an injected store fails during writes. Do not claim transactionality for arbitrary stores. If all stores are the same `SQLiteMCPStore` and a small transaction helper already exists, it may be used, but it is not required for this slice.
+
+- [ ] **Step 4: Apply import in safe order**
 
 Upsert profiles first, then default assignment, then external servers, then credential grants. Do not delete local records absent from the snapshot.
 
-- [ ] **Step 4: Add audit events**
+- [ ] **Step 5: Add audit events**
 
 Append best-effort audit events for import start/completion/failure when an audit store is available. Do not include snapshot raw payload in audit metadata.
 
-- [ ] **Step 5: Run import tests**
+- [ ] **Step 6: Run import tests**
 
 Run:
 
@@ -166,6 +177,7 @@ Cover:
 - `export-config --config <path> --output <file>` writes a file.
 - `import-config --config <path> --snapshot-file <file> --dry-run` reports planned actions without mutation.
 - `import-config --config <path> --snapshot-file <file>` applies upserts.
+- import failure after validation reports applied and failed action ids without raw secret-bearing payloads.
 
 - [ ] **Step 3: Implement CLI handlers**
 

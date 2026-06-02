@@ -4,7 +4,7 @@ title: Implement standalone MCP gateway config import export snapshots
 status: To Do
 assignee: []
 created_date: ''
-updated_date: '2026-06-02 02:07'
+updated_date: '2026-06-02 02:20'
 labels:
   - mcp-unified
   - standalone-gateway
@@ -28,6 +28,8 @@ Add versioned import/export snapshot workflows for standalone gateway profiles, 
 - [ ] #4 Import applies in safe order: profiles, default assignment, external servers, credential grants.
 - [ ] #5 Import defaults to upsert semantics and does not delete missing local records.
 - [ ] #6 A snapshot exported from one SQLite store can be imported into a fresh SQLite store and exported again with equivalent semantic content.
+- [ ] #7 Snapshot validation rejects secret-looking external server command args, URL userinfo, and sensitive URL query keys.
+- [ ] #8 Import validates the full snapshot before the first write and reports partial write failures explicitly for non-transactional stores.
 <!-- AC:END -->
 
 ## Implementation Plan

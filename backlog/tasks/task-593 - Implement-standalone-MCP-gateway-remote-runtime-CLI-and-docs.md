@@ -4,7 +4,7 @@ title: Implement standalone MCP gateway remote runtime CLI and docs
 status: To Do
 assignee: []
 created_date: ''
-updated_date: '2026-06-02 02:08'
+updated_date: '2026-06-02 02:20'
 labels:
   - mcp-unified
   - standalone-gateway
@@ -29,6 +29,8 @@ Add remote CLI commands that call a running standalone gateway for external runt
 - [ ] #4 CLI preserves the gateway JSON payloads and reason codes.
 - [ ] #5 Docs explain local store commands versus remote runtime commands and include a safe credential-grant example.
 - [ ] #6 No runtime CLI command starts an upstream process that becomes orphaned when the CLI exits.
+- [ ] #7 Gateway URL semantics are explicit: the URL is the mounted gateway base path, such as http://host/mcp, and the client does not auto-add /mcp.
+- [ ] #8 Remote CLI preserves JSON reason_code payloads from HTTP 4xx/5xx response bodies.
 <!-- AC:END -->
 
 ## Implementation Plan
