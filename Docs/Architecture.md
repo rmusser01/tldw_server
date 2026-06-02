@@ -30,7 +30,7 @@ Think of the architecture as:
 
 The goal is to keep endpoints thin, push logic into core modules, and keep storage access centralized via `core/DB_Management/` and the vector store adapters.
 
-For a visual diagram, see `README.md` (Architecture Diagram) and `Docs/Code_Documentation/Code_Map.md`.
+For a visual diagram, see `README.md` (Architecture Diagram) and `Docs/Code_Documentation/Code_Map.md`. For detailed backend data flow and process diagrams, see `Docs/Code_Documentation/Data_Flow_Atlas.md`.
 
 ---
 
