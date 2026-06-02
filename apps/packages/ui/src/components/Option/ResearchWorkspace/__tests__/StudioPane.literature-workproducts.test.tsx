@@ -12,6 +12,7 @@ import {
   buildCorpusGapMessages,
   buildEvidenceBoundHypothesesMessages,
   buildResearchProposalMessages,
+  formatLiteratureMatrixMarkdown,
   normalizeLiteratureMatrixResponse,
   normalizeResearchProposalMarkdown
 } from "../StudioPane/literature-workproducts"
@@ -556,6 +557,16 @@ describe("StudioPane literature work products", () => {
     expect(() =>
       normalizeLiteratureMatrixResponse(JSON.stringify({ rows: [["Paper A"]] }))
     ).toThrow("Literature Matrix JSON did not include any usable rows.")
+  })
+
+  it("escapes markdown table cell separators and existing escape characters", () => {
+    const markdown = formatLiteratureMatrixMarkdown({
+      headers: ["Source", "Finding | Risk"],
+      rows: [["Paper A", "A \\ B | C\nD"]]
+    })
+
+    expect(markdown).toContain("| Source | Finding \\| Risk |")
+    expect(markdown).toContain("| Paper A | A \\\\ B \\| C D |")
   })
 
   it("handles non-string literature matrix responses as empty output", () => {

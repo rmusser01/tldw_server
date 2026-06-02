@@ -643,8 +643,21 @@ export const normalizeResearchProposalMarkdown = (rawContent: string): string =>
   return content
 }
 
-const escapeMarkdownCell = (value: string): string =>
-  value.replace(/\n+/g, " ").replace(/\|/g, "\\|").trim()
+const escapeMarkdownCell = (value: string): string => {
+  const escaped: string[] = []
+
+  for (const char of value) {
+    if (char === "\n" || char === "\r") {
+      escaped.push(" ")
+    } else if (char === "\\" || char === "|") {
+      escaped.push("\\", char)
+    } else {
+      escaped.push(char)
+    }
+  }
+
+  return escaped.join("").trim()
+}
 
 export const formatLiteratureMatrixMarkdown = (
   table: LiteratureWorkProductTableData
