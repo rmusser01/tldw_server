@@ -300,7 +300,6 @@ flowchart TB
 flowchart LR
     subgraph Shared["Shared or deployment-level storage"]
         AuthDB[AuthNZ DB: Databases/users.db or PostgreSQL]
-        EvalDB[Evaluations DB: Databases/evaluations.db]
         JobDB[Jobs DB: SQLite or PostgreSQL when configured]
         Redis[Redis: queues, locks, rate/backpressure, optional job backend]
     end
@@ -310,6 +309,7 @@ flowchart LR
         ChaCha[ChaChaNotes: ChaChaNotes.db]
         Prompts[Prompts DB and prompt libraries]
         PromptStudio[Prompt Studio DB: prompt_studio_dbs/prompt_studio.db]
+        EvalDB[Per-user evaluations storage: evaluations/evaluations.db]
         Vector[ChromaDB: chroma_storage plus vector_store metadata]
         Outputs[outputs/ generated artifacts]
         Voices[voices/ custom voices and provider runtime cache]
