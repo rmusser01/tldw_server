@@ -23,6 +23,7 @@ class ShutdownPhase(str, Enum):
 
     JOB_POLLER_QUIESCE = "job_poller_quiesce"
     BACKGROUND_WORKER_SHUTDOWN = "background_worker_shutdown"
+    POST_WORKER_SHUTDOWN = "post_worker_shutdown"
 
 
 @dataclass
