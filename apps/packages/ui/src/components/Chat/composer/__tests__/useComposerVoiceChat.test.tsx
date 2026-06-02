@@ -1,6 +1,7 @@
 import React from "react"
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { DictationToggleIntent } from "@/hooks/useDictationStrategy"
 
 // ---------------------------------------------------------------------------
 // Mocks for the underlying primitives. The shared hook is pure orchestration —
@@ -72,7 +73,7 @@ const dictationStrategyState = {
     speechAvailable: true,
     speechUsesServer: true,
     isDictating: false,
-    toggleIntent: "start_server" as "start_server" | "start_browser",
+    toggleIntent: "start_server" as DictationToggleIntent,
     autoFallbackActive: false,
     autoFallbackErrorClass: null as null | string,
     clearAutoFallback: vi.fn()
