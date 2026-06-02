@@ -103,11 +103,10 @@ async def run_lifespan_shutdown_sequence(
         run_shutdown_pre_worker_cleanup,
     )
 
-    pre_worker_cleanup_handles = await run_shutdown_pre_worker_cleanup(
+    await run_shutdown_pre_worker_cleanup(
         app=app,
         guard_exceptions=startup_guard_exceptions,
     )
-    worker_runtime.apply_pre_worker_cleanup_handles(pre_worker_cleanup_handles)
 
     if worker_lifecycle_session is not None:
         await lifecycle_worker_engine.stop_phase(
@@ -119,18 +118,15 @@ async def run_lifespan_shutdown_sequence(
         run_shutdown_post_worker_non_worker_cleanup,
     )
 
-    post_worker_shutdown_handles = await run_shutdown_post_worker_non_worker_cleanup(
+    await run_shutdown_post_worker_non_worker_cleanup(
         guard_exceptions=startup_guard_exceptions,
-    )
-    worker_runtime.apply_post_worker_shutdown_handles(
-        post_worker_shutdown_handles,
     )
 
     from tldw_Server_API.app.services.shutdown_final_cleanup_tail import (
         shutdown_final_cleanup_tail,
     )
 
-    cleanup_timed_shutdown_handles = await shutdown_final_cleanup_tail(
+    await shutdown_final_cleanup_tail(
         app=app,
         db_pool=db_pool,
         session_manager=session_manager,
@@ -142,7 +138,6 @@ async def run_lifespan_shutdown_sequence(
         test_db_instance_ref=test_db_instance_ref,
         timed_shutdown_segment=timed_shutdown_segment,
     )
-    worker_runtime.apply_final_cleanup_handles(cleanup_timed_shutdown_handles)
 
     record_shutdown_timing_total(
         app,

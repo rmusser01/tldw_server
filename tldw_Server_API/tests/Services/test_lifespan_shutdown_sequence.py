@@ -31,9 +31,6 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
     worker_lifecycle_session = SimpleNamespace(name="worker-session")
     worker_runtime = LifespanWorkerRuntimeState(
         worker_lifecycle_session=worker_lifecycle_session,
-        owned_job_pollers=["legacy-poller-that-should-not-be-threaded"],
-        media_ingest_jobs_task="legacy-media-task-that-should-not-be-threaded",
-        jobs_metrics_task="legacy-metrics-task-that-should-not-be-threaded",
     )
     calls: list[tuple[str, dict[str, object]]] = []
     recorded_totals: list[int] = []

@@ -9,6 +9,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 
@@ -109,7 +110,9 @@ def route_enabled_predicate(
     """Return a worker predicate backed by the lifecycle route gate."""
 
     def _enabled(context: WorkerLifecycleContext) -> bool:
-        return context.route_enabled(flag_key, route_key, **route_kwargs)
+        return env_flag_enabled(flag_key) and bool(
+            context.route_enabled(route_key, **route_kwargs)
+        )
 
     return _enabled
 

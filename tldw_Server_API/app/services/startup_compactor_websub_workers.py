@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     WorkerLifecycleContext,
     WorkerSpec,
@@ -68,9 +69,10 @@ def _embeddings_compactor_worker_enabled(_context: WorkerLifecycleContext) -> bo
 
 def _websub_renewal_worker_enabled(context: WorkerLifecycleContext) -> bool:
     callback_base_url = os.getenv("WEBSUB_CALLBACK_BASE_URL", "").strip()
-    return bool(callback_base_url) and context.route_enabled(
-        "WEBSUB_RENEWAL_WORKER_ENABLED",
-        "collections-websub",
+    return (
+        bool(callback_base_url)
+        and env_flag_enabled("WEBSUB_RENEWAL_WORKER_ENABLED")
+        and context.route_enabled("collections-websub")
     )
 
 

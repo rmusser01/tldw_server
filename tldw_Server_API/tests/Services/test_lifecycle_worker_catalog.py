@@ -10,6 +10,7 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
     WorkerLifecycleContext,
     WorkerSpec,
     WorkerSpecValidationError,
+    route_enabled_predicate,
 )
 from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
     LifespanWorkerRuntimeState,
@@ -45,6 +46,48 @@ def _worker_spec(name: str, **overrides: Any) -> WorkerSpec:
     }
     values.update(overrides)
     return WorkerSpec(**values)
+
+
+@pytest.mark.unit
+def test_route_enabled_predicate_requires_env_flag_and_route_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route_calls: list[tuple[str, dict[str, object]]] = []
+    route_allowed = False
+
+    def _route_enabled(route_key: str, **kwargs: object) -> bool:
+        route_calls.append((route_key, kwargs))
+        return route_allowed
+
+    context = WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=_route_enabled,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    predicate = route_enabled_predicate(
+        "EXAMPLE_WORKER_ENABLED",
+        "example-route",
+        default_stable=False,
+    )
+
+    monkeypatch.delenv("EXAMPLE_WORKER_ENABLED", raising=False)
+
+    assert predicate(context) is False
+    assert route_calls == []
+
+    monkeypatch.setenv("EXAMPLE_WORKER_ENABLED", "1")
+
+    assert predicate(context) is False
+    assert route_calls == [("example-route", {"default_stable": False})]
+
+    route_allowed = True
+
+    assert predicate(context) is True
+    assert route_calls[-1] == ("example-route", {"default_stable": False})
 
 
 def _runtime_managed_worker_names() -> set[str]:
@@ -299,7 +342,7 @@ def test_legacy_worker_spec_parity_reports_missing_worker_name() -> None:
         assert_legacy_worker_spec_parity,
     )
 
-    missing_name = "core_jobs_task"
+    missing_name = "ephemeral_cleanup_task"
     specs = [
         _worker_spec(name)
         for name in sorted(LEGACY_MANAGED_WORKER_NAMES)

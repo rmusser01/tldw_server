@@ -19,11 +19,6 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
 class StartupWorkerBootstrapHandles:
     """Combined handles returned from the worker-bootstrap startup block."""
 
-    app_settings: Any
-    owned_job_pollers: list[Any]
-    startup_worker_group_handles: Any
-    startup_service_tail_handles: Any
-    worker_inventory: Any | None = None
     worker_lifecycle_session: WorkerLifecycleSession | None = None
 
 
@@ -54,7 +49,6 @@ async def initialize_startup_worker_bootstrap(
     )
     worker_specs = _collect_startup_worker_specs(context)
     worker_lifecycle_session = await _start_lifecycle_workers(context, worker_specs)
-    owned_job_pollers = list(worker_lifecycle_session.handles_by_name.values())
     await _run_startup_non_worker_tail(
         app=app,
         app_settings=app_settings,
@@ -66,11 +60,6 @@ async def initialize_startup_worker_bootstrap(
         import_exceptions=import_exceptions,
     )
     return StartupWorkerBootstrapHandles(
-        app_settings=app_settings,
-        owned_job_pollers=owned_job_pollers,
-        startup_worker_group_handles=None,
-        startup_service_tail_handles=None,
-        worker_inventory=worker_lifecycle_session,
         worker_lifecycle_session=worker_lifecycle_session,
     )
 

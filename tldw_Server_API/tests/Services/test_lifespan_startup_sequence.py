@@ -40,16 +40,6 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
         calls.append(("bootstrap", kwargs))
         return startup_worker_bootstrap.StartupWorkerBootstrapHandles(
-            app_settings="app-settings",
-            owned_job_pollers=["poller-a"],
-            startup_worker_group_handles=SimpleNamespace(
-                cleanup_task="cleanup-task",
-                core_jobs_task="core-task",
-                audio_jobs_stop_event="audio-stop",
-            ),
-            startup_service_tail_handles=SimpleNamespace(
-                jobs_metrics_task="jobs-metrics-task",
-            ),
             worker_lifecycle_session=worker_lifecycle_session,
         )
 
@@ -102,12 +92,11 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     assert handles.db_pool == "db-pool"
     assert handles.session_manager == "session-manager"
     assert handles.heavy_startup_handles == "heavy-handles"
-    assert worker_runtime.owned_job_pollers == ["poller-a"]
     assert not hasattr(worker_runtime, "cleanup_task")
-    assert worker_runtime.core_jobs_task == "core-task"
-    assert worker_runtime.audio_jobs_stop_event == "audio-stop"
-    assert worker_runtime.jobs_metrics_task == "jobs-metrics-task"
     assert worker_runtime.worker_lifecycle_session is worker_lifecycle_session
+    assert not hasattr(worker_runtime, "core_jobs_task")
+    assert not hasattr(worker_runtime, "audio_jobs_stop_event")
+    assert not hasattr(worker_runtime, "jobs_metrics_task")
     assert not hasattr(worker_runtime, "claims_task")
     assert not hasattr(worker_runtime, "authnz_scheduler_started")
 
@@ -146,10 +135,7 @@ async def test_startup_initializes_registry_and_runs_sandbox_producer(
 
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
         return startup_worker_bootstrap.StartupWorkerBootstrapHandles(
-            app_settings="app-settings",
-            owned_job_pollers=[],
-            startup_worker_group_handles=SimpleNamespace(),
-            startup_service_tail_handles=SimpleNamespace(),
+            worker_lifecycle_session=None,
         )
 
     def _fake_produce_sandbox_startup_warnings(**kwargs):
@@ -242,10 +228,7 @@ async def test_startup_blocks_on_protocol_mismatch_warning(
 
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
         return startup_worker_bootstrap.StartupWorkerBootstrapHandles(
-            app_settings="app-settings",
-            owned_job_pollers=[],
-            startup_worker_group_handles=SimpleNamespace(),
-            startup_service_tail_handles=SimpleNamespace(),
+            worker_lifecycle_session=None,
         )
 
     def _fake_produce_sandbox_startup_warnings(**kwargs):
@@ -340,10 +323,7 @@ async def test_startup_warning_registry_is_available_on_app_state(
 
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
         return startup_worker_bootstrap.StartupWorkerBootstrapHandles(
-            app_settings="app-settings",
-            owned_job_pollers=[],
-            startup_worker_group_handles=SimpleNamespace(),
-            startup_service_tail_handles=SimpleNamespace(),
+            worker_lifecycle_session=None,
         )
 
     monkeypatch.setattr(

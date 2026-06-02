@@ -115,12 +115,12 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
     assert calls[3][1]["shared_is_truthy"] == "truthy"
     assert calls[3][1]["startup_guard_exceptions"] == (RuntimeError,)
     assert calls[3][1]["import_exceptions"] == (ImportError,)
-    assert handles.app_settings == "settings"
-    assert handles.owned_job_pollers == ["handle"]
-    assert handles.worker_inventory is lifecycle_session
     assert handles.worker_lifecycle_session is lifecycle_session
-    assert handles.startup_worker_group_handles is None
-    assert handles.startup_service_tail_handles is None
+    assert not hasattr(handles, "app_settings")
+    assert not hasattr(handles, "owned_job_pollers")
+    assert not hasattr(handles, "worker_inventory")
+    assert not hasattr(handles, "startup_worker_group_handles")
+    assert not hasattr(handles, "startup_service_tail_handles")
 
 
 def test_startup_worker_bootstrap_no_longer_exposes_dead_poller_hook() -> None:
