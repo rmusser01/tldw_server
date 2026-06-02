@@ -44,6 +44,40 @@ untrusted URLs or sensitive configuration.
   providers should call egress helpers before outbound work.
 - AuthNZ and setup flows read secret and setup guard behavior from this module.
 
+## Architecture Notes
+
+### Core Flow
+
+- Startup installs request/response middlewares from `middleware.py`,
+  `request_id_middleware.py`, `setup_access_guard.py`, `setup_csp.py`, and
+  `drain_gate_middleware.py`.
+- Outbound callers should validate URLs through `egress.py` or
+  `url_validation.py` before constructing network clients. The policy layer
+  resolves global environment settings, workflow context, tenant webhook
+  allowances, private-address rejection, and port restrictions.
+- Secret consumers use `secret_manager.py` for source precedence and validation;
+  Jobs and related persistence use `crypto.py` for encrypted JSON blobs when
+  they need to store sensitive structured metadata.
+
+### Security And Operations
+
+- Treat egress policy as the single SSRF boundary. Feature modules should not
+  create local allowlists that bypass private-IP, scheme, or port checks.
+- Setup UI rules are path-sensitive: changes to setup access or CSP behavior
+  must preserve the distinction between `/setup`, `/docs`, and normal API
+  routes.
+- Request IDs are sanitized on ingress and propagated through logs; do not let
+  caller-provided IDs become log injection or unbounded cardinality sources.
+
+### Extension Checklist
+
+- New outbound integration: add egress tests for allowed and denied URLs before
+  wiring the integration into a feature module.
+- New middleware behavior: add path-specific tests under `tests/Security/` and
+  verify startup wiring in `app/main.py`.
+- New secret type: update `secret_manager.py`, define explicit source
+  precedence, and add tests that confirm missing or invalid secrets fail closed.
+
 ## Extension Points
 
 - Add outbound policy knobs in `egress.py` and cover global, workflow, and

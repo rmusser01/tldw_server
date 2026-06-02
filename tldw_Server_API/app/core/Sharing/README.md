@@ -36,6 +36,40 @@ Sharing owns the core services behind workspace, chatbook, and prototype workspa
 - `app/core/Prototype_Workspaces/` uses the same token service for prototype workspace private-link sharing.
 - The resolver crosses `ChaChaNotes_DB`, `Media_DB_v2`, and embedding namespaces so shared reads use owner data while mutations remain permission-checked.
 
+## Architecture Notes
+
+### Core Flow
+
+- Authenticated workspace sharing starts in `sharing.py`, verifies workspace
+  ownership, persists share rows through the AuthNZ shared-workspace repo, and
+  uses `ShareTokenService` only when a private/public token is requested.
+- Public token preview and import flows validate the token hash, optional
+  bcrypt-protected password, expiry, revocation, use limits, resource type, and
+  access level before resolving owner-side data.
+- `SharedWorkspaceDBResolver` builds a `SharedWorkspaceContext` that reads from
+  the owner user's ChaChaNotes/Media/embedding data. `CloneService` is the
+  write boundary that copies allowed data into recipient-owned workspace state.
+
+### State And Security
+
+- Raw share tokens must never be persisted or logged; validation uses token
+  hashes and creation is the only time the raw token is returned.
+- Shared reads and clone writes intentionally use different identities. Reads
+  inspect owner data through a validated share context, while clone/write
+  decisions use the recipient principal and destination workspace ownership.
+- Audit writes are split between legacy sharing audit helpers and unified audit
+  migration helpers; new event fields should be safe for admin display.
+
+### Extension Checklist
+
+- New shareable resource: update `ResourceType`, `share_token_service.py`,
+  endpoint schema/route handling, resolver behavior, and cross-user access
+  tests.
+- New clone subresource: extend `clone_service.py`, add rollback/orphan-state
+  coverage, and ensure embeddings are regenerated or explicitly skipped.
+- New public flow: add rate-limit, token validation, password, and audit tests
+  in `tests/Sharing/` before exposing the route.
+
 ## Extension Points
 
 - For a new shareable resource type, inspect `share_token_service.py`, `sharing_schemas.py`, and `sharing.py` first.

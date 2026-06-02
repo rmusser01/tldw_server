@@ -35,6 +35,38 @@ Text2SQL turns natural-language questions into guarded, read-only SQL execution 
 - `app/core/RAG/rag_service/database_retrievers.py` and the unified RAG pipeline use Text2SQL source registry behavior for database retrieval.
 - Security tests cover RBAC and source ACL behavior around the endpoint surface.
 
+## Architecture Notes
+
+### Core Flow
+
+- The endpoint resolves an internal target id through ACL-aware source logic,
+  creates a read-only SQLite executor for the target path, and passes request
+  SQL through `Text2SQLCoreService`.
+- `Text2SQLCoreService` asks a SQL generator for a statement, guards it with
+  `SqlGuard`, executes it through the `SqlExecutor` protocol, and applies row
+  and cell budgeting before returning shaped results and guardrail metadata.
+- RAG database retrieval uses the same canonical source registry so endpoint,
+  retrieval-plan, and ACL behavior do not drift.
+
+### Security And Operations
+
+- `SqlGuard` must remain fail-closed: it rejects empty SQL, parse failures,
+  multiple statements, and non-`SELECT`/`WITH` statements before execution.
+- `SqliteReadOnlyExecutor` is the execution boundary for SQLite paths. Do not
+  add write-capable executors to endpoint or RAG flows without a separate
+  design and tests.
+- Result budgeting protects downstream prompt/context and API response size;
+  changes to row or cell truncation must update API metadata tests.
+
+### Extension Checklist
+
+- New source: update `connectors.py`, `source_registry.py`, endpoint ACL
+  handling, and RAG retrieval-plan tests together.
+- New SQL policy rule: update `sql_guard.py` and add positive/negative cases in
+  `tests/Text2SQL/test_sql_guard.py`.
+- New execution backend: implement the `SqlExecutor` protocol, keep it
+  read-only by construction, and add endpoint/RAG integration tests.
+
 ## Extension Points
 
 - For a new data source, add connector behavior in `connectors.py`, register a canonical source in `source_registry.py`, and add source-registry tests.

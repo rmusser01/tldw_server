@@ -35,6 +35,40 @@ UserProfiles assembles readable and editable user profile state from AuthNZ iden
 - AuthNZ repositories provide user, membership, permission, and quota context.
 - `app/core/Usage/audio_quota.py` and prompt-studio quota configuration read profile or quota-related state.
 
+## Architecture Notes
+
+### Core Flow
+
+- Profile reads enter through `users.py`, resolve the authenticated principal,
+  and call `UserProfileService` to assemble identity, membership, security,
+  quota, raw override, and effective config sections.
+- Profile updates go through `UserProfileUpdateService`, which loads the
+  editable catalog, validates requested keys and values, checks actor roles
+  against catalog edit rules, and writes user/org/team overrides through
+  `overrides_repo.py`.
+- API schemas keep raw overrides, effective config, catalog entries, bulk
+  updates, and structured profile errors explicit for clients.
+
+### State And Security
+
+- Override state is layered from defaults, user overrides, org overrides, team
+  overrides, and AuthNZ-derived facts. Contributors must preserve deterministic
+  precedence when adding scopes or keys.
+- `user_profile_catalog.py` is the authority for editable keys, value types,
+  default values, and role constraints. Endpoint payloads must not create
+  arbitrary profile keys.
+- Profile responses include security, BYOK, quota, and membership summaries;
+  logs and error responses must stay sanitized.
+
+### Extension Checklist
+
+- New editable key: update the catalog loader/input data, `update_service.py`
+  validation, response schemas when needed, and `tests/UserProfile/`.
+- New override scope: add repository support, effective-layer assembly, role
+  validation, and migration/test coverage for both SQLite and Postgres paths.
+- New profile endpoint behavior: update `users.py`, `user_profile_schemas.py`,
+  `profile_errors.py`, and API tests together.
+
 ## Extension Points
 
 - For a new editable profile field, update the catalog, `user_profile_catalog.py`, `update_service.py`, and profile update tests.

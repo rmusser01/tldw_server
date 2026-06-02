@@ -4,7 +4,7 @@ title: Deepen core module architecture guides
 status: In Progress
 assignee: []
 created_date: '2026-06-02 00:18'
-updated_date: '2026-06-02 00:23'
+updated_date: '2026-06-02 00:26'
 labels: []
 dependencies:
   - TASK-588
@@ -46,6 +46,8 @@ Created after PR #2216 merged TASK-588 into dev. Worktree: .worktrees/core-archi
 2026-06-02: Drafted Phase 2 implementation plan at Docs/superpowers/plans/2026-06-02-core-module-architecture-guides-implementation-plan.md. Plan reviews all 88 modules, prioritizes the 47 high-risk/high-complexity modules first, and records sufficient decisions for modules that do not need expansion.
 
 2026-06-02: Stage 1 complete. Created Docs/superpowers/plans/2026-06-02-core-module-architecture-guide-inventory.md with 88 module rows. Verified 88 top-level app/core modules, no missing README files, Phase 1 priority counts of 47 high / 28 medium / 4 low / 9 sufficient, and a generated Phase 2 decision baseline of 47 expand / 28 tighten / 13 sufficient. git diff --check passed. Runtime code remains untouched.
+
+2026-06-02: Stage 2 complete. Reviewed AuthNZ, Billing, DB_Management, Resource_Governance, Sandbox, Security, Sharing, Storage, Sync, Text2SQL, UserProfiles, and Workspaces. Expanded README architecture notes for Billing, Security, Sharing, Storage, Text2SQL, UserProfiles, and Workspaces; recorded AuthNZ, DB_Management, Resource_Governance, Sandbox, and Sync as sufficient after source/test review. Verification passed: placeholder scan returned no matches, README local-link sanity passed, Stage 2 referenced source/test paths exist, inventory has 12 reviewed rows, and git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

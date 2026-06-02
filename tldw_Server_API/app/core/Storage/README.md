@@ -36,6 +36,40 @@ Storage defines shared storage abstractions and local filesystem helpers used by
 - AuthNZ quota repositories provide quota state used by `quota_enforcement.py`.
 - `app/core/File_Artifacts/`, `app/core/Image_Generation/`, `app/core/TTS/`, `app/core/VoiceAssistant/`, and `app/core/VN_Assets/` use storage helpers for file persistence and cleanup.
 
+## Architecture Notes
+
+### Core Flow
+
+- Callers obtain the configured backend through `get_storage_backend()` and use
+  the async `StorageBackend` protocol instead of constructing paths directly.
+- `FileSystemStorage` sanitizes path components, resolves paths under the
+  configured root, writes bytes, and streams reads back to endpoint helpers.
+- Generated outputs use `generated_file_helpers.py` to write bytes and then
+  register metadata in the AuthNZ generated-files repository; both sides are
+  part of the same logical operation.
+- Before accepting quota-bound writes, endpoints and feature modules should call
+  `check_storage_quota()` with the user/org/team context and projected byte
+  delta.
+
+### State And Operations
+
+- Filesystem storage state and generated-file DB metadata can drift if callers
+  bypass helpers or fail after one side of the operation. Cleanup code should
+  account for orphaned files and orphaned metadata.
+- Quota checks distinguish hard-limit denial from soft-limit warnings. Do not
+  turn soft-limit warnings into hard failures without updating admin quota tests.
+- Backup schedule jobs are identified by stable idempotency keys derived from
+  schedule id and scheduled slot.
+
+### Extension Checklist
+
+- New backend: implement `StorageBackend`, add path/stream/delete/size tests,
+  and keep `get_storage_backend()` reset behavior testable.
+- New generated artifact type: add a `save_and_register_*` helper or extend an
+  existing one, register metadata consistently, and add cleanup/orphan tests.
+- Quota policy change: update `quota_enforcement.py`, storage admin endpoints,
+  and `tests/Billing/test_storage_quota_guard.py` or `tests/Storage/`.
+
 ## Extension Points
 
 - For a new storage backend, implement `StorageBackend` in `storage_interface.py` and add backend-specific tests.

@@ -35,6 +35,41 @@ Workspaces contains helper services that support workspace capability reporting,
 - Jobs, Media DB, and RAG/indexing state feed `status_projection.py`.
 - Sync domain adapters and artifact promotion flows consume workspace export/status behavior.
 
+## Architecture Notes
+
+### Core Flow
+
+- Workspace CRUD and subresource routing live in `workspaces.py`; this package
+  provides focused helpers used by that endpoint rather than owning the full
+  persistence model.
+- `source_jobs.py` creates stable workspace-source ingest Jobs after a source
+  row exists, using idempotency keys based on workspace id, source id, and media
+  id.
+- `status_projection.py` builds read-computed source status by merging
+  workspace source rows, active/failed Jobs, Media DB chunk/vector state, and
+  readiness summaries.
+- `workspace_artifact_exports.py` renders accepted artifact versions to export
+  payloads with identity, lineage, review metadata, and redaction metadata.
+
+### State And Operations
+
+- ChaChaNotes remains the workspace metadata store; Jobs, Media DB, RAG, and
+  Sync provide adjacent state that is projected into workspace responses.
+- Source status is intentionally derived at read time. Avoid writing projected
+  readiness back as source truth unless the database contract changes.
+- Artifact export requires an accepted review state and preserves traceability
+  through `root_artifact_id`, `artifact_version_id`, `source_lineage`, and
+  embedded metadata.
+
+### Extension Checklist
+
+- New source lifecycle state: update `status_projection.py`,
+  `workspace_schemas.py`, and source status API tests.
+- New workspace job type: update `source_jobs.py`, Jobs queue expectations, and
+  idempotency tests.
+- New artifact export format: update `workspace_artifact_exports.py`, schema
+  allowlists, and artifact promotion/export contract tests.
+
 ## Extension Points
 
 - For new capability fields, update `service_capabilities.py`, workspace schemas, and capability tests.
