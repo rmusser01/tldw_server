@@ -100,9 +100,22 @@ const routerState = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+type ChatSettingsSyncParams = {
+  historyId: string | null
+  serverChatId: string | null
+}
+
+type ChatSettingsPatchParams = ChatSettingsSyncParams & {
+  patch: Record<string, unknown>
+}
+
 const chatSettingsState = vi.hoisted(() => ({
-  syncChatSettingsForServerChat: vi.fn(async () => null),
-  applyChatSettingsPatch: vi.fn(async () => null)
+  syncChatSettingsForServerChat: vi.fn(
+    async (_params: ChatSettingsSyncParams): Promise<unknown> => null
+  ),
+  applyChatSettingsPatch: vi.fn(
+    async (_params: ChatSettingsPatchParams): Promise<unknown> => null
+  )
 }))
 
 const loadLocalConversationMock = vi.hoisted(() => vi.fn(async () => {}))
@@ -220,10 +233,10 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 }))
 
 vi.mock("@/services/chat-settings", () => ({
-  syncChatSettingsForServerChat: (...args: unknown[]) =>
-    chatSettingsState.syncChatSettingsForServerChat(...args),
-  applyChatSettingsPatch: (...args: unknown[]) =>
-    chatSettingsState.applyChatSettingsPatch(...args)
+  syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
+    chatSettingsState.syncChatSettingsForServerChat(params),
+  applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
+    chatSettingsState.applyChatSettingsPatch(params)
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
