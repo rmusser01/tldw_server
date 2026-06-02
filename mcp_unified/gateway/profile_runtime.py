@@ -203,8 +203,9 @@ class ProfileAwareGatewayRuntime:
 def _context_profile_id(context: GatewayRequestContext) -> str | None:
     """Return an explicit profile id from transport metadata, if present."""
 
+    metadata = context.metadata or {}
     for key in ("profile_id", "profileId", "mcp_profile", "mcp-profile"):
-        value = context.metadata.get(key)
+        value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
@@ -218,7 +219,7 @@ def _context_with_effective_policy(
 
     if policy is None:
         return context
-    metadata = dict(context.metadata)
+    metadata = dict(context.metadata or {})
     metadata[EFFECTIVE_POLICY_METADATA_KEY] = _json_safe_model(policy)
     return GatewayRequestContext(
         request_id=context.request_id,

@@ -15,6 +15,7 @@ modified_files:
 - mcp_unified/gateway/external_runtime.py
 - mcp_unified/gateway/__init__.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime_adapter.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 - Docs/superpowers/plans/2026-06-02-mcp-gateway-external-runtime-adapter-plan.md
 ---
@@ -44,7 +45,7 @@ Docs/superpowers/plans/2026-06-02-mcp-gateway-external-runtime-adapter-plan.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a package-owned ExternalRuntimeGatewayRuntime adapter that exposes active GatewayExternalRuntimeManager virtual tools through GatewayRuntime tools/list and tools/call. ProfileAwareGatewayRuntime now copies resolved effective policy data into delegated request context metadata so external server grants and credential grants reach the external runtime manager without mutating the original context. Also fixed adjacent installer timeout/error wrapping regressions covered by existing tests. Verification: focused MCP pytest suite passed with 201 passed and 5 warnings; Ruff reported All checks passed; Bandit JSON at /tmp/bandit_mcp_gateway_external_runtime_adapter.json reported 0 results; git diff --check passed.
+PR #2219 review follow-up complete. Rebased on current origin/dev (already up to date). Addressed Gemini defensive-null findings by defaulting nullable external input schemas to {}, reading request metadata through safe fallbacks in the adapter/profile runtime, and covering metadata=None regressions. Addressed Qodo findings by adding a direct GatewayExternalRuntimeManager.has_virtual_tool() ownership check for call routing, removing the adapter's call-time list/sort/deep-copy scan, restoring timeout traceback logging, and adding sanitized traceback-frame diagnostics plus sanitized exception causes for installer operation failures without exposing do-not-leak secret text in public payloads/log arguments. Verification: targeted RED tests failed before fixes; targeted follow-up tests now pass; focused MCP suite reports 206 passed, 5 warnings; Ruff reports All checks passed; Bandit on touched gateway code reports 0 findings; git diff --check is clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

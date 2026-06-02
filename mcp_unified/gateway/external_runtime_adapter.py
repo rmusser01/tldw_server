@@ -63,7 +63,7 @@ class ExternalRuntimeGatewayRuntime:
     ) -> dict[str, Any]:
         """Execute an external virtual tool or delegate to the base runtime."""
 
-        if await self._has_external_tool(name):
+        if await self._external_runtime_manager.has_virtual_tool(name):
             try:
                 result = await self._external_runtime_manager.execute_virtual_tool(
                     name,
@@ -136,15 +136,6 @@ class ExternalRuntimeGatewayRuntime:
             return {"modules": []}
         return await self._base_runtime.get_modules_health(context)
 
-    async def _has_external_tool(self, name: str) -> bool:
-        """Return whether the active external runtime owns this tool name."""
-
-        return any(
-            virtual_tool.virtual_name == name
-            for virtual_tool in await self._external_runtime_manager.list_virtual_tools()
-        )
-
-
 def _virtual_tool_descriptor(virtual_tool: VirtualExternalTool) -> dict[str, Any]:
     """Convert one virtual external tool into a gateway tool descriptor."""
 
@@ -160,7 +151,7 @@ def _virtual_tool_descriptor(virtual_tool: VirtualExternalTool) -> dict[str, Any
     return {
         "name": virtual_tool.virtual_name,
         "description": virtual_tool.description,
-        "inputSchema": deepcopy(virtual_tool.input_schema),
+        "inputSchema": deepcopy(virtual_tool.input_schema or {}),
         "metadata": metadata,
     }
 
@@ -168,7 +159,7 @@ def _virtual_tool_descriptor(virtual_tool: VirtualExternalTool) -> dict[str, Any
 def _effective_policy_from_context(context: GatewayRequestContext) -> Any:
     """Return the profile-derived effective policy stored in request metadata."""
 
-    value = context.metadata.get(EFFECTIVE_POLICY_METADATA_KEY)
+    value = (context.metadata or {}).get(EFFECTIVE_POLICY_METADATA_KEY)
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     if isinstance(value, Mapping):

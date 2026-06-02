@@ -7,6 +7,8 @@ from mcp_unified.federation.models import (
     BrokeredExternalCredential,
     ExternalToolCallResult,
     ExternalToolDefinition,
+    FederatedToolResult,
+    VirtualExternalTool,
 )
 from mcp_unified.federation.transports import FakeExternalTransport
 from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeManager
@@ -16,7 +18,7 @@ from mcp_unified.gateway.profile_runtime import (
     EFFECTIVE_POLICY_METADATA_KEY,
     ProfileAwareGatewayRuntime,
 )
-from mcp_unified.gateway.runtime import GatewayRequestContext
+from mcp_unified.gateway.runtime import GatewayPolicyDenied, GatewayRequestContext
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 from mcp_unified.profiles.store import InMemoryProfileStore
 from mcp_unified.storage.models import ExternalServerDefinition
@@ -159,6 +161,58 @@ class RecordingCredentialBroker:
         return self.result.copy()
 
 
+class NullableVirtualToolManager:
+    """Minimal manager fake that returns nullable virtual tool fields."""
+
+    async def list_virtual_tools(self) -> list[VirtualExternalTool]:
+        """Return one virtual tool with nullable schema and metadata values."""
+
+        return [
+            VirtualExternalTool(
+                virtual_name="ext.null.search",
+                server_id="null-server",
+                upstream_tool_name="search",
+                input_schema=None,  # type: ignore[arg-type]
+                metadata=None,  # type: ignore[arg-type]
+            )
+        ]
+
+
+class DirectRoutingVirtualToolManager:
+    """Manager fake that fails if tool calls route through full discovery."""
+
+    def __init__(self) -> None:
+        self.has_calls: list[str] = []
+        self.execute_calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def list_virtual_tools(self) -> list[VirtualExternalTool]:
+        """Reject call-time discovery scans."""
+
+        raise AssertionError("call_tool should not list virtual tools for routing")
+
+    async def has_virtual_tool(self, name: str) -> bool:
+        """Return whether the fake external catalog owns the requested name."""
+
+        self.has_calls.append(name)
+        return name == "ext.fast.search"
+
+    async def execute_virtual_tool(
+        self,
+        virtual_tool_name: str,
+        arguments: dict[str, Any],
+        **_kwargs: Any,
+    ) -> FederatedToolResult:
+        """Record direct execution and return a gateway-compatible result."""
+
+        self.execute_calls.append((virtual_tool_name, dict(arguments)))
+        return FederatedToolResult(
+            content={"matches": ["paper-1"]},
+            server_id="fast",
+            upstream_tool_name="search",
+            virtual_tool_name=virtual_tool_name,
+        )
+
+
 def _server(
     server_id: str = "research",
     *,
@@ -245,6 +299,20 @@ async def test_external_runtime_gateway_lists_base_and_external_tools() -> None:
     assert external["metadata"]["is_write"] is False
 
 
+async def test_external_runtime_gateway_defaults_nullable_input_schema() -> None:
+    """Nullable upstream schemas should still expose a JSON object descriptor."""
+
+    runtime = ExternalRuntimeGatewayRuntime(
+        external_runtime_manager=NullableVirtualToolManager(),  # type: ignore[arg-type]
+    )
+
+    tools = await runtime.list_tools(GatewayRequestContext(request_id="list-nullable"))
+
+    assert tools[0]["name"] == "ext.null.search"
+    assert tools[0]["inputSchema"] == {}
+    assert tools[0]["metadata"]["external_server_id"] == "null-server"
+
+
 async def test_external_runtime_gateway_dispatches_external_and_local_tools() -> None:
     """External names call the manager while local names still use the base runtime."""
 
@@ -277,6 +345,42 @@ async def test_external_runtime_gateway_dispatches_external_and_local_tools() ->
     assert transport.calls == [("search", {"query": "mcp"})]
     assert local["content"][0]["text"] == "hello"
     assert base_runtime.calls[0][0] == "local.echo"
+
+
+async def test_external_runtime_gateway_routes_calls_without_full_tool_listing() -> None:
+    """Call routing should use a direct manager membership check."""
+
+    manager = DirectRoutingVirtualToolManager()
+    base_runtime = BaseGatewayRuntime()
+    runtime = ExternalRuntimeGatewayRuntime(
+        external_runtime_manager=manager,  # type: ignore[arg-type]
+        base_runtime=base_runtime,
+    )
+    context = GatewayRequestContext(request_id="direct-route")
+
+    external = await runtime.call_tool("ext.fast.search", {"query": "mcp"}, context)
+    local = await runtime.call_tool("local.echo", {"query": "hello"}, context)
+
+    assert external["content"] == {"matches": ["paper-1"]}
+    assert local["content"][0]["text"] == "hello"
+    assert manager.has_calls == ["ext.fast.search", "local.echo"]
+    assert manager.execute_calls == [("ext.fast.search", {"query": "mcp"})]
+    assert base_runtime.calls[0][0] == "local.echo"
+
+
+async def test_external_runtime_gateway_handles_missing_context_metadata() -> None:
+    """Missing metadata should not crash effective-policy extraction."""
+
+    runtime, _transport = await _started_runtime()
+    context = GatewayRequestContext(
+        request_id="call-null-metadata",
+        metadata=None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(GatewayPolicyDenied) as exc_info:
+        await runtime.call_tool("ext.research.search", {"query": "mcp"}, context)
+
+    assert exc_info.value.reason_code == "external_server_not_granted"
 
 
 async def test_external_runtime_gateway_unknown_tool_without_base_fails() -> None:
@@ -333,6 +437,36 @@ async def test_profile_runtime_passes_external_grants_to_adapter() -> None:
         {"server_id": "research", "credential_slots": ["api_key"]}
     ]
     assert EFFECTIVE_POLICY_METADATA_KEY not in context.metadata
+
+
+async def test_profile_runtime_enriches_context_with_missing_metadata() -> None:
+    """Profile policy metadata enrichment should tolerate a null metadata mapping."""
+
+    base_runtime = BaseGatewayRuntime()
+    profile_store = InMemoryProfileStore()
+    await profile_store.upsert_profile(
+        MCPProfile(
+            id="researcher",
+            name="Researcher",
+            policy_document=ProfilePolicy(allowed_tools=["local.echo"]),
+        )
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        base_runtime,
+        profile_store=profile_store,
+        default_profile_id="researcher",
+    )
+    context = GatewayRequestContext(
+        request_id="profile-null-metadata",
+        metadata=None,  # type: ignore[arg-type]
+    )
+
+    result = await runtime.call_tool("local.echo", {"query": "hello"}, context)
+
+    assert result["content"][0]["text"] == "hello"
+    delegated_context = base_runtime.calls[0][2]
+    assert delegated_context.metadata[EFFECTIVE_POLICY_METADATA_KEY]["profile_id"] == "researcher"
+    assert context.metadata is None
 
 
 async def test_jsonrpc_maps_external_policy_denial_to_policy_error() -> None:
