@@ -517,7 +517,7 @@ flowchart TB
         StreamConfig[Streaming model config]
         AudioChunks[Incoming audio chunks]
         PartialFinal[Partial and final transcript frames]
-        PersistGate{persist_transcript and media_id?}
+        PersistGate{"persist_transcript and media_id?"}
         NoPersist[No Media DB transcript write]
     end
 
