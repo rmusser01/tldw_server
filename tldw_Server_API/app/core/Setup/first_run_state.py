@@ -53,6 +53,11 @@ SECRET_KEY_MARKERS = (
 SENSITIVE_TOKEN_KEY_PREFIXES = frozenset({"access", "api", "auth", "bearer", "private", "refresh", "secret", "session"})
 TOKEN_KEY_MARKER = "".join(("tok", "en"))
 REDACTION_PLACEHOLDER = "********"
+NON_SECRET_BOOLEAN_STEP_MARKERS = frozenset(
+    {
+        "default_provider_credential_configured",
+    }
+)
 
 
 class FirstRunState(FirstRunStateResponse):
@@ -157,10 +162,18 @@ def _is_sensitive_key(key: object) -> bool:
     return False
 
 
+def _is_non_secret_step_marker(key: object, value: Any) -> bool:
+    return str(key) in NON_SECRET_BOOLEAN_STEP_MARKERS and isinstance(value, bool)
+
+
 def _redact_secret_step_data(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
-            key: REDACTION_PLACEHOLDER if _is_sensitive_key(key) else _redact_secret_step_data(item)
+            key: item
+            if _is_non_secret_step_marker(key, item)
+            else REDACTION_PLACEHOLDER
+            if _is_sensitive_key(key)
+            else _redact_secret_step_data(item)
             for key, item in value.items()
         }
     if isinstance(value, list):

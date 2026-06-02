@@ -1,4 +1,4 @@
-import { test as base, expect, Page } from "@playwright/test"
+import { test as base, expect, Page, type Route } from "@playwright/test"
 import { resolveE2eApiKey } from "../utils/e2e-auth"
 
 /**
@@ -110,6 +110,87 @@ export const AUTH_CONFIG = {
   serverUrl: SMOKE_SERVER_URL,
   apiKey: resolveE2eApiKey({ serverUrl: SMOKE_SERVER_URL }),
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== "0"
+}
+
+const fulfillSmokeJson = async (
+  route: Route,
+  status: number,
+  body: unknown
+): Promise<void> => {
+  await route.fulfill({
+    status,
+    contentType: "application/json",
+    headers: {
+      "access-control-allow-origin": "*",
+      "access-control-allow-headers": "*",
+      "access-control-allow-methods": "GET,POST,OPTIONS"
+    },
+    body: JSON.stringify(body)
+  })
+}
+
+async function stubCompletedFirstRunSetup(page: Page): Promise<void> {
+  await page.route(/\/api\/v1\/setup\/first-run\/(?:state|metadata)(?:\?.*)?$/, async (route) => {
+    const request = route.request()
+    const method = request.method().toUpperCase()
+    const path = new URL(request.url()).pathname
+
+    if (method === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-headers": "*",
+          "access-control-allow-methods": "GET,POST,OPTIONS"
+        }
+      })
+      return
+    }
+
+    if (method !== "GET") {
+      await route.fallback()
+      return
+    }
+
+    if (path === "/api/v1/setup/first-run/state") {
+      await fulfillSmokeJson(route, 200, {
+        status: "completed",
+        current_step: null,
+        completed_steps: ["first_chat"],
+        skipped_steps: [],
+        step_data: {},
+        acknowledged_steps: ["first_chat"],
+        first_chat: {
+          completed: true,
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          response_id: "smoke-first-chat",
+          completed_at: "2026-06-01T12:00:00Z"
+        },
+        skip_reason: null,
+        created_at: "2026-06-01T12:00:00Z",
+        updated_at: "2026-06-01T12:00:00Z",
+        completed_at: "2026-06-01T12:00:00Z"
+      })
+      return
+    }
+
+    await fulfillSmokeJson(route, 200, {
+      auth_mode: "single_user",
+      bundled_single_user_auth_available: true,
+      manual_auth_required: false,
+      setup_required: false,
+      setup_completed: true,
+      remote_setup_enabled: false,
+      connection: {
+        frontend_origin: "http://localhost:3000",
+        api_origin: SMOKE_SERVER_URL,
+        browser_access: "local"
+      },
+      setup_paths: [],
+      multi_user_exit: { guide_path: "/Docs/AuthNZ/Multi_User_Setup.md" }
+    })
+  })
 }
 
 type SeedAuthOverrides = {
@@ -351,6 +432,7 @@ export async function seedAuth(
     },
     cfg
   )
+  await stubCompletedFirstRunSetup(page)
 }
 
 /**

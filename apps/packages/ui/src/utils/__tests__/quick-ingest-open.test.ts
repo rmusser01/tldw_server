@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import {
   buildQuickIngestOpenDetailFromUrl,
   createQuickIngestSessionSeedFromOpenDetail,
+  isFirstSourceOpenDetail,
   isQuickIngestPlaylistPreflightDetail,
   requestQuickIngestOpen
 } from "../quick-ingest-open"
@@ -69,7 +70,8 @@ describe("quick ingest open handoff", () => {
     }
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toEqual({
-      openDetail: detail
+      openDetail: detail,
+      firstSourceAddMode: null
     })
   })
 
@@ -77,11 +79,13 @@ describe("quick ingest open handoff", () => {
     const detail = {
       source: "first_source_milestone" as const,
       preferredPreset: "quick" as const,
-      firstSource: true
+      firstSource: true,
+      firstSourceKind: "paste_text" as const
     }
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
       openDetail: detail,
+      firstSourceAddMode: "paste_text",
       selectedPreset: "quick",
       customBasePreset: "quick",
       presetConfig: {
@@ -98,6 +102,32 @@ describe("quick ingest open handoff", () => {
     })
   })
 
+  it("keeps legacy first-source markers from narrowing to milestone-only source", () => {
+    const detail = {
+      source: "global",
+      firstSource: true,
+      firstSourceKind: "paste_text"
+    } as QuickIngestOpenDetail
+
+    expect(isFirstSourceOpenDetail(detail)).toBe(true)
+    if (isFirstSourceOpenDetail(detail)) {
+      expect(detail.source).toBe("global")
+      const narrowedSource: Exclude<
+        typeof detail.source,
+        "first_source_milestone"
+      > = detail.source
+      expect(narrowedSource).toBe("global")
+      expectTypeOf(detail.source).not.toEqualTypeOf<"first_source_milestone">()
+    }
+
+    expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
+      openDetail: detail,
+      firstSourceAddMode: "paste_text",
+      selectedPreset: "quick",
+      customBasePreset: "quick"
+    })
+  })
+
   it("falls back when first-source metadata names an inherited object key as a preset", () => {
     const detail = {
       source: "first_source_milestone" as const,
@@ -106,6 +136,7 @@ describe("quick ingest open handoff", () => {
     } as unknown as QuickIngestOpenDetail
 
     expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
+      firstSourceAddMode: "web_url",
       selectedPreset: "quick",
       customBasePreset: "quick",
       presetConfig: {

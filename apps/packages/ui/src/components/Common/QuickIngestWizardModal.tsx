@@ -574,12 +574,26 @@ const buildInitialWizardState = (
   playlistPreflightSeed: isQuickIngestPlaylistPreflightDetail(session.openDetail)
     ? session.openDetail
     : null,
+  firstSourceAddMode: session.firstSourceAddMode ?? null,
   processingState: session.processingState,
   results: session.results,
   conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
   isMinimized:
     session.visibility === "hidden" && session.lifecycle === "processing",
 })
+
+const buildOpenDetailPatch = (
+  state: IngestWizardState,
+  session: QuickIngestSessionRecord
+): QuickIngestSessionRecord["openDetail"] => {
+  if (state.playlistPreflightSeed) {
+    return state.playlistPreflightSeed
+  }
+  if (isQuickIngestPlaylistPreflightDetail(session.openDetail)) {
+    return null
+  }
+  return session.openDetail ?? null
+}
 
 const buildSessionPatchFromWizardState = (
   state: IngestWizardState,
@@ -597,7 +611,8 @@ const buildSessionPatchFromWizardState = (
     conferenceBatchMetadata: state.conferenceBatchMetadata,
     processingState: state.processingState,
     results: state.results,
-    openDetail: state.playlistPreflightSeed,
+    openDetail: buildOpenDetailPatch(state, session),
+    firstSourceAddMode: state.firstSourceAddMode ?? null,
     badge: {
       queueCount:
         lifecycle === "draft"

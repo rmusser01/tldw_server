@@ -94,6 +94,33 @@ def test_step_data_secrets_are_redacted_before_persistence(tmp_path: Path):
     assert state.step_data["providers"]["acknowledged"] is True
 
 
+def test_provider_credential_configured_marker_survives_redaction(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    store = FirstRunStateStore(path)
+
+    store.update_step(
+        "providers",
+        {
+            "acknowledged": True,
+            "default_provider": "openai",
+            "default_model": "gpt-4.1-mini",
+            "default_provider_credential_configured": True,
+            "provider_credential": "raw-secret",
+            "api_token": "raw-token",
+        },
+    )
+
+    state = FirstRunStateStore(path).load()
+    provider_data = state.step_data["providers"]
+    serialized_step_data = json.dumps(state.step_data)
+
+    assert provider_data["default_provider_credential_configured"] is True
+    assert provider_data["provider_credential"] == "********"
+    assert provider_data["api_token"] == "********"
+    assert "raw-secret" not in serialized_step_data
+    assert "raw-token" not in serialized_step_data
+
+
 def test_complete_requires_first_chat_success(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 

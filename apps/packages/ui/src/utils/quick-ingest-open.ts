@@ -15,6 +15,16 @@ export type QuickIngestPlaylistSourceKind =
   | "youtube_watch_playlist"
   | "unknown"
 
+export type FirstSourceQuickIngestKind =
+  | "web_url"
+  | "file_upload"
+  | "paste_text"
+
+export const isFirstSourceQuickIngestKind = (
+  value: unknown
+): value is FirstSourceQuickIngestKind =>
+  value === "web_url" || value === "file_upload" || value === "paste_text"
+
 export type QuickIngestOpenDetail =
   | {
       source: "manual"
@@ -24,6 +34,7 @@ export type QuickIngestOpenDetail =
       source: "first_source_milestone"
       preferredPreset?: Exclude<IngestPreset, "custom">
       firstSource?: boolean
+      firstSourceKind?: FirstSourceQuickIngestKind
       action?: string
     }
   | {
@@ -55,10 +66,19 @@ export type QuickIngestPendingOpenRequest = {
 
 export type QuickIngestSessionSeed = {
   openDetail: QuickIngestOpenDetail
+  firstSourceAddMode?: FirstSourceQuickIngestKind | null
   selectedPreset?: Exclude<IngestPreset, "custom">
   customBasePreset?: Exclude<IngestPreset, "custom">
   presetConfig?: PresetConfig
 }
+
+export type FirstSourceOpenDetail =
+  | Extract<QuickIngestOpenDetail, { source: "first_source_milestone" }>
+  | (QuickIngestOpenDetail & {
+      firstSource: true
+      preferredPreset?: unknown
+      firstSourceKind?: unknown
+    })
 
 type QuickIngestWindow = Window & {
   __tldwPendingQuickIngestOpen?: QuickIngestPendingOpenRequest
@@ -216,16 +236,20 @@ const isPreferredPreset = (
   typeof value === "string" &&
   Object.prototype.hasOwnProperty.call(DEFAULT_PRESETS, value)
 
-const isFirstSourceOpenDetail = (
+export const isFirstSourceOpenDetail = (
   detail: QuickIngestOpenDetail | null | undefined
-): detail is Extract<
-  QuickIngestOpenDetail,
-  { source: "first_source_milestone" }
-> =>
+): detail is FirstSourceOpenDetail =>
   Boolean(
     detail &&
     (detail.source === "first_source_milestone" || detail.firstSource === true)
   )
+
+const getFirstSourceAddMode = (
+  detail: FirstSourceOpenDetail
+): FirstSourceQuickIngestKind =>
+  isFirstSourceQuickIngestKind(detail.firstSourceKind)
+    ? detail.firstSourceKind
+    : "web_url"
 
 export const createQuickIngestSessionSeedFromOpenDetail = (
   detail: QuickIngestOpenDetail | null | undefined
@@ -236,6 +260,7 @@ export const createQuickIngestSessionSeedFromOpenDetail = (
       : FIRST_SOURCE_PREFERRED_PRESET
     return {
       openDetail: detail,
+      firstSourceAddMode: getFirstSourceAddMode(detail),
       selectedPreset: preferredPreset,
       customBasePreset: preferredPreset,
       presetConfig:
@@ -246,7 +271,7 @@ export const createQuickIngestSessionSeedFromOpenDetail = (
   }
 
   if (isQuickIngestPlaylistPreflightDetail(detail)) {
-    return { openDetail: detail }
+    return { openDetail: detail, firstSourceAddMode: null }
   }
 
   return null

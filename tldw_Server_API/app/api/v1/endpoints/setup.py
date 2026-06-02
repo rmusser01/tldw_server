@@ -128,6 +128,9 @@ _SUSPICIOUS_SETUP_DETAIL_RE = re.compile(
 )
 _SANITIZED_SETUP_DETAIL_MESSAGE = "Internal setup diagnostics were suppressed."
 UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL = "unsupported_first_run_step_data"
+_FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS = {
+    "providers": frozenset({"default_provider_credential_configured"}),
+}
 _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
     "setup_path": frozenset(
         {
@@ -148,7 +151,14 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
             "selected_options",
         }
     ),
-    "providers": frozenset({"acknowledged", "default_provider", "default_model"}),
+    "providers": frozenset(
+        {
+            "acknowledged",
+            "default_provider",
+            "default_model",
+            *_FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS["providers"],
+        }
+    ),
     "ingest_defaults": frozenset(
         {
             "acknowledged",
@@ -329,7 +339,14 @@ def _is_unsafe_public_step_data_key(key: object) -> bool:
 
 
 def _is_explicitly_allowed_unsafe_named_step_key(step: str, key: object) -> bool:
-    return step == "optional_advanced" and key == "values"
+    return (step == "optional_advanced" and key == "values") or (
+        key in _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset())
+    )
+
+
+def _is_valid_non_secret_boolean_step_data(step: str, data: dict[str, Any]) -> bool:
+    keys = _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset()) & data.keys()
+    return all(isinstance(data[key], bool) for key in keys)
 
 
 def _is_unsafe_public_step_data_value(value: object) -> bool:
@@ -441,6 +458,11 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
         )
+    if not _is_valid_non_secret_boolean_step_data(step, data):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
     if step == "ingest_defaults":
         _validate_ingest_allowed_local_roots(data)
     if not all(
@@ -470,6 +492,11 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
         if key not in allowed_keys:
             continue
         if step == "ingest_defaults" and key == "allowed_local_roots":
+            continue
+        if (
+            key in _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset())
+            and not isinstance(value, bool)
+        ):
             continue
         if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(step, key):
             continue
@@ -777,6 +804,11 @@ def _refresh_runtime_config_cache(context: str) -> bool:
     return True
 
 
+async def _is_secret_configured(section: str, key: str) -> bool:
+    """Return whether a setup secret is configured without blocking the event loop."""
+    return await asyncio.to_thread(setup_manager.is_secret_configured, section, key)
+
+
 def _sanitize_setup_payload(value: Any) -> Any:
     if isinstance(value, str):
         return _SANITIZED_SETUP_DETAIL_MESSAGE if _SUSPICIOUS_SETUP_DETAIL_RE.search(value) else value
@@ -1053,14 +1085,19 @@ async def save_first_run_provider(
     entry = get_setup_provider_entry(provider_key)
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
-    if (
-        entry.provider_type is SetupProviderType.HOSTED_API_KEY
-        and entry.api_key_field
-        and (payload.api_key is None or not payload.api_key.strip())
-    ):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="provider_api_key_required")
-    if entry.provider_type is SetupProviderType.HOSTED_API_KEY and payload.api_key is not None:
-        payload = payload.model_copy(update={"api_key": payload.api_key.strip()})
+    credential_configured = False
+    if entry.api_key_field:
+        normalized_api_key = payload.api_key.strip() if payload.api_key is not None else ""
+        if normalized_api_key:
+            payload = payload.model_copy(update={"api_key": normalized_api_key})
+            credential_configured = True
+        elif await _is_secret_configured(entry.config_section, entry.api_key_field):
+            payload = payload.model_copy(update={"api_key": None})
+            credential_configured = True
+        elif entry.provider_type is SetupProviderType.HOSTED_API_KEY:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="provider_api_key_required")
+        elif payload.api_key is not None:
+            payload = payload.model_copy(update={"api_key": None})
 
     updates = _provider_config_updates(payload)
     if not updates:
@@ -1083,6 +1120,7 @@ async def save_first_run_provider(
             provider_key=provider_key,
             status=SetupProviderSaveStatus.FAILED,
             masked_api_key=mask_secret(payload.api_key) if payload.api_key is not None else None,
+            credential_configured=False,
             base_url=payload.base_url,
             model=payload.model,
             make_default=payload.make_default,
@@ -1095,6 +1133,7 @@ async def save_first_run_provider(
             provider_key=provider_key,
             status=SetupProviderSaveStatus.SAVED,
             masked_api_key=mask_secret(payload.api_key) if payload.api_key is not None else None,
+            credential_configured=credential_configured,
             base_url=payload.base_url,
             model=payload.model,
             make_default=payload.make_default,
@@ -1107,6 +1146,7 @@ async def save_first_run_provider(
         provider_key=provider_key,
         status=SetupProviderSaveStatus.SAVED,
         masked_api_key=mask_secret(payload.api_key) if payload.api_key is not None else None,
+        credential_configured=credential_configured,
         base_url=payload.base_url,
         model=payload.model,
         make_default=payload.make_default,
