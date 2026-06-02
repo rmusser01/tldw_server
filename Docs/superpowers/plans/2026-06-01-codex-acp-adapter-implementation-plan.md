@@ -1308,7 +1308,7 @@ Actual: no helper/test files changed; inspection result recorded in the implemen
 - Modify: `backlog/tasks/task-592 - Plan-Codex-ACP-adapter-implementation.md` only if this plan is being finalized in this branch.
 - Modify later implementation task records as they are created/executed.
 
-- [ ] **Step 1: Run backend verification**
+- [x] **Step 1: Run backend verification**
 
 Run:
 
@@ -1323,13 +1323,21 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run Go verification**
+Actual: first run failed because `test_acp_setup_guide_codex_includes_entrypoint_blocker_steps` still expected Codex `entrypoint_strategy == "documented_candidate"`. Root cause was a stale assertion from the pre-`external_acp_adapter` Codex model; the test was updated to expect `external_acp_adapter` and concrete adapter blockers. Rerun passed with 114 tests and 6 warnings:
+
+```bash
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sessions_db.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_health.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_config_validation.py -q
+```
+
+- [x] **Step 2: Run Go verification**
 
 Run: `cd tools/tldw-agent && go test ./internal/config ./internal/acp`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run frontend verification**
+Actual: passed with `GOCACHE=/private/tmp/tldw-go-cache go test ./internal/config ./internal/acp` from `tools/tldw-agent`.
+
+- [x] **Step 3: Run frontend verification**
 
 Run:
 
@@ -1341,7 +1349,9 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Bandit on touched Python scope**
+Actual: passed from `apps/packages/ui` with `./node_modules/.bin/vitest run src/services/acp/__tests__/readiness.test.ts src/components/Option/ACPPlayground/__tests__/ACPSessionCreateModal.modal-prop-guard.test.ts` with 2 files and 11 tests. The package-local command is required in this worktree because root `bunx vitest` does not resolve the UI package alias/dependency layout.
+
+- [x] **Step 4: Run Bandit on touched Python scope**
 
 Run:
 
@@ -1357,7 +1367,9 @@ source .venv/bin/activate && python -m bandit \
 
 Expected: no new findings in touched code. If `Helper_Scripts/Testing-related/acp_certification_smoke.py` was not touched, remove it from the command.
 
-- [ ] **Step 5: Run diff hygiene checks**
+Actual: ran without the helper file because Task 7 did not touch it. Bandit exited 1 for the known `ACP_Sessions_DB.py` baseline only: B105 at line 205 and B608 at lines 1058, 1063, 1099, 1117, 1947, 2162, and 2247. `agent_registry.py`, `agent_client_protocol.py` schemas, and endpoint files had zero findings. JSON output: `/tmp/bandit_task_593_codex_acp_adapter.json`.
+
+- [x] **Step 5: Run diff hygiene checks**
 
 Run: `git diff --check`
 
@@ -1367,7 +1379,9 @@ Run: `rg -n "adapter_acp" tldw_Server_API apps tools Docs | cat`
 
 Expected: only legacy-import compatibility tests/comments mention `adapter_acp`; current UI, emitted API examples, active docs, and seeded config use `external_acp_adapter`.
 
-- [ ] **Step 6: Update Backlog final summary and commit any remaining docs/task changes**
+Actual: `git diff --check` passed. `rg -n "adapter_acp" tldw_Server_API apps tools Docs` returned legacy-import tests, compatibility alias code, historical plan/spec docs, and the compatibility matrix note that legacy input may be imported as `external_acp_adapter`; no current UI, emitted API example, seeded config, or active Codex docs use `adapter_acp`.
+
+- [x] **Step 6: Update Backlog final summary and commit any remaining docs/task changes**
 
 Use Backlog MCP for final notes. Record:
 

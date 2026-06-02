@@ -277,15 +277,19 @@ def test_acp_setup_guide_marks_configured_but_unverified_agents(client_user_only
 
 
 def test_acp_setup_guide_codex_includes_entrypoint_blocker_steps(client_user_only, stub_runner_client):
-    """Setup guide surfaces documented-candidate ACP adapter blockers."""
+    """Setup guide surfaces canonical Codex external-adapter blockers."""
     resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=codex")
     assert resp.status_code == 200
     data = resp.json()
     guide = data["guides"][0]
 
     entrypoint = guide["entrypoint"]
-    assert entrypoint["entrypoint_strategy"] == "documented_candidate"
-    assert entrypoint["primary_blocker"] == "adapter_required"
+    assert entrypoint["entrypoint_strategy"] == "external_acp_adapter"
+    assert entrypoint["primary_blocker"] in {
+        "adapter_missing",
+        "agent_binary_missing",
+        "live_certification_required",
+    }
     assert any("adapter" in step.lower() for step in guide["steps"])
 
 
