@@ -320,8 +320,10 @@ class GatewayCredentialGrantManager:
                     reason_code="invalid_credential_grant_patch",
                 )
         if "external_server_id" in patch:
-            patch["external_server_id"] = self._normalize_optional_text(
-                patch["external_server_id"]
+            patch["external_server_id"] = self._normalize_optional_patch_text(
+                patch["external_server_id"],
+                field="external_server_id",
+                reason_code="invalid_credential_grant_patch",
             )
         if "scopes" in patch:
             patch["scopes"] = self._normalize_text_list(
@@ -534,6 +536,19 @@ class GatewayCredentialGrantManager:
             return None
         text = value.strip()
         return text or None
+
+    def _normalize_optional_patch_text(
+        self,
+        value: Any,
+        *,
+        field: str,
+        reason_code: str,
+    ) -> str | None:
+        """Normalize nullable text patch fields without silently dropping bad types."""
+
+        if value is None:
+            return None
+        return self._require_text(value, field=field, reason_code=reason_code)
 
     def _normalize_text_list(self, values: Any, *, reason_code: str) -> list[str]:
         if values is None:

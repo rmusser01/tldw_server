@@ -269,6 +269,22 @@ def test_gateway_credential_grant_manager_duplicate_create_does_not_replace() ->
     asyncio.run(run())
 
 
+def test_gateway_credential_grant_manager_patch_rejects_non_string_server_id() -> None:
+    async def run() -> None:
+        manager = _manager()
+        await manager.create_grant(_grant_payload())
+
+        with pytest.raises(GatewayCredentialGrantManagementError) as exc_info:
+            await manager.patch_grant("grant-one", {"external_server_id": 123})
+
+        assert exc_info.value.reason_code == "invalid_credential_grant_patch"
+        assert (
+            await manager.show_grant("grant-one")
+        )["grant"]["external_server_id"] == "github-mcp"
+
+    asyncio.run(run())
+
+
 def test_sqlite_create_grant_rejects_duplicate_without_replacing(tmp_path) -> None:
     async def run() -> None:
         store = SQLiteMCPStore(tmp_path / "gateway.db")

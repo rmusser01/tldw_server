@@ -122,6 +122,10 @@ class GatewayConfigSnapshot(BaseModel):
             _reject_secret_material(profile.metadata)
             _reject_secret_material(profile.provenance)
         if self.default_assignment is not None:
+            if self.default_assignment.id != GATEWAY_DEFAULT_ASSIGNMENT_ID:
+                raise ValueError(
+                    "Snapshot default assignment id must be gateway default assignment id"
+                )
             _reject_secret_material(self.default_assignment.provenance)
         for server in self.external_servers:
             _reject_secret_material(server.metadata)
@@ -298,7 +302,10 @@ class GatewayConfigSnapshotManager:
                     f"External server not found: {grant.external_server_id}",
                     reason_code="config_snapshot_invalid_reference",
                 )
-            if grant.credential_slot not in server.credential_slots:
+            if (
+                not server.credential_slots
+                or grant.credential_slot not in server.credential_slots
+            ):
                 raise GatewayConfigSnapshotManagementError(
                     "Credential grant references a missing external server slot",
                     reason_code="config_snapshot_invalid_reference",
@@ -438,7 +445,7 @@ def _reject_secret_material(value: Any) -> None:
 
 
 def _reject_external_server_inline_secrets(server: ExternalServerDefinition) -> None:
-    for command_part in server.command:
+    for command_part in server.command or ():
         if _command_part_contains_inline_secret(command_part):
             raise ValueError("External server command must not contain secret material")
     if server.url:

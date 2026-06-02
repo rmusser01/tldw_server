@@ -295,7 +295,7 @@ class CredentialGrantListResponse(BaseModel):
     """Response body for listing stored credential grants."""
 
     ok: bool
-    grants: list[dict[str, Any]]
+    grants: list[CredentialGrant]
     store: StoreMetadataResponse
 
 
@@ -303,7 +303,7 @@ class CredentialGrantResponse(BaseModel):
     """Response body for returning one stored credential grant."""
 
     ok: bool
-    grant: dict[str, Any]
+    grant: CredentialGrant
     store: StoreMetadataResponse
 
 

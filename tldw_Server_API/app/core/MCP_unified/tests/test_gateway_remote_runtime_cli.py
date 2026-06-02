@@ -79,6 +79,19 @@ def test_remote_gateway_admin_client_sends_env_style_admin_header() -> None:
     assert seen_headers[0]["x-admin-key"] == "secret-value"
 
 
+@pytest.mark.parametrize("admin_key", ["secret\nvalue", "secret\rvalue"])
+def test_remote_gateway_admin_config_rejects_admin_key_line_breaks(
+    admin_key: str,
+) -> None:
+    """Admin header values cannot contain line breaks."""
+
+    with pytest.raises(ValueError, match="admin_key cannot contain line breaks"):
+        RemoteGatewayAdminConfig(
+            gateway_url="http://example.test/mcp",
+            admin_key=admin_key,
+        )
+
+
 def test_remote_gateway_admin_client_omits_admin_header_when_absent() -> None:
     """The admin header is not sent when no admin key is configured."""
 

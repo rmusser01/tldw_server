@@ -41,6 +41,8 @@ class RemoteGatewayAdminConfig:
             raise ValueError("timeout_seconds must be greater than zero")
 
         admin_key = self.admin_key.strip() if self.admin_key is not None else None
+        if admin_key is not None and ("\r" in admin_key or "\n" in admin_key):
+            raise ValueError("admin_key cannot contain line breaks")
         object.__setattr__(self, "gateway_url", gateway_url)
         object.__setattr__(self, "admin_header_name", admin_header_name)
         object.__setattr__(self, "admin_key", admin_key or None)

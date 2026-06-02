@@ -1598,7 +1598,7 @@ def test_gateway_credential_grant_management_success_envelopes() -> None:
     assert shown.status_code == 200
     assert shown.json()["grant"]["credential_slot"] == "github_token"
     assert created.status_code == 200
-    assert created.json()["grant"] == {
+    expected_created_grant = {
         "id": "grant-one",
         "profile_id": "reviewer",
         "broker_id": "env-broker",
@@ -1608,6 +1608,14 @@ def test_gateway_credential_grant_management_success_envelopes() -> None:
         "metadata": {"label": "GitHub read token"},
         "provenance": {"source": "test"},
     }
+    created_grant = created.json()["grant"]
+    assert {
+        key: created_grant[key]
+        for key in expected_created_grant
+    } == expected_created_grant
+    assert created_grant["enabled"] is True
+    assert isinstance(created_grant["created_at"], str)
+    assert isinstance(created_grant["updated_at"], str)
     assert patched.json()["grant"]["metadata"] == {"label": "Updated"}
     assert patched.json()["grant"]["enabled"] is False
     assert deleted.json() == {
@@ -1615,29 +1623,24 @@ def test_gateway_credential_grant_management_success_envelopes() -> None:
         "grant_id": "grant-one",
         "store": {"kind": "memory", "persistent": False},
     }
-    assert manager.calls == [
+    assert manager.calls[:2] == [
         (
             "list_grants",
             (),
             {"profile_id": "reviewer", "external_server_id": "github-mcp"},
         ),
         ("show_grant", ("grant-one",), {}),
-        (
-            "create_grant",
-            (
-                {
-                    "id": "grant-one",
-                    "profile_id": "reviewer",
-                    "broker_id": "env-broker",
-                    "credential_slot": "github_token",
-                    "external_server_id": "github-mcp",
-                    "scopes": ["repo:read"],
-                    "metadata": {"label": "GitHub read token"},
-                    "provenance": {"source": "test"},
-                },
-            ),
-            {},
-        ),
+    ]
+    created_payload = manager.calls[2][1][0]
+    assert manager.calls[2][0] == "create_grant"
+    assert {
+        key: created_payload[key]
+        for key in expected_created_grant
+    } == expected_created_grant
+    assert "enabled" not in created_payload
+    assert "created_at" not in created_payload
+    assert "updated_at" not in created_payload
+    assert manager.calls[3:] == [
         (
             "patch_grant",
             (
@@ -1678,6 +1681,14 @@ def test_gateway_credential_grant_management_routes_have_pydantic_response_model
     for (path, method), expected_ref in expected_refs.items():
         schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
         assert schema == {"$ref": expected_ref}
+
+    schemas = app.openapi()["components"]["schemas"]
+    assert schemas["CredentialGrantResponse"]["properties"]["grant"] == {
+        "$ref": "#/components/schemas/CredentialGrant"
+    }
+    assert schemas["CredentialGrantListResponse"]["properties"]["grants"]["items"] == {
+        "$ref": "#/components/schemas/CredentialGrant"
+    }
 
 
 @pytest.mark.parametrize(

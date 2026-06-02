@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+import mcp_unified.gateway.snapshots as snapshot_module
 from mcp_unified.gateway.snapshots import (
     GatewayConfigSnapshot,
     GatewayConfigSnapshotManagementError,
@@ -174,6 +175,37 @@ def test_snapshot_validation_rejects_external_server_inline_secrets(
         GatewayConfigSnapshot.model_validate(payload)
 
 
+def test_snapshot_inline_secret_validation_allows_malformed_missing_command() -> None:
+    """Defensive validation treats missing command lists as empty."""
+
+    server = ExternalServerDefinition.model_construct(
+        id="disabled-search",
+        name="Disabled Search",
+        transport="stdio",
+        command=None,
+        url=None,
+        cwd=None,
+        env_allowlist=[],
+        credential_slots=[],
+        metadata={},
+        provenance={},
+        enabled=False,
+        auto_start=False,
+    )
+
+    snapshot_module._reject_external_server_inline_secrets(server)
+
+
+def test_snapshot_validation_rejects_non_gateway_default_assignment_id() -> None:
+    """Snapshots cannot import arbitrary default assignment ids."""
+
+    payload = _snapshot_payload()
+    payload["default_assignment"]["id"] = "workspace-assignment"
+
+    with pytest.raises(ValueError, match="default assignment id"):
+        GatewayConfigSnapshot.model_validate(payload)
+
+
 @pytest.mark.asyncio
 async def test_import_snapshot_validates_before_first_write() -> None:
     """Reference validation fails without writing earlier valid snapshot sections."""
@@ -193,6 +225,53 @@ async def test_import_snapshot_validates_before_first_write() -> None:
 
     with pytest.raises(GatewayConfigSnapshotManagementError) as exc_info:
         await manager.import_snapshot(payload)
+
+    assert exc_info.value.reason_code == "config_snapshot_invalid_reference"
+    assert await profile_store.list_profiles() == []
+    assert await assignment_store.list_assignments() == []
+    assert await external_store.list_server_definitions() == []
+    assert await grant_store.list_grants() == []
+
+
+@pytest.mark.asyncio
+async def test_import_snapshot_handles_malformed_server_slots_before_first_write() -> None:
+    """Malformed model instances fail reference validation without mutation."""
+
+    profile_store = InMemoryProfileStore()
+    assignment_store = InMemoryProfileAssignmentStore()
+    external_store = _InMemoryExternalRegistryStore()
+    grant_store = _InMemoryCredentialGrantStore()
+    manager = GatewayConfigSnapshotManager(
+        profile_store=profile_store,
+        assignment_store=assignment_store,
+        external_registry_store=external_store,
+        credential_grant_store=grant_store,
+    )
+    snapshot = GatewayConfigSnapshot.model_construct(
+        profiles=[MCPProfile(id="reviewer", name="Reviewer")],
+        default_assignment=ProfileAssignment(
+            id=GATEWAY_DEFAULT_ASSIGNMENT_ID,
+            profile_id="reviewer",
+            is_default=True,
+        ),
+        external_servers=[
+            ExternalServerDefinition.model_construct(
+                id="search",
+                name="Search",
+                transport="stdio",
+                command=["node", "server.js"],
+                credential_slots=None,
+                metadata={},
+                provenance={},
+                enabled=True,
+                auto_start=False,
+            )
+        ],
+        credential_grants=[_grant()],
+    )
+
+    with pytest.raises(GatewayConfigSnapshotManagementError) as exc_info:
+        await manager.import_snapshot(snapshot)
 
     assert exc_info.value.reason_code == "config_snapshot_invalid_reference"
     assert await profile_store.list_profiles() == []
