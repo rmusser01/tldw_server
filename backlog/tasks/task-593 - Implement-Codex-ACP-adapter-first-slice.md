@@ -4,7 +4,7 @@ title: Implement Codex ACP adapter first slice
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-02 00:06'
+updated_date: '2026-06-02 00:31'
 labels:
   - ACP
   - Codex
@@ -44,6 +44,8 @@ Task 2 complete and approved. Commit e86d935951 exposes ACP adapter readiness me
 Task 3 complete and approved. Commit b3cb9dcc94 persists external ACP adapter metadata in the dynamic agent registry, adds schema version 15 migration/defaults for adapter package/version/version policy/install source/credential policy/runtime backend, preserves the fields through register/update/reload API paths, and keeps legacy adapter_acp normalized on DB write. Verification: focused pytest `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sessions_db.py tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py` passed with 81 passed and 6 warnings; `git diff --check` passed. Bandit on touched production files exited 1 only for existing ACP_Sessions_DB.py baseline findings outside the Task 3 diff: B105 at line 205 and B608 at lines 1058, 1063, 1099, 1117, 1947, 2162, and 2247; endpoint/schema/registry files had zero findings. Review: delegated spec review approved; local code quality review approved with the baseline Bandit note recorded.
 
 Task 4 complete and approved. Commit c97f4d0cc5 seeds the Codex registry row as an experimental external_acp_adapter profile using `codex-acp` 0.15.0 metadata, delegated adapter credentials, and live_certification_required, then updates the ACP compatibility matrix and active/published getting-started docs without claiming live certification. Verification: seeded Codex test was added red first and failed before the YAML change; focused registry test command `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py` passed with 29 passed and 6 warnings after the amended published-doc consistency fix; `git diff --check` passed. Bandit not applicable because Task 4 changed only docs, YAML, and tests. Review: local spec and code quality review approved after confirming no mutable runtime config, stale Codex OPENAI_API_KEY-only copy, or live support overclaim remained in changed Codex sections.
+
+Task 5 complete and approved. Commit ca98282828 adds Go runner config parsing for ACP entrypoint/adapter metadata, explicit launch resolution that starts external_acp_adapter profiles through acp_command without falling back to the display command, passive initialize/agent-list readiness that never spawns downstream agents or runs mutable npx @latest inventory checks, and runner agent/list readiness metadata including adapter_docs_url. Verification: red Go test run with `GOCACHE=/private/tmp/tldw-go-cache go test ./internal/config ./internal/acp` failed before implementation on missing config fields and missing resolver; green command `cd tools/tldw-agent && GOCACHE=/private/tmp/tldw-go-cache go test -count=1 ./internal/config ./internal/acp` passed after amendments; `git diff --check 0a8f2b7e41 ca98282828` passed. Review: delegated spec review initially rejected missing config-test coverage for adapter_docs_url/adapter_package/runtime_backend and missing agent/list adapter_docs_url; both were fixed before local spec/code quality approval. Bandit not applicable for Go-only task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
