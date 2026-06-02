@@ -15,9 +15,13 @@ const OptionSetup = () => {
   const { state, metadata, loading, adoptState } = useSetupOnboarding()
   const status = state?.status
   const showWizard = isSetupStatusRequiringWizard(status)
+  const showLoader = loading && !state
+  const showRouteHeading = !showWizard || showLoader
+  const routeHeading = t("setupRoute.heading", "Setup")
 
   return (
     <OptionLayout hideHeader hideSidebar>
+      {showRouteHeading ? <h1 className="sr-only">{routeHeading}</h1> : null}
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
         title={t("setupRoute.recoveryTitle", "Setup operator recovery")}
@@ -43,7 +47,7 @@ const OptionSetup = () => {
           }
         }}
       />
-      {loading && !state ? (
+      {showLoader ? (
         <PageAssistLoader
           label={t("setupRoute.loadingLabel", "Loading setup...")}
           description={t(

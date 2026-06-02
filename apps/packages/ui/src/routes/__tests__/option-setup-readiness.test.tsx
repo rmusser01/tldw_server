@@ -2,14 +2,13 @@
 
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import OptionSetup from "../option-setup"
 
 const mocks = vi.hoisted(() => ({
-  useConnectionState: vi.fn(),
-  useConnectionUxState: vi.fn()
+  useSetupOnboarding: vi.fn()
 }))
 
 vi.mock("~/components/Layouts/Layout", () => ({
@@ -19,30 +18,37 @@ vi.mock("~/components/Layouts/Layout", () => ({
   )
 }))
 
-vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
-  OnboardingWizard: () => <div data-testid="onboarding-wizard">Onboarding</div>
+vi.mock("@/components/Common/PageAssistLoader", () => ({
+  PageAssistLoader: ({ label }: { label: string }) => (
+    <div data-testid="page-assist-loader">{label}</div>
+  )
 }))
 
-vi.mock("@/components/Option/Setup/ReadinessSetupScreen", () => ({
-  ReadinessSetupScreen: ({
-    mode,
-    onUnavailable
-  }: {
-    mode?: string
-    onUnavailable?: () => void
-  }) => (
-    <div data-testid="readiness-screen" data-mode={mode}>
-      Readiness
-      <button type="button" data-testid="readiness-unavailable" onClick={onUnavailable}>
-        Unavailable
-      </button>
-    </div>
+vi.mock("@/components/Option/Onboarding/UnifiedSetupWizard", () => ({
+  UnifiedSetupWizard: () => (
+    <section data-testid="unified-setup-shell">
+      <h1>First-time setup</h1>
+    </section>
   )
 }))
 
 vi.mock("@/components/ui/state", () => ({
-  SetupRequiredPanel: ({ title }: { title: string }) => (
-    <div data-testid="setup-required-panel">{title}</div>
+  SetupRequiredPanel: ({
+    title,
+    message,
+    primaryAction
+  }: {
+    title: string
+    message: string
+    primaryAction: { label: string; onClick: () => void }
+  }) => (
+    <section data-testid="setup-required-panel">
+      <h2>{title}</h2>
+      <p>{message}</p>
+      <button type="button" onClick={primaryAction.onClick}>
+        {primaryAction.label}
+      </button>
+    </section>
   )
 }))
 
@@ -52,9 +58,8 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionState: () => mocks.useConnectionState(),
-  useConnectionUxState: () => mocks.useConnectionUxState()
+vi.mock("@/hooks/useSetupOnboarding", () => ({
+  useSetupOnboarding: () => mocks.useSetupOnboarding()
 }))
 
 const renderRoute = () =>
@@ -66,57 +71,53 @@ const renderRoute = () =>
 
 describe("OptionSetup readiness route", () => {
   beforeEach(() => {
-    mocks.useConnectionState.mockReturnValue({
-      serverUrl: "http://127.0.0.1:8000"
+    mocks.useSetupOnboarding.mockReturnValue({
+      state: { status: "completed" },
+      metadata: null,
+      loading: false,
+      adoptState: vi.fn()
     })
-    mocks.useConnectionUxState.mockReturnValue({
-      hasCompletedFirstRun: false,
-      isConfigOrError: false
+  })
+
+  it("exposes a route heading when setup does not require the wizard", () => {
+    renderRoute()
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent("Setup")
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+  })
+
+  it("keeps the wizard as the only h1 when setup is required", () => {
+    mocks.useSetupOnboarding.mockReturnValue({
+      state: { status: "not_started" },
+      metadata: null,
+      loading: false,
+      adoptState: vi.fn()
     })
-  })
 
-  it("renders the native readiness screen when a backend is configured", () => {
     renderRoute()
 
-    expect(screen.getByTestId("readiness-screen")).toHaveAttribute("data-mode", "first-run")
-    expect(screen.queryByTestId("onboarding-wizard")).not.toBeInTheDocument()
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent("First-time setup")
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
   })
 
-  it("uses admin readiness mode after first-run setup has completed", () => {
-    mocks.useConnectionUxState.mockReturnValue({
-      hasCompletedFirstRun: true,
-      isConfigOrError: false
+  it("uses the route heading while initial setup state is loading", () => {
+    mocks.useSetupOnboarding.mockReturnValue({
+      state: null,
+      metadata: null,
+      loading: true,
+      adoptState: vi.fn()
     })
 
     renderRoute()
 
-    expect(screen.getByTestId("readiness-screen")).toHaveAttribute("data-mode", "admin")
-  })
-
-  it("keeps the connection onboarding wizard when the server URL is missing", () => {
-    mocks.useConnectionState.mockReturnValue({ serverUrl: null })
-
-    renderRoute()
-
-    expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
-    expect(screen.queryByTestId("readiness-screen")).not.toBeInTheDocument()
-  })
-
-  it("keeps the connection onboarding wizard while connection setup still needs attention", () => {
-    mocks.useConnectionUxState.mockReturnValue({ isConfigOrError: true })
-
-    renderRoute()
-
-    expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
-    expect(screen.queryByTestId("readiness-screen")).not.toBeInTheDocument()
-  })
-
-  it("falls back to the connection onboarding wizard when setup readiness is unavailable", () => {
-    renderRoute()
-
-    fireEvent.click(screen.getByTestId("readiness-unavailable"))
-
-    expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
-    expect(screen.queryByTestId("readiness-screen")).not.toBeInTheDocument()
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent("Setup")
+    expect(screen.getByTestId("page-assist-loader")).toBeInTheDocument()
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
   })
 })
