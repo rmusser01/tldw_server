@@ -14,6 +14,7 @@ const BENIGN_PAGE_ERROR_PATTERNS = [
 
 const BENIGN_CONSOLE_ERROR_PATTERNS = [
   /Failed to fetch models from tldw:\s+AbortError/i,
+  /Failed to fetch models from tldw:\s+Error:\s+Failed to fetch \(GET \/api\/v1\/llm\/models\/metadata\)/i,
   /Failed to load resource: net::ERR_NAME_NOT_RESOLVED/i,
   /Failed to load resource: net::ERR_FILE_NOT_FOUND/i
 ]
