@@ -27,6 +27,8 @@ Execute the approved declarative worker lifecycle implementation plan using suba
 
 <!-- SECTION:PLAN:BEGIN -->
 Task 1 completed at commit 3dfcf77f4e0a561bd399b9d640f90d9fa0be3f1f. Added lifecycle worker spec types, graph validation, post-predicate dependency validation, POST_WORKER_SHUTDOWN phase, and focused spec tests. Verification: focused pytest 36 passed/6 warnings; git diff --check passed; Bandit on lifecycle_worker_specs.py reported 0 findings. Reviews: spec compliance passed; code quality passed with one minor non-blocking note about future string-field validation.
+
+Task 2 completed at commit 5d18e330639689b1880b1031078f43a0f62246ea. Added WorkerLifecycleSession diagnostics and stop-state tracking, preserved inventory compatibility through publish_worker_inventory(), mapped stopped-name app-state fields, and fixed callback-only diagnostics to publish the spec task_name with has_stop_event=false. Verification: focused pytest 19 passed/6 warnings; git diff --check passed; Bandit on lifecycle_worker_session.py reported 0 findings. Reviews: spec compliance passed after the callback-only task_name fix; code quality passed with no blocking issues.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
