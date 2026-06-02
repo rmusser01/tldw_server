@@ -167,6 +167,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
     db = SimpleNamespace(
         _ensure_postgres_collections_tables=lambda value: calls.append(("collections", value)),
         _ensure_postgres_tts_history=lambda value: calls.append(("tts_history", value)),
+        _ensure_postgres_audio_presets=lambda value: calls.append(("audio_presets", value)),
         _ensure_postgres_data_tables=lambda value: calls.append(("data_tables", value)),
         _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
         _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
@@ -191,6 +192,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
     assert calls == [
         ("collections", conn),
         ("tts_history", conn),
+        ("audio_presets", conn),
         ("data_tables", conn),
         ("document_workspace", conn),
         ("source_hash", conn),
@@ -1389,13 +1391,16 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
     )
 
     calls: list[object] = []
+    audio_presets_sql = "CREATE TABLE IF NOT EXISTS audio_presets (id INTEGER PRIMARY KEY);"
 
     class FakeConn:
         def executescript(self, script: str) -> None:
-            calls.append(("collections_sql", script))
+            label = "audio_presets_sql" if script == audio_presets_sql else "collections_sql"
+            calls.append((label, script))
 
     conn = FakeConn()
     db = SimpleNamespace(
+        _AUDIO_PRESETS_TABLE_SQL=audio_presets_sql,
         _ensure_sqlite_data_tables=lambda value: calls.append(("data_tables", value)),
         _ensure_sqlite_visibility_columns=lambda value: calls.append(("visibility", value)),
         _ensure_sqlite_source_hash_column=lambda value: calls.append(("source_hash", value)),
@@ -1421,6 +1426,7 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
         "data_tables",
         "fts",
         "collections_sql",
+        "audio_presets_sql",
         "document_workspace",
         "visibility",
         "source_hash",
@@ -1432,7 +1438,8 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
     assert "CREATE TABLE IF NOT EXISTS output_templates" in calls[2][1]
     assert "CREATE TABLE IF NOT EXISTS content_items" in calls[2][1]
     assert "CREATE VIRTUAL TABLE IF NOT EXISTS content_items_fts" in calls[2][1]
-    assert calls[3:] == [
+    assert calls[3] == ("audio_presets_sql", audio_presets_sql)
+    assert calls[4:] == [
         ("document_workspace", conn),
         ("visibility", conn),
         ("source_hash", conn),

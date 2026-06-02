@@ -1076,7 +1076,13 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert review.status_code == 403
-        assert review.json()["detail"] == "Reviewer does not have promotion permissions"
+        _assert_prototype_error(
+            review,
+            category="unauthorized",
+            frontend_state="unauthorized",
+            retryable=False,
+        )
+        assert review.json()["detail"]["message"] == "Reviewer does not have promotion permissions"
         updated_request = _run(test_services.repo.get_promotion_request(promotion_request["id"]))
         assert updated_request["status"] == "pending"
 
@@ -1093,7 +1099,13 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert review.status_code == 404
-        assert review.json()["detail"] == "Prototype promotion request not found"
+        _assert_prototype_error(
+            review,
+            category="missing",
+            frontend_state="missing",
+            retryable=False,
+        )
+        assert review.json()["detail"]["message"] == "Prototype promotion request not found"
 
     def test_preview_grant_renewal_returns_updated_expiry(
         self,
