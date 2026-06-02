@@ -22,6 +22,13 @@ import {
   stopProcessTree,
   waitForHttpOk,
 } from "../onboarding-uat/processes.mjs"
+import {
+  buildCommands,
+  copyReviewedEvidence,
+  formatUsage,
+  parseArgs,
+  runOnboardingUat,
+} from "../onboarding-uat/run.mjs"
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(testDir, "../..")
@@ -565,5 +572,181 @@ describe("onboarding UAT runner helpers", () => {
 
     expect(child.signals).toEqual(["SIGTERM"])
     expect(child.exitCode).toBe(0)
+  })
+})
+
+describe("onboarding UAT runner command assembly", () => {
+  it("builds service and Playwright commands from ports, profile, and mock config", () => {
+    const profile = {
+      root: "/tmp/tldw-onboarding-uat-unit",
+      configPath: "/tmp/tldw-onboarding-uat-unit/Config_Files/config.txt",
+      envPath: "/tmp/tldw-onboarding-uat-unit/Config_Files/.env",
+      usersDbPath: "/tmp/tldw-onboarding-uat-unit/Databases/users.db",
+      databaseDir: "/tmp/tldw-onboarding-uat-unit/Databases",
+      fixtureRoot: path.join(frontendRoot, "e2e/fixtures/media"),
+    }
+    const commands = buildCommands({
+      repoRoot,
+      frontendRoot,
+      ports: { backend: 18110, web: 18111, mock: 18112 },
+      profile,
+      mockConfig: "hosted-success.json",
+      scenario: "hosted-openai-first-chat",
+      viewport: "desktop",
+      baseEnv: { PATH: "/usr/bin", PYTHON: "/opt/project-python" },
+    })
+
+    expect(commands.mockOpenai).toMatchObject({
+      name: "mock-openai",
+      command: "/opt/project-python",
+      cwd: repoRoot,
+    })
+    expect(commands.mockOpenai.args).toEqual([
+      "-m",
+      "mock_openai.server",
+      "--config",
+      path.join(
+        frontendRoot,
+        "e2e/onboarding-uat/mock-openai/configs/hosted-success.json"
+      ),
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "18112",
+    ])
+    expect(commands.mockOpenai.env.PYTHONPATH).toContain(
+      path.join(repoRoot, "mock_openai_server")
+    )
+
+    expect(commands.backend).toMatchObject({
+      name: "backend",
+      command: "/opt/project-python",
+      cwd: repoRoot,
+    })
+    expect(commands.backend.args).toEqual([
+      "-m",
+      "uvicorn",
+      "tldw_Server_API.app.main:app",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "18110",
+    ])
+    expect(commands.backend.env.TLDW_CONFIG_FILE).toBe(profile.configPath)
+    expect(commands.backend.env.OPENAI_API_KEY).toBe("sk-uat-mock-openai")
+
+    expect(commands.authInit).toMatchObject({
+      name: "auth-init",
+      command: "/opt/project-python",
+      cwd: repoRoot,
+    })
+    expect(commands.authInit.args).toEqual([
+      "-m",
+      "tldw_Server_API.app.core.AuthNZ.initialize",
+      "--non-interactive",
+    ])
+    expect(commands.authInit.env.TLDW_ENV_FILE).toBe(profile.envPath)
+
+    expect(commands.frontend).toMatchObject({
+      name: "frontend",
+      command: "bun",
+      cwd: frontendRoot,
+    })
+    expect(commands.frontend.args).toEqual(["run", "dev", "--", "-p", "18111"])
+    expect(commands.frontend.env.NEXT_PUBLIC_API_URL).toBe("http://127.0.0.1:18110")
+    expect(commands.frontend.env.NEXT_PUBLIC_X_API_KEY).toBe(
+      "THIS-IS-A-SECURE-KEY-123-UAT"
+    )
+
+    expect(commands.playwright).toMatchObject({
+      name: "playwright",
+      command: "bunx",
+      cwd: frontendRoot,
+    })
+    expect(commands.playwright.args).toEqual([
+      "playwright",
+      "test",
+      "-c",
+      "e2e/onboarding-uat/playwright.config.ts",
+      "--reporter=line",
+      "--grep",
+      "hosted-openai-first-chat",
+      "--project",
+      "uat-desktop",
+    ])
+    expect(commands.playwright.env.TLDW_ONBOARDING_UAT).toBe("1")
+    expect(commands.playwright.env.TLDW_WEB_URL).toBe("http://localhost:18111")
+    expect(commands.playwright.env.TLDW_SERVER_URL).toBe("http://127.0.0.1:18110")
+    expect(commands.playwright.env.TLDW_MOCK_OPENAI_URL).toBe(
+      "http://127.0.0.1:18112/v1"
+    )
+  })
+
+  it("parses help and debug flags without requiring service startup", () => {
+    expect(parseArgs(["--help"])).toMatchObject({ help: true })
+    expect(
+      parseArgs([
+        "--scenario",
+        "hosted-openai-first-chat",
+        "--viewport",
+        "mobile",
+        "--mock-config",
+        "chat-fail-once.json",
+        "--preserve-runtime",
+        "--reviewed-evidence",
+      ])
+    ).toMatchObject({
+      scenario: "hosted-openai-first-chat",
+      viewport: "mobile",
+      mockConfig: "chat-fail-once.json",
+      preserveRuntime: true,
+      reviewedEvidence: true,
+    })
+    expect(formatUsage()).toContain("e2e:onboarding:uat")
+    expect(formatUsage()).toContain("--scenario")
+  })
+
+  it("returns help without allocating ports or starting services", async () => {
+    const writes: string[] = []
+    const originalWrite = process.stdout.write
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      writes.push(String(chunk))
+      return true
+    }) as typeof process.stdout.write
+
+    try {
+      await expect(
+        runOnboardingUat({ options: parseArgs(["--help"]) })
+      ).resolves.toEqual({ status: "help" })
+    } finally {
+      process.stdout.write = originalWrite
+    }
+
+    expect(writes.join("")).toContain("Usage: bun run e2e:onboarding:uat")
+  })
+
+  it("copies preserved artifacts into the reviewed evidence tree when requested", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-reviewed-evidence",
+      preserve: false,
+    })
+    const evidenceRoot = path.join(
+      repoRoot,
+      "Docs/Product/WebUI/evidence/onboarding_uat/unit-reviewed-evidence"
+    )
+
+    try {
+      writeFileSync(artifacts.summaryPath, "{\"status\":\"passed\"}\n", "utf8")
+
+      expect(copyReviewedEvidence({ artifacts, repoRoot })).toBe(evidenceRoot)
+      expect(existsSync(path.join(evidenceRoot, "summary.json"))).toBe(true)
+      expect(readFileSync(path.join(evidenceRoot, "summary.json"), "utf8")).toContain(
+        "\"status\":\"passed\""
+      )
+    } finally {
+      cleanupRunArtifacts(artifacts)
+      rmSync(evidenceRoot, { recursive: true, force: true })
+    }
   })
 })

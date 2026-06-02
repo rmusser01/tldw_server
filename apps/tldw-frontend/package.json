@@ -22,6 +22,7 @@
     "e2e:chat-queued-requests": "playwright test e2e/workflows/chat-queued-requests.spec.ts --reporter=line",
     "e2e:family-guardrails": "playwright test e2e/workflows/family-guardrails-wizard.spec.ts --reporter=line",
     "e2e:onboarding": "playwright test e2e/workflows/onboarding-ingestion-first.spec.ts --reporter=line",
+    "e2e:onboarding:uat": "node scripts/onboarding-uat/run.mjs",
     "e2e:research-workspace:parity": "playwright test e2e/workflows/research-workspace.parity.spec.ts --reporter=line",
     "e2e:research-workspace:real": "playwright test e2e/workflows/research-workspace.real-backend.spec.ts --reporter=line",
     "e2e:smoke": "playwright test e2e/smoke/all-pages.spec.ts --reporter=list",
