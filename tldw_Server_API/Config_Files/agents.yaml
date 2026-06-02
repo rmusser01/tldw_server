@@ -20,9 +20,11 @@
 #   compatibility_notes: Release-facing compatibility caveat
 #   compatibility_docs_url: Compatibility matrix or evidence document
 #   entrypoint_strategy: ACP entrypoint strategy; one of native_acp,
-#     adapter_acp, documented_candidate, custom_template
+#     external_acp_adapter, documented_candidate, custom_template
 #   acp_command: ACP stdio command to probe; not inferred from command
 #   acp_args: ACP stdio command arguments
+#   adapter_source: Upstream adapter source when entrypoint_strategy is external_acp_adapter
+#   credential_policy: How readiness checks account for credentials
 
 agents:
   - type: claude_code
@@ -47,22 +49,31 @@ agents:
 
   - type: codex
     name: OpenAI Codex CLI
-    description: "OpenAI's coding agent"
+    description: "OpenAI's coding agent via the Codex ACP adapter"
     command: codex
     args: []
     env: {}
-    requires_api_key: OPENAI_API_KEY
+    requires_api_key: null
     install_instructions:
-      - "npm install -g @openai/codex"
+      - "Install OpenAI Codex CLI using the current OpenAI instructions."
+      - "Install zed-industries/codex-acp 0.15.0 from the GitHub release artifact and ensure codex-acp is on PATH."
     docs_url: "https://github.com/openai/codex"
-    support_state: documented_unverified
+    support_state: experimental
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Codex ACP compatibility remains blocked until an ACP-compatible stdio command and provider credentials are verified."
+    compatibility_notes: "Codex can be reached through zed-industries/codex-acp, but this tldw profile remains experimental until live ACP certification passes."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
-    entrypoint_strategy: documented_candidate
-    acp_command: ""
+    entrypoint_strategy: external_acp_adapter
+    acp_command: codex-acp
     acp_args: []
-    certification_blocker: adapter_required
+    adapter_source: zed-industries/codex-acp
+    adapter_docs_url: "https://github.com/zed-industries/codex-acp"
+    adapter_package: "@zed-industries/codex-acp"
+    adapter_version: "0.15.0"
+    adapter_version_policy: exact_pin_required
+    adapter_install_source: github_release_preferred
+    credential_policy: delegated_to_adapter
+    runtime_backend: acp_downstream
+    certification_blocker: live_certification_required
 
   - type: aider
     name: Aider

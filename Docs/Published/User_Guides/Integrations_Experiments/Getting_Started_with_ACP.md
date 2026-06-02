@@ -283,13 +283,32 @@ When you're done:
 
 ### Codex CLI (OpenAI)
 
+Codex uses an external ACP adapter profile. Install the OpenAI Codex CLI
+separately first, then install `zed-industries/codex-acp` `0.15.0` from the
+GitHub release artifact and ensure both `codex` and `codex-acp` are on PATH.
+
+For operator setup or certification environments where release artifacts are not
+available, a pinned npm install of `@zed-industries/codex-acp@0.15.0` is an
+acceptable alternative. Do not use `@latest` for certification or seeded runtime
+configuration.
+
+Passive readiness checks only inspect configured binaries and metadata. They do
+not install packages, invoke package managers, or run `npx @latest`.
+
 ```yaml
-# ~/.tldw-agent/config.yaml
-agent:
-  command: "codex"
-  args: []
-  env:
-    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+# tldw_Server_API/Config_Files/agents.yaml
+- type: codex
+  command: codex
+  entrypoint_strategy: external_acp_adapter
+  acp_command: codex-acp
+  acp_args: []
+  adapter_source: zed-industries/codex-acp
+  adapter_version: "0.15.0"
+  adapter_version_policy: exact_pin_required
+  adapter_install_source: github_release_preferred
+  credential_policy: delegated_to_adapter
+  support_state: experimental
+  verification_level: documented_only
 ```
 
 ### OpenCode
@@ -352,6 +371,7 @@ Then restart tldw_server.
    ```bash
    claude code --help
    ```
+   For Codex adapter setups, also check `codex --version` and `codex-acp --version`.
 3. Ensure API key is set:
    ```bash
    echo $ANTHROPIC_API_KEY

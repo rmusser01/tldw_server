@@ -57,6 +57,25 @@ agents:
     assert entry.acp_args == ["acp"]
 
 
+def test_seeded_codex_profile_uses_pinned_external_acp_adapter() -> None:
+    registry = AgentRegistry()
+    registry.load()
+
+    entry = registry.get_entry("codex")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "codex"
+    assert entry.acp_command == "codex-acp"
+    assert entry.adapter_source == "zed-industries/codex-acp"
+    assert entry.adapter_version == "0.15.0"
+    assert entry.adapter_version_policy == "exact_pin_required"
+    assert entry.adapter_install_source == "github_release_preferred"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.support_state == "experimental"
+    assert entry.verification_level == "documented_only"
+
+
 def test_legacy_adapter_acp_input_is_imported_as_external_acp_adapter(tmp_path) -> None:
     yaml_file = tmp_path / "agents.yaml"
     yaml_file.write_text(
