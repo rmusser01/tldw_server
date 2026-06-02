@@ -40,7 +40,7 @@ Design spec written for a Mermaid-only layered data flow atlas. Implementation p
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec drafted at Docs/superpowers/specs/2026-06-02-data-flow-atlas-design.md and reviewed for the tldw_Server_API data flow atlas. Verification: local text sanity check confirmed required scope terms, TASK-502 backlink, Mermaid-only requirement, router_groups anchors, verification section, and docs-only Bandit skip; independent spec review returned Approved. Implementation planning is intentionally deferred until the user reviews and approves the committed spec.
+Design spec drafted and tightened at Docs/superpowers/specs/2026-06-02-data-flow-atlas-design.md. Verification: local text sanity checks confirmed required scope terms, TASK-502 backlink, Mermaid-only requirement, phased delivery, router registration helper anchors, coverage table requirement, verification section, and docs-only Bandit skip. Independent spec review loop returned Approved after the router anchor improvement. User asked to continue into implementation planning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

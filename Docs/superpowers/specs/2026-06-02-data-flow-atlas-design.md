@@ -49,6 +49,13 @@ The atlas should start broad, then progressively reveal detail:
 
 This structure gives newcomers a top-down path while giving maintainers direct entry points for specific flows.
 
+The implementation should be staged so the atlas remains reviewable:
+
+1. foundation maps: system context, request lifecycle, router group map, and data-store map;
+2. core flow diagrams: auth, media ingestion, audio, chunking/embeddings, RAG, chat/LLM, jobs/scheduler;
+3. extended domain maps: evaluations, MCP, prompt studio, notes/chatbooks, research/web scraping, storage/files, admin/ops, characters/workspaces, integrations/connectors;
+4. final linking, coverage matrix, and verification pass.
+
 ## Non-Goals
 
 - No generated OpenAPI replacement.
@@ -146,11 +153,28 @@ This diagram should help contributors reason about where cross-cutting behavior 
 
 Base the router map on the current files:
 
+- `tldw_Server_API/app/api/v1/router_registry.py`
+- `tldw_Server_API/app/api/v1/router_groups/spec.py`
 - `tldw_Server_API/app/api/v1/router_groups/core.py`
 - `tldw_Server_API/app/api/v1/router_groups/content.py`
 - `tldw_Server_API/app/api/v1/router_groups/admin.py`
 - `tldw_Server_API/app/api/v1/router_groups/minimal.py`
 - `tldw_Server_API/app/api/v1/router_groups/conditional.py`
+- `tldw_Server_API/app/api/v1/router_groups/factories.py`
+
+Verify the map against these concrete registration anchors:
+
+- `include_router_idempotent`
+- `register_router_specs`
+- `register_all_routers`
+- `RouterSpec.resolve_router`
+- `append_imported_router_spec`
+- `iter_core_router_specs`
+- `iter_content_router_specs`
+- `iter_admin_router_specs`
+- `iter_minimal_test_router_specs`
+- `iter_minimal_optional_router_specs`
+- grouped and minimal registration calls in `tldw_Server_API/app/main.py`
 
 The map should show major groups rather than every individual route:
 
@@ -166,6 +190,13 @@ The map should show major groups rather than every individual route:
 - admin, orgs, billing, resource governance, monitoring.
 
 When a route is optional, lazy-imported, or feature-gated, label it as such.
+
+Include a compact router coverage table after the map:
+
+| Router group or domain | Representative routes/modules | Atlas section | Coverage note |
+| --- | --- | --- | --- |
+
+This table should make grouping decisions explicit. It does not need every concrete path, but it should include every major router group/domain and representative modules from the current router specs.
 
 ### 5. Data Store Map
 
@@ -361,8 +392,10 @@ Implementation verification should be documentation-focused:
 - confirm `Docs/Architecture.md` links to it;
 - confirm `Docs/Code_Documentation/Code_Map.md` links to it;
 - run a text check for Mermaid fences and obvious Markdown link problems;
+- render-check Mermaid when a local renderer is already available, without committing generated PNG/SVG assets;
 - grep for key source anchors to ensure diagrams cite real module paths;
 - manually compare the router map against `router_groups/*.py`;
+- confirm the router coverage table accounts for the major router groups/domains called out in this spec;
 - record verification results in `TASK-502`.
 
 No backend unit tests are required unless implementation uncovers a code/docs mismatch that requires code changes.
@@ -378,12 +411,13 @@ Keep the atlas maintainable:
 - update the atlas when router groups, storage ownership, or major process flows change;
 - link to deeper module docs rather than duplicating all module internals;
 - avoid speculative architecture language unless clearly labeled as future work.
+- include a brief "How to update this atlas" checklist at the end of the final doc.
 
-## Open Questions For Implementation Planning
+## Implementation Decisions
 
-These do not block the design, but the implementation plan should decide them explicitly:
+Use these decisions when writing the implementation plan:
 
-- Whether `Data_Flow_Atlas.md` should be one long page or include a generated table of contents.
-- Whether admin/ops deserves one diagram or several small diagrams.
-- Whether the router group map should include every router spec name or collapse low-level routes into domain buckets.
-- Whether to include a brief "How to update this atlas" checklist at the end of the final doc.
+- `Data_Flow_Atlas.md` should be one long page with a table of contents.
+- Admin/ops should use one primary map plus smaller diagrams only when needed for clarity.
+- The router group map should include domain buckets, and the router coverage table should list representative router spec names/modules so maintainers can audit coverage without reading a huge diagram.
+- The final doc should include a short "How to update this atlas" checklist.
