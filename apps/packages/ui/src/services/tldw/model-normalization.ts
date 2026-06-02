@@ -21,7 +21,7 @@ function toNonEmptyString(value: unknown): string | null {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object"
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
 function isLikelyModelId(value: string): boolean {
@@ -152,5 +152,5 @@ export async function getNormalizedTldwModels(
     ? await buildProviderAvailabilityMap(() => client.getProviders())
     : new Map<string, ProviderAvailability>()
 
-  return normalizeTldwModels(list, providerAvailability)
+  return normalizeTldwModels(meta, providerAvailability)
 }

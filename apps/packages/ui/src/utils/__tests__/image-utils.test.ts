@@ -67,4 +67,11 @@ describe("image utils", () => {
       )
     ).toBe("data:image/jpeg;base64,ZmFrZQ==")
   })
+
+  it("leaves generic data URLs unchanged when no attachment MIME is available", () => {
+    const dataUrl = "data:application/octet-stream;base64,ZmFrZQ=="
+
+    expect(normalizeImageDataUrlMime(dataUrl, null)).toBe(dataUrl)
+    expect(normalizeImageDataUrlMime(dataUrl, undefined)).toBe(dataUrl)
+  })
 })

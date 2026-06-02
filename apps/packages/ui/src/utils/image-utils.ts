@@ -63,12 +63,13 @@ export function inferImageAttachmentMimeType(
 
 export function normalizeImageDataUrlMime(
   dataUrl: string,
-  mimeType: string
+  mimeType: string | null | undefined
 ): string {
   if (dataUrl.toLowerCase().startsWith("data:image/")) return dataUrl
 
   const commaIndex = dataUrl.indexOf(",")
   if (commaIndex === -1) return dataUrl
+  if (!mimeType) return dataUrl
 
   return `data:${mimeType};base64,${dataUrl.slice(commaIndex + 1)}`
 }

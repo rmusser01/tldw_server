@@ -1,5 +1,5 @@
 ---
-id: TASK-499
+id: TASK-589
 title: Address review duplication in model normalization and chat image MIME policy
 status: Done
 labels:
@@ -38,13 +38,13 @@ Docs/superpowers/plans/2026-06-01-review-duplication-normalization-image-policy-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Acceptance criteria completed: shared model normalizer used by both getModels paths; shared image utility policy used by composer and unsupported-types; regression tests added. Verification recorded in Final Summary. Bandit skipped because no Python code changed. PR: https://github.com/rmusser01/tldw_server/pull/2218
+Acceptance criteria completed: shared model normalizer used by both getModels paths; shared image utility policy used by composer and unsupported-types; regression tests added. PR #2218 was rebased onto the latest `origin/dev` on 2026-06-01; the rebase was a no-op because the branch was already current. Addressed Gemini review threads for nullish image MIME handling, array-valued model metadata records, and raw metadata normalization. Replaced the duplicate `TASK-499` branch task record with unique `TASK-589`. Bandit skipped because no Python code changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved the two review duplication findings by centralizing Tldw model normalization/provider availability enrichment and chat attachment image MIME policy. Verification: initial red tests failed for missing helper exports; targeted Vitest from apps/packages/ui passed 4 files / 25 tests in the original workspace and 4 files / 31 tests after cherry-picking onto the clean dev-based PR branch. Touched-file whitespace check passed. Package-wide TypeScript still has unrelated baseline failures; exact touched-source type-error filter returned no matches. Bandit skipped because this slice touched no Python code.
+Resolved the two review duplication findings by centralizing Tldw model normalization/provider availability enrichment and chat attachment image MIME policy. PR #2218 was rebased onto the latest `origin/dev`; no commits were replayed because it was already current. Addressed all current Gemini inline review comments by accepting nullish MIME values in `normalizeImageDataUrlMime`, making model-normalization records exclude arrays, and passing the raw metadata payload into `normalizeTldwModels`. Also replaced the duplicate branch-local `TASK-499` tracking file with unique `TASK-589`. Verification: targeted Vitest from apps/packages/ui passed 4 files / 33 tests after the review-comment fixes. Touched-file whitespace check passed. Package-wide TypeScript still has unrelated baseline failures; exact touched-source type-error filter returned no matches. Bandit skipped because this slice touched no Python code. PR: https://github.com/rmusser01/tldw_server/pull/2218
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

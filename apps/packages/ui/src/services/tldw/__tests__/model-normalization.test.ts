@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import { getNormalizedTldwModels } from "../model-normalization"
+import {
+  getNormalizedTldwModels,
+  normalizeTldwModels
+} from "../model-normalization"
 
 describe("model normalization helpers", () => {
   it("normalizes models with inherited provider availability metadata", async () => {
@@ -60,5 +63,25 @@ describe("model normalization helpers", () => {
         availability: "disabled"
       })
     ])
+  })
+
+  it("treats array-valued modalities as invalid metadata records", () => {
+    const models = normalizeTldwModels({
+      models: [
+        {
+          id: "openai/gpt-4o-mini",
+          provider: "openai",
+          type: "chat",
+          modalities: ["text"],
+          input_modality: ["text"],
+          output_modality: "text"
+        }
+      ]
+    })
+
+    expect(models[0]?.modalities).toEqual({
+      input: ["text"],
+      output: ["text"]
+    })
   })
 })
