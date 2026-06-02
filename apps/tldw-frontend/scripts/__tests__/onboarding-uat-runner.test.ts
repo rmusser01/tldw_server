@@ -101,12 +101,12 @@ describe("onboarding UAT static fixtures", () => {
         status_code?: number
         code?: string
       }) =>
-        failure.match?.model === "missing-uat-model" &&
+        failure.match?.model === "gpt-4.1-mini" &&
         failure.status_code === 404 &&
         failure.code === "model_not_found"
     )
 
-    expect(modelIds(unavailable)).not.toContain("missing-uat-model")
+    expect(modelIds(unavailable)).toContain("gpt-4.1-mini")
     expect(failsSelectedChatModel).toBe(true)
   })
 

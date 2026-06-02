@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test"
+import { expect, type Locator, type Page } from "@playwright/test"
 import { ChatPage } from "../utils/page-objects"
 import {
   isBenign,
@@ -25,30 +25,28 @@ export async function openFirstRunSetup(page: Page): Promise<void> {
   }
 }
 
-export async function connectSingleUser(
+export async function attemptSingleUserConnection(
   page: Page,
   options: { serverUrl: string; apiKey: string }
 ): Promise<void> {
-  const serverUrlInput = page
-    .getByTestId("onboarding-server-url")
-    .or(page.getByLabel(/server url|api url|backend url/i))
-    .first()
-  const apiKeyInput = page
-    .getByTestId("onboarding-api-key")
-    .or(page.getByLabel(/api key/i))
-    .first()
+  const serverUrlInput = page.getByTestId("onboarding-server-url")
+  const apiKeyInput = page.getByTestId("onboarding-api-key")
 
   await expect(serverUrlInput).toBeVisible({ timeout: 30_000 })
   await serverUrlInput.fill(options.serverUrl)
   await expect(apiKeyInput).toBeVisible({ timeout: 30_000 })
   await apiKeyInput.fill(options.apiKey)
 
-  const connectButton = page
-    .getByTestId("onboarding-connect")
-    .or(page.getByRole("button", { name: /connect|continue|save/i }))
-    .first()
+  const connectButton = page.getByTestId("onboarding-connect")
   await expect(connectButton).toBeVisible({ timeout: 30_000 })
   await connectButton.click()
+}
+
+export async function connectSingleUser(
+  page: Page,
+  options: { serverUrl: string; apiKey: string }
+): Promise<void> {
+  await attemptSingleUserConnection(page, options)
 
   await waitForSetupConnectionReady(page)
 }
@@ -124,7 +122,20 @@ export async function captureStep(
   return { screenshotPath, jsonPath }
 }
 
+const UNSAFE_PRIMARY_DETAIL_PATTERN =
+  /traceback|stack trace|authorization|x-api-key|request headers|\/Users\/|[A-Za-z]:\\|sk-[A-Za-z0-9_-]+/i
+
+export async function expectNoUnsafePrimaryDetails(
+  locator: Locator
+): Promise<void> {
+  await expect(locator).not.toContainText(UNSAFE_PRIMARY_DETAIL_PATTERN)
+}
+
 type ConsoleDiagnostic = DiagnosticsData["console"][number]
+type DiagnosticsAllowance = {
+  expectedEndpointOrigins?: string[]
+  expectedConsoleText?: RegExp[]
+}
 
 const MODEL_METADATA_ENDPOINT = "/api/v1/llm/models/metadata"
 const CHAT_SETTINGS_ENDPOINT_PREFIX = "/api/v1/chats/"
@@ -150,13 +161,35 @@ function isBenignOnboardingConsoleEntry(entry: ConsoleDiagnostic): boolean {
   )
 }
 
-export function assertNoCriticalDiagnostics(diagnostics: DiagnosticsData): void {
+const matchesExpectedEndpoint = (
+  url: string | undefined,
+  expectedEndpointOrigins: string[] = []
+): boolean => {
+  if (!url) return false
+  return expectedEndpointOrigins.some((origin) =>
+    url.startsWith(origin.replace(/\/$/, ""))
+  )
+}
+
+export function assertNoCriticalDiagnostics(
+  diagnostics: DiagnosticsData,
+  allowance: DiagnosticsAllowance = {}
+): void {
+  const expectedEndpointOrigins = allowance.expectedEndpointOrigins ?? []
+  const expectedConsoleText = allowance.expectedConsoleText ?? []
   const pageErrors = diagnostics.pageErrors.filter((error) => !isBenign(error.message))
   const consoleErrors = diagnostics.console.filter(
-    (entry) => entry.type === "error" && !isBenignOnboardingConsoleEntry(entry)
+    (entry) =>
+      entry.type === "error" &&
+      !isBenignOnboardingConsoleEntry(entry) &&
+      !matchesExpectedEndpoint(entry.location?.url, expectedEndpointOrigins) &&
+      !expectedConsoleText.some((pattern) => pattern.test(entry.text))
   )
   const requestFailures = diagnostics.requestFailures.filter(
-    (request) => !isBenign(request.url) && !isBenign(request.errorText)
+    (request) =>
+      !isBenign(request.url) &&
+      !isBenign(request.errorText) &&
+      !matchesExpectedEndpoint(request.url, expectedEndpointOrigins)
   )
 
   if (pageErrors.length || consoleErrors.length || requestFailures.length) {

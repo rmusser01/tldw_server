@@ -62,6 +62,28 @@ export const tierAScenarios = [
     viewports: ["desktop"],
     grep: "provider-retry-recovery",
   },
+  {
+    id: "model-unavailable-recovery",
+    tier: "A",
+    title: "Model unavailable recovery",
+    description:
+      "Exercise inline recovery when the selected chat model is unavailable through the repo mock OpenAI-compatible server.",
+    specFile: "e2e/onboarding-uat/recovery.spec.ts",
+    mockConfig: "model-unavailable.json",
+    viewports: ["desktop"],
+    grep: "model-unavailable-recovery",
+  },
+  {
+    id: "setup-endpoint-recovery",
+    tier: "A",
+    title: "Setup endpoint recovery",
+    description:
+      "Exercise inline recovery when the setup shell cannot reach the configured local backend endpoint and the user edits it without leaving setup.",
+    specFile: "e2e/onboarding-uat/recovery.spec.ts",
+    mockConfig: "hosted-success.json",
+    viewports: ["desktop"],
+    grep: "setup-endpoint-recovery",
+  },
 ] as const satisfies readonly OnboardingUatScenario[]
 
 export const onboardingUatScenarios = [...tierAScenarios] as const
