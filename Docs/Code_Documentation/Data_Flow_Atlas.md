@@ -617,7 +617,7 @@ flowchart LR
 
 **Purpose:** Normalize search/RAG requests, retrieve candidate chunks from lexical and vector paths, rerank and post-process them, then assemble results or generation context.
 
-**Primary entrypoints:** `POST /api/v1/rag/search`, `GET /api/v1/rag/search/stream`, RAG settings/backends endpoints, media search endpoints, and chat flows that request RAG context before generation.
+**Primary entrypoints:** `POST /api/v1/rag/search`, `POST /api/v1/rag/search/stream`, RAG settings/backends endpoints, media search endpoints, and chat flows that request RAG context before generation.
 
 ```mermaid
 flowchart LR
