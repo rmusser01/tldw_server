@@ -53,6 +53,10 @@ import {
   DISCUSS_MEDIA_PROMPT_SETTING,
   DISCUSS_WATCHLIST_PROMPT_SETTING,
 } from "@/services/settings/ui-settings";
+import {
+  isChatSubmitSuccess,
+  normalizeChatSubmitResult,
+} from "@/hooks/chat/chat-action-utils";
 import { fetchChatModels, fetchImageModels } from "@/services/tldw-server";
 import {
   type ResearchRunCreateRequest,
@@ -2837,11 +2841,14 @@ export const PlaygroundForm = ({
     onMutate: () => ({
       errorKeyToDismiss: chatErrorBanner?.key ?? null,
     }),
-    onSuccess: (_data, _variables, context) => {
-      dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
-      void trackOnboardingChatSubmitSuccess(
-        typeof window !== "undefined" ? window.location.pathname : "/chat",
-      );
+    onSuccess: (data, _variables, context) => {
+      const result = normalizeChatSubmitResult(data);
+      if (isChatSubmitSuccess(result)) {
+        dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
+        void trackOnboardingChatSubmitSuccess(
+          typeof window !== "undefined" ? window.location.pathname : "/chat",
+        );
+      }
       textAreaFocus();
       queryClient.invalidateQueries({
         queryKey: ["fetchChatHistory"],
@@ -2851,6 +2858,34 @@ export const PlaygroundForm = ({
       textAreaFocus();
     },
   });
+
+  const handleRetryChatError = React.useCallback(() => {
+    const lastUserMessage = [...messages].reverse().find((entry: any) => {
+      const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
+      return role === "user" || entry?.isBot === false
+    }) as any
+    const retryText =
+      typeof lastUserMessage?.message === "string"
+        ? lastUserMessage.message
+        : typeof lastUserMessage?.content === "string"
+          ? lastUserMessage.content
+          : ""
+    const trimmed = retryText.trim()
+    if (!trimmed) {
+      textAreaFocus()
+      return
+    }
+
+    void sendMessage({
+      message: trimmed,
+      image: "",
+      docs: [],
+    })
+  }, [messages, sendMessage, textAreaFocus])
+
+  const handleEditChatProvider = React.useCallback(() => {
+    setOpenModelSettings(true)
+  }, [setOpenModelSettings])
 
   const followUpResearchDraftQuery = React.useMemo(() => {
     const trimmed = form.values.message.trim();
@@ -5000,7 +5035,28 @@ export const PlaygroundForm = ({
                             "View in Health & Diagnostics",
                           ) as string
                         }
+                        retryLabel={
+                          t(
+                            "playground:composer.errorBanner.retry",
+                            "Retry chat",
+                          ) as string
+                        }
+                        editProviderLabel={
+                          t(
+                            "playground:composer.errorBanner.editProvider",
+                            "Edit provider",
+                          ) as string
+                        }
+                        switchProviderLabel={
+                          t(
+                            "playground:composer.errorBanner.switchProvider",
+                            "Switch provider",
+                          ) as string
+                        }
                         dismissLabel={t("common:close", "Dismiss") as string}
+                        onRetry={handleRetryChatError}
+                        onEditProvider={handleEditChatProvider}
+                        onSwitchProvider={openModelApiSelector}
                         onDismiss={dismissChatErrorBanner}
                       />
                       {showFollowUpResearchButton ? (

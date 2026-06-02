@@ -625,8 +625,9 @@ describe("UnifiedSetupWizard", () => {
     });
   });
 
-  it("does not refresh readiness after first chat completion", async () => {
+  it("does not refresh readiness and notifies after first chat completion", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    const onComplete = vi.fn();
 
     render(
       <UnifiedSetupWizard
@@ -638,6 +639,7 @@ describe("UnifiedSetupWizard", () => {
           "audio_defaults",
           "optional_advanced",
         ])}
+        onComplete={onComplete}
       />,
     );
 
@@ -654,6 +656,7 @@ describe("UnifiedSetupWizard", () => {
     await waitFor(() => {
       expect(setupHookMocks.refresh).toHaveBeenCalledTimes(2);
     });
+    expect(onComplete).toHaveBeenCalledTimes(1);
     expect(readinessHookMocks.refresh).not.toHaveBeenCalled();
   });
 

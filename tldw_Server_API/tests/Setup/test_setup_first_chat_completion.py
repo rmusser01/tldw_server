@@ -2,6 +2,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
+    ChatBadRequestError,
     ChatConfigurationError,
 )
 
@@ -205,3 +206,25 @@ async def test_first_chat_verifier_maps_configuration_failures_without_raw_detai
     assert result.failure_category == "configuration_error"
     assert "C:\\secret" not in str(result)
     assert "token=abc123" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_first_chat_verifier_maps_model_not_found_to_model_unavailable(monkeypatch):
+    from tldw_Server_API.app.core.Setup import first_chat_verifier
+
+    raw_detail = "invalid_request_error Model gpt-4.1-mini is not available in this fixture"
+
+    async def _fake_call_chat_completion(**_kwargs):
+        raise ChatBadRequestError(raw_detail, provider="openai")
+
+    monkeypatch.setattr(first_chat_verifier, "_call_chat_completion", _fake_call_chat_completion)
+
+    result = await first_chat_verifier.verify_first_chat(
+        provider="openai",
+        model="gpt-4.1-mini",
+    )
+
+    assert result.status == "failed"
+    assert result.failure_category == "model_unavailable"
+    assert result.message == "The selected model is unavailable. Switch model or provider."
+    assert "gpt-4.1-mini is not available" not in str(result)

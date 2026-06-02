@@ -40,6 +40,7 @@ type UnifiedSetupWizardProps = {
   initialState?: FirstRunState | null;
   initialMetadata?: FirstRunMetadata | null;
   onStateChange?: (state: FirstRunState) => void;
+  onComplete?: () => void;
 };
 
 const setupPathToBackend = (path: SoloSetupPath) =>
@@ -83,6 +84,7 @@ export function UnifiedSetupWizard({
   initialState = null,
   initialMetadata = null,
   onStateChange,
+  onComplete,
 }: UnifiedSetupWizardProps = {}) {
   const {
     state,
@@ -477,6 +479,7 @@ export function UnifiedSetupWizard({
             complete={completeAndPublish}
             onComplete={() => {
               void refreshParentState();
+              onComplete?.();
             }}
             onBack={() => setStep("provider_setup")}
             onEditProvider={() => setStep("provider_setup")}

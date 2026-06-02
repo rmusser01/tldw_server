@@ -1,6 +1,6 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import OptionIndex from "../option-index"
 import OptionSetup from "../option-setup"
 import OptionOnboardingTest from "../option-onboarding-test"
@@ -64,6 +64,15 @@ vi.mock("@/hooks/useComposerFocus", () => ({
   useFocusComposerOnConnect: () => undefined
 }))
 
+vi.mock("@/hooks/usePostOnboardingMediaReadiness", () => ({
+  usePostOnboardingMediaReadiness: () => ({
+    status: "ready",
+    errorMessage: null,
+    recoverWithApiKey: vi.fn(),
+    retry: vi.fn()
+  })
+}))
+
 vi.mock("@/hooks/useDarkmode", () => ({
   useDarkMode: () => ({
     mode: "dark",
@@ -97,10 +106,17 @@ vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
 }))
 
 vi.mock("@/components/Option/Onboarding/UnifiedSetupWizard", () => ({
-  UnifiedSetupWizard: () => (
+  UnifiedSetupWizard: ({ onComplete }: { onComplete?: () => void }) => (
     <div data-testid="unified-setup-shell">
       <h1>First-time setup</h1>
       <button type="button">Mock unified setup</button>
+      <button
+        type="button"
+        data-testid="complete-unified-setup"
+        onClick={() => onComplete?.()}
+      >
+        Complete unified setup
+      </button>
     </div>
   )
 }))
@@ -257,6 +273,14 @@ describe("core route identity guardrails", () => {
         hideSidebar: true
       })
     )
+  })
+
+  it("returns from setup recovery to home after unified setup completion", () => {
+    render(<OptionSetup />)
+
+    fireEvent.click(screen.getByTestId("complete-unified-setup"))
+
+    expect(navigateMock).toHaveBeenCalledWith("/")
   })
 
   it("uses unified setup for character-chat first-run entry without pre-auth action lane", async () => {
