@@ -46,6 +46,33 @@ quotas, metrics, events, audit hooks, and worker SDK utilities.
 - Billing/Usage/Resource Governance can influence quotas and cost accounting.
 - Logging/Tracing add request IDs and trace metadata to job records.
 
+## Architecture Notes
+
+### Core Flow
+
+- Domain modules create work through `JobManager.create_job(...)` with domain, queue, type, owner, payload, idempotency, quota, and scheduling metadata.
+- Workers acquire jobs with a lease, process the payload, renew when needed, and finish through `complete_job` or `fail_job`. `WorkerSDK` wraps that loop so cancellation, structured errors, metrics, and retries stay consistent.
+- Admin queue controls in `jobs_admin.py` pause, resume, drain, prune, retry, reschedule, cancel, and requeue quarantined jobs through the same manager and backend state.
+- `event_stream.py`, `metrics.py`, `audit_bridge.py`, and `tracing.py` observe lifecycle transitions; they should not own domain-specific business logic.
+
+### State And Data
+
+- SQLite and Postgres schemas are maintained in `migrations.py`, `pg_migrations.py`, and `pg_util.py`; persisted fields need both backends and migration tests.
+- Job payloads are durable JSON contracts across API processes, workers, and deployments. Keep payloads small, version-tolerant, and owned by the module that enqueues them.
+- Idempotency is enforced with persisted keys, and completion/failure can use lease or completion tokens for repeated finalize attempts.
+
+### Security And Operations
+
+- Postgres paths preserve RLS and domain allowlist behavior through endpoint context and manager calls. Do not fabricate owner or principal context to make an admin route easier.
+- Destructive admin operations such as prune, batch cancel, and quarantine requeue require scoped filters and confirmation behavior outside test mode.
+- Leases are the concurrency boundary. Workers must complete, fail, or renew with the expected worker and lease identifiers rather than updating rows directly.
+
+### Extension Checklist
+
+- New domain job: define the payload near the owning module, enqueue through `JobManager`, add worker coverage, and include domain/queue owner tests.
+- New persisted field: update SQLite migration, Postgres migration, model serialization, manager reads/writes, and both migration suites.
+- New admin control: update `jobs_admin.py`, RBAC/RLS tests, queue-control tests, and audit or metrics expectations.
+
 ## Extension Points
 
 - Define domain-specific job types next to the owning module, then enqueue via

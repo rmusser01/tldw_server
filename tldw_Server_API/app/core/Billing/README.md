@@ -55,6 +55,40 @@ billing disabled.
   public builds should operate on the free/self-host tier without active
   checkout or portal flows.
 
+## Architecture Notes
+
+### Core Flow
+
+- Endpoint dependencies build a `LimitEnforcementContext` with user/org/team
+  identity, requested resource category, and usage quantity.
+- `enforcement.py` resolves the applicable plan through AuthNZ billing/quota
+  repositories, loads category limits from `plan_limits.py`, applies overage
+  behavior from `overage_config.py`, and returns allow/deny decisions before the
+  caller creates storage, media, audio, or provider work.
+- `subscription_service.py` remains a compatibility boundary for injected
+  payment clients; public OSS payment capability is still controlled by
+  `runtime_flags.py` and must not be inferred from compatibility methods.
+
+### State And Operations
+
+- Limit state comes from AuthNZ billing/quota repositories and Usage/Resource
+  Governance counters, not from this package alone.
+- `LIMIT_ENFORCEMENT_ENABLED` controls quota enforcement; payment billing
+  remains disabled through the OSS runtime flag.
+- Billing audit events should capture decision context and provider event ids
+  without logging secrets, signed webhook bodies, or raw provider payloads.
+
+### Extension Checklist
+
+- New resource limit: update `LimitCategory`, `plan_limits.py`,
+  `billing_schemas.py`, endpoint/dependency wiring, and
+  `tests/Billing/test_billing_enforcement.py`.
+- New overage mode: update `overage_config.py`,
+  `tests/Billing/test_overage_config.py`, and integration coverage for allow,
+  deny, and failure-mode behavior.
+- New provider compatibility event: update `subscription_service.py`,
+  `billing_audit.py`, webhook sanitization tests, and idempotency checks.
+
 ## Extension Points
 
 - Add a new enforced resource by extending `LimitCategory`, plan limits, endpoint

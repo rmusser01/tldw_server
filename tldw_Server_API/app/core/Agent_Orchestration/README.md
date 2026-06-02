@@ -39,6 +39,33 @@ Agent_Orchestration coordinates ACP-backed workspaces, projects, tasks, runs, re
 - Workspace artifact promotion uses `ChaChaNotes_DB` so accepted work can appear in the workspace artifact system while raw ACP artifacts remain evidence.
 - Workspace root validation is tied to `[ACP-WORKSPACE]` configuration and `ACP_WORKSPACE_ALLOWED_BASE_PATHS`.
 
+## Architecture Notes
+
+### Core Flow
+
+- `models.py` is the state-machine source of truth. The service and DB layer should reject transitions that do not match the `todo -> inprogress -> review/triage/complete` rules.
+- Task start checks dependency readiness before creating an ACP run. A dependent task is ready only when its dependency is complete or the dependency has been removed.
+- ACP completion markers are parsed in `completion_signals.py`; reviewer markers are parsed separately so completion and review decisions cannot be conflated.
+- Artifact promotion is a post-review step. `artifact_promotion.py` only promotes accepted ACP work products into ChaChaNotes workspace artifacts, preserving run, review, and source lineage.
+
+### State And Data
+
+- `DB_Management/Orchestration_DB.py` owns projects, tasks, runs, reviews, ACP workspaces, and workspace MCP servers in a per-user SQLite store.
+- Workspace root paths and canonical workspace links are persisted, while workspace creation is constrained by the allowlist resolved in `agent_orchestration.py`.
+- `ACPWorkspace.env_vars` are stored as plaintext JSON. Use them for runner environment convenience, not high-sensitivity secret storage.
+
+### Security And Operations
+
+- Workspace root validation is part of the endpoint boundary. Do not bypass `_validate_workspace_root` when adding alternate workspace creation or discovery paths.
+- Review gates are state transitions, not comments. A rejected review moves the task back toward work or triage based on attempt count, and an accepted review is what unlocks artifact promotion.
+- Completion-marker and review-marker formats are automation contracts. Prompt changes should be tested against parser and endpoint behavior.
+
+### Extension Checklist
+
+- New task or run state: update `models.py`, `orchestration_service.py`, `DB_Management/Orchestration_DB.py`, API schemas, and service/API tests.
+- New completion or review marker: update `completion_signals.py`, endpoint review handling, parser tests, and orchestration API tests.
+- New promotable artifact type: update `artifact_promotion.py`, workspace artifact expectations, and `tests/Agent_Orchestration/test_artifact_promotion_contract.py`.
+
 ## Extension Points
 
 - Add a task transition by starting in `models.py`, then update `orchestration_service.py`, API schemas, and tests.

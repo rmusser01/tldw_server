@@ -31,6 +31,32 @@ Research_Workspace currently owns the capability-readiness contract for the Rese
 - Slides readiness checks `try_get_slides_db_for_user`; TTS readiness checks configured enabled TTS providers.
 - Broader Research Workspace migration, source status, MCP hub, ACP bridge, sandbox handoff, and UI plans live outside this core package.
 
+## Architecture Notes
+
+### Core Flow
+
+- The endpoint calls `collect_research_workspace_health()`, then `build_research_workspace_capabilities()` maps subsystem health into capability modes and reason codes.
+- Capability ids are composed from dependency health rather than direct feature execution. The response tells the WebUI whether to allow, warn, or block an action.
+- TTS readiness is derived from configured provider availability and should not initialize TTS providers during capability checks.
+
+### State And Data
+
+- This package does not persist workspace state; the capability response schema is the contract.
+- The response includes a TTL so clients know when to refresh readiness.
+- `sync_share` currently reports unknown/warn readiness until a concrete sync health collector is wired into this package.
+
+### Security And Operations
+
+- Health payloads must stay user-safe by excluding raw errors, filesystem paths, secrets, and provider credentials.
+- Unknown health should usually warn, while unavailable required dependencies can block only the capabilities that depend on them.
+- Keep endpoint permission and rate-limit checks in `research_workspace.py` when adding capability routes.
+
+### Extension Checklist
+
+- New capability: update constants, schema literals, builder logic, and derivation tests.
+- New health dependency: add a collector, sanitize its payload, and add endpoint coverage.
+- New readiness mode or reason code: update schema, WebUI contract expectations, and capability derivation tests.
+
 ## Extension Points
 
 - Add a capability id in `RESEARCH_WORKSPACE_CAPABILITY_IDS`, the schema literal, and `build_research_workspace_capabilities()`.

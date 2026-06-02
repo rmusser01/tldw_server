@@ -32,6 +32,34 @@ Data_Tables contains the Jobs worker that generates and regenerates structured t
 - The worker uses ChaChaNotes DB for chat sources, Media DB for media and document sources, RAG for query sources, and LLM_Calls adapters for model execution.
 - Sidecar deployments can run the worker via `tldw_Server_API.app.core.Data_Tables.jobs_worker` and `DATA_TABLES_JOBS_WORKER_ENABLED`.
 
+## Architecture Notes
+
+### Core Flow
+
+- Generate and regenerate routes create or reuse a table record in Media DB, store the selected sources, and enqueue a Jobs entry with `job_type="data_table_generate"`.
+- `jobs_worker.py` normalizes the Jobs payload, resolves source text, builds a bounded table-generation prompt, invokes the selected LLM_Calls adapter, parses JSON output, then persists normalized columns, rows, status, and snapshots.
+- Regeneration relies on the stored table/source snapshot instead of requiring the worker to trust fresh endpoint state.
+- Export routes either render table content directly or hand structured table payloads to File Artifacts when generated-file metadata is required.
+
+### State And Data
+
+- Media DB owns table metadata, source rows, column definitions, generated rows, status transitions, and regeneration snapshots.
+- Jobs owns lifecycle state such as queued, running, cancellation, failure, and completion; the Data Tables worker should not invent parallel lifecycle state.
+- Per-user Media DB and ChaChaNotes DB connections are cached by the worker and closed on eviction to avoid leaking file handles in sidecar processes.
+
+### Security And Operations
+
+- Endpoint permissions, rate limits, and user scoping are enforced before work is queued; the worker assumes the payload already carries the authenticated user boundary.
+- Source text and prompt size are truncated by environment-backed limits before provider calls. Keep those limits in place when adding new sources.
+- Provider keys and model-specific behavior belong in LLM_Calls. Data_Tables should pass provider configuration through the adapter layer and avoid logging provider secrets.
+- Cancellation and failure should flow through Jobs so the endpoint status and admin controls stay accurate.
+
+### Extension Checklist
+
+- New source type: update `jobs_worker.py`, `data_tables_schemas.py`, endpoint validation, and DataTables worker/API tests.
+- New output shape: update column normalization, row validation, export behavior, and `test_data_tables_export.py`.
+- New worker lifecycle behavior: update Jobs integration tests and sidecar worker settings.
+
 ## Extension Points
 
 - Add a source type by updating source resolution in `jobs_worker.py`, then add endpoint/schema support if the API accepts the new source.

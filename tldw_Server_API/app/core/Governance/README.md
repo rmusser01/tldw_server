@@ -39,6 +39,33 @@ Governance resolves policy rules and records policy gaps for ACP and MCP executi
 - Metrics are recorded through the MCP Unified metrics collector when available.
 - Design and operations context live in `Docs/Plans/2026-02-24-unified-governance-plane-implementation.md` and `Docs/MCP/Unified/Governance_Operations.md`.
 
+## Architecture Notes
+
+### Core Flow
+
+- ACP and MCP callers build a governance request, pass it to `GovernanceService`, and receive an effective action plus warnings, approval requirements, or gap metadata.
+- `service.py` classifies the category and scope, loads candidate rules, handles empty candidate sets, and calls `resolver.py` only when there is at least one candidate.
+- `resolver.py` applies deterministic precedence so stricter, more specific, higher-priority, and newer rules win.
+- `metrics.py` records rollout traces for off, shadow, and enforce modes without changing the resolver contract.
+
+### State And Data
+
+- `store.py` owns the SQLite schema for `governance_rules` and `governance_gaps`.
+- Gap fingerprints include category plus optional org, team, persona, and workspace scope so repeated unresolved questions reuse the same open gap.
+- ACP and MCP keep their own execution context; Governance only returns policy decisions and trace data.
+
+### Security And Operations
+
+- Enforce rollout mode can block a denied action; shadow mode records the decision without making every trace a runtime block.
+- Empty rule sets should be handled by service fallback or gap creation before calling `resolve_effective_action`.
+- Audit traces should describe decisions and scope without embedding sensitive request bodies.
+
+### Extension Checklist
+
+- Rule conflict change: update `resolver.py` and Governance resolver tests first.
+- New category or scope: update `service.py`, store query behavior, gap dedupe tests, and ACP/MCP integration tests.
+- Rollout or metrics change: update `metrics.py` and trace/rollout tests.
+
 ## Extension Points
 
 - Add a new rule source by implementing the loader methods expected by `GovernanceService`.

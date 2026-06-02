@@ -38,6 +38,33 @@ Chat_Workflows implements template-driven multi-step chat workflows and moderate
 - Context reference fields are preserved in schemas, templates, and runs, but current draft generation does not resolve content sources or pass `context_refs` into the service; run start stores `selected_context_refs` with an empty `resolved_context_snapshot`.
 - API schemas define LLM selection, dialogue config, template steps, draft requests, run requests, answers, rounds, transcripts, and continue-chat responses.
 
+## Architecture Notes
+
+### Core Flow
+
+- Template and run requests enter through `chat_workflows.py`, resolve the per-user `ChatWorkflowsDatabase` in `chat_workflows_deps.py`, then call `ChatWorkflowService`.
+- `service.py` owns run lifecycle: create or reuse an idempotent run, render the current step through `question_renderer.py`, record answers, advance steps, and build transcripts.
+- Dialogue workflows call `dialogue_orchestrator.py`, which runs debate and moderator turns through the shared Chat orchestrator instead of direct provider adapters.
+- Dialogue rounds use `ChatWorkflowsDatabase.begin_dialogue_round` and `complete_dialogue_round` to distinguish fresh, replayed, stale, failed, and conflicting idempotent submissions.
+
+### State And Data
+
+- `DB_Management/ChatWorkflows_DB.py` owns templates, template steps, runs, answers, run events, and dialogue rounds. Idempotency keys are enforced in the database and mirrored by service-level conflict handling.
+- `selected_context_refs` are stored with runs and passed into dialogue orchestration, while `resolved_context_snapshot` remains empty unless a caller adds source resolution.
+- Database instances are cached per user by dependency helpers, so tests that override paths should use the existing dependency override fixtures.
+
+### Security And Operations
+
+- Permission boundaries live at the endpoint and dependency layer. Service code assumes it is called with a user-scoped database handle and should not open a global workflow DB.
+- Moderator decisions are parsed from model output. Treat parser changes as behavior changes and cover malformed, continue, and finish cases.
+- Repeated answer or dialogue requests must stay idempotent for matching keys and reject key reuse with different content.
+
+### Extension Checklist
+
+- New template or run field: update `schemas/chat_workflows.py`, `ChatWorkflows_DB.py`, `service.py`, and schema/database tests.
+- New dialogue policy: update `dialogue_orchestrator.py`, moderator parsing tests, and API tests that exercise dialogue rounds.
+- New context resolution: update endpoint request handling, `service.py`, dependency wiring, and tests for both stored `selected_context_refs` and resolved snapshots.
+
 ## Extension Points
 
 - Add template fields or validation in `schemas/chat_workflows.py`, then update `service.py` and schema tests.

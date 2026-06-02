@@ -28,6 +28,32 @@ VN_Policy owns visual novel policy profile and safety-definition behavior. It pr
 - `app/core/VN_Play/` consumes policy profiles during runtime setup and generated turns.
 - `app/core/VN_Scripts/` uses policy data during authoring and validation flows.
 
+## Architecture Notes
+
+### Core Flow
+
+- VN policy endpoints build `VNPolicyService` with the current user and `VNPolicyProfileStore`, then delegate profile CRUD and evaluation.
+- `service.py` resolves built-in or stored policy/generation profiles, validates definitions, and evaluates character safety metadata into a deterministic decision and reason list.
+- VN Play and VN Scripts consume policy profile ids, profile definitions, and snapshots so runtime and published-script behavior stays stable.
+
+### State And Data
+
+- `VNPolicy_DB.py` owns profile persistence, versioning, disabled rows, and user/global visibility rules.
+- API schemas define the shared shape for policy profiles, generation profiles, evaluation requests, and evaluation responses.
+- Snapshot consumers depend on profile id, definition, and version fields staying coordinated across service, DB, and schemas.
+
+### Security And Operations
+
+- Profile mutation is admin-only in the endpoint; normal users can evaluate and read usable profiles.
+- Evaluation should remain deterministic and free of provider calls so VN authoring and playback can safely reuse results.
+- Schema changes must be coordinated with VN Play and VN Scripts because both modules validate policy-dependent manifests and turns.
+
+### Extension Checklist
+
+- New policy field: update schemas, service validation, `VNPolicy_DB.py`, API tests, and VN consumer tests.
+- New evaluation rule: update `service.py`, service tests, and script/playback policy validation paths.
+- New profile visibility behavior: update endpoint authorization, DB store tests, and profile list/read tests.
+
 ## Extension Points
 
 - For new policy fields, update `service.py`, `vn_policy_schemas.py`, `VNPolicy_DB.py`, and policy API tests.

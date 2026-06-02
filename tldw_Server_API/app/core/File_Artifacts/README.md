@@ -46,6 +46,34 @@ File_Artifacts creates, validates, stores, exports, and purges structured genera
 - Jobs integration uses `FILES_JOBS_QUEUE`, `FILES_JOBS_WORKER_ID`, and the `file_artifact_export` job type.
 - Export files are written under user-scoped generated output storage and are served back by the files endpoint when ready.
 
+## Architecture Notes
+
+### Core Flow
+
+- The files endpoint builds a user-scoped service with Collections DB and generated-output storage paths, then delegates artifact validation and export work to `file_artifacts_service.py`.
+- Artifact creation selects an adapter from `adapter_registry.py`, validates the structured payload, and persists artifact metadata before any export file is served.
+- Synchronous exports write the generated output and return ready metadata; asynchronous exports enqueue `file_artifact_export` Jobs that `jobs_worker.py` consumes.
+- Download and cleanup routes consume ready export metadata, clear stale export state, and purge expired generated files.
+
+### State And Data
+
+- Collections DB stores artifact records, structured payload metadata, export status, MIME details, expiration, and consumption state.
+- User generated-output storage holds rendered files; adapter code owns the in-memory payload and export result shape for each artifact type.
+- Reference image listing reads Media DB candidates but keeps File Artifacts focused on generated-file metadata and export validation.
+
+### Security And Operations
+
+- Export path resolution rejects absolute paths, nested unsafe paths, and paths outside the user's generated output directory.
+- Adapter validation is the trust boundary for artifact payloads. New artifact types should validate before persisting or rendering output.
+- Failed async exports must reset export state so stale job ids are not treated as downloadable files.
+- Keep reference-image and image-export allowlists in sync with endpoint tests before exposing new media types.
+
+### Extension Checklist
+
+- New artifact type: add an adapter, register it, update schemas or endpoint maps if exposed publicly, and add adapter tests.
+- New export format: update the adapter, endpoint MIME map, FileArtifacts tests, and Files endpoint tests.
+- New cleanup behavior: update `file_artifacts_service.py`, purge routes, storage integration tests, and async export tests together.
+
 ## Extension Points
 
 - Add a file type by creating an adapter under `adapters/`, registering it in `adapter_registry.py`, and adding schema or endpoint support if needed.

@@ -50,6 +50,33 @@ Agent_Client_Protocol is the server-side integration layer for ACP-compatible co
 - Workspaces and orchestration code consume ACP capabilities when binding agents to workspace tasks.
 - Metrics, checkpoints, replay helpers, and audit consumers observe the event bus rather than duplicating runner logic.
 
+## Architecture Notes
+
+### Core Flow
+
+- Profile and runner discovery starts in `agent_registry.py` and `config.py`; endpoint handlers resolve the profile, call `get_runner_client()`, then delegate session creation, prompt sending, cancellation, fork, reconcile, or diagnostics to `runner_client.py`.
+- Local sessions are stdio process sessions. Sandboxed sessions are selected by runner configuration and routed through `sandbox_runner_client.py`, which owns sandbox lifecycle, SSH metadata, and bridge setup.
+- Session output is normalized into ACP event objects in `events.py`, published through `SessionEventBus`, and consumed by audit, checkpoint, metrics, replay, SSE, and WebSocket consumers under `consumers/`.
+- Scheduled ACP runs use the core Scheduler handler `app/core/Scheduler/handlers/acp.py`; keep that payload contract aligned with the endpoint run creation path.
+
+### State And Data
+
+- Durable session, run, checkpoint, replay, and permission decision state lives in `DB_Management/ACP_Sessions_DB.py`; do not add side stores for ACP lifecycle data without also updating migration and persistence tests.
+- Permission decisions flow through `permission_decision_service.py` into the `permission_decisions` table, so tool gates can reuse user-scoped allow/deny decisions across requests.
+- Event payloads may carry file paths, terminal fragments, tool arguments, and generated content. New consumers must preserve redaction and audit expectations before fanning events to clients.
+
+### Security And Operations
+
+- Tool execution crosses both ACP governance and MCP policy boundaries. Changes to tool approval should move through `governance_filter.py`, `tool_gate.py`, and `permission_decision_service.py` together.
+- Permission requests are asynchronous and can time out. Treat missing or expired approval as denial unless a policy layer explicitly grants the call.
+- Sandbox-backed runners inherit Sandbox quotas, network policy, runtime selection, and SSH port limits; endpoint success does not guarantee the runner process can start.
+
+### Extension Checklist
+
+- New runner transport: update `adapters/base.py` plus the concrete adapter, `runner_client.py` or `sandbox_runner_client.py`, endpoint schemas, and runner/session tests.
+- New event consumer: add the consumer under `consumers/`, wire it to the event bus path, and cover fanout plus redaction behavior in `tests/Agent_Client_Protocol/`.
+- New permission behavior: update `governance_filter.py`, `tool_gate.py`, `permission_decision_service.py`, ACP endpoint tests, and MCP runner tests if tools are surfaced through MCP.
+
 ## Extension Points
 
 - Add a new runner transport by starting with `adapters/base.py`, `stdio_adapter.py`, and `mcp_transport.py`.
