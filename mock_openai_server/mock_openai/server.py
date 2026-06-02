@@ -11,7 +11,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,8 +37,6 @@ from .streaming import StreamingResponseGenerator
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-_scenario_failure_counts: dict[tuple[int, str, int], int] = {}
 
 # Create FastAPI app
 app = FastAPI(
@@ -71,14 +69,14 @@ def get_streaming_generator(config: MockConfig = Depends(get_config_instance)) -
     )
 
 
-def reset_scenario_failure_counts() -> None:
+def reset_scenario_failure_counts(config: MockConfig) -> None:
     """Reset deterministic scenario failure counters."""
-    _scenario_failure_counts.clear()
+    config.scenario_failure_counts.clear()
 
 
 def maybe_raise_scenario_failure(
     endpoint: str,
-    request_data: dict[str, object],
+    request_data: Dict[str, Any],
     config: MockConfig,
 ) -> None:
     """Raise a configured deterministic scenario failure for matching requests."""
@@ -86,12 +84,12 @@ def maybe_raise_scenario_failure(
         if not ResponsePattern(match=failure.match, response_file="").matches(request_data):
             continue
 
-        key = (id(config), endpoint, index)
-        used = _scenario_failure_counts.get(key, 0)
+        key: Tuple[str, int] = (endpoint, index)
+        used = config.scenario_failure_counts.get(key, 0)
         if used >= max(0, failure.times):
             continue
 
-        _scenario_failure_counts[key] = used + 1
+        config.scenario_failure_counts[key] = used + 1
         raise HTTPException(
             status_code=failure.status_code,
             detail={
@@ -118,8 +116,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Initialize the server on startup."""
-    reset_scenario_failure_counts()
     config = get_config_instance()
+    reset_scenario_failure_counts(config)
 
     logger.info(f"Mock OpenAI server started on {config.server.host}:{config.server.port}")
     logger.info(f"Streaming enabled: {config.streaming.enabled}")

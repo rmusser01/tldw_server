@@ -9,6 +9,7 @@ import asyncio
 from typing import Dict, Any
 from pathlib import Path
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
@@ -406,6 +407,56 @@ class TestConfiguration:
         failures = config.scenario_failures["chat_completions"]
         assert failures[0].error_type == "server_error"
         assert failures[1].error_type == "rate_limit_error"
+
+    def test_scenario_failure_counts_are_config_local(self):
+        """Test scenario failure counters stay isolated per config instance."""
+        from ..mock_openai.server import (
+            maybe_raise_scenario_failure,
+            reset_scenario_failure_counts,
+        )
+
+        def make_config():
+            return MockConfig(
+                scenario_failures={
+                    "chat_completions": [
+                        {
+                            "match": {"model": "gpt-4.1-mini"},
+                            "status_code": 503,
+                            "times": 1,
+                        }
+                    ]
+                }
+            )
+
+        request_data = {
+            "model": "gpt-4.1-mini",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+
+        first_config = make_config()
+        with pytest.raises(HTTPException):
+            maybe_raise_scenario_failure(
+                "chat_completions",
+                request_data,
+                first_config,
+            )
+        maybe_raise_scenario_failure("chat_completions", request_data, first_config)
+
+        second_config = make_config()
+        with pytest.raises(HTTPException):
+            maybe_raise_scenario_failure(
+                "chat_completions",
+                request_data,
+                second_config,
+            )
+
+        reset_scenario_failure_counts(first_config)
+        with pytest.raises(HTTPException):
+            maybe_raise_scenario_failure(
+                "chat_completions",
+                request_data,
+                first_config,
+            )
 
 
 class TestResponseManager:

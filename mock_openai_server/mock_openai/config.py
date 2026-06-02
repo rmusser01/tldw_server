@@ -8,7 +8,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 import yaml
 
@@ -127,6 +127,12 @@ class MockConfig:
     responses: Dict[str, ResponseConfig] = field(default_factory=dict)
     scenario_failures: Dict[str, List[ScenarioFailure]] = field(default_factory=dict)
     models: List[Dict[str, Any]] = field(default_factory=list)
+    scenario_failure_counts: Dict[Tuple[str, int], int] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         """Normalize config-file style scenario failure dictionaries."""
