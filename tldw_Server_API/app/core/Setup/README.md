@@ -44,6 +44,34 @@ configuration.
   disabled.
 - Config section loaders in `config_sections/` consume settings written here.
 
+## Architecture Notes
+
+### Core Flow
+
+- Setup endpoints call setup access guards and AuthNZ setup dependencies before reading or mutating first-run state, readiness overlays, provider settings, or install plans.
+- `setup_manager.py` reads, masks, previews, and writes `Config_Files/config.txt`, then clears config caches after controlled writes.
+- Readiness preview paths build install/config plans without side effects; provision paths run only after explicit confirmation.
+- Audio setup services rank bundles and track local audio pack readiness separately from provider key validation.
+
+### State And Data
+
+- Setup state spans `Config_Files/config.txt`, first-run state JSON, readiness stores, readiness profiles, install-plan schemas, and audio readiness stores.
+- Config section metadata controls which values are visible, masked, inserted, or validated.
+- Install plans describe actions before execution so the API can show users what will change.
+
+### Security And Operations
+
+- Mutating setup routes are local-only unless remote setup access is explicitly enabled and the caller passes admin checks.
+- Proxy headers are trusted only through the configured setup access guard path.
+- Provider keys and config values must stay masked in responses and logs.
+- Preview endpoints must remain side-effect-free; tests should fail if previews write files or start installs.
+
+### Extension Checklist
+
+- New config field: update setup metadata, schema, masking/default tests, and config section readers.
+- New installer: update install schema, preview/provision logic, and readiness tests.
+- New remote setup behavior: update Security setup access guard tests and Setup endpoint tests together.
+
 ## Extension Points
 
 - Add new setup fields by updating config metadata in `setup_manager.py`, schema

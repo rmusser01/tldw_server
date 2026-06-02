@@ -364,7 +364,7 @@ git commit -m "docs: deepen core orchestration guides"
 
 **Tests:** Same docs sanity checks as prior stages plus targeted scans for stale claims and nonexistent local links.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 4: Expand Provider And Operations Guides
 

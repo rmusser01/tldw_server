@@ -43,6 +43,35 @@ allowed.
 - Governance and Monitoring share policy schedule/chat-type utility functions.
 - AuthNZ permission tests protect moderation endpoint claims.
 
+## Architecture Notes
+
+### Core Flow
+
+- Endpoints and chat flows obtain the effective moderation policy, evaluate input or output text with `ModerationService`, then apply block, warn, redact, allow, or review outcomes.
+- Literal, regex, managed-blocklist, category, and override rules are combined through explicit precedence so stricter actions win where rules overlap.
+- Review capture flows pass sanitized event data through `review_service.py` into `review_store.py`.
+- Family wizard materialization writes settings into moderation and governance policy records rather than special-casing family behavior in chat routes.
+
+### State And Data
+
+- Runtime policy can come from config, managed blocklists, user overrides, and family-wizard materialized records.
+- Managed blocklist updates use version/ETag-style concurrency checks in the API path.
+- Review storage owns review item lifecycle and idempotent event capture.
+- Category taxonomy names and supervised policy schedules are shared with adjacent governance and monitoring helpers.
+
+### Security And Operations
+
+- Regex and redaction rules must keep scan limits, replacement limits, and dangerous-pattern linting to avoid runaway matches.
+- Do not log raw moderated content, blocklist secrets, or review payloads that may contain sensitive user text.
+- Endpoint permissions are guarded by AuthNZ moderation claims; update permission tests when adding moderation routes.
+- Block, warn, and redact behavior must stay deterministic so test endpoints and chat integration checks agree.
+
+### Extension Checklist
+
+- New rule type: update `moderation_service.py`, schemas/endpoints, conflict behavior, and unit/chat integration tests.
+- New review field: update `review_store.py`, `review_service.py`, endpoint schemas, and review capture tests.
+- New family setup setting: update `family_wizard_materializer.py`, Guardian tests, and the moderation/governance policy mapping.
+
 ## Extension Points
 
 - Add rule sources in `moderation_service.py` only after defining conflict and

@@ -30,6 +30,34 @@ Streaming contains shared runtime primitives for server-sent events, WebSocket w
 - `app/core/MCP_unified/adapters/tldw_runtime.py` imports WebSocket stream helpers.
 - Audio and voice-adjacent flows use `phrase_chunker.py` and `speech_chat_service.py` for speech output timing and turn orchestration.
 
+## Architecture Notes
+
+### Core Flow
+
+- `SSEStream` owns queue-backed event emission, heartbeats, provider-control filtering, idle/max-duration checks, error events, and a single done event.
+- `WebSocketStream` wraps accept/send/error/done/close behavior with ping and idle tracking for endpoint-specific WebSocket consumers.
+- `PhraseChunker` buffers streaming text until sentence, clause, whitespace, or max-character boundaries make a useful TTS chunk.
+- `speech_chat_service.py` decodes audio, enforces audio constraints, transcribes, optionally executes a speech action, calls the LLM, records chat history, and maps TTS errors into API-compatible failures.
+
+### State And Data
+
+- Stream queues and heartbeat timers are per request; this package does not store auth or tenant state.
+- Metrics labels include endpoint/component details and must stay stable for monitoring assertions.
+- Speech-chat state crosses STT, LLM, optional MCP action execution, chat history, and TTS services; keep those boundaries explicit when changing turn behavior.
+
+### Security And Operations
+
+- Authorization, moderation, and business rules belong to the caller before the stream helper is created.
+- SSE and WebSocket streams should terminate once through done or error handling so clients do not hang.
+- Backpressure and heartbeat behavior are covered by tests; preserve queue limits and idle/max-duration safeguards.
+- Logs for provider, metric, and TTS failures should not include raw secrets, private paths, or full user audio payloads.
+
+### Extension Checklist
+
+- New SSE event behavior: update `streams.py` and `tests/Streaming/test_streams.py`.
+- New WebSocket timeout or ping behavior: update `streams.py` and WebSocket label tests.
+- New speech-chat provider boundary: update `speech_chat_service.py`, audio constraint tests, and TTS/STT error mapping tests.
+
 ## Extension Points
 
 - For new SSE event types, update `streams.py` and add focused assertions in `tests/Streaming/test_streams.py`.

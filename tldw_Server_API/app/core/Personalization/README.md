@@ -48,6 +48,36 @@ Personalization provides opt-in user memory and companion-context helpers for pr
 - Persona chat can call `load_companion_context()` to include bounded companion context in prompts.
 - Companion reflection notifications are written through Collections DB.
 
+## Architecture Notes
+
+### Core Flow
+
+- API dependencies and route helpers check the global feature flag and the user's opt-in/profile state before recording activity or returning companion context.
+- Adjacent features record explicit activity through `companion_activity.py`; derivation helpers turn that activity into bounded knowledge cards, goals, reflections, and follow-up prompts.
+- `companion_context.py` ranks and formats a compact context bundle for chat/persona callers without exposing the entire activity log.
+- The reflection scheduler enqueues daily and weekly Jobs with deterministic idempotency keys; worker code generates reflections and optional notification items.
+- Lifecycle helpers purge or rebuild derived scopes while keeping raw activity unless a full purge path is requested.
+
+### State And Data
+
+- `PersonalizationDB` owns profiles, opt-in state, semantic memories, explicit activity, derived cards, goals, and reflections.
+- Collections DB stores companion reflection notifications and related delivery artifacts.
+- `companion_user_ids.py` provides stable companion storage identifiers so adjacent modules do not invent user-id mappings.
+- Raw activity and derived cards are separate data classes; preserve that distinction when adding new companion features.
+
+### Security And Operations
+
+- Disabled or non-opted-in users should receive empty context and skipped captures, not partial data.
+- Logs use redacted user identifiers in companion context paths.
+- Context limits are a privacy and prompt-size control; do not widen them without updating tests and caller expectations.
+- Scheduler idempotency keys prevent duplicate reflection jobs across daily and weekly slots.
+
+### Extension Checklist
+
+- New activity source: add a builder/recorder, wire the owning endpoint, and add bridge tests.
+- New derived card or reflection type: update derivation, lifecycle rebuild/purge behavior, and Personalization tests.
+- New context consumer: use `load_companion_context()` and keep opt-in handling in the dependency or service boundary.
+
 ## Extension Points
 
 - Add a new explicit activity source by adding a builder or recorder in `companion_activity.py` and wiring it from the endpoint that owns the user action.

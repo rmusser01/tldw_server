@@ -46,6 +46,34 @@ Security egress policy.
 - TTS and audio modules can create briefings from Watchlist output.
 - Jobs/Scheduler service periodic work and admin controls for runs.
 
+## Architecture Notes
+
+### Core Flow
+
+- Watchlist endpoints create sources, groups, jobs, filters, templates, runs, outputs, and alerts, then call `pipeline.py` for on-demand execution or Scheduler/Jobs for periodic work.
+- `pipeline.py` fetches source items through `fetchers.py`, applies filters, writes run/item/output state, and composes reports or delivery actions through helper modules.
+- Preview and draft-source test routes exercise fetch/filter behavior and diagnostics without mutating run state.
+- OPML and WebSub helpers translate external feed formats into the same source/item contracts used by scheduled runs.
+
+### State And Data
+
+- Watchlist state lives in per-user database paths used by the endpoints and pipeline for sources, jobs, runs, items, outputs, alert rules, and template metadata.
+- Collections and output services store rendered artifacts, reading/feed projections, and optional ingested outputs.
+- Audio briefing workflows track script, clip, final audio, and workflow metadata separately from text output rows.
+
+### Security And Operations
+
+- Fetchers must honor Security egress policy and selector validation before making outbound requests.
+- Preview routes should stay bounded and side-effect-free because they are often used interactively.
+- Scheduled jobs can be expensive; preserve run status, retry, diagnostics, and admin-control behavior when changing the pipeline.
+- Template rendering and evidence tables should expose enough provenance for review without leaking unrelated user data.
+
+### Extension Checklist
+
+- New source or fetch mode: update `fetchers.py`, pipeline handling, egress tests, and preview tests.
+- New filter behavior: update `filters.py`, schemas/endpoints, and filter matching tests.
+- New output or delivery channel: update template/report helpers, output services, notification/audio integration tests, and run diagnostics.
+
 ## Extension Points
 
 - Add fetchers in `fetchers.py` with explicit egress checks and selector tests.

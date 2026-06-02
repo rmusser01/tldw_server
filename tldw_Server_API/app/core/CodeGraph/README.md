@@ -53,7 +53,7 @@ CodeGraph indexes trusted workspace source trees into a local code graph for MCP
 
 - MCP tool execution starts in `MCP_unified/modules/implementations/codegraph_module.py`, resolves the active trusted workspace with `CodeGraphWorkspaceResolver`, and builds a per-workspace `CodeGraphRepository`.
 - Foreground `codegraph.index` and `codegraph.sync` calls run `CodeGraphIndexer` directly. Background mode enqueues a Jobs payload through `jobs.py`, and `jobs_worker.py` validates local worker paths before writing an index.
-- Read tools return `index_present: false` when the per-workspace index DB does not exist; they should not create indexes as a side effect.
+- Read tools return `index_present: false` when the per-workspace index DB is absent; they should not create indexes as a side effect.
 - `context.py` ranks indexed nodes and reads bounded workspace-relative source snippets for `codegraph.context`.
 
 ### State And Data
