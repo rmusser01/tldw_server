@@ -1529,13 +1529,12 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
 ) -> None:
     from tldw_Server_API.app import main as main_module
     from tldw_Server_API.app.services import shutdown_coordinated_legacy_components as coordinated_legacy
-    from tldw_Server_API.app.services import shutdown_core_jobs_worker as core_jobs_shutdown
     from tldw_Server_API.app.services import shutdown_job_poller_handoff as job_poller_handoff
     from tldw_Server_API.app.services import shutdown_transition_handoff as transition_handoff
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
-    core_shutdown_calls: list[dict[str, object]] = []
 
     async def _fake_shutdown_transition_handoff(**kwargs):
         kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
@@ -1546,6 +1545,10 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
 
     async def _fake_run_shutdown_job_poller_handoff(**kwargs):
         recorded_calls.append(kwargs)
+        await kwargs["lifecycle_worker_engine"].stop_phase(
+            kwargs["worker_lifecycle_session"],
+            ShutdownPhase.JOB_POLLER_QUIESCE,
+        )
         return job_poller_handoff.JobPollerShutdownHandoffHandles(
             early_quiesced_job_poller_names={"core_jobs_task"},
             should_run_late_stop=lambda task_name, task: bool(task) and task_name != "core_jobs_task",
@@ -1554,13 +1557,6 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
     async def _fake_shutdown_coordinated_legacy_components(**kwargs):
         return coordinated_legacy.CoordinatedLegacyShutdownHandles(
             coordinated_legacy_component_names=set(),
-        )
-
-    async def _fake_shutdown_core_jobs_worker(**kwargs):
-        core_shutdown_calls.append(kwargs)
-        return core_jobs_shutdown.CoreJobsShutdownHandles(
-            core_jobs_task=kwargs["core_jobs_task"],
-            core_jobs_stop_event=kwargs["core_jobs_stop_event"],
         )
 
     monkeypatch.setattr(
@@ -1578,28 +1574,20 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
         "shutdown_coordinated_legacy_components",
         _fake_shutdown_coordinated_legacy_components,
     )
-    monkeypatch.setattr(
-        core_jobs_shutdown,
-        "shutdown_core_jobs_worker",
-        _fake_shutdown_core_jobs_worker,
-    )
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
-    assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
+    assert recorded_calls[0]["worker_lifecycle_session"] is not None
+    assert hasattr(recorded_calls[0]["lifecycle_worker_engine"], "stop_phase")
+    assert "owned_job_pollers" not in recorded_calls[0]
     assert recorded_calls[0]["quiesce_owned_job_pollers_for_shutdown"] is (
         main_module._quiesce_owned_job_pollers_for_shutdown
     )
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
     assert recorded_calls[0]["import_exceptions"] == main_module._IMPORT_EXCEPTIONS
-    assert len(core_shutdown_calls) == 1
-    should_run_late_stop = core_shutdown_calls[0]["should_run_late_stop"]
-    late_stop_task = object()
-    assert should_run_late_stop("core_jobs_task", late_stop_task) is False
-    assert should_run_late_stop("files_jobs_task", late_stop_task) is True
 
 
 @pytest.mark.integration

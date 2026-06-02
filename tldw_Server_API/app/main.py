@@ -356,6 +356,7 @@ async def _quiesce_owned_job_pollers_for_shutdown(
     *,
     wait_for_leases_sec: int | float,
     count_active_processing: Any,
+    stop_registered_job_pollers: Any | None = None,
 ) -> None:
     """Optionally wait for active leases, then quiesce owned job pollers.
 
@@ -373,7 +374,9 @@ async def _quiesce_owned_job_pollers_for_shutdown(
         job_poller_handles,
         wait_for_leases_sec=wait_for_leases_sec,
         count_active_processing=count_active_processing,
-        stop_registered_job_pollers=_stop_registered_job_pollers,
+        stop_registered_job_pollers=(
+            stop_registered_job_pollers or _stop_registered_job_pollers
+        ),
         record_shutdown_timing_segment=_record_shutdown_timing_segment,
         timed_shutdown_segment=_timed_shutdown_segment,
         guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,

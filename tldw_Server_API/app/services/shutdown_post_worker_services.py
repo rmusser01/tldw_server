@@ -28,6 +28,11 @@ class PostWorkerShutdownHandles:
     workflows_maint_task: Any | None = None
 
 
+@dataclass
+class PostWorkerNonWorkerCleanupHandles:
+    """Updated handles produced by post-worker non-worker cleanup."""
+
+
 async def shutdown_post_worker_services(
     *,
     jobs_notifications_bridge_task: Any | None,
@@ -258,6 +263,20 @@ async def run_shutdown_post_worker_services(
                 workflows_maint_task,
             ),
         )
+
+
+async def run_shutdown_post_worker_non_worker_cleanup(
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+) -> PostWorkerNonWorkerCleanupHandles:
+    """Run post-worker cleanup that is not owned by lifecycle worker handles."""
+    try:
+        await _shutdown_personalization_consolidation(
+            guard_exceptions=guard_exceptions,
+        )
+    except guard_exceptions as exc:
+        logger.debug(f"Post-worker non-worker cleanup skipped: {exc}")
+    return PostWorkerNonWorkerCleanupHandles()
 
 
 async def _shutdown_notifications_compactor_websub_workers(**kwargs):
