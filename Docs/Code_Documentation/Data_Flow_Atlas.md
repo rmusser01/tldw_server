@@ -248,9 +248,9 @@ flowchart TB
     end
 
     subgraph CoreGroup["Core specs"]
-        Infrastructure[health, moderation, monitoring, metrics, audit, consent, setup]
-        Identity[auth, users, user keys, config, sync]
-        ChatProviders[chat, chat loop, tools, ACP, LLM, VLM, MCP Unified]
+        Infrastructure["health, moderation, monitoring, metrics, audit, consent, setup"]
+        Identity["auth, users, user keys, config, sync"]
+        ChatProviders["chat, chat loop, tools, ACP, LLM, VLM, MCP Unified"]
     end
 
     subgraph ContentGroup["Content specs"]
