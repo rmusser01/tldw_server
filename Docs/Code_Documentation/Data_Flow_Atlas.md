@@ -82,7 +82,7 @@ flowchart LR
         MediaDB[Per-user Media DB]
         NotesDB[Per-user ChaChaNotes DB]
         PromptDB[Prompt and Prompt Studio DBs]
-        EvalDB[Evaluations DB]
+        EvalDB[Per-user Evaluations DB]
         VectorStore[ChromaDB or pgvector]
         Files[Files, outputs, voices, cache]
         RedisJobs[Redis or Jobs backend]
