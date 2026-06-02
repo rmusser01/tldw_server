@@ -25,6 +25,7 @@ const OptionSetup = () => {
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
         title={t("setupRoute.recoveryTitle", "Setup operator recovery")}
+        titleHeadingLevel={showWizard ? 2 : 1}
         message={t(
           "setupRoute.recoveryMessage",
           "Use this surface when first-run setup needs local operator recovery."

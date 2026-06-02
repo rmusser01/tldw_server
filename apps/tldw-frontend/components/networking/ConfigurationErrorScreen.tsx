@@ -25,6 +25,7 @@ export const ConfigurationErrorScreen = ({
       >
         <SetupRequiredPanel
           title="WebUI networking configuration error"
+          titleHeadingLevel={1}
           message={
             <>
               The configured API URL points to <code>{issue.apiOrigin}</code>,

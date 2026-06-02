@@ -36,6 +36,7 @@ describe("state primitives", () => {
     )
 
     expect(screen.getByText("Diagnostics").closest("details")).not.toHaveAttribute("open")
+    expect(screen.getByRole("heading", { level: 2, name: "Request failed" })).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toBeInTheDocument()
     expect(screen.getByText("/api/v1/health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
