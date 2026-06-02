@@ -1217,7 +1217,7 @@ flowchart LR
     subgraph Routes["Integration routes"]
         Connectors[Connectors and OAuth]
         Sources[Ingestion sources and sync]
-        ChatOps[Slack, Discord, Telegram]
+        ChatOps["Slack, Discord, Telegram"]
         Meetings[Meetings]
         Optional[Optional gated routes]
     end
