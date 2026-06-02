@@ -1240,13 +1240,15 @@ git commit -m "feat: show ACP adapter readiness in session creation"
 - Modify if needed: `Helper_Scripts/Testing-related/acp_certification_smoke.py`
 - Test if modified: `tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py`
 
-- [ ] **Step 1: Inspect certification helper strategy assumptions**
+- [x] **Step 1: Inspect certification helper strategy assumptions**
 
 Run: `rg -n "adapter_acp|native_acp|entrypoint_strategy|codex" Helper_Scripts/Testing-related/acp_certification_smoke.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py`
 
 Expected: identify whether the helper rejects `external_acp_adapter`.
 
-- [ ] **Step 2: If needed, write failing helper test**
+Actual: `build_agent_profile_manifest` does not filter by strategy name; it emits the supplied entrypoint metadata and creates the ACP initialize probe whenever `probe_state == "ready_to_probe"`. Inspection found no helper rejection path for `external_acp_adapter`.
+
+- [x] **Step 2: If needed, write failing helper test**
 
 Only if the helper has strategy filtering, add:
 
@@ -1270,17 +1272,23 @@ Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Helper
 
 Expected: FAIL only if code changes are required.
 
-- [ ] **Step 3: Normalize certification manifest handling**
+Actual: not needed because the helper has no strategy filter to fail; existing helper coverage remains compatible with the external adapter path.
+
+- [x] **Step 3: Normalize certification manifest handling**
 
 Update helper logic so `external_acp_adapter` is treated as ACP downstream for command-manifest purposes, but do not auto-run live Codex certification and do not update compatibility evidence.
 
-- [ ] **Step 4: Run helper tests if modified**
+Actual: no code change needed; current command-manifest handling is strategy-agnostic and gated by `probe_state`, so external adapters are already treated as ACP downstream when ready to probe.
+
+- [x] **Step 4: Run helper tests if modified**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 7 if files changed**
+Actual: ran despite no code changes. `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py` passed with 37 tests.
+
+- [x] **Step 5: Commit Task 7 if files changed**
 
 ```bash
 git add Helper_Scripts/Testing-related/acp_certification_smoke.py \
@@ -1288,7 +1296,9 @@ git add Helper_Scripts/Testing-related/acp_certification_smoke.py \
 git commit -m "test: allow external ACP adapter certification manifests"
 ```
 
-If no helper changes are needed, record the inspection result in `TASK-592` implementation notes instead of committing an empty task.
+If no helper changes are needed, record the inspection result in `TASK-593` implementation notes instead of committing an empty task.
+
+Actual: no helper/test files changed; inspection result recorded in the implementation tracker instead of creating an empty helper commit.
 
 ---
 

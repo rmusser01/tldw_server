@@ -4,7 +4,7 @@ title: Implement Codex ACP adapter first slice
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-06-02 00:46
+updated_date: 2026-06-02 00:50
 labels:
 - ACP
 - Codex
@@ -55,6 +55,8 @@ Task 4 complete and approved. Commit c97f4d0cc5 seeds the Codex registry row as 
 Task 5 complete and approved. Commit ca98282828 adds Go runner config parsing for ACP entrypoint/adapter metadata, explicit launch resolution that starts external_acp_adapter profiles through acp_command without falling back to the display command, passive initialize/agent-list readiness that never spawns downstream agents or runs mutable npx @latest inventory checks, and runner agent/list readiness metadata including adapter_docs_url. Verification: red Go test run with `GOCACHE=/private/tmp/tldw-go-cache go test ./internal/config ./internal/acp` failed before implementation on missing config fields and missing resolver; green command `cd tools/tldw-agent && GOCACHE=/private/tmp/tldw-go-cache go test -count=1 ./internal/config ./internal/acp` passed after amendments; `git diff --check 0a8f2b7e41 ca98282828` passed. Review: delegated spec review initially rejected missing config-test coverage for adapter_docs_url/adapter_package/runtime_backend and missing agent/list adapter_docs_url; both were fixed before local spec/code quality approval. Bandit not applicable for Go-only task.
 
 Task 6 complete and reviewed. Commit e140fdb6b2 adds frontend ACP entrypoint readiness types, `isACPAgentReadyToStart`, `buildACPAgentSetupSummary`, and ACP create modal wiring for structured agent-card disabled state, default selection, disabled submit state, setup tooltip/copy, and an inline external-adapter badge. Review found two P2 issues: secondary blockers could override `primary_blocker`, and cached agent data could be reset back to a blocked backend default; both were fixed by making `primary_blocker` authoritative and by resetting before applying the first structured-ready agent while preserving an already-ready current selection. Verification: red UI readiness test failed on missing helpers before implementation; review follow-up red test failed on blocker precedence before the fix; focused UI command `./node_modules/.bin/vitest run src/services/acp/__tests__/readiness.test.ts src/components/Option/ACPPlayground/__tests__/ACPSessionCreateModal.modal-prop-guard.test.ts` passed with 2 files and 11 tests; `git diff --check` passed. UI package typecheck required `NODE_OPTIONS=--max-old-space-size=8192` and then failed on existing non-ACP baseline errors in QuickIngest, Layout, Playground, Sidepanel, onboarding, option-index, and quick-ingest-open files, with no ACP file errors reported. Bandit not applicable for TypeScript-only production changes.
+
+Task 7 complete by inspection. `Helper_Scripts/Testing-related/acp_certification_smoke.py` does not reject `external_acp_adapter`; `build_agent_profile_manifest` is strategy-agnostic and emits the supplied entrypoint metadata, with command probes gated by `probe_state == "ready_to_probe"`. No helper code or tests needed modification, so no empty implementation commit was created. Verification: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py` passed with 37 tests and 6 warnings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
