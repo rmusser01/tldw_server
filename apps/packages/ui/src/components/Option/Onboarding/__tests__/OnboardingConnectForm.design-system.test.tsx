@@ -94,7 +94,7 @@ type RenderConnectionFormOptions = {
 
 type MockButtonProps = Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
-  "onClick" | "type"
+  "disabled" | "onClick" | "type"
 > & {
   children?: React.ReactNode
   onClick?: () => void
@@ -107,12 +107,14 @@ type MockButtonProps = Omit<
 }
 
 type MockInputChangeEvent = {
-  target: { value: string }
+  target: {
+    value: string
+  }
 }
 
 type MockInputProps = Omit<
   React.InputHTMLAttributes<HTMLInputElement>,
-  "onChange" | "size" | "value"
+  "disabled" | "onChange" | "size" | "value"
 > & {
   value?: string
   onChange?: (event: MockInputChangeEvent) => void
@@ -122,9 +124,11 @@ type MockInputProps = Omit<
   size?: string
 }
 
+type MockPasswordInputProps = Omit<MockInputProps, "suffix">
+
 type MockSelectProps = Omit<
   React.SelectHTMLAttributes<HTMLSelectElement>,
-  "onChange" | "value"
+  "disabled" | "onChange" | "value"
 > & {
   value?: string
   onChange?: (value: string) => void
@@ -218,34 +222,19 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       </button>
     ),
     Input: Object.assign(
-      React.forwardRef<HTMLInputElement, MockInputProps>(({
-        value,
-        onChange,
-        disabled,
-        suffix: _suffix,
-        status: _status,
-        size: _size,
-        ...props
-      }, ref) => (
-        <input
-          ref={ref}
-          value={value}
-          onChange={(event) =>
-            onChange?.({ target: { value: event.currentTarget.value } })
-          }
-          disabled={disabled}
-          {...props}
-        />
-      )),
-      {
-        Password: React.forwardRef<HTMLInputElement, MockInputProps>(({
-          value,
-          onChange,
-          disabled,
-          status: _status,
-          size: _size,
-          ...props
-        }, ref) => (
+      React.forwardRef<HTMLInputElement, MockInputProps>(
+        (
+          {
+            value,
+            onChange,
+            disabled,
+            suffix: _suffix,
+            status: _status,
+            size: _size,
+            ...props
+          },
+          ref
+        ) => (
           <input
             ref={ref}
             value={value}
@@ -255,7 +244,32 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
             disabled={disabled}
             {...props}
           />
-        ))
+        )
+      ),
+      {
+        Password: React.forwardRef<HTMLInputElement, MockPasswordInputProps>(
+          (
+            {
+              value,
+              onChange,
+              disabled,
+              status: _status,
+              size: _size,
+              ...props
+            },
+            ref
+          ) => (
+            <input
+              ref={ref}
+              value={value}
+              onChange={(event) =>
+                onChange?.({ target: { value: event.currentTarget.value } })
+              }
+              disabled={disabled}
+              {...props}
+            />
+          )
+        )
       }
     ),
     Select: ({
