@@ -1106,9 +1106,9 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph AdminRoutes["Admin routes"]
-        Users[Users, sessions, MFA, API keys]
-        RBAC[RBAC, privileges, orgs, billing]
-        Ops[Monitoring, metrics, audit, system]
+        Users["Users, sessions, MFA, API keys"]
+        RBAC["RBAC, privileges, orgs, billing"]
+        Ops["Monitoring, metrics, audit, system"]
         Config[Config admin and profiles]
         JobsAdmin[Jobs admin]
         Governor[Resource governor and quotas]
