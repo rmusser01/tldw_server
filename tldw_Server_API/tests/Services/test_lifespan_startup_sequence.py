@@ -23,6 +23,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     app = FastAPI()
     worker_runtime = LifespanWorkerRuntimeState()
     calls: list[tuple[str, dict[str, object]]] = []
+    worker_lifecycle_session = object()
 
     async def _fake_prepare_startup_pre_core(**kwargs):
         calls.append(("pre_core", kwargs))
@@ -49,6 +50,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
             startup_service_tail_handles=SimpleNamespace(
                 jobs_metrics_task="jobs-metrics-task",
             ),
+            worker_lifecycle_session=worker_lifecycle_session,
         )
 
     monkeypatch.setattr(
@@ -105,6 +107,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     assert worker_runtime.core_jobs_task == "core-task"
     assert worker_runtime.audio_jobs_stop_event == "audio-stop"
     assert worker_runtime.jobs_metrics_task == "jobs-metrics-task"
+    assert worker_runtime.worker_lifecycle_session is worker_lifecycle_session
     assert not hasattr(worker_runtime, "claims_task")
     assert not hasattr(worker_runtime, "authnz_scheduler_started")
 

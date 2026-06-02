@@ -12,6 +12,7 @@ from typing import Any
 class LifespanWorkerRuntimeState:
     """Mutable worker/task runtime state shared across startup and shutdown."""
 
+    worker_lifecycle_session: Any | None = None
     worker_inventory: Any | None = None
     owned_job_pollers: list[Any] = field(default_factory=list)
     core_jobs_stop_event: Any | None = None
@@ -87,8 +88,16 @@ class LifespanWorkerRuntimeState:
     connectors_jobs_stop_event: Any | None = None
 
     def apply_startup_worker_bootstrap_handles(self, handles: Any) -> None:
+        self.worker_lifecycle_session = getattr(handles, "worker_lifecycle_session", None)
         self.worker_inventory = getattr(handles, "worker_inventory", None)
-        self.owned_job_pollers = list(getattr(handles, "owned_job_pollers", []) or [])
+        owned_job_pollers = getattr(handles, "owned_job_pollers", None)
+        if owned_job_pollers is None and self.worker_lifecycle_session is not None:
+            owned_job_pollers = getattr(
+                self.worker_lifecycle_session,
+                "handles_by_name",
+                {},
+            ).values()
+        self.owned_job_pollers = list(owned_job_pollers or [])
         _copy_known_fields(self, getattr(handles, "startup_worker_group_handles", None))
         _copy_known_fields(self, getattr(handles, "startup_service_tail_handles", None))
 

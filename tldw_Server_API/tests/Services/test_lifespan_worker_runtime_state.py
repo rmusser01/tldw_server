@@ -39,6 +39,30 @@ def test_apply_startup_worker_bootstrap_handles_copies_known_fields() -> None:
     assert not hasattr(runtime, "authnz_scheduler_started")
 
 
+def test_apply_startup_worker_bootstrap_handles_stores_worker_lifecycle_session() -> None:
+    from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
+        LifespanWorkerRuntimeState,
+    )
+    from tldw_Server_API.app.services.startup_worker_bootstrap import (
+        StartupWorkerBootstrapHandles,
+    )
+
+    session = object()
+    runtime = LifespanWorkerRuntimeState()
+    startup_handles = StartupWorkerBootstrapHandles(
+        app_settings="settings",
+        owned_job_pollers=["session-handle"],
+        startup_worker_group_handles=None,
+        startup_service_tail_handles=None,
+        worker_lifecycle_session=session,
+    )
+
+    runtime.apply_startup_worker_bootstrap_handles(startup_handles)
+
+    assert runtime.worker_lifecycle_session is session
+    assert runtime.owned_job_pollers == ["session-handle"]
+
+
 def test_shutdown_apply_methods_copy_known_fields() -> None:
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,

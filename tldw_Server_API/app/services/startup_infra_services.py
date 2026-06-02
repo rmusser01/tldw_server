@@ -94,6 +94,15 @@ async def start_infra_services(
     )
 
 
+async def run_startup_infra_non_worker_setup(
+    *,
+    run_pg_rls_auto_ensure: Callable[[Any], Any],
+) -> None:
+    """Run infrastructure startup setup that is not lifecycle-worker owned."""
+
+    await _maybe_ensure_pg_rls(run_pg_rls_auto_ensure)
+
+
 async def start_connectors_startup(
     *,
     app: Any,

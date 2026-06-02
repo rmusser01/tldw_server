@@ -204,44 +204,39 @@ def test_lifespan_startup_delegates_startup_bg_tasks(
 
 
 @pytest.mark.integration
-def test_lifespan_startup_delegates_owned_job_pollers(
+def test_lifespan_startup_delegates_lifecycle_worker_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail, startup_worker_groups
+    from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
-    worker_group_calls: list[dict[str, object]] = []
-    service_tail_calls: list[dict[str, object]] = []
+    collect_calls: list[object] = []
+    start_calls: list[dict[str, object]] = []
+    lifecycle_session = SimpleNamespace(handles_by_name={})
 
-    async def _fake_start_worker_groups(**kwargs):
-        worker_group_calls.append(kwargs)
-        return startup_worker_groups.StartupWorkerGroupHandles()
+    def _fake_collect_startup_worker_specs(context):
+        collect_calls.append(context)
+        return ("spec",)
 
-    async def _fake_initialize_startup_service_tail(**kwargs):
-        service_tail_calls.append(kwargs)
-        return startup_service_tail.StartupServiceTailHandles()
+    async def _fake_start_lifecycle_workers(context, specs):
+        start_calls.append({"context": context, "specs": specs})
+        return lifecycle_session
 
-    monkeypatch.setattr(
-        startup_worker_groups,
-        "start_worker_groups",
-        _fake_start_worker_groups,
-    )
-    monkeypatch.setattr(
-        startup_service_tail,
-        "initialize_startup_service_tail",
-        _fake_initialize_startup_service_tail,
-    )
+    async def _fake_run_startup_non_worker_tail(**_kwargs):
+        return None
+
+    monkeypatch.setattr(startup_worker_bootstrap, "_collect_startup_worker_specs", _fake_collect_startup_worker_specs)
+    monkeypatch.setattr(startup_worker_bootstrap, "_start_lifecycle_workers", _fake_start_lifecycle_workers)
+    monkeypatch.setattr(startup_worker_bootstrap, "_run_startup_non_worker_tail", _fake_run_startup_non_worker_tail)
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
-    assert len(worker_group_calls) == 1
-    assert len(service_tail_calls) == 1
-    owned_job_pollers = worker_group_calls[0]["owned_job_pollers"]
-    assert isinstance(owned_job_pollers, list)
-    assert service_tail_calls[0]["owned_job_pollers"] is owned_job_pollers
-    assert service_tail_calls[0]["worker_inventory"].handles is owned_job_pollers
+    assert len(collect_calls) == 1
+    assert len(start_calls) == 1
+    assert start_calls[0]["context"] is collect_calls[0]
+    assert start_calls[0]["specs"] == ("spec",)
 
 
 @pytest.mark.integration
@@ -896,57 +891,61 @@ def test_lifespan_startup_delegates_core_initialization(
 
 
 @pytest.mark.integration
-def test_lifespan_startup_delegates_worker_groups(
+def test_lifespan_startup_collects_declarative_worker_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_worker_groups
+    from tldw_Server_API.app.services import startup_worker_bootstrap, startup_worker_groups
 
     app = main_module.app
-    recorded_calls: list[dict[str, object]] = []
+    recorded_contexts: list[object] = []
+    lifecycle_session = SimpleNamespace(handles_by_name={})
 
-    async def _fake_start_worker_groups(**kwargs):
-        recorded_calls.append(kwargs)
-        return startup_worker_groups.StartupWorkerGroupHandles()
+    def _fake_collect_startup_worker_specs(context):
+        recorded_contexts.append(context)
+        return ()
 
-    monkeypatch.setattr(
-        startup_worker_groups,
-        "start_worker_groups",
-        _fake_start_worker_groups,
-    )
+    async def _fake_start_lifecycle_workers(_context, _specs):
+        return lifecycle_session
+
+    async def _fake_run_startup_non_worker_tail(**_kwargs):
+        return None
+
+    monkeypatch.setattr(startup_worker_groups, "collect_startup_worker_specs", _fake_collect_startup_worker_specs)
+    monkeypatch.setattr(startup_worker_bootstrap, "_start_lifecycle_workers", _fake_start_lifecycle_workers)
+    monkeypatch.setattr(startup_worker_bootstrap, "_run_startup_non_worker_tail", _fake_run_startup_non_worker_tail)
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
-    assert len(recorded_calls) == 1
-    assert recorded_calls[0]["app"] is app
-    assert recorded_calls[0]["test_mode"] is True
-    assert recorded_calls[0]["route_enabled"] is main_module.route_enabled
-    assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
-    assert recorded_calls[0]["register_owned_job_poller"] is main_module._register_owned_job_poller
-    assert "app_settings" in recorded_calls[0]
+    assert len(recorded_contexts) == 1
+    assert recorded_contexts[0].app is app
+    assert recorded_contexts[0].test_mode is True
+    assert recorded_contexts[0].route_enabled is main_module.route_enabled
+    assert recorded_contexts[0].startup_guard_exceptions == main_module._STARTUP_GUARD_EXCEPTIONS
+    assert recorded_contexts[0].import_exceptions == main_module._IMPORT_EXCEPTIONS
 
 
 @pytest.mark.integration
-def test_lifespan_startup_delegates_service_tail(
+def test_lifespan_startup_delegates_non_worker_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail
+    from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
+    lifecycle_session = SimpleNamespace(handles_by_name={})
 
-    async def _fake_initialize_startup_service_tail(**kwargs):
+    async def _fake_start_lifecycle_workers(_context, _specs):
+        return lifecycle_session
+
+    async def _fake_run_startup_non_worker_tail(**kwargs):
         recorded_calls.append(kwargs)
-        return startup_service_tail.StartupServiceTailHandles()
 
-    monkeypatch.setattr(
-        startup_service_tail,
-        "initialize_startup_service_tail",
-        _fake_initialize_startup_service_tail,
-    )
+    monkeypatch.setattr(startup_worker_bootstrap, "_collect_startup_worker_specs", lambda _context: ())
+    monkeypatch.setattr(startup_worker_bootstrap, "_start_lifecycle_workers", _fake_start_lifecycle_workers)
+    monkeypatch.setattr(startup_worker_bootstrap, "_run_startup_non_worker_tail", _fake_run_startup_non_worker_tail)
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
@@ -954,15 +953,7 @@ def test_lifespan_startup_delegates_service_tail(
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
     assert recorded_calls[0]["logger"] is main_module.logger
-    assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
-    assert recorded_calls[0]["register_owned_job_poller"] is main_module._register_owned_job_poller
     assert recorded_calls[0]["run_pg_rls_auto_ensure"] is main_module._run_pg_rls_auto_ensure
-    assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (main_module._replace_owned_job_poller_inventory)
-    assert isinstance(
-        recorded_calls[0]["startup_worker_group_handles"],
-        object,
-    )
-    assert recorded_calls[0]["test_mode"] is True
     assert recorded_calls[0]["startup_api_key_log_value"] is main_module._startup_api_key_log_value
     assert recorded_calls[0]["shared_is_truthy"] is main_module._shared_is_truthy
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
