@@ -18,7 +18,6 @@ from tldw_Server_API.app.services.lifecycle_workers import (
     publish_worker_inventory,
 )
 
-
 _STOPPED_NAMES_ATTR_BY_PHASE = {
     ShutdownPhase.JOB_POLLER_QUIESCE: "_tldw_shutdown_quiesced_job_poller_names",
     ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN: ("_tldw_shutdown_stopped_background_worker_names"),
@@ -85,7 +84,10 @@ class WorkerLifecycleSession:
 
         shutdown_phase = _normalize_shutdown_phase(phase)
         attr_name = _STOPPED_NAMES_ATTR_BY_PHASE[shutdown_phase]
-        stopped_names = sorted(self.stopped_names_by_phase.get(shutdown_phase, set()))
+        stopped_names = [
+            self._diagnostic_name_for(name)
+            for name in sorted(self.stopped_names_by_phase.get(shutdown_phase, set()))
+        ]
         try:
             setattr(self.app.state, attr_name, stopped_names)
         except LIFECYCLE_GUARD_EXCEPTIONS as exc:
@@ -93,9 +95,15 @@ class WorkerLifecycleSession:
 
     def _inventory_handles(self) -> list[ManagedWorker]:
         return [
-            _handle_with_spec_task_name(handle, self.graph.specs_by_name.get(name))
+            _handle_with_spec_diagnostics(handle, self.graph.specs_by_name.get(name))
             for name, handle in self.handles_by_name.items()
         ]
+
+    def _diagnostic_name_for(self, name: str) -> str:
+        spec = self.graph.specs_by_name.get(name)
+        if spec is None:
+            return name
+        return spec.diagnostic_name or spec.name
 
 
 def _normalize_shutdown_phase(phase: ShutdownPhase | str) -> ShutdownPhase:
@@ -104,13 +112,20 @@ def _normalize_shutdown_phase(phase: ShutdownPhase | str) -> ShutdownPhase:
     return ShutdownPhase(str(phase))
 
 
-def _handle_with_spec_task_name(
+def _handle_with_spec_diagnostics(
     handle: ManagedWorker,
     spec: WorkerSpec | None,
 ) -> ManagedWorker:
-    if handle.task is not None or spec is None:
+    if spec is None:
         return handle
-    return replace(handle, task=cast(Any, _DiagnosticTaskName(spec.task_name)))
+    task: Any = handle.task
+    if task is None:
+        task = _DiagnosticTaskName(spec.task_name)
+    return replace(
+        handle,
+        name=spec.diagnostic_name or spec.name,
+        task=cast(Any, task),
+    )
 
 
 class _DiagnosticTaskName:
