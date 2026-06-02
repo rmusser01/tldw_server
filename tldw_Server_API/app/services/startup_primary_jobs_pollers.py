@@ -51,7 +51,7 @@ def provide_primary_jobs_worker_specs(
     """Return declarative specs for primary jobs pollers.
 
     Core jobs preserve the legacy sidecar gate through
-    ``context.settings["sidecar_mode"]``. Omitted settings default to the
+    ``context.sidecar_mode``. Omitted settings default to the
     existing non-sidecar behavior.
     """
 
@@ -104,8 +104,7 @@ def _core_jobs_worker_enabled(context: WorkerLifecycleContext) -> bool:
         os.getenv("CHATBOOKS_CORE_WORKER_ENABLED", "true").lower()
         in _TRUTHY_ENV_VALUES
     )
-    sidecar_mode = bool(context.settings.get("sidecar_mode", False))
-    return is_core and core_worker_enabled and not sidecar_mode
+    return is_core and core_worker_enabled and not context.sidecar_mode
 
 
 async def start_primary_jobs_pollers(

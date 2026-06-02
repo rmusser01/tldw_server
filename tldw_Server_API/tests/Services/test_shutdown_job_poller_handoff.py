@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -40,6 +41,16 @@ def _make_session(app: FastAPI, workers: list[Any]):
     for spec, worker in zip(specs, workers):
         session.register_handle(spec, worker)
     return session
+
+
+@pytest.mark.unit
+def test_filter_job_poller_quiesce_handles_accepts_string_phase() -> None:
+    from tldw_Server_API.app.services import shutdown_job_poller_handoff as handoff_module
+
+    poller = SimpleNamespace(task=object(), shutdown_phase="job_poller_quiesce")
+    background = SimpleNamespace(task=object(), shutdown_phase="background_worker_shutdown")
+
+    assert handoff_module._filter_job_poller_quiesce_handles([poller, background]) == [poller]
 
 
 class _FakeLifecycleWorkerEngine:

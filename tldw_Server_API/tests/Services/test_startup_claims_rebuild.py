@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -42,7 +41,7 @@ async def test_start_claims_rebuild_worker_creates_task_when_enabled(
 
     monkeypatch.setattr(startup_claims.asyncio, "create_task", _record_create_task)
 
-    task = await startup_claims.start_claims_rebuild_worker(
+    handle = await startup_claims.start_claims_rebuild_worker(
         {
             "CLAIMS_REBUILD_ENABLED": True,
             "CLAIMS_REBUILD_INTERVAL_SEC": 17,
@@ -50,8 +49,9 @@ async def test_start_claims_rebuild_worker_creates_task_when_enabled(
         },
     )
 
-    assert task is created_tasks[0]
-    assert getattr(task, "_tldw_claims_rebuild_stop_event") is not None
+    assert isinstance(handle, startup_claims.ClaimsRebuildWorkerHandle)
+    assert handle.task is created_tasks[0]
+    assert handle.stop_event is not None
 
 
 @pytest.mark.asyncio

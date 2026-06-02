@@ -28,7 +28,30 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
     )
 
     app = FastAPI()
-    worker_lifecycle_session = SimpleNamespace(name="worker-session")
+
+    class _FakeLifecycleSession:
+        def __init__(self) -> None:
+            self.name = "worker-session"
+            self.stopped_names_by_phase: dict[ShutdownPhase, list[str]] = {}
+
+        def mark_stopped(self, name: str, phase: ShutdownPhase) -> None:
+            self.stopped_names_by_phase.setdefault(phase, []).append(name)
+
+        def publish_stopped_names(self, phase: ShutdownPhase) -> None:
+            attr_by_phase = {
+                ShutdownPhase.JOB_POLLER_QUIESCE: "_tldw_shutdown_quiesced_job_poller_names",
+                ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN: (
+                    "_tldw_shutdown_stopped_background_worker_names"
+                ),
+                ShutdownPhase.POST_WORKER_SHUTDOWN: "_tldw_shutdown_stopped_post_worker_names",
+            }
+            setattr(
+                app.state,
+                attr_by_phase[phase],
+                self.stopped_names_by_phase.get(phase, []),
+            )
+
+    worker_lifecycle_session = _FakeLifecycleSession()
     worker_runtime = LifespanWorkerRuntimeState(
         worker_lifecycle_session=worker_lifecycle_session,
     )
@@ -48,13 +71,11 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
     async def _fake_stop_phase(session: object, phase: ShutdownPhase) -> None:
         calls.append(("engine", {"session": session, "phase": phase}))
         if phase is ShutdownPhase.JOB_POLLER_QUIESCE:
-            app.state._tldw_shutdown_quiesced_job_poller_names = ["core_jobs_task"]
+            session.mark_stopped("core_jobs_task", phase)
         if phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN:
-            app.state._tldw_shutdown_stopped_background_worker_names = [
-                "jobs_metrics_task"
-            ]
+            session.mark_stopped("jobs_metrics_task", phase)
         if phase is ShutdownPhase.POST_WORKER_SHUTDOWN:
-            app.state._tldw_shutdown_stopped_post_worker_names = ["jobs_webhooks_task"]
+            session.mark_stopped("jobs_webhooks_task", phase)
 
     lifecycle_worker_engine = SimpleNamespace(stop_phase=_fake_stop_phase)
 
@@ -63,6 +84,9 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
         await kwargs["lifecycle_worker_engine"].stop_phase(
             kwargs["worker_lifecycle_session"],
             ShutdownPhase.JOB_POLLER_QUIESCE,
+        )
+        kwargs["worker_lifecycle_session"].publish_stopped_names(
+            ShutdownPhase.JOB_POLLER_QUIESCE
         )
         return SimpleNamespace(
             should_run_late_stop=lambda task_name, task: bool(task)
@@ -210,7 +234,9 @@ async def test_run_lifespan_shutdown_sequence_skips_managed_phase_stops_without_
     )
 
     app = FastAPI()
+    app.state._tldw_shutdown_stopped_background_worker_names = ["stale_worker"]
     calls: list[str] = []
+    coordinated_stopped_names: list[set[str]] = []
 
     @contextmanager
     def _timed_shutdown_segment(_app: FastAPI, _segment_name: str):
@@ -228,8 +254,9 @@ async def test_run_lifespan_shutdown_sequence_skips_managed_phase_stops_without_
     async def _fake_stop_phase(*_args, **_kwargs) -> None:
         calls.append("engine")
 
-    async def _fake_coordinated_shutdown(**_kwargs):
+    async def _fake_coordinated_shutdown(**kwargs):
         calls.append("coordinated")
+        coordinated_stopped_names.append(kwargs["stopped_background_worker_names"])
 
     async def _fake_pre_worker_cleanup(**_kwargs):
         calls.append("pre")
@@ -307,3 +334,5 @@ async def test_run_lifespan_shutdown_sequence_skips_managed_phase_stops_without_
         "post-cleanup",
         "final",
     ]
+    assert coordinated_stopped_names == [set()]
+    assert app.state._tldw_shutdown_stopped_background_worker_names == []

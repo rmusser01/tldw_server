@@ -25,6 +25,7 @@ def _import_startup_notifications_abtest_workers():
 def _context(
     *,
     settings: dict[str, object] | None = None,
+    sidecar_mode: bool = False,
 ) -> WorkerLifecycleContext:
     return WorkerLifecycleContext(
         app="app",
@@ -34,6 +35,7 @@ def _context(
         logger=None,
         startup_guard_exceptions=(),
         import_exceptions=(),
+        sidecar_mode=sidecar_mode,
     )
 
 
@@ -139,8 +141,8 @@ def test_notifications_abtest_worker_specs_disable_in_sidecar_mode(
 
     specs = _specs_by_name(startup_workers)
 
-    assert specs["jobs_notifications_bridge_task"].enabled(_context(settings={"sidecar_mode": True})) is False
-    assert specs["evals_abtest_jobs_task"].enabled(_context(settings={"sidecar_mode": True})) is False
+    assert specs["jobs_notifications_bridge_task"].enabled(_context(sidecar_mode=True)) is False
+    assert specs["evals_abtest_jobs_task"].enabled(_context(sidecar_mode=True)) is False
 
 
 @pytest.mark.asyncio

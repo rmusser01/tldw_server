@@ -74,9 +74,18 @@ def _filter_job_poller_quiesce_handles(handles: list[Any]) -> list[Any]:
         handle
         for handle in handles
         if getattr(handle, "task", None) is not None
-        and getattr(handle, "shutdown_phase", ShutdownPhase.JOB_POLLER_QUIESCE)
-        == ShutdownPhase.JOB_POLLER_QUIESCE
+        and _is_job_poller_quiesce_handle(handle)
     ]
+
+
+def _is_job_poller_quiesce_handle(handle: Any) -> bool:
+    try:
+        shutdown_phase = ShutdownPhase(
+            getattr(handle, "shutdown_phase", ShutdownPhase.JOB_POLLER_QUIESCE)
+        )
+    except (TypeError, ValueError):
+        return False
+    return shutdown_phase is ShutdownPhase.JOB_POLLER_QUIESCE
 
 
 async def run_shutdown_job_poller_handoff(

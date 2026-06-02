@@ -24,6 +24,7 @@ class WorkerLifecycleContext:
     logger: Any
     startup_guard_exceptions: tuple[type[BaseException], ...]
     import_exceptions: tuple[type[BaseException], ...]
+    sidecar_mode: bool = False
 
 
 StopEventWorkerFactory = Callable[
@@ -172,6 +173,8 @@ def validate_enabled_worker_dependencies(
 
 
 def _validate_unique_names(specs: tuple[WorkerSpec, ...]) -> dict[str, WorkerSpec]:
+    """Return specs keyed by name after rejecting duplicate worker identities."""
+
     specs_by_name: dict[str, WorkerSpec] = {}
     for spec in specs:
         if spec.name in specs_by_name:
@@ -181,6 +184,8 @@ def _validate_unique_names(specs: tuple[WorkerSpec, ...]) -> dict[str, WorkerSpe
 
 
 def _validate_diagnostic_names(specs: tuple[WorkerSpec, ...]) -> None:
+    """Reject diagnostic names that would publish ambiguous lifecycle metadata."""
+
     diagnostic_names: dict[str, str] = {}
     for spec in specs:
         diagnostic_name = spec.diagnostic_name or spec.name
@@ -194,6 +199,8 @@ def _validate_diagnostic_names(specs: tuple[WorkerSpec, ...]) -> None:
 
 
 def _validate_phase(spec: WorkerSpec) -> None:
+    """Require specs to use explicit shutdown phases instead of raw values."""
+
     if not isinstance(spec.phase, ShutdownPhase):
         raise WorkerSpecValidationError(
             f"Worker spec {spec.name!r} phase must be a ShutdownPhase value, "
@@ -202,6 +209,8 @@ def _validate_phase(spec: WorkerSpec) -> None:
 
 
 def _validate_enabled_predicate(spec: WorkerSpec) -> None:
+    """Require enablement to be an explicit predicate callable."""
+
     if not callable(spec.enabled):
         raise WorkerSpecValidationError(
             f"Worker spec {spec.name!r} enabled must be callable"
@@ -209,6 +218,8 @@ def _validate_enabled_predicate(spec: WorkerSpec) -> None:
 
 
 def _validate_strategy_requirements(spec: WorkerSpec) -> None:
+    """Validate the factory fields required by a worker startup strategy."""
+
     if not isinstance(spec.strategy, WorkerStrategy):
         raise WorkerSpecValidationError(
             f"Worker spec {spec.name!r} strategy must be a WorkerStrategy value, "
@@ -246,6 +257,8 @@ def _validate_strategy_requirements(spec: WorkerSpec) -> None:
 
 
 def _validate_failure_policy(spec: WorkerSpec) -> None:
+    """Require each spec to declare a known startup failure policy."""
+
     if not isinstance(spec.failure_policy, WorkerFailurePolicy):
         raise WorkerSpecValidationError(
             f"Worker spec {spec.name!r} failure_policy must be a WorkerFailurePolicy "
@@ -254,6 +267,8 @@ def _validate_failure_policy(spec: WorkerSpec) -> None:
 
 
 def _validate_dependency_shape(spec: WorkerSpec) -> None:
+    """Require dependencies to be an immutable tuple of worker names."""
+
     if not isinstance(spec.depends_on, tuple):
         raise WorkerSpecValidationError(
             f"Worker spec {spec.name!r} depends_on must be a tuple of worker names"
@@ -264,6 +279,8 @@ def _validate_dependencies(
     spec: WorkerSpec,
     specs_by_name: Mapping[str, WorkerSpec],
 ) -> None:
+    """Reject dependencies that do not exist in the collected spec graph."""
+
     for dependency_name in spec.depends_on:
         if dependency_name not in specs_by_name:
             raise WorkerSpecValidationError(
@@ -275,6 +292,8 @@ def _validate_acyclic(
     specs: tuple[WorkerSpec, ...],
     specs_by_name: Mapping[str, WorkerSpec],
 ) -> None:
+    """Reject dependency cycles so startup order and rollback remain deterministic."""
+
     visited: set[str] = set()
     visiting: list[str] = []
 

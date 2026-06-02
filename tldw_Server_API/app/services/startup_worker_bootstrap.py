@@ -7,12 +7,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.lifecycle_worker_engine import LifecycleWorkerEngine
 from tldw_Server_API.app.services.lifecycle_worker_session import WorkerLifecycleSession
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     WorkerLifecycleContext,
     WorkerSpec,
 )
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 
 @dataclass
@@ -46,19 +48,27 @@ async def initialize_startup_worker_bootstrap(
         logger=logger,
         startup_guard_exceptions=startup_guard_exceptions,
         import_exceptions=import_exceptions,
+        sidecar_mode=env_flag_enabled("TLDW_WORKERS_SIDECAR_MODE"),
     )
     worker_specs = _collect_startup_worker_specs(context)
     worker_lifecycle_session = await _start_lifecycle_workers(context, worker_specs)
-    await _run_startup_non_worker_tail(
-        app=app,
-        app_settings=app_settings,
-        run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
-        logger=logger,
-        startup_api_key_log_value=startup_api_key_log_value,
-        shared_is_truthy=shared_is_truthy,
-        startup_guard_exceptions=startup_guard_exceptions,
-        import_exceptions=import_exceptions,
-    )
+    try:
+        await _run_startup_non_worker_tail(
+            app=app,
+            app_settings=app_settings,
+            run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
+            logger=logger,
+            startup_api_key_log_value=startup_api_key_log_value,
+            shared_is_truthy=shared_is_truthy,
+            startup_guard_exceptions=startup_guard_exceptions,
+            import_exceptions=import_exceptions,
+        )
+    except Exception:
+        await _stop_lifecycle_workers_after_tail_failure(
+            worker_lifecycle_session,
+            logger=logger,
+        )
+        raise
     return StartupWorkerBootstrapHandles(
         worker_lifecycle_session=worker_lifecycle_session,
     )
@@ -73,6 +83,8 @@ def _load_app_settings():
 def _collect_startup_worker_specs(
     context: WorkerLifecycleContext,
 ) -> tuple[WorkerSpec, ...]:
+    """Collect startup worker specs after building the shared lifecycle context."""
+
     from tldw_Server_API.app.services.startup_worker_groups import (
         collect_startup_worker_specs,
     )
@@ -85,6 +97,31 @@ async def _start_lifecycle_workers(
     specs: tuple[WorkerSpec, ...],
 ) -> WorkerLifecycleSession:
     return await LifecycleWorkerEngine().start(context, specs)
+
+
+async def _stop_lifecycle_workers_after_tail_failure(
+    session: WorkerLifecycleSession | None,
+    *,
+    logger: Any,
+) -> None:
+    """Best-effort cleanup for workers started before non-worker startup fails."""
+
+    if session is None:
+        return
+
+    engine = LifecycleWorkerEngine()
+    try:
+        for phase in (
+            ShutdownPhase.JOB_POLLER_QUIESCE,
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            ShutdownPhase.POST_WORKER_SHUTDOWN,
+        ):
+            await engine.stop_phase(session, phase)
+    except Exception as exc:  # noqa: BLE001 - preserve the original startup failure.
+        logger.warning(
+            "Lifecycle worker cleanup after startup-tail failure skipped after {}",
+            type(exc).__name__,
+        )
 
 
 async def _run_startup_non_worker_tail(

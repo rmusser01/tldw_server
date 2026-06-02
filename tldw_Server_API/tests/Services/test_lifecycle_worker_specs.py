@@ -70,7 +70,9 @@ def test_stop_event_worker_spec_builds_standard_stop_event_spec_and_delegates_di
 
 
 @pytest.mark.unit
-def test_route_enabled_predicate_forwards_flag_route_and_kwargs() -> None:
+def test_route_enabled_predicate_forwards_route_and_kwargs_after_env_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tldw_Server_API.app.services.lifecycle_worker_specs import (
         route_enabled_predicate,
     )
@@ -87,10 +89,17 @@ def test_route_enabled_predicate_forwards_flag_route_and_kwargs() -> None:
         default_stable=False,
     )
 
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+
+    assert predicate(_context(route_enabled=_route_enabled)) is False
+    assert calls == []
+
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "true")
+
     assert predicate(_context(route_enabled=_route_enabled)) is False
     assert calls == [
         (
-            ("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "media-ingest-heavy-jobs"),
+            ("media-ingest-heavy-jobs",),
             {"default_stable": False},
         )
     ]

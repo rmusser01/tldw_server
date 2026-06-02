@@ -68,12 +68,17 @@ class LifecycleWorkerEngine:
         for spec in graph.specs:
             try:
                 enabled = spec.enabled(context)
+                if type(enabled) is not bool:
+                    raise TypeError(
+                        f"Worker spec {spec.name!r} enabled predicate must return bool, "
+                        f"got {type(enabled).__name__}"
+                    )
             except Exception as exc:
                 session.mark_startup_failure(spec.name, exc)
                 if spec.failure_policy is WorkerFailurePolicy.ABORT:
                     raise
                 continue
-            if enabled:
+            if enabled is True:
                 enabled_names.add(spec.name)
             else:
                 session.mark_disabled(spec.name)
@@ -160,11 +165,17 @@ class LifecycleWorkerEngine:
 
         if spec.shutdown_callback_factory is None:
             raise RuntimeError(f"Worker spec {spec.name!r} has no shutdown callback factory")
+        shutdown_callback = spec.shutdown_callback_factory(context)
+        if not callable(shutdown_callback):
+            raise RuntimeError(
+                f"Worker spec {spec.name!r} shutdown callback factory returned "
+                f"non-callable result: {shutdown_callback!r}"
+            )
         return ManagedWorker(
             name=spec.name,
             task=None,
             stop_event=None,
-            shutdown_callback=spec.shutdown_callback_factory(context),
+            shutdown_callback=shutdown_callback,
             timeout_sec=spec.timeout_sec,
             category=spec.category,
             shutdown_phase=spec.phase,

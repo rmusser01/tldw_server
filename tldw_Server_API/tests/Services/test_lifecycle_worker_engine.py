@@ -15,6 +15,10 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
 )
 
 
+async def _noop_callback() -> None:
+    return None
+
+
 def _context(app: FastAPI | None = None) -> WorkerLifecycleContext:
     return WorkerLifecycleContext(
         app=app or FastAPI(),
@@ -147,6 +151,46 @@ async def test_engine_disabled_predicates_skip_workers_deterministically() -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_engine_rejects_non_boolean_enabled_predicate_results() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_engine import (
+        LifecycleWorkerEngine,
+    )
+
+    skipped = _stop_event_spec(
+        name="skipped_non_bool",
+        task_name="skipped-non-bool-task",
+        enabled=lambda _context: "false",
+        failure_policy=WorkerFailurePolicy.SKIP,
+    )
+    healthy = _stop_event_spec(
+        name="healthy",
+        task_name="healthy-task",
+        enabled=lambda _context: True,
+    )
+
+    session = await LifecycleWorkerEngine().start(_context(), [skipped, healthy])
+    try:
+        assert session.enabled_names == {"healthy"}
+        assert "must return bool" in session.startup_failures["skipped_non_bool"]
+    finally:
+        await LifecycleWorkerEngine().stop_phase(
+            session,
+            ShutdownPhase.JOB_POLLER_QUIESCE,
+        )
+
+    aborting = _stop_event_spec(
+        name="aborting_non_bool",
+        task_name="aborting-non-bool-task",
+        enabled=lambda _context: 1,
+        failure_policy=WorkerFailurePolicy.ABORT,
+    )
+
+    with pytest.raises(TypeError, match="must return bool"):
+        await LifecycleWorkerEngine().start(_context(), [aborting])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_engine_enabled_worker_depending_on_disabled_worker_fails_after_predicates() -> None:
     from tldw_Server_API.app.services.lifecycle_worker_engine import (
         LifecycleWorkerEngine,
@@ -228,6 +272,42 @@ async def test_engine_startup_failures_follow_failure_policy() -> None:
     )
     with pytest.raises(RuntimeError, match="factory unavailable"):
         await engine.start(_context(), [aborting])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_engine_rejects_callback_only_non_callable_shutdown_hook() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_engine import (
+        LifecycleWorkerEngine,
+    )
+
+    invalid_callback_spec = _callback_spec(
+        name="invalid_callback",
+        callback=_noop_callback,
+        shutdown_callback_factory=lambda _context: None,
+        failure_policy=WorkerFailurePolicy.SKIP,
+    )
+    healthy = _stop_event_spec(name="healthy")
+
+    session = await LifecycleWorkerEngine().start(_context(), [invalid_callback_spec, healthy])
+    try:
+        assert session.enabled_names == {"healthy"}
+        assert "non-callable result" in session.startup_failures["invalid_callback"]
+    finally:
+        await LifecycleWorkerEngine().stop_phase(
+            session,
+            ShutdownPhase.JOB_POLLER_QUIESCE,
+        )
+
+    aborting = _callback_spec(
+        name="aborting_callback",
+        callback=_noop_callback,
+        shutdown_callback_factory=lambda _context: "not-callable",
+        failure_policy=WorkerFailurePolicy.ABORT,
+    )
+
+    with pytest.raises(RuntimeError, match="non-callable result"):
+        await LifecycleWorkerEngine().start(_context(), [aborting])
 
 
 @pytest.mark.unit

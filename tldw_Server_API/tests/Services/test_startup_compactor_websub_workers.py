@@ -104,7 +104,10 @@ def test_websub_worker_spec_predicate_uses_callback_url_and_route_enabled(
     monkeypatch.setattr(
         startup_workers.os,
         "getenv",
-        lambda key, default=None: "https://callback.test" if key == "WEBSUB_CALLBACK_BASE_URL" else default,
+        lambda key, default=None: {
+            "WEBSUB_CALLBACK_BASE_URL": "https://callback.test",
+            "WEBSUB_RENEWAL_WORKER_ENABLED": "true",
+        }.get(key, default),
     )
 
     def _route_enabled(*args: object, **kwargs: object) -> bool:
@@ -114,7 +117,7 @@ def test_websub_worker_spec_predicate_uses_callback_url_and_route_enabled(
     spec = _specs_by_name(startup_workers)["websub_renewal_task"]
 
     assert spec.enabled(_context(route_enabled=_route_enabled)) is False
-    assert calls == [(("WEBSUB_RENEWAL_WORKER_ENABLED", "collections-websub"), {})]
+    assert calls == [(("collections-websub",), {})]
 
 
 @pytest.mark.asyncio

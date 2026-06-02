@@ -91,11 +91,22 @@ async def _cancel_and_wait_for_started_task(task: Any, *, timeout: float) -> Non
     if callable(cancel):
         cancel()
     try:
-        await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        await asyncio.wait_for(task, timeout=timeout)
     except asyncio.CancelledError:
         pass
-    except (asyncio.TimeoutError,) + _STARTUP_GUARD_EXCEPTIONS:
-        pass
+    except asyncio.TimeoutError:
+        if callable(cancel):
+            cancel()
+        logger.warning(
+            "WebSub renewal task did not stop within {}s after cancellation",
+            timeout,
+        )
+        raise
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(
+            "WebSub renewal task cleanup failed after {}",
+            type(exc).__name__,
+        )
 
 
 async def start_compactor_websub_workers(

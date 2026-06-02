@@ -52,6 +52,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
+        "llamacpp_acquisition_jobs_task",
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
@@ -83,6 +84,7 @@ def test_content_jobs_worker_specs_use_expected_names() -> None:
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
+        "llamacpp_acquisition_jobs_task",
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
@@ -102,6 +104,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("media_ingest_jobs_task", "_run_media_ingest_jobs_worker_service"),
         ("media_ingest_heavy_jobs_task", "_run_media_ingest_heavy_jobs_worker_service"),
         ("reading_digest_jobs_task", "_run_reading_digest_jobs_worker_service"),
+        ("llamacpp_acquisition_jobs_task", "_run_llamacpp_acquisition_jobs_worker_service"),
         ("vn_asset_jobs_task", "_run_vn_asset_jobs_worker_service"),
         ("vn_asset_generation_jobs_task", "_run_vn_asset_generation_jobs_worker_service"),
         ("companion_reflection_jobs_task", "_run_companion_reflection_jobs_worker_service"),
@@ -125,13 +128,16 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("media_ingest_jobs_task", "media_ingest_jobs_task-stop"),
         ("media_ingest_heavy_jobs_task", "media_ingest_heavy_jobs_task-stop"),
         ("reading_digest_jobs_task", "reading_digest_jobs_task-stop"),
+        ("llamacpp_acquisition_jobs_task", "llamacpp_acquisition_jobs_task-stop"),
         ("vn_asset_jobs_task", "vn_asset_jobs_task-stop"),
         ("vn_asset_generation_jobs_task", "vn_asset_generation_jobs_task-stop"),
         ("companion_reflection_jobs_task", "companion_reflection_jobs_task-stop"),
     ]
 
 
-def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments() -> None:
+def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     startup_pollers = _import_startup_content_jobs_pollers()
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
@@ -149,28 +155,45 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments() -> No
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
+        "llamacpp_acquisition_jobs_task",
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
     ]:
+        monkeypatch.setenv(
+            {
+                "audio_jobs_task": "AUDIO_JOBS_WORKER_ENABLED",
+                "audiobook_jobs_task": "AUDIOBOOK_JOBS_WORKER_ENABLED",
+                "presentation_render_jobs_task": "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
+                "media_ingest_jobs_task": "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+                "media_ingest_heavy_jobs_task": "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+                "reading_digest_jobs_task": "READING_DIGEST_JOBS_WORKER_ENABLED",
+                "llamacpp_acquisition_jobs_task": "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+                "vn_asset_jobs_task": "VN_ASSET_JOBS_WORKER_ENABLED",
+                "vn_asset_generation_jobs_task": "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
+                "companion_reflection_jobs_task": "COMPANION_REFLECTION_JOBS_WORKER_ENABLED",
+            }[spec_name],
+            "true",
+        )
         assert specs[spec_name].enabled(context) is False
 
     assert calls == [
-        (("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs"), {}),
-        (("AUDIOBOOK_JOBS_WORKER_ENABLED", "audiobooks"), {}),
-        (("PRESENTATION_RENDER_JOBS_WORKER_ENABLED", "slides"), {}),
-        (("MEDIA_INGEST_JOBS_WORKER_ENABLED", "media"), {}),
+        (("audio-jobs",), {}),
+        (("audiobooks",), {}),
+        (("slides",), {}),
+        (("media",), {}),
         (
-            ("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "media-ingest-heavy-jobs"),
+            ("media-ingest-heavy-jobs",),
             {"default_stable": False},
         ),
-        (("READING_DIGEST_JOBS_WORKER_ENABLED", "reading"), {}),
-        (("VN_ASSET_JOBS_WORKER_ENABLED", "vn-assets"), {"default_stable": True}),
+        (("reading",), {}),
+        (("llamacpp-acquisition",), {}),
+        (("vn-assets",), {"default_stable": True}),
         (
-            ("VN_ASSET_GENERATION_JOBS_WORKER_ENABLED", "vn-assets-generation"),
+            ("vn-assets-generation",),
             {"default_stable": True},
         ),
-        (("COMPANION_REFLECTION_JOBS_WORKER_ENABLED", "companion"), {}),
+        (("companion",), {}),
     ]
 
 

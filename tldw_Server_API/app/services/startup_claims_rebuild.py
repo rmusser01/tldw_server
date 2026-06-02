@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -27,6 +28,14 @@ _STARTUP_GUARD_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+
+@dataclass(frozen=True)
+class ClaimsRebuildWorkerHandle:
+    """Legacy direct-start handle for the claims rebuild worker."""
+
+    task: Any
+    stop_event: asyncio.Event
 
 
 def provide_claims_rebuild_worker_specs(
@@ -59,7 +68,7 @@ async def start_claims_rebuild_worker(
     app_settings: Mapping[str, Any],
     *,
     worker_inventory: Any | None = None,
-) -> Any | None:
+) -> ClaimsRebuildWorkerHandle | Any | None:
     """Start the claims rebuild worker when enabled."""
     try:
         enabled = bool(app_settings.get("CLAIMS_REBUILD_ENABLED", False))
@@ -95,8 +104,7 @@ async def start_claims_rebuild_worker(
                 policy=policy,
             )
         )
-        task._tldw_claims_rebuild_stop_event = stop_event
-        return task
+        return ClaimsRebuildWorkerHandle(task=task, stop_event=stop_event)
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start claims rebuild worker: {exc}")
         return None

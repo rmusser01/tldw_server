@@ -62,11 +62,11 @@ def provide_notifications_abtest_worker_specs(
 
 
 def _jobs_notifications_bridge_spec_enabled(context: WorkerLifecycleContext) -> bool:
-    return not bool(context.settings.get("sidecar_mode", False)) and _jobs_notifications_bridge_enabled()
+    return not context.sidecar_mode and _jobs_notifications_bridge_enabled()
 
 
 def _evals_abtest_jobs_spec_enabled(context: WorkerLifecycleContext) -> bool:
-    return not bool(context.settings.get("sidecar_mode", False)) and _evals_abtest_jobs_worker_enabled()
+    return not context.sidecar_mode and _evals_abtest_jobs_worker_enabled()
 
 
 def _jobs_notifications_bridge_enabled() -> bool:
@@ -102,11 +102,22 @@ async def _cancel_and_wait_for_started_task(task: Any, *, timeout: float) -> Non
         cancel()
     if inspect.isawaitable(task):
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+            await asyncio.wait_for(task, timeout=timeout)
         except asyncio.CancelledError:
             pass
-        except (asyncio.TimeoutError,) + _STARTUP_GUARD_EXCEPTIONS:
-            pass
+        except asyncio.TimeoutError:
+            if callable(cancel):
+                cancel()
+            logger.warning(
+                "Jobs notifications bridge task did not stop within {}s after cancellation",
+                timeout,
+            )
+            raise
+        except _STARTUP_GUARD_EXCEPTIONS as exc:
+            logger.debug(
+                "Jobs notifications bridge task cleanup failed after {}",
+                type(exc).__name__,
+            )
 
 
 async def _resolve_started_task_result(result: Any) -> Any:

@@ -119,6 +119,16 @@ def provide_content_jobs_worker_specs(
             ),
         ),
         stop_event_worker_spec(
+            name="llamacpp_acquisition_jobs_task",
+            worker_service=_run_llamacpp_acquisition_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+                "llamacpp-acquisition",
+            ),
+        ),
+        stop_event_worker_spec(
             name="vn_asset_jobs_task",
             worker_service=_run_vn_asset_jobs_worker_service,
             category="jobs",

@@ -54,6 +54,8 @@ def test_optional_worker_specs_match_legacy_worker_contract() -> None:
         "workflows_gc_task": "workflows",
         "workflows_maint_task": "workflows",
         "jobs_integrity_task": "jobs",
+        "persona_visual_generation_task": "persona",
+        "persona_visual_portability_task": "persona",
     }
     assert set(specs) == set(expected)
     for name, category in expected.items():
@@ -79,6 +81,8 @@ def test_optional_worker_spec_factories_delegate_to_existing_worker_services(
         "workflows_gc_task": "_run_workflows_artifact_gc_worker_service",
         "workflows_maint_task": "_run_workflows_db_maintenance_worker_service",
         "jobs_integrity_task": "_run_jobs_integrity_sweeper_service",
+        "persona_visual_generation_task": "_run_persona_visual_generation_worker_service",
+        "persona_visual_portability_task": "_run_persona_visual_portability_worker_service",
     }
     calls: list[tuple[str, object]] = []
     for worker_name, service_name in service_by_name.items():
@@ -171,6 +175,16 @@ async def test_start_optional_workers_combines_handles_in_order(
         calls.append("jobs-integrity")
         return ("jobs-integrity-stop", "jobs-integrity-task")
 
+    async def _record_persona_generation(*, worker_inventory: object | None = None) -> tuple[str, str]:
+        assert worker_inventory is None
+        calls.append("persona-generation")
+        return ("persona-generation-stop", "persona-generation-task")
+
+    async def _record_persona_portability(*, worker_inventory: object | None = None) -> tuple[str, str]:
+        assert worker_inventory is None
+        calls.append("persona-portability")
+        return ("persona-portability-stop", "persona-portability-task")
+
     monkeypatch.setattr(startup_workers, "_start_jobs_metrics_reconcile_worker", _record_jobs_metrics)
     monkeypatch.setattr(startup_workers, "_start_jobs_crypto_rotate_worker", _record_jobs_crypto)
     monkeypatch.setattr(startup_workers, "_start_jobs_webhooks_worker", _record_jobs_webhooks)
@@ -179,6 +193,8 @@ async def test_start_optional_workers_combines_handles_in_order(
     monkeypatch.setattr(startup_workers, "_start_workflows_artifact_gc_worker", _record_workflows_gc)
     monkeypatch.setattr(startup_workers, "_start_workflows_db_maintenance_worker", _record_workflows_maint)
     monkeypatch.setattr(startup_workers, "_start_jobs_integrity_sweeper", _record_jobs_integrity)
+    monkeypatch.setattr(startup_workers, "_start_persona_visual_generation_worker", _record_persona_generation)
+    monkeypatch.setattr(startup_workers, "_start_persona_visual_portability_worker", _record_persona_portability)
 
     handles = await startup_workers.start_optional_workers()
 
@@ -191,6 +207,8 @@ async def test_start_optional_workers_combines_handles_in_order(
         "workflows-gc",
         "workflows-maint",
         "jobs-integrity",
+        "persona-generation",
+        "persona-portability",
     ]
     assert handles.jobs_metrics_reconcile_stop == "jobs-metrics-stop"
     assert handles.jobs_metrics_reconcile_task == "jobs-metrics-task"
@@ -208,6 +226,10 @@ async def test_start_optional_workers_combines_handles_in_order(
     assert handles.workflows_maint_task == "workflows-maint-task"
     assert handles.jobs_integrity_stop_event == "jobs-integrity-stop"
     assert handles.jobs_integrity_task == "jobs-integrity-task"
+    assert handles.persona_visual_generation_stop_event == "persona-generation-stop"
+    assert handles.persona_visual_generation_task == "persona-generation-task"
+    assert handles.persona_visual_portability_stop_event == "persona-portability-stop"
+    assert handles.persona_visual_portability_task == "persona-portability-task"
 
 
 @pytest.mark.asyncio

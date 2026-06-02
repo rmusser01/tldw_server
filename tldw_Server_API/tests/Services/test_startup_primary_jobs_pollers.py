@@ -112,7 +112,9 @@ def test_primary_jobs_worker_spec_factories_delegate_to_existing_worker_services
     ]
 
 
-def test_primary_jobs_worker_spec_predicates_use_route_enabled() -> None:
+def test_primary_jobs_worker_spec_predicates_use_route_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     startup_pollers = _import_startup_primary_jobs_pollers()
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
@@ -122,14 +124,20 @@ def test_primary_jobs_worker_spec_predicates_use_route_enabled() -> None:
 
     context = _context(route_enabled=_route_enabled)
     specs = _specs_by_name(startup_pollers)
+    for env_key in [
+        "FILES_JOBS_WORKER_ENABLED",
+        "DATA_TABLES_JOBS_WORKER_ENABLED",
+        "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
+    ]:
+        monkeypatch.setenv(env_key, "true")
 
     assert specs["files_jobs_task"].enabled(context) is False
     assert specs["data_tables_jobs_task"].enabled(context) is False
     assert specs["prompt_studio_jobs_task"].enabled(context) is False
     assert calls == [
-        (("FILES_JOBS_WORKER_ENABLED", "files"), {}),
-        (("DATA_TABLES_JOBS_WORKER_ENABLED", "data-tables"), {}),
-        (("PROMPT_STUDIO_JOBS_WORKER_ENABLED", "prompt-studio"), {}),
+        (("files",), {}),
+        (("data-tables",), {}),
+        (("prompt-studio",), {}),
     ]
 
 
@@ -141,10 +149,9 @@ def test_primary_jobs_worker_spec_predicates_use_route_enabled() -> None:
         ({"TLDW_JOBS_BACKEND": "core"}, {}, True),
         ({"CHATBOOKS_JOBS_BACKEND": "jobs"}, {}, False),
         ({"CHATBOOKS_CORE_WORKER_ENABLED": "false"}, {}, False),
-        ({}, {"sidecar_mode": True}, False),
     ],
 )
-def test_core_jobs_worker_spec_preserves_backend_flag_and_sidecar_predicate(
+def test_core_jobs_worker_spec_preserves_backend_flag_predicate(
     monkeypatch: pytest.MonkeyPatch,
     env: dict[str, str],
     settings: dict[str, object],
@@ -163,6 +170,32 @@ def test_core_jobs_worker_spec_preserves_backend_flag_and_sidecar_predicate(
     spec = _specs_by_name(startup_pollers)["core_jobs_task"]
 
     assert spec.enabled(_context(settings=settings)) is expected
+
+
+def test_core_jobs_worker_spec_uses_explicit_sidecar_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    for key in [
+        "CHATBOOKS_JOBS_BACKEND",
+        "TLDW_JOBS_BACKEND",
+        "CHATBOOKS_CORE_WORKER_ENABLED",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    spec = _specs_by_name(startup_pollers)["core_jobs_task"]
+
+    context = WorkerLifecycleContext(
+        app="app",
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+        sidecar_mode=True,
+    )
+    assert spec.enabled(context) is False
 
 
 @pytest.mark.asyncio

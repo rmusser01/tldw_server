@@ -112,6 +112,18 @@ def provide_optional_worker_specs(
             category="jobs",
             enabled=_env_enabled_predicate("JOBS_INTEGRITY_SWEEP_ENABLED"),
         ),
+        _optional_stop_event_worker_spec(
+            name="persona_visual_generation_task",
+            worker_service=_run_persona_visual_generation_worker_service,
+            category="persona",
+            enabled=_env_enabled_predicate("PERSONA_VISUAL_GENERATION_WORKER_ENABLED"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="persona_visual_portability_task",
+            worker_service=_run_persona_visual_portability_worker_service,
+            category="persona",
+            enabled=_env_enabled_predicate("PERSONA_VISUAL_PORTABILITY_WORKER_ENABLED"),
+        ),
     )
 
 

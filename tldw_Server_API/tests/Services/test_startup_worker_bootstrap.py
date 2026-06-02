@@ -20,6 +20,7 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
 ) -> None:
     from tldw_Server_API.app.services import startup_worker_bootstrap as startup_bootstrap
 
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
     calls: list[tuple[str, dict[str, object]]] = []
 
     def _record_load_app_settings() -> str:
@@ -41,6 +42,7 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
                     "logger": context.logger,
                     "startup_guard_exceptions": context.startup_guard_exceptions,
                     "import_exceptions": context.import_exceptions,
+                    "sidecar_mode": context.sidecar_mode,
                 },
             )
         )
@@ -105,6 +107,7 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
     assert calls[1][1]["logger"] == "logger"
     assert calls[1][1]["startup_guard_exceptions"] == (RuntimeError,)
     assert calls[1][1]["import_exceptions"] == (ImportError,)
+    assert calls[1][1]["sidecar_mode"] is False
     assert calls[2][1]["context"].settings == "settings"
     assert calls[2][1]["specs"] is specs
     assert calls[3][1]["app"] == "app"
@@ -121,6 +124,58 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
     assert not hasattr(handles, "worker_inventory")
     assert not hasattr(handles, "startup_worker_group_handles")
     assert not hasattr(handles, "startup_service_tail_handles")
+
+
+@pytest.mark.asyncio
+async def test_initialize_startup_worker_bootstrap_injects_sidecar_mode_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import startup_worker_bootstrap as startup_bootstrap
+
+    contexts: list[WorkerLifecycleContext] = []
+    monkeypatch.setenv("TLDW_WORKERS_SIDECAR_MODE", "true")
+    monkeypatch.setattr(startup_bootstrap, "_load_app_settings", lambda: {})
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_collect_startup_worker_specs",
+        lambda context: contexts.append(context) or (),
+    )
+
+    async def _record_start_lifecycle_workers(
+        _context: WorkerLifecycleContext,
+        _specs: tuple[WorkerSpec, ...],
+    ):
+        return SimpleNamespace(handles_by_name={})
+
+    async def _skip_non_worker_tail(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_start_lifecycle_workers",
+        _record_start_lifecycle_workers,
+    )
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_run_startup_non_worker_tail",
+        _skip_non_worker_tail,
+    )
+
+    await startup_bootstrap.initialize_startup_worker_bootstrap(
+        app="app",
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        run_pg_rls_auto_ensure="run-pg-ensure",
+        register_owned_job_poller="register-poller",
+        replace_owned_job_poller_inventory="replace-inventory",
+        logger="logger",
+        startup_api_key_log_value="api-key",
+        shared_is_truthy="truthy",
+        startup_guard_exceptions=(RuntimeError,),
+        import_exceptions=(ImportError,),
+    )
+
+    assert contexts[0].sidecar_mode is True
 
 
 def test_startup_worker_bootstrap_no_longer_exposes_dead_poller_hook() -> None:
@@ -247,3 +302,66 @@ async def test_initialize_startup_worker_bootstrap_records_disabled_worker_diagn
 
     assert handles.worker_lifecycle_session.disabled_names == {"disabled_worker"}
     assert handles.worker_lifecycle_session.handles_by_name == {}
+
+
+@pytest.mark.asyncio
+async def test_initialize_startup_worker_bootstrap_cleans_workers_when_tail_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import startup_worker_bootstrap as startup_bootstrap
+
+    lifecycle_session = SimpleNamespace(handles_by_name={"worker": "handle"})
+    cleaned_sessions: list[object] = []
+
+    monkeypatch.setattr(startup_bootstrap, "_load_app_settings", lambda: {})
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_collect_startup_worker_specs",
+        lambda _context: (),
+    )
+
+    async def _record_start_lifecycle_workers(
+        _context: WorkerLifecycleContext,
+        _specs: tuple[WorkerSpec, ...],
+    ):
+        return lifecycle_session
+
+    async def _raise_non_worker_tail(**_kwargs):
+        raise RuntimeError("tail failed")
+
+    async def _record_cleanup(session, *, logger):
+        assert logger == "logger"
+        cleaned_sessions.append(session)
+
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_start_lifecycle_workers",
+        _record_start_lifecycle_workers,
+    )
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_run_startup_non_worker_tail",
+        _raise_non_worker_tail,
+    )
+    monkeypatch.setattr(
+        startup_bootstrap,
+        "_stop_lifecycle_workers_after_tail_failure",
+        _record_cleanup,
+    )
+
+    with pytest.raises(RuntimeError, match="tail failed"):
+        await startup_bootstrap.initialize_startup_worker_bootstrap(
+            app="app",
+            test_mode=True,
+            route_enabled=lambda *_args, **_kwargs: True,
+            run_pg_rls_auto_ensure="run-pg-ensure",
+            register_owned_job_poller="register-poller",
+            replace_owned_job_poller_inventory="replace-inventory",
+            logger="logger",
+            startup_api_key_log_value="api-key",
+            shared_is_truthy="truthy",
+            startup_guard_exceptions=(RuntimeError,),
+            import_exceptions=(ImportError,),
+        )
+
+    assert cleaned_sessions == [lifecycle_session]

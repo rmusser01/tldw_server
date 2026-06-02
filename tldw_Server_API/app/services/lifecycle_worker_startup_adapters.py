@@ -33,7 +33,15 @@ async def run_started_task_until_stop(
         await stop_event.wait()
     finally:
         if stopper is not None:
-            await stopper(task)
+            try:
+                await asyncio.wait_for(stopper(task), timeout=timeout_sec)
+            except (asyncio.TimeoutError,) + LIFECYCLE_GUARD_EXCEPTIONS as exc:
+                logger.debug(
+                    "Lifecycle startup adapter stopper cleanup fell back to task "
+                    "cancellation after {}",
+                    type(exc).__name__,
+                )
+                await cancel_started_task(task, timeout_sec=timeout_sec)
         else:
             await cancel_started_task(task, timeout_sec=timeout_sec)
 
@@ -43,6 +51,7 @@ async def run_start_stop_service_until_stop(
     *,
     starter: ServiceStarter,
     stopper: ServiceStopper,
+    timeout_sec: float = 5.0,
 ) -> None:
     """Start a service with separate start/stop functions and wait for shutdown."""
 
@@ -50,7 +59,13 @@ async def run_start_stop_service_until_stop(
     try:
         await stop_event.wait()
     finally:
-        await stopper()
+        try:
+            await asyncio.wait_for(stopper(), timeout=timeout_sec)
+        except (asyncio.TimeoutError,) + LIFECYCLE_GUARD_EXCEPTIONS as exc:
+            logger.debug(
+                "Lifecycle startup adapter service cleanup skipped after {}",
+                type(exc).__name__,
+            )
 
 
 async def cancel_started_task(

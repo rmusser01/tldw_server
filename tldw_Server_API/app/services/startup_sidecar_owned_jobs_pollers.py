@@ -111,7 +111,16 @@ def _sidecar_owned_worker_enabled(
     context: WorkerLifecycleContext,
     worker_enabled: Callable[[], bool],
 ) -> bool:
-    return not bool(context.settings.get("sidecar_mode", False)) and worker_enabled()
+    if context.sidecar_mode:
+        return False
+    try:
+        return worker_enabled()
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(
+            "Sidecar-owned Jobs worker predicate disabled after {}",
+            type(exc).__name__,
+        )
+        return False
 
 
 def _reminder_jobs_worker_enabled() -> bool:

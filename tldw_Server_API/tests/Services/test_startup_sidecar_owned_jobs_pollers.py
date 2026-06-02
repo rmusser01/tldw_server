@@ -24,6 +24,7 @@ def _import_startup_sidecar_owned_jobs_pollers():
 def _context(
     *,
     settings: dict[str, object] | None = None,
+    sidecar_mode: bool = False,
 ) -> WorkerLifecycleContext:
     return WorkerLifecycleContext(
         app="app",
@@ -33,6 +34,7 @@ def _context(
         logger=None,
         startup_guard_exceptions=(),
         import_exceptions=(),
+        sidecar_mode=sidecar_mode,
     )
 
 
@@ -131,9 +133,28 @@ def test_sidecar_owned_jobs_worker_specs_disable_in_sidecar_mode(
     specs = _specs_by_name(startup_pollers)
 
     assert all(
-        not spec.enabled(_context(settings={"sidecar_mode": True}))
+        not spec.enabled(_context(sidecar_mode=True))
         for spec in specs.values()
     )
+
+
+def test_sidecar_owned_jobs_worker_specs_guard_optional_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_sidecar_owned_jobs_pollers()
+
+    def _raise_optional_import() -> bool:
+        raise ImportError("optional worker unavailable")
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_admin_byok_validation_jobs_worker_enabled",
+        _raise_optional_import,
+    )
+
+    spec = _specs_by_name(startup_pollers)["admin_byok_validation_jobs_task"]
+
+    assert spec.enabled(_context()) is False
 
 
 @pytest.mark.asyncio

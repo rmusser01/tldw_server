@@ -24,7 +24,9 @@ async def run_shutdown_post_worker_non_worker_cleanup(
             guard_exceptions=guard_exceptions,
         )
     except guard_exceptions as exc:
-        logger.debug(f"Post-worker non-worker cleanup skipped: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "Post-worker non-worker cleanup skipped after guarded exception"
+        )
     return PostWorkerNonWorkerCleanupHandles()
 
 

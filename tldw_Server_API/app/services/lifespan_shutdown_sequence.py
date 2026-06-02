@@ -82,9 +82,19 @@ async def run_lifespan_shutdown_sequence(
                 worker_lifecycle_session,
                 ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
             )
-        stopped_background_worker_names = set(
-            getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
-        )
+            _publish_stopped_names_for_phase(
+                worker_lifecycle_session,
+                ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                startup_guard_exceptions,
+            )
+            stopped_background_worker_names = set(
+                getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
+            )
+        else:
+            try:
+                app.state._tldw_shutdown_stopped_background_worker_names = []
+            except startup_guard_exceptions:
+                pass
 
     from tldw_Server_API.app.services.shutdown_coordinated_legacy_components import (
         run_shutdown_coordinated_legacy_components,
@@ -112,6 +122,11 @@ async def run_lifespan_shutdown_sequence(
         await lifecycle_worker_engine.stop_phase(
             worker_lifecycle_session,
             ShutdownPhase.POST_WORKER_SHUTDOWN,
+        )
+        _publish_stopped_names_for_phase(
+            worker_lifecycle_session,
+            ShutdownPhase.POST_WORKER_SHUTDOWN,
+            startup_guard_exceptions,
         )
 
     from tldw_Server_API.app.services.shutdown_post_worker_services import (
@@ -143,3 +158,21 @@ async def run_lifespan_shutdown_sequence(
         app,
         int((monotonic() - shutdown_started) * 1000),
     )
+
+
+def _publish_stopped_names_for_phase(
+    worker_lifecycle_session: Any,
+    phase: ShutdownPhase,
+    guard_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    publish_stopped_names = getattr(
+        worker_lifecycle_session,
+        "publish_stopped_names",
+        None,
+    )
+    if not callable(publish_stopped_names):
+        return
+    try:
+        publish_stopped_names(phase)
+    except guard_exceptions:
+        pass

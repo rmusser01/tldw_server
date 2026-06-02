@@ -110,7 +110,9 @@ def test_study_privilege_jobs_worker_spec_factories_delegate_to_existing_worker_
     ]
 
 
-def test_study_privilege_jobs_worker_spec_predicates_use_route_enabled() -> None:
+def test_study_privilege_jobs_worker_spec_predicates_use_route_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     startup_pollers = _import_startup_study_privilege_jobs_pollers()
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
@@ -120,14 +122,20 @@ def test_study_privilege_jobs_worker_spec_predicates_use_route_enabled() -> None
 
     context = _context(route_enabled=_route_enabled)
     specs = _specs_by_name(startup_pollers)
+    for env_key in [
+        "STUDY_PACK_JOBS_WORKER_ENABLED",
+        "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+        "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
+    ]:
+        monkeypatch.setenv(env_key, "true")
 
     assert specs["study_pack_jobs_task"].enabled(context) is False
     assert specs["study_suggestions_jobs_task"].enabled(context) is False
     assert specs["privilege_snapshot_task"].enabled(context) is False
     assert calls == [
-        (("STUDY_PACK_JOBS_WORKER_ENABLED", "flashcards"), {}),
-        (("STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED", "study-suggestions"), {}),
-        (("PRIVILEGE_SNAPSHOT_WORKER_ENABLED", "privileges"), {}),
+        (("flashcards",), {}),
+        (("study-suggestions",), {}),
+        (("privileges",), {}),
     ]
 
 

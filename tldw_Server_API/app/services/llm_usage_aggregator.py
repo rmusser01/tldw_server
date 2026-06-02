@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,7 +48,11 @@ def provide_llm_usage_aggregator_worker_specs(
 
 
 def _llm_usage_aggregator_worker_enabled(_context: WorkerLifecycleContext) -> bool:
-    settings = get_settings()
+    settings = _context.settings
+    if settings is None:
+        settings = get_settings()
+    if isinstance(settings, Mapping):
+        return bool(settings.get("LLM_USAGE_AGGREGATOR_ENABLED", True))
     return bool(getattr(settings, "LLM_USAGE_AGGREGATOR_ENABLED", True))
 
 
