@@ -1,0 +1,46 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 0,
+    "cors_origins": ["*"],
+    "log_requests": true,
+    "simulate_errors": false,
+    "error_rate": 0
+  },
+  "streaming": {
+    "enabled": true,
+    "chunk_delay_ms": 5,
+    "words_per_chunk": 6
+  },
+  "models": [
+    { "id": "gpt-4.1-mini", "object": "model", "owned_by": "openai" },
+    { "id": "text-embedding-3-small", "object": "model", "owned_by": "openai" }
+  ],
+  "responses": {
+    "chat_completions": {
+      "patterns": [
+        {
+          "match": { "content_regex": ".*summarize|source|research note.*" },
+          "response_file": "chat/source-summary.json",
+          "priority": 10
+        }
+      ],
+      "default": "chat/default.json"
+    },
+    "embeddings": {
+      "default": "embeddings/default.json"
+    }
+  },
+  "scenario_failures": {
+    "chat_completions": [
+      {
+        "match": { "model": "missing-uat-model" },
+        "status_code": 404,
+        "message": "Model missing-uat-model is not available in this UAT fixture",
+        "type": "invalid_request_error",
+        "code": "model_not_found",
+        "times": 999
+      }
+    ]
+  }
+}
