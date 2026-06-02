@@ -52,12 +52,18 @@ def passing_promotion_service(repo):
     return service_cls(repo=repo, publish_validator=_AlwaysPassingPublishValidator())
 
 
-async def _seed_promotable_workspace(repo, prototype_db):
+async def _seed_promotable_workspace(
+    repo,
+    prototype_db,
+    *,
+    designated_promoter_ids: list[int] | None = None,
+):
     workspace = await repo.create_workspace(
         owner_user_id=1,
         title="Task 4 Promotion",
         creation_source="prompt",
         runtime_policy={"external_collaborator_profile": "locked_collab"},
+        designated_promoter_ids=designated_promoter_ids,
     )
     base_snapshot = await repo.create_snapshot(
         prototype_workspace_id=workspace["id"],
@@ -87,6 +93,21 @@ async def _seed_promotable_workspace(repo, prototype_db):
     )
     prototype_db.commit()
     return workspace, base_snapshot, session, candidate
+
+
+async def _seed_promotion_request(repo, prototype_db, **workspace_kwargs: Any):
+    workspace, base_snapshot, session, candidate = await _seed_promotable_workspace(
+        repo,
+        prototype_db,
+        **workspace_kwargs,
+    )
+    promotion_request = await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=candidate["snapshot_id"],
+        requested_by_user_id=2,
+    )
+    return workspace, base_snapshot, session, candidate, promotion_request
 
 
 def test_build_promote_idempotency_key_uses_workspace_candidate_and_canonical_snapshot_ids() -> None:
@@ -181,6 +202,128 @@ async def test_promote_candidate_requires_validation(repo, prototype_db, promoti
     assert result["failure_code"] == "publish_validation_failed"
     assert updated_workspace["canonical_snapshot_id"] == base_snapshot["snapshot_id"]
     assert updated_workspace["last_known_good_snapshot_id"] == base_snapshot["snapshot_id"]
+
+
+@pytest.mark.asyncio
+async def test_review_promotion_request_owner_rejects_request(
+    repo,
+    prototype_db,
+    passing_promotion_service,
+):
+    workspace, base_snapshot, _session, candidate, promotion_request = await _seed_promotion_request(
+        repo,
+        prototype_db,
+    )
+
+    result = await passing_promotion_service.review_promotion_request(
+        promotion_request_id=promotion_request["id"],
+        reviewer_user_id=1,
+        decision="reject",
+        review_notes="Not ready",
+    )
+    updated_request = await repo.get_promotion_request(promotion_request["id"])
+
+    assert result == {
+        "status": "rejected",
+        "prototype_workspace_id": workspace["id"],
+        "candidate_snapshot_id": candidate["snapshot_id"],
+        "canonical_snapshot_id": base_snapshot["snapshot_id"],
+        "details": {"review_notes": "Not ready"},
+    }
+    assert updated_request["status"] == "rejected"
+    assert updated_request["reviewed_by_user_id"] == 1
+    assert updated_request["review_notes"] == "Not ready"
+
+
+@pytest.mark.asyncio
+async def test_review_promotion_request_designated_promoter_rejects_request(
+    repo,
+    prototype_db,
+    passing_promotion_service,
+):
+    _workspace, _base_snapshot, _session, _candidate, promotion_request = await _seed_promotion_request(
+        repo,
+        prototype_db,
+        designated_promoter_ids=[2],
+    )
+
+    result = await passing_promotion_service.review_promotion_request(
+        promotion_request_id=promotion_request["id"],
+        reviewer_user_id=2,
+        decision="reject",
+        review_notes="Needs polish",
+    )
+    updated_request = await repo.get_promotion_request(promotion_request["id"])
+
+    assert result["status"] == "rejected"
+    assert result["details"] == {"review_notes": "Needs polish"}
+    assert updated_request["reviewed_by_user_id"] == 2
+    assert updated_request["review_notes"] == "Needs polish"
+
+
+@pytest.mark.asyncio
+async def test_review_promotion_request_rejects_non_promoter(
+    repo,
+    prototype_db,
+    passing_promotion_service,
+):
+    _workspace, _base_snapshot, _session, _candidate, promotion_request = await _seed_promotion_request(
+        repo,
+        prototype_db,
+    )
+
+    with pytest.raises(PermissionError, match="prototype.promote"):
+        await passing_promotion_service.review_promotion_request(
+            promotion_request_id=promotion_request["id"],
+            reviewer_user_id=2,
+            decision="reject",
+            review_notes="Cannot decide",
+        )
+
+    updated_request = await repo.get_promotion_request(promotion_request["id"])
+    assert updated_request["status"] == "pending"
+    assert updated_request["reviewed_by_user_id"] is None
+    assert updated_request["review_notes"] is None
+
+
+@pytest.mark.asyncio
+async def test_review_promotion_request_missing_request_raises_value_error(
+    passing_promotion_service,
+):
+    with pytest.raises(ValueError, match="Prototype promotion request not found"):
+        await passing_promotion_service.review_promotion_request(
+            promotion_request_id="ppr_missing",
+            reviewer_user_id=1,
+            decision="reject",
+        )
+
+
+@pytest.mark.asyncio
+async def test_review_promotion_request_approve_returns_promotion_result(
+    repo,
+    prototype_db,
+    passing_promotion_service,
+):
+    workspace, _base_snapshot, _session, candidate, promotion_request = await _seed_promotion_request(
+        repo,
+        prototype_db,
+    )
+
+    result = await passing_promotion_service.review_promotion_request(
+        promotion_request_id=promotion_request["id"],
+        reviewer_user_id=1,
+        decision="approve",
+        review_notes="Ship it",
+    )
+    updated_request = await repo.get_promotion_request(promotion_request["id"])
+
+    assert result["status"] == "promoted"
+    assert result["prototype_workspace_id"] == workspace["id"]
+    assert result["candidate_snapshot_id"] == candidate["snapshot_id"]
+    assert result["canonical_snapshot_id"] == candidate["snapshot_id"]
+    assert result["preview_handle"]
+    assert updated_request["status"] == "promoted"
+    assert updated_request["review_notes"] == "Ship it"
 
 
 @pytest.mark.asyncio
