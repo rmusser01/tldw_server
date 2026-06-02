@@ -424,6 +424,99 @@ class TestConfiguration:
 
         assert config.response_base_dir == responses_dir
 
+    def test_loaded_config_drives_request_handlers_after_server_import(
+        self,
+        tmp_path,
+        auth_headers,
+    ):
+        """Test file-loaded config remains visible to request dependencies."""
+        from ..mock_openai import config as config_module
+        from ..mock_openai.server import app, get_config_instance
+
+        # Prime the dependency before loading a file config, matching the import-time path.
+        get_config_instance()
+
+        config_dir = tmp_path / "configs"
+        responses_dir = tmp_path / "responses"
+        chat_dir = responses_dir / "chat"
+        config_dir.mkdir()
+        chat_dir.mkdir(parents=True)
+        (chat_dir / "source-summary.json").write_text(
+            json.dumps(
+                {
+                    "id": "chatcmpl-config-backed-uat",
+                    "object": "chat.completion",
+                    "created": 1770000000,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "Config backed source summary response.",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 6,
+                        "completion_tokens": 6,
+                        "total_tokens": 12,
+                    },
+                }
+            ),
+            encoding="utf8",
+        )
+        config_path = config_dir / "hosted-success.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "response_base_dir": "../responses",
+                    "responses": {
+                        "chat_completions": {
+                            "patterns": [
+                                {
+                                    "match": {"content_regex": "(?i).*source.*"},
+                                    "response_file": "chat/source-summary.json",
+                                    "priority": 10,
+                                }
+                            ],
+                            "default": "chat/source-summary.json",
+                        }
+                    },
+                }
+            ),
+            encoding="utf8",
+        )
+
+        try:
+            load_config(config_path)
+            client = TestClient(app)
+            response = client.post(
+                "/v1/chat/completions",
+                headers=auth_headers,
+                json={
+                    "model": "gpt-4.1-mini",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Summarize this source.",
+                        }
+                    ],
+                },
+            )
+
+            assert response.status_code == 200
+            assert (
+                response.json()["choices"][0]["message"]["content"]
+                == "Config backed source summary response."
+            )
+        finally:
+            config_module._config = None
+            cache_clear = getattr(get_config_instance, "cache_clear", None)
+            if cache_clear is not None:
+                cache_clear()
+
     def test_scenario_failure_counts_are_config_local(self):
         """Test scenario failure counters stay isolated per config instance."""
         from ..mock_openai.server import (

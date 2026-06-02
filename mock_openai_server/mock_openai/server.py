@@ -45,14 +45,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Dependency injection functions
-from functools import lru_cache
 from fastapi import Depends
 
 
-@lru_cache()
 def get_config_instance() -> MockConfig:
-    """Get the configuration instance (cached)."""
+    """Get the current configuration instance."""
     return get_config()
 
 
