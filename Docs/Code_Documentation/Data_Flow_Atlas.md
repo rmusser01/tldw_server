@@ -574,8 +574,8 @@ flowchart LR
 
     subgraph Chunking["core/Chunking"]
         Options[Resolve strategy/template/options]
-        Strategies[words, sentences, paragraphs, tokens, semantic, template]
-        Pieces[Chunk objects with text, offsets, metadata]
+        Strategies["words, sentences, paragraphs, tokens, semantic, template"]
+        Pieces["Chunk objects with text, offsets, metadata"]
     end
 
     subgraph Metadata["Media DB relationship"]
