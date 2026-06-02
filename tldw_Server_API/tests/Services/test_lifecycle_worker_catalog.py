@@ -96,6 +96,38 @@ TASK6_BACKGROUND_SPEC_NAMES = {
     "llm_usage_aggregator",
 }
 
+TASK7_SERVICE_TAIL_SPEC_NAMES = {
+    "jobs_metrics_task",
+    "loop_lag_task",
+    "jobs_metrics_reconcile_task",
+    "jobs_crypto_rotate_task",
+    "jobs_webhooks_task",
+    "meetings_webhook_dlq_task",
+    "workflows_dlq_task",
+    "workflows_gc_task",
+    "workflows_maint_task",
+    "jobs_integrity_task",
+    "claims_alerts_task",
+    "claims_review_metrics_task",
+    "tts_history_cleanup_task",
+    "connectors_jobs_task",
+    "quality_eval_task",
+    "outputs_purge_task",
+    "kanban_activity_cleanup_scheduler",
+    "ingestion_sources_cleanup",
+    "kanban_purge_scheduler",
+    "files_export_gc_task",
+    "notifications_prune_task",
+    "jobs_prune_task",
+    "authnz_scheduler",
+    "workflows_sched_task",
+    "reading_digest_sched_task",
+    "admin_backup_sched_task",
+    "companion_reflection_sched_task",
+    "reminders_sched_task",
+    "connectors_sync_sched_task",
+}
+
 
 @pytest.mark.unit
 def test_collect_worker_specs_collects_specs_from_provider_functions() -> None:
@@ -207,6 +239,47 @@ def test_collect_worker_specs_accepts_task6_background_spec_providers() -> None:
 
     assert {spec.name for spec in specs} == TASK6_BACKGROUND_SPEC_NAMES
     assert_legacy_worker_spec_parity(TASK6_BACKGROUND_SPEC_NAMES, specs)
+
+
+@pytest.mark.unit
+def test_collect_worker_specs_accepts_task7_service_tail_spec_providers() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_catalog import (
+        assert_legacy_worker_spec_parity,
+        collect_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_auxiliary_services import (
+        provide_auxiliary_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_infra_services import (
+        provide_infra_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_maintenance_schedulers import (
+        provide_maintenance_scheduler_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_optional_workers import (
+        provide_optional_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_recurring_schedulers import (
+        provide_recurring_scheduler_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_runtime_monitors import (
+        provide_runtime_monitor_worker_specs,
+    )
+
+    specs = collect_worker_specs(
+        _context(),
+        [
+            provide_runtime_monitor_worker_specs,
+            provide_optional_worker_specs,
+            provide_auxiliary_worker_specs,
+            provide_infra_worker_specs,
+            provide_maintenance_scheduler_worker_specs,
+            provide_recurring_scheduler_worker_specs,
+        ],
+    )
+
+    assert {spec.name for spec in specs} == TASK7_SERVICE_TAIL_SPEC_NAMES
+    assert_legacy_worker_spec_parity(TASK7_SERVICE_TAIL_SPEC_NAMES, specs)
 
 
 @pytest.mark.unit

@@ -13,6 +13,12 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -50,6 +56,94 @@ class OptionalWorkerStartupHandles:
     persona_visual_generation_task: Any | None = None
     persona_visual_portability_stop_event: Any | None = None
     persona_visual_portability_task: Any | None = None
+
+
+def provide_optional_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for optional stop-event workers."""
+
+    return (
+        _optional_stop_event_worker_spec(
+            name="jobs_metrics_reconcile_task",
+            worker_service=_run_jobs_metrics_reconcile_service,
+            category="jobs",
+            enabled=_env_enabled_predicate("JOBS_METRICS_RECONCILE_ENABLE"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="jobs_crypto_rotate_task",
+            worker_service=_run_jobs_crypto_rotate_service,
+            category="jobs",
+            enabled=_env_enabled_predicate("JOBS_CRYPTO_ROTATE_SERVICE_ENABLED"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="jobs_webhooks_task",
+            worker_service=_run_jobs_webhooks_worker_service,
+            category="jobs",
+            enabled=_jobs_webhooks_worker_enabled,
+        ),
+        _optional_stop_event_worker_spec(
+            name="meetings_webhook_dlq_task",
+            worker_service=_run_meetings_webhook_dlq_worker_service,
+            category="meetings",
+            enabled=_env_enabled_predicate("MEETINGS_WEBHOOK_DLQ_ENABLED"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="workflows_dlq_task",
+            worker_service=_run_workflows_webhook_dlq_worker_service,
+            category="workflows",
+            enabled=_env_enabled_predicate("WORKFLOWS_WEBHOOK_DLQ_ENABLED"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="workflows_gc_task",
+            worker_service=_run_workflows_artifact_gc_worker_service,
+            category="workflows",
+            enabled=_env_enabled_predicate("WORKFLOWS_ARTIFACT_GC_ENABLED"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="workflows_maint_task",
+            worker_service=_run_workflows_db_maintenance_worker_service,
+            category="workflows",
+            enabled=_env_enabled_predicate("WORKFLOWS_DB_MAINTENANCE_ENABLED"),
+        ),
+        _optional_stop_event_worker_spec(
+            name="jobs_integrity_task",
+            worker_service=_run_jobs_integrity_sweeper_service,
+            category="jobs",
+            enabled=_env_enabled_predicate("JOBS_INTEGRITY_SWEEP_ENABLED"),
+        ),
+    )
+
+
+def _optional_stop_event_worker_spec(
+    *,
+    name: str,
+    worker_service: OptionalWorkerCoroutineFactory,
+    category: str,
+    enabled: Callable[[WorkerLifecycleContext], bool],
+) -> WorkerSpec:
+    return stop_event_worker_spec(
+        name=name,
+        worker_service=worker_service,
+        category=category,
+        phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        enabled=enabled,
+    )
+
+
+def _env_enabled_predicate(
+    env_key: str,
+) -> Callable[[WorkerLifecycleContext], bool]:
+    def _enabled(_context: WorkerLifecycleContext) -> bool:
+        return _env_flag_enabled(env_key)
+
+    return _enabled
+
+
+def _jobs_webhooks_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    return _env_flag_enabled("JOBS_WEBHOOKS_ENABLED") and bool(
+        os.getenv("JOBS_WEBHOOKS_URL")
+    )
 
 
 async def start_optional_workers(

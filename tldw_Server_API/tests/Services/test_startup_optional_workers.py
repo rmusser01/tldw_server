@@ -7,12 +7,121 @@ import sys
 import pytest
 from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
+
 pytestmark = pytest.mark.unit
 
 
 def _import_startup_optional_workers():
     sys.modules.pop("tldw_Server_API.app.services.startup_optional_workers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_optional_workers")
+
+
+def _context() -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_workers):
+    return {
+        spec.name: spec
+        for spec in startup_workers.provide_optional_worker_specs()
+    }
+
+
+def test_optional_worker_specs_match_legacy_worker_contract() -> None:
+    startup_workers = _import_startup_optional_workers()
+
+    specs = _specs_by_name(startup_workers)
+
+    expected = {
+        "jobs_metrics_reconcile_task": "jobs",
+        "jobs_crypto_rotate_task": "jobs",
+        "jobs_webhooks_task": "jobs",
+        "meetings_webhook_dlq_task": "meetings",
+        "workflows_dlq_task": "workflows",
+        "workflows_gc_task": "workflows",
+        "workflows_maint_task": "workflows",
+        "jobs_integrity_task": "jobs",
+    }
+    assert set(specs) == set(expected)
+    for name, category in expected.items():
+        spec = specs[name]
+        assert spec.task_name == name
+        assert spec.category == category
+        assert spec.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert spec.timeout_sec == 5.0
+        assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+        assert spec.factory is not None
+
+
+def test_optional_worker_spec_factories_delegate_to_existing_worker_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    service_by_name = {
+        "jobs_metrics_reconcile_task": "_run_jobs_metrics_reconcile_service",
+        "jobs_crypto_rotate_task": "_run_jobs_crypto_rotate_service",
+        "jobs_webhooks_task": "_run_jobs_webhooks_worker_service",
+        "meetings_webhook_dlq_task": "_run_meetings_webhook_dlq_worker_service",
+        "workflows_dlq_task": "_run_workflows_webhook_dlq_worker_service",
+        "workflows_gc_task": "_run_workflows_artifact_gc_worker_service",
+        "workflows_maint_task": "_run_workflows_db_maintenance_worker_service",
+        "jobs_integrity_task": "_run_jobs_integrity_sweeper_service",
+    }
+    calls: list[tuple[str, object]] = []
+    for worker_name, service_name in service_by_name.items():
+        monkeypatch.setattr(
+            startup_workers,
+            service_name,
+            lambda stop_event, worker_name=worker_name: (
+                calls.append((worker_name, stop_event)) or f"{worker_name}-coro"
+            ),
+        )
+
+    specs = _specs_by_name(startup_workers)
+
+    for worker_name in service_by_name:
+        assert specs[worker_name].factory(_context(), f"{worker_name}-stop") == f"{worker_name}-coro"
+
+    assert calls == [
+        (worker_name, f"{worker_name}-stop")
+        for worker_name in service_by_name
+    ]
+
+
+def test_optional_worker_spec_predicates_match_legacy_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    enabled_envs: list[str] = []
+
+    def _enabled(key: str) -> bool:
+        enabled_envs.append(key)
+        return key != "JOBS_WEBHOOKS_ENABLED"
+
+    monkeypatch.setattr(startup_workers, "_env_flag_enabled", _enabled)
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://hooks.test/jobs")
+
+    specs = _specs_by_name(startup_workers)
+
+    assert specs["jobs_metrics_reconcile_task"].enabled(_context()) is True
+    assert specs["jobs_webhooks_task"].enabled(_context()) is False
+    assert enabled_envs == [
+        "JOBS_METRICS_RECONCILE_ENABLE",
+        "JOBS_WEBHOOKS_ENABLED",
+    ]
 
 
 @pytest.mark.asyncio

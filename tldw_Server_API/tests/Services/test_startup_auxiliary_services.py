@@ -7,12 +7,92 @@ import sys
 import pytest
 from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
+
 pytestmark = pytest.mark.unit
 
 
 def _import_startup_auxiliary_services():
     sys.modules.pop("tldw_Server_API.app.services.startup_auxiliary_services", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_auxiliary_services")
+
+
+def _context() -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_aux):
+    return {
+        spec.name: spec
+        for spec in startup_aux.provide_auxiliary_worker_specs()
+    }
+
+
+def test_auxiliary_worker_specs_match_legacy_scheduler_contract() -> None:
+    startup_aux = _import_startup_auxiliary_services()
+
+    specs = _specs_by_name(startup_aux)
+
+    expected = {
+        "claims_alerts_task": "claims_alerts_scheduler",
+        "claims_review_metrics_task": "claims_review_metrics_scheduler",
+    }
+    assert set(specs) == set(expected)
+    for name, task_name in expected.items():
+        spec = specs[name]
+        assert spec.task_name == task_name
+        assert spec.category == "auxiliary"
+        assert spec.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert spec.timeout_sec == 5.0
+        assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+        assert spec.factory is not None
+
+
+@pytest.mark.asyncio
+async def test_auxiliary_worker_spec_factory_starts_and_cancels_scheduler_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    scheduler_started = asyncio.Event()
+    cancelled: list[str] = []
+
+    async def _scheduler_loop() -> None:
+        scheduler_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append("claims-alerts")
+            raise
+
+    async def _fake_start() -> asyncio.Task[None]:
+        return asyncio.create_task(_scheduler_loop(), name="claims_alerts_scheduler")
+
+    monkeypatch.setattr(startup_aux, "_start_claims_alerts_scheduler_service", _fake_start)
+
+    spec = _specs_by_name(startup_aux)["claims_alerts_task"]
+    stop_event = asyncio.Event()
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+
+    await asyncio.wait_for(scheduler_started.wait(), timeout=1)
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+
+    assert cancelled == ["claims-alerts"]
 
 
 @pytest.mark.asyncio

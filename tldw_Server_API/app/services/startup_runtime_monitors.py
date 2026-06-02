@@ -13,6 +13,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
 from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
@@ -32,6 +37,41 @@ class RuntimeMonitorHandles:
     jobs_metrics_task: Any | None = None
     loop_lag_stop_event: Any | None = None
     loop_lag_task: Any | None = None
+
+
+def provide_runtime_monitor_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for runtime monitor workers."""
+
+    return (
+        stop_event_worker_spec(
+            name="jobs_metrics_task",
+            worker_service=_run_jobs_metrics_gauges_service,
+            category="jobs",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_jobs_metrics_worker_enabled,
+        ),
+        WorkerSpec(
+            name="loop_lag_task",
+            task_name="loop_lag_watchdog",
+            category="monitoring",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_loop_lag_worker_enabled,
+            timeout_sec=2.0,
+            factory=lambda _context, stop_event: _run_loop_lag_watchdog_service(
+                stop_event
+            ),
+        ),
+    )
+
+
+def _jobs_metrics_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    return _is_truthy(os.getenv("JOBS_METRICS_GAUGES_ENABLED", "true"))
+
+
+def _loop_lag_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    return _env_flag_enabled("EVENT_LOOP_LAG_WATCHDOG_ENABLED")
 
 
 async def start_runtime_monitors(
