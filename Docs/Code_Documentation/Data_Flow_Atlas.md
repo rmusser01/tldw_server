@@ -683,7 +683,7 @@ flowchart LR
     end
 
     subgraph RetrievalContext["Optional retrieval"]
-        NeedRAG{RAG requested?}
+        NeedRAG{"RAG requested?"}
         RAGFlow["RAG/Search flow"]
         PromptContext[Prompt context and citations]
     end
