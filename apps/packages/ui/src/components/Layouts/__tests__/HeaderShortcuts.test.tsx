@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 import { HeaderShortcuts } from "../HeaderShortcuts"
 import { getHeaderShortcutItems } from "../header-shortcut-items"
+import { HEADER_SHORTCUT_IDS } from "@/services/settings/ui-settings"
 
 const mockState = vi.hoisted(() => ({
   expanded: false,
@@ -16,21 +17,7 @@ const mockState = vi.hoisted(() => ({
 const mockUseSetting = vi.hoisted(() => vi.fn())
 const mockT = vi.hoisted(() => (key: string, fallback?: string) => fallback ?? key)
 
-const ALL_SHORTCUT_IDS = [
-  "chat", "chat-workspace", "prompts", "prompt-studio", "characters",
-  "chat-dictionaries", "world-books", "deep-research", "research-workspace",
-  "knowledge-qa", "media", "document-workspace",
-  "repo2txt",
-  "multi-item-review", "collections",
-  "watchlists", "integrations", "mcp-hub", "scheduled-tasks", "notes", "chatbooks-playground", "flashcards",
-  "quizzes", "evaluations", "chunking-playground",
-  "stt-playground", "tts-playground", "audiobook-studio",
-  "workflows", "writing-playground", "acp-playground",
-  "skills", "kanban-playground",
-  "model-playground", "data-tables",
-  "admin-server", "admin-integrations", "documentation", "moderation-review", "moderation-rules",
-  "admin-llamacpp", "admin-mlx", "settings"
-]
+const ALL_SHORTCUT_IDS = [...HEADER_SHORTCUT_IDS]
 
 /* ------------------------------------------------------------------ */
 /*  Mocks                                                              */
@@ -68,6 +55,15 @@ vi.mock("@/services/settings/ui-settings", async (importOriginal) => {
 
 const renderWithRouter = (ui: React.ReactElement, initialRoute = "/") =>
   render(<MemoryRouter initialEntries={[initialRoute]}>{ui}</MemoryRouter>)
+
+const getShortcutLink = (
+  container: HTMLElement,
+  label: string
+): HTMLAnchorElement => {
+  const link = within(container).getByText(label).closest("a")
+  expect(link).toBeTruthy()
+  return link as HTMLAnchorElement
+}
 
 /* ------------------------------------------------------------------ */
 /*  Tests                                                              */
@@ -187,11 +183,71 @@ describe("HeaderShortcuts launcher modal", () => {
       <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />
     )
     // Items should be visible
+    expect(screen.getByText("Companion Home")).toBeInTheDocument()
     expect(screen.getByText("Chat")).toBeInTheDocument()
     expect(screen.getByText("Prompts")).toBeInTheDocument()
     expect(screen.getByText("Deep Research")).toBeInTheDocument()
     expect(screen.getByText("Repo2Txt")).toBeInTheDocument()
     expect(screen.getByText("Settings")).toBeInTheDocument()
+  })
+
+  it("lists Companion Home in the current launcher view and targets home", () => {
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat"
+    )
+
+    const nav = screen.getByLabelText("Categories")
+    expect(within(nav).getByText("Start")).toBeInTheDocument()
+
+    const listbox = screen.getByRole("listbox", { name: "Pages" })
+    const companionHome = getShortcutLink(listbox, "Companion Home")
+
+    expect(companionHome).toHaveAttribute("href", "/")
+  })
+
+  it("does not mark Companion Home as current in the launcher while on the chat route", () => {
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat"
+    )
+
+    const listbox = screen.getByRole("listbox", { name: "Pages" })
+    const companionHome = getShortcutLink(listbox, "Companion Home")
+    const chat = getShortcutLink(listbox, "Chat")
+
+    expect(companionHome.className).not.toContain("border-primary")
+    expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat.className).toContain("border-primary")
+    expect(chat).toHaveAttribute("aria-current", "page")
+  })
+
+  it("does not expose Chat as current in the launcher on nested chat routes", () => {
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat/thread/1"
+    )
+
+    const listbox = screen.getByRole("listbox", { name: "Pages" })
+    const companionHome = getShortcutLink(listbox, "Companion Home")
+    const chat = getShortcutLink(listbox, "Chat")
+
+    expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat.className).not.toContain("border-primary")
+    expect(chat).not.toHaveAttribute("aria-current")
+  })
+
+  it("marks Companion Home as current in the launcher on the home route", () => {
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/"
+    )
+
+    const listbox = screen.getByRole("listbox", { name: "Pages" })
+    const companionHome = getShortcutLink(listbox, "Companion Home")
+
+    expect(companionHome.className).toContain("border-primary")
+    expect(companionHome).toHaveAttribute("aria-current", "page")
   })
 
   it("does not show Content Review in the launcher modal", () => {
@@ -352,6 +408,75 @@ describe("HeaderShortcuts launcher modal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Current view" }))
     expect(screen.getByLabelText("Categories")).toBeInTheDocument()
     expect(mockState.setLauncherView).toHaveBeenCalledWith("current")
+  })
+
+  it("lists Companion Home in the legacy sheet view", () => {
+    mockState.launcherView = "legacy"
+
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat"
+    )
+
+    const legacySheet = screen.getByRole("listbox", { name: "Legacy sheet" })
+    const companionHome = getShortcutLink(legacySheet, "Companion Home")
+
+    expect(companionHome).toHaveAttribute("href", "/")
+  })
+
+  it("does not mark Companion Home as current in the legacy sheet while on the chat route", () => {
+    mockState.launcherView = "legacy"
+
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat"
+    )
+
+    const legacySheet = screen.getByRole("listbox", { name: "Legacy sheet" })
+    const companionHome = getShortcutLink(legacySheet, "Companion Home")
+    const chat = getShortcutLink(legacySheet, "Chat")
+
+    expect(companionHome).not.toHaveClass("border-border")
+    expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat).toHaveClass("border-border")
+    expect(chat).toHaveAttribute("aria-current", "page")
+  })
+
+  it("does not expose Chat as current in the legacy sheet on nested chat routes", () => {
+    mockState.launcherView = "legacy"
+
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/chat/thread/1"
+    )
+
+    const legacySheet = screen.getByRole("listbox", { name: "Legacy sheet" })
+    const companionHome = getShortcutLink(legacySheet, "Companion Home")
+    const chat = getShortcutLink(legacySheet, "Chat")
+
+    expect(companionHome).not.toHaveClass("border-border")
+    expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat).not.toHaveClass("border-border")
+    expect(chat).not.toHaveAttribute("aria-current")
+  })
+
+  it("marks Companion Home as current in the legacy sheet on the home route", () => {
+    mockState.launcherView = "legacy"
+
+    renderWithRouter(
+      <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />,
+      "/"
+    )
+
+    const legacySheet = screen.getByRole("listbox", { name: "Legacy sheet" })
+    const companionHome = getShortcutLink(legacySheet, "Companion Home")
+    const chat = getShortcutLink(legacySheet, "Chat")
+
+    fireEvent.mouseEnter(chat)
+
+    expect(companionHome).toHaveClass("border-border")
+    expect(companionHome).toHaveAttribute("aria-current", "page")
+    expect(chat).not.toHaveAttribute("aria-current")
   })
 
   it("opens in persisted legacy view mode when preference is set", () => {
