@@ -1,7 +1,7 @@
 ---
 id: TASK-504
 title: Implement declarative worker lifecycle migration
-status: In Progress
+status: Done
 labels:
 - backend
 - implementation
@@ -17,10 +17,10 @@ Execute the approved declarative worker lifecycle implementation plan using suba
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All tasks in Docs/superpowers/plans/2026-06-02-declarative-worker-lifecycle-implementation-plan.md are completed or blockers documented.
-- [ ] #2 Each task receives spec compliance and code quality review before moving to the next task.
-- [ ] #3 Focused lifecycle tests, compileall on app/services, and Bandit on app/services run with results recorded.
-- [ ] #4 Final summary and touched files are recorded in Backlog.
+- [x] #1 All tasks in Docs/superpowers/plans/2026-06-02-declarative-worker-lifecycle-implementation-plan.md are completed or blockers documented.
+- [x] #2 Each task receives spec compliance and code quality review before moving to the next task.
+- [x] #3 Focused lifecycle tests, compileall on app/services, and Bandit on app/services run with results recorded.
+- [x] #4 Final summary and touched files are recorded in Backlog.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -49,20 +49,21 @@ Task 9 completed. Shutdown now stops lifecycle-managed workers from the stored W
 Task 10 started. Pre-deletion parity checkpoint adjusted to the current test name because the plan's test node was stale: test_lifecycle_worker_catalog.py::test_legacy_managed_worker_names_from_runtime_fields_and_matrix_have_specs passed 1 test/6 warnings. Proceeding to remove legacy managed-worker runtime fields, sync bridge, and now-unreachable primary/grouped/post managed-worker shutdown helper surface.
 Task 10 completed. Removed the legacy managed-worker handle threading from LifespanWorkerRuntimeState and StartupWorkerBootstrapHandles so startup/shutdown now carry only WorkerLifecycleSession. Deleted the primary/grouped late-stop worker bridge modules and tests, narrowed shutdown_post_worker_services.py to non-worker personalization cleanup, and removed shutdown runtime rehydration apply calls. Added explicit runtime/bootstrap tests for the removed sync/apply bridge, updated main lifecycle contract tests to assert declarative session stop behavior, and added route_enabled_predicate coverage. While validating route-gated workers, fixed route_enabled_predicate() and WebSub renewal startup gating to require the env flag and call route_enabled() with the route key instead of passing env+route positional arguments. Verification: focused Task 10 pytest passed 24 tests/6 warnings; broader lifecycle/job-poller suite passed 82 tests/10 warnings; scoped Ruff passed; git diff --check passed; Bandit on touched production files wrote /tmp/bandit_task504_task10.json with 0 findings/results.
 Task 11 completed. Re-assessed the migrated lifecycle design against the Codeslop Vibecheck axes. The main sequential-coupling finding is now addressed in the live lifespan path: runtime state carries only WorkerLifecycleSession, startup collection runs through WorkerSpec providers, job-poller/background/post-worker shutdown phases run through LifecycleWorkerEngine, and deleted shutdown bridge modules are no longer imported. The only material leftover found during reassessment was the unused startup_worker_groups.start_worker_groups()/StartupWorkerGroupHandles compatibility surface, which still exposed the old wide handle-threading API even though no live startup path called it. Removed that dead API and its grouped-choreography tests, leaving startup_worker_groups.py as the provider catalog plus an absence test to prevent reintroduction. No remaining material duplication, encapsulation, or sequential-coupling finding was identified in the reviewed live startup/shutdown boundary. Verification for the reassessment cleanup: startup_worker_groups pytest passed 3 tests/6 warnings; expanded lifecycle/provider pytest passed 27 tests/6 warnings; broader lifecycle/job-poller pytest passed 82 tests/10 warnings; scoped Ruff passed; git diff --check passed; Bandit on startup_worker_groups.py wrote /tmp/bandit_task504_task11.json with 0 findings/results.
+Task 12 completed. Final verification ran after the last code commit. Results: python -m compileall -q tldw_Server_API/app/services passed; focused lifecycle/provider pytest passed 27 tests/6 warnings; broad lifecycle/job-poller pytest passed 82 tests/10 warnings; scoped lifecycle Ruff passed; git diff --check passed; touched-service Bandit wrote /tmp/bandit_task504_final_touched_services.json with 0 findings/results. Full app/services Bandit was also run and wrote /tmp/bandit_task504_final_services.json; it exited nonzero for 5 existing findings outside the lifecycle touched files: admin_e2e_support_service.py:168 B108, admin_guardrails_service.py:53/82 B106, core_jobs_worker.py:128 B311, and quality_eval_scheduler.py:57 B112. Full changed-file Ruff was attempted and is still blocked by existing repo-baseline issues in app/main.py and test_main_shutdown_job_pollers.py; the lifecycle scoped Ruff gate passed cleanly.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Completed the declarative worker lifecycle migration through final verification. Startup now collects WorkerSpec providers through startup_worker_groups.collect_startup_worker_specs(), starts workers through LifecycleWorkerEngine, and stores a WorkerLifecycleSession rather than threaded task/stop-event fields. Shutdown now stops job-poller, background-worker, and post-worker phases through the lifecycle session/engine, with runtime state reduced to the session handle. Removed the legacy runtime sync/apply bridge, primary/grouped late-stop shutdown helper modules, legacy post-worker managed-worker API, and the unused startup_worker_groups.start_worker_groups()/StartupWorkerGroupHandles compatibility surface. Fixed route-gated worker predicates so env flags and route gates are evaluated separately with the route key passed to route_enabled(). Reassessment found no remaining material duplication, encapsulation, or sequential-coupling issue in the live startup/shutdown lifecycle boundary. Final verification: compileall app/services passed; focused lifecycle/provider pytest 27 passed/6 warnings; broad lifecycle/job-poller pytest 82 passed/10 warnings; scoped lifecycle Ruff passed; git diff --check passed; touched-service Bandit 0 findings/results. Known repo-baseline notes: full app/services Bandit has 5 findings outside touched lifecycle files, and full changed-file Ruff remains blocked by existing app/main.py/test_main_shutdown_job_pollers.py issues.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
