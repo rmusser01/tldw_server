@@ -4,7 +4,7 @@ title: Deepen core module architecture guides
 status: In Progress
 assignee: []
 created_date: '2026-06-02 00:18'
-updated_date: '2026-06-02 00:21'
+updated_date: '2026-06-02 00:23'
 labels: []
 dependencies:
   - TASK-588
@@ -13,6 +13,8 @@ documentation:
   - Docs/superpowers/plans/2026-06-01-core-module-readme-refresh-inventory.md
   - >-
     Docs/superpowers/plans/2026-06-02-core-module-architecture-guides-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-06-02-core-module-architecture-guide-inventory.md
 priority: medium
 ---
 
@@ -42,6 +44,8 @@ Implementation plan: Docs/superpowers/plans/2026-06-02-core-module-architecture-
 Created after PR #2216 merged TASK-588 into dev. Worktree: .worktrees/core-architecture-guides on branch codex/core-architecture-guides from origin/dev merge commit c7b2e66400492614914e1a8f0e4abe939b031b64.
 
 2026-06-02: Drafted Phase 2 implementation plan at Docs/superpowers/plans/2026-06-02-core-module-architecture-guides-implementation-plan.md. Plan reviews all 88 modules, prioritizes the 47 high-risk/high-complexity modules first, and records sufficient decisions for modules that do not need expansion.
+
+2026-06-02: Stage 1 complete. Created Docs/superpowers/plans/2026-06-02-core-module-architecture-guide-inventory.md with 88 module rows. Verified 88 top-level app/core modules, no missing README files, Phase 1 priority counts of 47 high / 28 medium / 4 low / 9 sufficient, and a generated Phase 2 decision baseline of 47 expand / 28 tighten / 13 sufficient. git diff --check passed. Runtime code remains untouched.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
