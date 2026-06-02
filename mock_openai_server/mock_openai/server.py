@@ -143,7 +143,8 @@ def should_simulate_error(config: MockConfig) -> bool:
     if not config.server.simulate_errors:
         return False
 
-    return random.random() < config.server.error_rate
+    # Mock-only error simulation; not used for secrets or cryptography.
+    return random.random() < config.server.error_rate  # nosec B311
 
 
 @app.middleware("http")

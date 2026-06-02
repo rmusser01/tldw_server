@@ -137,6 +137,8 @@ describe("onboarding UAT static fixtures", () => {
     expect(sourceSummary.choices?.[0]?.message?.content).toContain(
       "Deterministic evidence"
     )
+    expect(defaultChat.model).toBeUndefined()
+    expect(sourceSummary.model).toBeUndefined()
 
     expect(embeddings.object).toBe("list")
     expect(embeddings.data?.[0]).toMatchObject({

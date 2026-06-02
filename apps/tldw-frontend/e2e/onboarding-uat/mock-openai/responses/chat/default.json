@@ -2,7 +2,6 @@
   "id": "chatcmpl-onboarding-uat-default",
   "object": "chat.completion",
   "created": 1770000000,
-  "model": "gpt-4.1-mini",
   "choices": [
     {
       "index": 0,

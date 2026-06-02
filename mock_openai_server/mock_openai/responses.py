@@ -104,7 +104,8 @@ class ResponseManager:
     def get_default_embedding_response(self) -> Dict[str, Any]:
         """Get a default embedding response."""
         # Generate a random 1536-dimensional embedding (default for text-embedding-ada-002)
-        embedding = [random.random() for _ in range(1536)]
+        # Mock-only embedding values; not used for secrets or cryptography.
+        embedding = [random.random() for _ in range(1536)]  # nosec B311
 
         return {
             "object": "list",
@@ -225,7 +226,7 @@ class ResponseManager:
             else:
                 # Generate random embedding for additional inputs
                 embedding_data = {
-                    "embedding": [random.random() for _ in range(1536)],
+                    "embedding": [random.random() for _ in range(1536)],  # nosec B311
                     "index": i
                 }
 

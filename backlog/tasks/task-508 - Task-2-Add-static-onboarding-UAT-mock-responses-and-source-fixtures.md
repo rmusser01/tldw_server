@@ -8,6 +8,10 @@ labels:
 - test
 priority: medium
 modified_files:
+- mock_openai_server/mock_openai/config.py
+- mock_openai_server/mock_openai/responses.py
+- mock_openai_server/mock_openai/server.py
+- mock_openai_server/tests/test_server.py
 - apps/tldw-frontend/scripts/__tests__/onboarding-uat-runner.test.ts
 - apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/hosted-success.json
 - apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/local-success.json
@@ -39,15 +43,15 @@ Add static mock_openai_server configuration/response fixtures and synthetic firs
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented static onboarding UAT mock_openai_server configs/responses and synthetic first-source Markdown/HTML fixtures. Added focused Vitest fixture validation covering config presence/shape, model lists, scenario_failures, secret-marker checks, stable chat/source-summary text, embedding shape, and source fixture content. Verification: `bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts` from `apps/tldw-frontend` passed with 1 file / 4 tests. `git diff --check` passed. Bandit skipped because the touched implementation scope is frontend/static JSON, Markdown, HTML, and TypeScript test fixtures with no Python source changes.
+Implemented static onboarding UAT mock_openai_server configs/responses and synthetic first-source Markdown/HTML fixtures. Added focused Vitest fixture validation covering config presence/shape, model lists, scenario_failures, config-relative response paths, secret-marker checks, stable chat/source-summary text, unpinned chat fixture models for hosted/local parity, deterministic embedding shape, and source fixture content. Verification: `bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts` from `apps/tldw-frontend` passed with 1 file / 5 tests. `RUN_MOCK_OPENAI=1 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest mock_openai_server/tests/test_server.py -q` passed with 26 tests. `git diff --check` passed. Bandit on the touched Python mock-server scope passed with `-s B101`; remaining output is existing `B104` nosec warning noise.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
