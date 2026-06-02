@@ -39,6 +39,11 @@ from .external_registry import (
     GatewayExternalRegistryManager,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
+from .remote_admin import (
+    RemoteGatewayAdminClient,
+    RemoteGatewayAdminConfig,
+    RemoteGatewayAdminError,
+)
 from .snapshots import (
     GatewayConfigSnapshotManagementError,
     GatewayConfigSnapshotManager,
@@ -60,6 +65,7 @@ _ConfigSnapshotOperation = Callable[
     [GatewayConfigSnapshotManager],
     Coroutine[Any, Any, Mapping[str, Any]],
 ]
+_RemoteRuntimeOperation = Callable[[RemoteGatewayAdminClient], dict[str, Any]]
 
 
 class _CliArgumentError(ValueError):
@@ -401,6 +407,92 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(import_config)
     import_config.set_defaults(handler=_handle_import_config)
 
+    runtime_list = subparsers.add_parser(
+        "runtime-list",
+        help="List external runtime state from a running gateway.",
+    )
+    _add_remote_runtime_arguments(runtime_list)
+    runtime_list.set_defaults(handler=_handle_runtime_list)
+
+    runtime_start = subparsers.add_parser(
+        "runtime-start",
+        help="Start one external server through a running gateway.",
+    )
+    runtime_start.add_argument(
+        "server_id",
+        help="External server id to start.",
+    )
+    _add_remote_runtime_arguments(runtime_start)
+    runtime_start.set_defaults(handler=_handle_runtime_start)
+
+    runtime_stop = subparsers.add_parser(
+        "runtime-stop",
+        help="Stop one external server through a running gateway.",
+    )
+    runtime_stop.add_argument(
+        "server_id",
+        help="External server id to stop.",
+    )
+    _add_remote_runtime_arguments(runtime_stop)
+    runtime_stop.set_defaults(handler=_handle_runtime_stop)
+
+    runtime_restart = subparsers.add_parser(
+        "runtime-restart",
+        help="Restart one external server through a running gateway.",
+    )
+    runtime_restart.add_argument(
+        "server_id",
+        help="External server id to restart.",
+    )
+    _add_remote_runtime_arguments(runtime_restart)
+    runtime_restart.set_defaults(handler=_handle_runtime_restart)
+
+    runtime_refresh = subparsers.add_parser(
+        "runtime-refresh",
+        help="Refresh one external runtime or all runtimes from a running gateway.",
+    )
+    runtime_refresh.add_argument(
+        "server_id",
+        nargs="?",
+        help="Optional external server id to refresh.",
+    )
+    _add_remote_runtime_arguments(runtime_refresh)
+    runtime_refresh.set_defaults(handler=_handle_runtime_refresh)
+
+    runtime_reconcile = subparsers.add_parser(
+        "runtime-reconcile",
+        help="Reconcile one external runtime or all runtimes from a running gateway.",
+    )
+    runtime_reconcile.add_argument(
+        "server_id",
+        nargs="?",
+        help="Optional external server id to reconcile.",
+    )
+    _add_remote_runtime_arguments(runtime_reconcile)
+    runtime_reconcile.set_defaults(handler=_handle_runtime_reconcile)
+
+    runtime_install = subparsers.add_parser(
+        "runtime-install",
+        help="Run the configured install flow through a running gateway.",
+    )
+    runtime_install.add_argument(
+        "server_id",
+        help="External server id to install.",
+    )
+    _add_remote_runtime_arguments(runtime_install)
+    runtime_install.set_defaults(handler=_handle_runtime_install)
+
+    runtime_update = subparsers.add_parser(
+        "runtime-update",
+        help="Run the configured update flow through a running gateway.",
+    )
+    runtime_update.add_argument(
+        "server_id",
+        help="External server id to update.",
+    )
+    _add_remote_runtime_arguments(runtime_update)
+    runtime_update.set_defaults(handler=_handle_runtime_update)
+
     get_default_profile = subparsers.add_parser(
         "get-default-profile",
         help="Show the active gateway default profile.",
@@ -432,6 +524,29 @@ def _add_profile_config_argument(parser: argparse.ArgumentParser) -> None:
             "Path to a JSON or TOML gateway config file. "
             "Falls back to MCP_UNIFIED_GATEWAY_CONFIG or MCP_GATEWAY_CONFIG."
         ),
+    )
+
+
+def _add_remote_runtime_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add common remote runtime options without command-line secrets."""
+
+    parser.add_argument(
+        "--gateway-url",
+        help=(
+            "Mounted gateway base URL, for example http://127.0.0.1:8000/mcp. "
+            "Falls back to MCP_UNIFIED_GATEWAY_URL."
+        ),
+    )
+    parser.add_argument(
+        "--admin-header-name",
+        default="X-MCP-Gateway-Admin-Key",
+        help="Admin auth header name used with MCP_UNIFIED_GATEWAY_ADMIN_KEY.",
+    )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=30.0,
+        help="Remote gateway request timeout in seconds.",
     )
 
 
@@ -696,6 +811,146 @@ def _handle_set_default_profile(args: argparse.Namespace) -> int:
         lambda manager: _set_default_profile_for_cli(manager, profile_id),
         require_persistent=True,
     )
+
+
+def _handle_runtime_list(args: argparse.Namespace) -> int:
+    """List external runtime state from a running gateway."""
+
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.list_runtime_servers(),
+    )
+
+
+def _handle_runtime_start(args: argparse.Namespace) -> int:
+    """Start one external server through a running gateway."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.start_server(server_id),
+    )
+
+
+def _handle_runtime_stop(args: argparse.Namespace) -> int:
+    """Stop one external server through a running gateway."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.stop_server(server_id),
+    )
+
+
+def _handle_runtime_restart(args: argparse.Namespace) -> int:
+    """Restart one external server through a running gateway."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.restart_server(server_id),
+    )
+
+
+def _handle_runtime_refresh(args: argparse.Namespace) -> int:
+    """Refresh one external runtime or all runtimes through a running gateway."""
+
+    server_id = _optional_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.refresh_server(server_id),
+    )
+
+
+def _handle_runtime_reconcile(args: argparse.Namespace) -> int:
+    """Reconcile one external runtime or all runtimes through a running gateway."""
+
+    server_id = _optional_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.reconcile(server_id),
+    )
+
+
+def _handle_runtime_install(args: argparse.Namespace) -> int:
+    """Run one external server install flow through a running gateway."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.install_server(server_id),
+    )
+
+
+def _handle_runtime_update(args: argparse.Namespace) -> int:
+    """Run one external server update flow through a running gateway."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_remote_runtime_command(
+        args,
+        lambda client: client.update_server(server_id),
+    )
+
+
+def _handle_remote_runtime_command(
+    args: argparse.Namespace,
+    operation: _RemoteRuntimeOperation,
+) -> int:
+    """Run one remote runtime command against an already-running gateway."""
+
+    try:
+        config = _remote_runtime_config_from_args(args)
+        payload = operation(RemoteGatewayAdminClient(config))
+    except _CliArgumentError:
+        raise
+    except RemoteGatewayAdminError as exc:
+        _emit_json(exc.to_payload(), sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        _emit_json(
+            {
+                "error": "Remote gateway command failed",
+                "error_type": exc.__class__.__name__,
+                "ok": False,
+                "reason_code": "remote_gateway_command_failed",
+            },
+            sys.stderr,
+        )
+        return 1
+
+    _emit_json(payload, sys.stdout)
+    return 0
+
+
+def _remote_runtime_config_from_args(
+    args: argparse.Namespace,
+) -> RemoteGatewayAdminConfig:
+    """Build a remote admin config from CLI args and environment."""
+
+    gateway_url = _optional_cli_text(args.gateway_url, field="gateway_url")
+    if gateway_url is None:
+        gateway_url = _optional_cli_text(
+            os.environ.get("MCP_UNIFIED_GATEWAY_URL"),
+            field="MCP_UNIFIED_GATEWAY_URL",
+        )
+    if gateway_url is None:
+        raise _CliArgumentError(
+            "--gateway-url is required unless MCP_UNIFIED_GATEWAY_URL is set"
+        )
+
+    admin_key = _optional_cli_text(
+        os.environ.get("MCP_UNIFIED_GATEWAY_ADMIN_KEY"),
+        field="MCP_UNIFIED_GATEWAY_ADMIN_KEY",
+    )
+    try:
+        return RemoteGatewayAdminConfig(
+            gateway_url=gateway_url,
+            admin_header_name=args.admin_header_name,
+            admin_key=admin_key,
+            timeout_seconds=args.timeout_seconds,
+        )
+    except ValueError as exc:
+        raise _CliArgumentError(str(exc)) from exc
 
 
 def _handle_profile_management_command(

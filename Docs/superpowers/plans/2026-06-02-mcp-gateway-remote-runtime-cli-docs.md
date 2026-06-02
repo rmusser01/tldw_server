@@ -37,23 +37,23 @@
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_remote_runtime_cli.py`
 
-- [ ] **Step 1: Write URL normalization tests**
+- [x] **Step 1: Write URL normalization tests**
 
 Assert base URLs with or without trailing slash resolve endpoint paths correctly. Treat `http://host/mcp` as the gateway base and resolve runtime list to `http://host/mcp/external-servers/runtime`; do not automatically add `/mcp` to `http://host` because gateway prefixes are configurable.
 
-- [ ] **Step 2: Write auth header tests**
+- [x] **Step 2: Write auth header tests**
 
 Assert the remote client sends the configured admin header when `MCP_UNIFIED_GATEWAY_ADMIN_KEY` is set and omits it when absent.
 
-- [ ] **Step 3: Write response/error tests**
+- [x] **Step 3: Write response/error tests**
 
 Use a fake request function to assert JSON payload passthrough for success and sanitized error envelopes for malformed responses or connection failures.
 
-- [ ] **Step 4: Write HTTP error preservation tests**
+- [x] **Step 4: Write HTTP error preservation tests**
 
 Simulate stdlib `urllib.error.HTTPError` for 401, 404, and 503 responses with JSON bodies. Assert the CLI/client preserves gateway `reason_code`, `server_id`, and public `error` fields instead of replacing them with a generic connection error.
 
-- [ ] **Step 5: Run tests to verify they fail**
+- [x] **Step 5: Run tests to verify they fail**
 
 Run:
 
@@ -69,7 +69,7 @@ Expected: fail because `mcp_unified.gateway.remote_admin` does not exist.
 **Files:**
 - Create: `mcp_unified/gateway/remote_admin.py`
 
-- [ ] **Step 1: Add client config**
+- [x] **Step 1: Add client config**
 
 Create a small dataclass:
 
@@ -84,11 +84,11 @@ class RemoteGatewayAdminConfig:
 
 Validate `gateway_url` is non-blank and has `http` or `https` scheme. Store the normalized base URL without a trailing slash; do not mutate path prefixes beyond trimming trailing slash.
 
-- [ ] **Step 2: Add request helper**
+- [x] **Step 2: Add request helper**
 
 Implement JSON GET/POST helpers. Prefer stdlib `urllib.request` to avoid a new runtime dependency unless the package already requires an HTTP client. When `urllib` raises `HTTPError`, read and parse the response body; if it is a JSON object, preserve that payload and exit non-zero from CLI handlers.
 
-- [ ] **Step 3: Add runtime methods**
+- [x] **Step 3: Add runtime methods**
 
 Implement:
 
@@ -103,7 +103,7 @@ install_server(server_id)
 update_server(server_id)
 ```
 
-- [ ] **Step 4: Run client tests**
+- [x] **Step 4: Run client tests**
 
 Run:
 
@@ -121,7 +121,7 @@ Expected: pass for client-level tests.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_remote_runtime_cli.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py` if needed.
 
-- [ ] **Step 1: Write CLI command tests**
+- [x] **Step 1: Write CLI command tests**
 
 Cover flat commands to match existing CLI style:
 
@@ -136,7 +136,7 @@ Cover flat commands to match existing CLI style:
 
 Each command should accept `--gateway-url`; tests should also cover `MCP_UNIFIED_GATEWAY_URL`.
 
-- [ ] **Step 2: Add common remote options**
+- [x] **Step 2: Add common remote options**
 
 Add helpers for:
 
@@ -149,11 +149,11 @@ Avoid `--admin-key` to keep secrets out of process lists.
 
 Document and test that `--gateway-url` should include the gateway prefix. Example: `--gateway-url http://127.0.0.1:8000/mcp`.
 
-- [ ] **Step 3: Implement handlers**
+- [x] **Step 3: Implement handlers**
 
 Call `RemoteGatewayAdminClient` methods and emit exactly one JSON object to stdout or stderr, matching existing CLI behavior.
 
-- [ ] **Step 4: Run CLI tests**
+- [x] **Step 4: Run CLI tests**
 
 Run:
 
@@ -172,7 +172,7 @@ Expected: pass.
 **Files:**
 - Create: `Docs/MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md`
 
-- [ ] **Step 1: Document concepts**
+- [x] **Step 1: Document concepts**
 
 Explain:
 
@@ -182,7 +182,7 @@ Explain:
 - admin auth setup and expected header/env vars.
 - why `--gateway-url` includes the mounted prefix and how that differs from a server origin URL.
 
-- [ ] **Step 2: Add safe examples**
+- [x] **Step 2: Add safe examples**
 
 Include examples for:
 
@@ -194,7 +194,7 @@ Include examples for:
 - calling `runtime-list`, `runtime-start`, and `runtime-refresh`.
 - an HTTP error example showing the gateway `reason_code` preserved in CLI output.
 
-- [ ] **Step 3: Add operational cautions**
+- [x] **Step 3: Add operational cautions**
 
 State that runtime commands require a running gateway and do not start durable upstream processes from a short-lived local CLI.
 
@@ -204,7 +204,7 @@ State that runtime commands require a running gateway and do not start durable u
 - Modified files from prior tasks.
 - Backlog task `TASK-593`.
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run:
 
@@ -216,7 +216,7 @@ python -m pytest \
   -v
 ```
 
-- [ ] **Step 2: Run Bandit**
+- [x] **Step 2: Run Bandit**
 
 Run:
 
@@ -229,6 +229,6 @@ python -m bandit -r \
   -f json -o /tmp/bandit_mcp_gateway_remote_runtime_cli.json
 ```
 
-- [ ] **Step 3: Update Backlog**
+- [x] **Step 3: Update Backlog**
 
 Record touched files, verification commands, known skips, and final summary in `TASK-593`.
