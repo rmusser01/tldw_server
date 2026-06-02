@@ -1,0 +1,57 @@
+---
+id: TASK-593
+title: Implement Codex ACP adapter first slice
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-06-02 04:33'
+labels:
+  - ACP
+  - Codex
+  - agents
+  - implementation
+dependencies: []
+documentation:
+  - Docs/superpowers/specs/2026-06-01-acp-codex-orchestration-design.md
+  - Docs/superpowers/plans/2026-06-01-codex-acp-adapter-implementation-plan.md
+priority: high
+ordinal: 593
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Execute the approved first-slice Codex ACP adapter implementation plan. Scope includes canonical external_acp_adapter backend/API strategy support, dynamic registry metadata persistence, seeded Codex codex-acp profile/docs, passive Go runner readiness and explicit launch rules, frontend structured readiness gating, certification helper compatibility, and verification. Live Codex ACP certification and Codex app-server support remain follow-up work.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Canonical external_acp_adapter strategy is implemented and legacy adapter_acp is accepted only as an import compatibility alias.
+- [ ] #2 Backend/API/static fallback/DB registry metadata expose adapter readiness without stale OPENAI_API_KEY-only Codex semantics.
+- [ ] #3 Go runner uses passive no-spawn readiness for inventory/initialize and explicit acp_command launch rules for ACP sessions.
+- [ ] #4 Frontend ACP session creation gates on structured entrypoint readiness and does not let stale is_configured override blocked states.
+- [ ] #5 Docs and seeded Codex profile describe pinned codex-acp 0.15.0 without overclaiming live certification.
+- [ ] #6 Focused backend, Go, frontend, Bandit, and diff hygiene verification results are recorded.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 1 complete and approved. Commit d7651601c3 implements canonical external_acp_adapter strategy normalization, legacy adapter_acp import aliasing in registry/schema/endpoint helpers, Codex static fallback external-adapter/delegated-auth semantics, endpoint test update for canonical forwarded strategy, and live_certification_required setup-step coverage. Verification: focused pytest command passed locally with 36 passed and 6 warnings using /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv; git diff --check passed; Bandit on touched backend files passed with no findings. Review: spec compliance passed after adding explicit ACPAgentEntrypointStatus legacy alias coverage; code quality issues were fixed before approval.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
