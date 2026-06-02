@@ -78,6 +78,24 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "companion_reflection_jobs_task",
 }
 
+TASK6_BACKGROUND_SPEC_NAMES = {
+    "reminder_jobs_task",
+    "admin_backup_jobs_task",
+    "admin_byok_validation_jobs_task",
+    "admin_maintenance_rotation_jobs_task",
+    "recipe_run_jobs_task",
+    "jobs_notifications_bridge_task",
+    "evals_abtest_jobs_task",
+    "ephemeral_cleanup_task",
+    "chatbooks_cleanup",
+    "storage_cleanup_service",
+    "embeddings_compactor_task",
+    "websub_renewal_task",
+    "claims_rebuild",
+    "usage_aggregator",
+    "llm_usage_aggregator",
+}
+
 
 @pytest.mark.unit
 def test_collect_worker_specs_collects_specs_from_provider_functions() -> None:
@@ -144,6 +162,51 @@ def test_collect_worker_specs_accepts_task5_job_poller_spec_providers() -> None:
 
     assert {spec.name for spec in specs} == TASK5_JOB_POLLER_SPEC_NAMES
     assert_legacy_worker_spec_parity(TASK5_JOB_POLLER_SPEC_NAMES, specs)
+
+
+@pytest.mark.unit
+def test_collect_worker_specs_accepts_task6_background_spec_providers() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_catalog import (
+        assert_legacy_worker_spec_parity,
+        collect_worker_specs,
+    )
+    from tldw_Server_API.app.services.llm_usage_aggregator import (
+        provide_llm_usage_aggregator_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_claims_rebuild import (
+        provide_claims_rebuild_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_cleanup_workers import (
+        provide_cleanup_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_compactor_websub_workers import (
+        provide_compactor_websub_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_notifications_abtest_workers import (
+        provide_notifications_abtest_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_sidecar_owned_jobs_pollers import (
+        provide_sidecar_owned_jobs_worker_specs,
+    )
+    from tldw_Server_API.app.services.usage_aggregator import (
+        provide_usage_aggregator_worker_specs,
+    )
+
+    specs = collect_worker_specs(
+        _context(),
+        [
+            provide_sidecar_owned_jobs_worker_specs,
+            provide_notifications_abtest_worker_specs,
+            provide_cleanup_worker_specs,
+            provide_compactor_websub_worker_specs,
+            provide_claims_rebuild_worker_specs,
+            provide_usage_aggregator_worker_specs,
+            provide_llm_usage_aggregator_worker_specs,
+        ],
+    )
+
+    assert {spec.name for spec in specs} == TASK6_BACKGROUND_SPEC_NAMES
+    assert_legacy_worker_spec_parity(TASK6_BACKGROUND_SPEC_NAMES, specs)
 
 
 @pytest.mark.unit

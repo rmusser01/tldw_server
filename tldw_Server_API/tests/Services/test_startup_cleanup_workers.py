@@ -10,12 +10,140 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
+
 pytestmark = pytest.mark.unit
 
 
 def _import_startup_cleanup_workers() -> Any:
     sys.modules.pop("tldw_Server_API.app.services.startup_cleanup_workers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_cleanup_workers")
+
+
+def _context(
+    *,
+    settings: dict[str, object] | None = None,
+    test_mode: bool = True,
+) -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings=settings or {},
+        test_mode=test_mode,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_cleanup: Any) -> dict[str, Any]:
+    return {
+        spec.name: spec
+        for spec in startup_cleanup.provide_cleanup_worker_specs()
+    }
+
+
+def test_cleanup_worker_specs_match_legacy_worker_contract() -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+
+    specs = _specs_by_name(startup_cleanup)
+
+    for spec_name, task_name in [
+        ("ephemeral_cleanup_task", "ephemeral_cleanup_task"),
+        ("chatbooks_cleanup", "chatbooks_cleanup_task"),
+    ]:
+        spec = specs[spec_name]
+        assert spec.task_name == task_name
+        assert spec.category == "cleanup"
+        assert spec.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert spec.timeout_sec == 5.0
+        assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+        assert spec.factory is not None
+
+    storage = specs["storage_cleanup_service"]
+    assert storage.task_name == "storage_cleanup_service"
+    assert storage.category == "cleanup"
+    assert storage.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert storage.timeout_sec == 5.0
+    assert storage.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert storage.factory is not None
+    assert storage.shutdown_callback_factory is None
+
+
+def test_cleanup_worker_specs_use_expected_names() -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+
+    assert [spec.name for spec in startup_cleanup.provide_cleanup_worker_specs()] == [
+        "ephemeral_cleanup_task",
+        "chatbooks_cleanup",
+        "storage_cleanup_service",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_worker_spec_factories_delegate_to_existing_worker_loops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    calls: list[tuple[str, object]] = []
+
+    async def _fake_ephemeral(settings: dict[str, object], *, stop_event: object) -> str:
+        calls.append(("ephemeral", stop_event))
+        assert settings["SINGLE_USER_FIXED_ID"] == "11"
+        return "ephemeral"
+
+    monkeypatch.setattr(startup_cleanup, "_run_ephemeral_cleanup_loop", _fake_ephemeral)
+    monkeypatch.setattr(
+        startup_cleanup,
+        "_run_chatbooks_cleanup_loop",
+        lambda stop_event: calls.append(("chatbooks", stop_event)) or "chatbooks",
+    )
+
+    specs = _specs_by_name(startup_cleanup)
+    context = _context(settings={"SINGLE_USER_FIXED_ID": "11"})
+
+    assert specs["ephemeral_cleanup_task"].factory is not None
+    assert await specs["ephemeral_cleanup_task"].factory(context, "ephemeral-stop") == "ephemeral"
+    assert specs["chatbooks_cleanup"].factory is not None
+    assert specs["chatbooks_cleanup"].factory(context, "chatbooks-stop") == "chatbooks"
+    assert calls == [
+        ("ephemeral", "ephemeral-stop"),
+        ("chatbooks", "chatbooks-stop"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_storage_cleanup_worker_spec_factory_starts_and_stops_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    calls: list[str] = []
+
+    class _Service:
+        async def start(self) -> None:
+            calls.append("start")
+
+        async def stop(self) -> None:
+            calls.append("stop")
+
+    monkeypatch.setattr(startup_cleanup, "_get_storage_cleanup_service", lambda: _Service())
+
+    spec = _specs_by_name(startup_cleanup)["storage_cleanup_service"]
+    stop_event = asyncio.Event()
+
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+    await asyncio.sleep(0)
+    assert calls == ["start"]
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+    assert calls == ["start", "stop"]
 
 
 @pytest.mark.asyncio

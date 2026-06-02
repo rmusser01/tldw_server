@@ -11,9 +11,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
 from tldw_Server_API.app.services.lifecycle_workers import (
     ManagedWorker,
-    ShutdownPhase,
     WorkerRegistry,
 )
 
@@ -41,6 +46,108 @@ class SidecarOwnedJobsPollerHandles:
     admin_maintenance_rotation_jobs_task: Any | None = None
     recipe_run_jobs_stop_event: Any | None = None
     recipe_run_jobs_task: Any | None = None
+
+
+def provide_sidecar_owned_jobs_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for sidecar-gated owned Jobs pollers."""
+
+    return (
+        stop_event_worker_spec(
+            name="reminder_jobs_task",
+            worker_service=_run_reminder_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _sidecar_owned_worker_enabled(
+                context,
+                _reminder_jobs_worker_enabled,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="admin_backup_jobs_task",
+            worker_service=_run_admin_backup_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _sidecar_owned_worker_enabled(
+                context,
+                _admin_backup_jobs_worker_enabled,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="admin_byok_validation_jobs_task",
+            worker_service=_run_admin_byok_validation_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _sidecar_owned_worker_enabled(
+                context,
+                _admin_byok_validation_jobs_worker_enabled,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="admin_maintenance_rotation_jobs_task",
+            worker_service=_run_admin_maintenance_rotation_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _sidecar_owned_worker_enabled(
+                context,
+                _admin_maintenance_rotation_jobs_worker_enabled,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="recipe_run_jobs_task",
+            worker_service=_run_recipe_run_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _sidecar_owned_worker_enabled(
+                context,
+                _recipe_run_jobs_worker_enabled,
+            ),
+        ),
+    )
+
+
+def _sidecar_owned_worker_enabled(
+    context: WorkerLifecycleContext,
+    worker_enabled: Callable[[], bool],
+) -> bool:
+    return not bool(context.settings.get("sidecar_mode", False)) and worker_enabled()
+
+
+def _reminder_jobs_worker_enabled() -> bool:
+    from tldw_Server_API.app.core.testing import env_flag_enabled
+
+    return env_flag_enabled("REMINDER_JOBS_WORKER_ENABLED")
+
+
+def _admin_backup_jobs_worker_enabled() -> bool:
+    from tldw_Server_API.app.core.testing import env_flag_enabled
+
+    return env_flag_enabled("ADMIN_BACKUP_JOBS_WORKER_ENABLED")
+
+
+def _admin_byok_validation_jobs_worker_enabled() -> bool:
+    from tldw_Server_API.app.services.admin_byok_validation_jobs_worker import (
+        byok_validation_worker_enabled,
+    )
+
+    return byok_validation_worker_enabled()
+
+
+def _admin_maintenance_rotation_jobs_worker_enabled() -> bool:
+    from tldw_Server_API.app.services.admin_maintenance_rotation_jobs_worker import (
+        maintenance_rotation_worker_enabled,
+    )
+
+    return maintenance_rotation_worker_enabled()
+
+
+def _recipe_run_jobs_worker_enabled() -> bool:
+    from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker import (
+        recipe_run_jobs_worker_enabled,
+    )
+
+    return recipe_run_jobs_worker_enabled()
 
 
 async def start_sidecar_owned_jobs_pollers(
@@ -355,12 +462,28 @@ def _start_reminder_jobs_worker_service(*, stop_event: Any) -> Any:
     return _start_reminder_jobs_worker_impl(stop_event=stop_event)
 
 
+def _run_reminder_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.reminder_jobs_worker import (
+        run_reminder_jobs_worker as _run_reminder_jobs_worker_impl,
+    )
+
+    return _run_reminder_jobs_worker_impl(stop_event=stop_event)
+
+
 def _start_admin_backup_jobs_worker_service(*, stop_event: Any) -> Any:
     from tldw_Server_API.app.services.admin_backup_jobs_worker import (
         start_admin_backup_jobs_worker as _start_admin_backup_jobs_worker_impl,
     )
 
     return _start_admin_backup_jobs_worker_impl(stop_event=stop_event)
+
+
+def _run_admin_backup_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.admin_backup_jobs_worker import (
+        run_admin_backup_jobs_worker as _run_admin_backup_jobs_worker_impl,
+    )
+
+    return _run_admin_backup_jobs_worker_impl(stop_event=stop_event)
 
 
 def _start_admin_byok_validation_jobs_worker_service(*, stop_event: Any) -> Any:
@@ -371,6 +494,14 @@ def _start_admin_byok_validation_jobs_worker_service(*, stop_event: Any) -> Any:
     return _start_admin_byok_validation_jobs_worker_impl(stop_event=stop_event)
 
 
+def _run_admin_byok_validation_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.admin_byok_validation_jobs_worker import (
+        run_admin_byok_validation_jobs_worker as _run_admin_byok_validation_jobs_worker_impl,
+    )
+
+    return _run_admin_byok_validation_jobs_worker_impl(stop_event=stop_event)
+
+
 def _start_admin_maintenance_rotation_jobs_worker_service(*, stop_event: Any) -> Any:
     from tldw_Server_API.app.services.admin_maintenance_rotation_jobs_worker import (
         start_admin_maintenance_rotation_jobs_worker as _start_admin_maintenance_rotation_jobs_worker_impl,
@@ -379,9 +510,25 @@ def _start_admin_maintenance_rotation_jobs_worker_service(*, stop_event: Any) ->
     return _start_admin_maintenance_rotation_jobs_worker_impl(stop_event=stop_event)
 
 
+def _run_admin_maintenance_rotation_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.admin_maintenance_rotation_jobs_worker import (
+        run_admin_maintenance_rotation_jobs_worker as _run_admin_maintenance_rotation_jobs_worker_impl,
+    )
+
+    return _run_admin_maintenance_rotation_jobs_worker_impl(stop_event=stop_event)
+
+
 def _start_recipe_run_jobs_worker_service(*, stop_event: Any) -> Any:
     from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker import (
         start_recipe_run_jobs_worker as _start_recipe_run_jobs_worker_impl,
     )
 
     return _start_recipe_run_jobs_worker_impl(stop_event=stop_event)
+
+
+def _run_recipe_run_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker import (
+        run_recipe_run_jobs_worker as _run_recipe_run_jobs_worker_impl,
+    )
+
+    return _run_recipe_run_jobs_worker_impl(stop_event=stop_event)

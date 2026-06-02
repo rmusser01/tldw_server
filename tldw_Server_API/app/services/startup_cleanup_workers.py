@@ -13,6 +13,10 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+)
 from tldw_Server_API.app.services.worker_registry import (
     ManagedWorker,
     ShutdownPhase,
@@ -37,6 +41,75 @@ class CleanupWorkerHandles:
     chatbooks_cleanup_task: Any | None = None
     chatbooks_cleanup_stop_event: Any | None = None
     storage_cleanup_service: Any | None = None
+
+
+def provide_cleanup_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for cleanup workers."""
+
+    return (
+        WorkerSpec(
+            name="ephemeral_cleanup_task",
+            task_name="ephemeral_cleanup_task",
+            category="cleanup",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_ephemeral_cleanup_worker_enabled,
+            factory=lambda context, stop_event: _run_ephemeral_cleanup_loop(
+                context.settings,
+                stop_event=stop_event,
+            ),
+        ),
+        WorkerSpec(
+            name="chatbooks_cleanup",
+            task_name="chatbooks_cleanup_task",
+            category="cleanup",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_chatbooks_cleanup_worker_enabled,
+            factory=lambda _context, stop_event: _run_chatbooks_cleanup_loop(stop_event),
+        ),
+        WorkerSpec(
+            name="storage_cleanup_service",
+            task_name="storage_cleanup_service",
+            category="cleanup",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_storage_cleanup_worker_enabled,
+            factory=lambda _context, stop_event: _run_storage_cleanup_service(stop_event),
+        ),
+    )
+
+
+def _ephemeral_cleanup_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    return _settings_truthy(context.settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
+
+
+def _chatbooks_cleanup_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    interval_sec = int(os.getenv("CHATBOOKS_CLEANUP_INTERVAL_SEC", "0") or "0")
+    return interval_sec > 0
+
+
+def _storage_cleanup_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    storage_cleanup_default = "false" if context.test_mode else "true"
+    return os.getenv("STORAGE_CLEANUP_ENABLED", storage_cleanup_default).lower() in _TRUTHY_VALUES
+
+
+async def _run_storage_cleanup_service(stop_event: Any) -> None:
+    storage_cleanup_service = _get_storage_cleanup_service()
+    started = False
+    try:
+        await storage_cleanup_service.start()
+        started = True
+        await stop_event.wait()
+    except asyncio.CancelledError:
+        raise
+    except _STARTUP_GUARD_EXCEPTIONS:
+        if started:
+            await _stop_started_storage_cleanup_service(storage_cleanup_service)
+            started = False
+        raise
+    finally:
+        if started:
+            await storage_cleanup_service.stop()
 
 
 async def start_cleanup_workers(

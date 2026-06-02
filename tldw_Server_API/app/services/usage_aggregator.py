@@ -9,6 +9,11 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
 from tldw_Server_API.app.services.lifecycle_workers import (
     ShutdownPhase,
     start_stop_event_worker,
@@ -23,6 +28,27 @@ _USAGE_AGGREGATOR_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+
+def provide_usage_aggregator_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return the declarative spec for usage aggregation."""
+
+    return (
+        stop_event_worker_spec(
+            name="usage_aggregator",
+            worker_service=_aggregator_loop,
+            category="usage",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_usage_aggregator_worker_enabled,
+        ),
+    )
+
+
+def _usage_aggregator_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    settings = get_settings()
+    return bool(getattr(settings, "USAGE_LOG_ENABLED", False))
 
 
 async def aggregate_usage_daily(db_pool: DatabasePool | None = None, day: str | None = None) -> None:

@@ -4,8 +4,15 @@ import asyncio
 import importlib
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
+
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -13,6 +20,127 @@ pytestmark = pytest.mark.unit
 def _import_startup_notifications_abtest_workers():
     sys.modules.pop("tldw_Server_API.app.services.startup_notifications_abtest_workers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_notifications_abtest_workers")
+
+
+def _context(
+    *,
+    settings: dict[str, object] | None = None,
+) -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app="app",
+        settings=settings or {},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_workers: Any) -> dict[str, Any]:
+    return {
+        spec.name: spec
+        for spec in startup_workers.provide_notifications_abtest_worker_specs()
+    }
+
+
+def test_notifications_abtest_worker_specs_match_legacy_worker_contract() -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+
+    specs = _specs_by_name(startup_workers)
+
+    bridge = specs["jobs_notifications_bridge_task"]
+    assert bridge.task_name == "jobs_notifications_bridge_task"
+    assert bridge.category == "jobs"
+    assert bridge.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert bridge.timeout_sec == 5.0
+    assert bridge.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert bridge.factory is not None
+    assert bridge.shutdown_callback_factory is None
+
+    abtest = specs["evals_abtest_jobs_task"]
+    assert abtest.task_name == "evals_abtest_jobs_task"
+    assert abtest.category == "jobs"
+    assert abtest.phase is ShutdownPhase.JOB_POLLER_QUIESCE
+    assert abtest.timeout_sec == 5.0
+    assert abtest.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert abtest.factory is not None
+
+
+def test_notifications_abtest_worker_specs_use_expected_names() -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+
+    assert [spec.name for spec in startup_workers.provide_notifications_abtest_worker_specs()] == [
+        "jobs_notifications_bridge_task",
+        "evals_abtest_jobs_task",
+    ]
+
+
+def test_evals_abtest_worker_spec_factory_delegates_to_existing_worker_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+    calls: list[object] = []
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_embeddings_abtest_jobs_worker_service",
+        lambda stop_event: calls.append(stop_event) or "abtest-awaitable",
+    )
+
+    spec = _specs_by_name(startup_workers)["evals_abtest_jobs_task"]
+
+    assert spec.factory is not None
+    assert spec.factory(_context(), "abtest-stop") == "abtest-awaitable"
+    assert calls == ["abtest-stop"]
+
+
+@pytest.mark.asyncio
+async def test_jobs_notifications_bridge_worker_spec_factory_starts_and_cancels_legacy_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+    bridge_started = asyncio.Event()
+    cancelled: list[str] = []
+
+    async def _bridge_loop() -> None:
+        bridge_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append("bridge")
+            raise
+
+    monkeypatch.setattr(
+        startup_workers,
+        "_start_jobs_notifications_service",
+        lambda: asyncio.create_task(_bridge_loop(), name="jobs_notifications_bridge"),
+    )
+
+    spec = _specs_by_name(startup_workers)["jobs_notifications_bridge_task"]
+    stop_event = asyncio.Event()
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+
+    await asyncio.wait_for(bridge_started.wait(), timeout=1)
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+
+    assert cancelled == ["bridge"]
+
+
+def test_notifications_abtest_worker_specs_disable_in_sidecar_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+    monkeypatch.setattr(startup_workers, "_jobs_notifications_bridge_enabled", lambda: True)
+    monkeypatch.setattr(startup_workers, "_evals_abtest_jobs_worker_enabled", lambda: True)
+
+    specs = _specs_by_name(startup_workers)
+
+    assert specs["jobs_notifications_bridge_task"].enabled(_context(settings={"sidecar_mode": True})) is False
+    assert specs["evals_abtest_jobs_task"].enabled(_context(settings={"sidecar_mode": True})) is False
 
 
 @pytest.mark.asyncio
