@@ -34,19 +34,28 @@ type AgentConfig struct {
 
 // AgentRegistry holds globally configured downstream agents.
 type AgentRegistry struct {
-	Default string              `yaml:"default"`
-	Agents  []RegisteredAgent   `yaml:"agents"`
+	Default string            `yaml:"default"`
+	Agents  []RegisteredAgent `yaml:"agents"`
 }
 
 // RegisteredAgent defines a configured ACP downstream agent.
 type RegisteredAgent struct {
-	Type           string   `yaml:"type"`
-	Name           string   `yaml:"name"`
-	Description    string   `yaml:"description"`
-	Command        string   `yaml:"command"`
-	Args           []string `yaml:"args"`
-	Env            []string `yaml:"env"`
-	RequiresAPIKey string   `yaml:"requires_api_key"`
+	Type               string   `yaml:"type"`
+	Name               string   `yaml:"name"`
+	Description        string   `yaml:"description"`
+	Command            string   `yaml:"command"`
+	Args               []string `yaml:"args"`
+	Env                []string `yaml:"env"`
+	RequiresAPIKey     string   `yaml:"requires_api_key"`
+	EntrypointStrategy string   `yaml:"entrypoint_strategy"`
+	ACPCommand         string   `yaml:"acp_command"`
+	ACPArgs            []string `yaml:"acp_args"`
+	AdapterSource      string   `yaml:"adapter_source"`
+	AdapterDocsURL     string   `yaml:"adapter_docs_url"`
+	AdapterPackage     string   `yaml:"adapter_package"`
+	AdapterVersion     string   `yaml:"adapter_version"`
+	CredentialPolicy   string   `yaml:"credential_policy"`
+	RuntimeBackend     string   `yaml:"runtime_backend"`
 }
 
 // WorkspaceConfig holds workspace-related settings.

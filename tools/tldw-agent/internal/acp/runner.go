@@ -30,11 +30,12 @@ type Runner struct {
 	cfg      *config.Config
 	upstream *Conn
 
-	sessions   map[string]*Session
-	sessionsMu sync.Mutex
-	spawnFunc  func(config.AgentConfig) (*Conn, *exec.Cmd, error)
-	capsMu     sync.Mutex
-	cachedCaps map[string]interface{}
+	sessions     map[string]*Session
+	sessionsMu   sync.Mutex
+	spawnFunc    func(config.AgentConfig) (*Conn, *exec.Cmd, error)
+	lookPathFunc func(string) (string, error)
+	capsMu       sync.Mutex
+	cachedCaps   map[string]interface{}
 }
 
 type Session struct {
@@ -55,11 +56,16 @@ func NewRunner(cfg *config.Config) *Runner {
 		sessions: make(map[string]*Session),
 	}
 	runner.spawnFunc = runner.spawnDownstream
+	runner.lookPathFunc = exec.LookPath
 	return runner
 }
 
 func (r *Runner) SetSpawnFunc(spawn func(config.AgentConfig) (*Conn, *exec.Cmd, error)) {
 	r.spawnFunc = spawn
+}
+
+func (r *Runner) SetLookPathFunc(lookPath func(string) (string, error)) {
+	r.lookPathFunc = lookPath
 }
 
 func (r *Runner) Run(stdin io.Reader, stdout io.Writer) error {
@@ -118,11 +124,28 @@ func (r *Runner) handleInitialize(msg *RPCMessage) (*RPCResponse, error) {
 }
 
 type agentListItem struct {
-	Type           string `json:"type"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	IsConfigured   bool   `json:"isConfigured"`
-	RequiresAPIKey string `json:"requiresApiKey,omitempty"`
+	Type               string   `json:"type"`
+	Name               string   `json:"name"`
+	Description        string   `json:"description"`
+	IsConfigured       bool     `json:"isConfigured"`
+	RequiresAPIKey     string   `json:"requiresApiKey,omitempty"`
+	EntrypointStrategy string   `json:"entrypoint_strategy,omitempty"`
+	ACPCommand         string   `json:"acp_command,omitempty"`
+	ACPArgs            []string `json:"acp_args,omitempty"`
+	AdapterSource      string   `json:"adapter_source,omitempty"`
+	AdapterDocsURL     string   `json:"adapter_docs_url,omitempty"`
+	AdapterPackage     string   `json:"adapter_package,omitempty"`
+	AdapterVersion     string   `json:"adapter_version,omitempty"`
+	CredentialPolicy   string   `json:"credential_policy,omitempty"`
+	RuntimeBackend     string   `json:"runtime_backend,omitempty"`
+	DisplayCommand     string   `json:"display_command,omitempty"`
+	DisplayBinaryFound bool     `json:"display_binary_found"`
+	AdapterFound       bool     `json:"adapter_found"`
+	CredentialState    string   `json:"credential_state,omitempty"`
+	ProbeState         string   `json:"probe_state,omitempty"`
+	PrimaryBlocker     string   `json:"primary_blocker,omitempty"`
+	Blockers           []string `json:"blockers,omitempty"`
+	StatusMessage      string   `json:"status_message,omitempty"`
 }
 
 type agentListResponse struct {
@@ -134,12 +157,30 @@ func (r *Runner) handleAgentList(msg *RPCMessage) (*RPCResponse, error) {
 	entries, defaultType := r.getAgentEntries()
 	items := make([]agentListItem, 0, len(entries))
 	for _, entry := range entries {
+		readiness := r.passiveAgentReadiness(entry)
 		items = append(items, agentListItem{
-			Type:           entry.Type,
-			Name:           entry.Name,
-			Description:    entry.Description,
-			IsConfigured:   r.isAgentReady(entry),
-			RequiresAPIKey: entry.RequiresAPIKey,
+			Type:               entry.Type,
+			Name:               entry.Name,
+			Description:        entry.Description,
+			IsConfigured:       readiness.IsConfigured,
+			RequiresAPIKey:     entry.RequiresAPIKey,
+			EntrypointStrategy: readiness.EntrypointStrategy,
+			ACPCommand:         entry.ACPCommand,
+			ACPArgs:            entry.ACPArgs,
+			AdapterSource:      entry.AdapterSource,
+			AdapterDocsURL:     entry.AdapterDocsURL,
+			AdapterPackage:     entry.AdapterPackage,
+			AdapterVersion:     entry.AdapterVersion,
+			CredentialPolicy:   entry.CredentialPolicy,
+			RuntimeBackend:     entry.RuntimeBackend,
+			DisplayCommand:     readiness.DisplayCommand,
+			DisplayBinaryFound: readiness.DisplayBinaryFound,
+			AdapterFound:       readiness.AdapterFound,
+			CredentialState:    readiness.CredentialState,
+			ProbeState:         readiness.ProbeState,
+			PrimaryBlocker:     readiness.PrimaryBlocker,
+			Blockers:           readiness.Blockers,
+			StatusMessage:      readiness.StatusMessage,
 		})
 	}
 	return NewResultResponse(msg.ID, agentListResponse{
@@ -166,19 +207,14 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 	if err != nil {
 		return NewErrorResponse(msg.ID, ErrInvalidParams, err.Error()), nil
 	}
-	if agentEntry.Command == "" {
-		return NewErrorResponse(msg.ID, ErrInvalidParams, "agent.command is required"), nil
-	}
-
 	ws := workspace.NewSession(r.cfg)
 	if err := ws.SetRoot(params.Cwd); err != nil {
 		return NewErrorResponse(msg.ID, ErrInvalidParams, fmt.Sprintf("invalid cwd: %v", err)), nil
 	}
 
-	agentCfg := config.AgentConfig{
-		Command: agentEntry.Command,
-		Args:    agentEntry.Args,
-		Env:     expandAgentEnv(agentEntry.Env),
+	agentCfg, err := resolveLaunchAgentConfig(agentEntry)
+	if err != nil {
+		return NewErrorResponse(msg.ID, ErrInvalidParams, err.Error()), nil
 	}
 	downstream, cmd, err := r.spawnFunc(agentCfg)
 	if err != nil {
@@ -393,11 +429,6 @@ func (r *Runner) buildAgentCapabilities() map[string]interface{} {
 	base := defaultAgentCapabilities()
 	cached := r.getCachedCapabilities()
 	if cached == nil {
-		if refreshed := r.refreshCapabilities(); refreshed != nil {
-			cached = refreshed
-		}
-	}
-	if cached == nil {
 		return base
 	}
 
@@ -413,6 +444,202 @@ func (r *Runner) buildAgentCapabilities() map[string]interface{} {
 	}
 	merged["loadSession"] = false
 	return merged
+}
+
+func resolveLaunchAgentConfig(entry config.RegisteredAgent) (config.AgentConfig, error) {
+	strategy := strings.TrimSpace(entry.EntrypointStrategy)
+	if strategy == "" {
+		strategy = "native_acp"
+	}
+
+	switch strategy {
+	case "native_acp":
+		if strings.TrimSpace(entry.ACPCommand) != "" {
+			return config.AgentConfig{
+				Command: entry.ACPCommand,
+				Args:    entry.ACPArgs,
+				Env:     expandAgentEnv(entry.Env),
+			}, nil
+		}
+		if strings.TrimSpace(entry.Command) == "" {
+			return config.AgentConfig{}, fmt.Errorf("agent.command is required")
+		}
+		return config.AgentConfig{
+			Command: entry.Command,
+			Args:    entry.Args,
+			Env:     expandAgentEnv(entry.Env),
+		}, nil
+	case "external_acp_adapter":
+		if strings.TrimSpace(entry.ACPCommand) == "" {
+			return config.AgentConfig{}, fmt.Errorf("agent.acp_command is required for external_acp_adapter")
+		}
+		return config.AgentConfig{
+			Command: entry.ACPCommand,
+			Args:    entry.ACPArgs,
+			Env:     expandAgentEnv(entry.Env),
+		}, nil
+	default:
+		return config.AgentConfig{}, fmt.Errorf("agent strategy %q is not launchable by ACP downstream runner", strategy)
+	}
+}
+
+type agentReadiness struct {
+	IsConfigured       bool
+	EntrypointStrategy string
+	DisplayCommand     string
+	DisplayBinaryFound bool
+	AdapterFound       bool
+	CredentialState    string
+	ProbeState         string
+	PrimaryBlocker     string
+	Blockers           []string
+	StatusMessage      string
+}
+
+func (r *Runner) passiveAgentReadiness(entry config.RegisteredAgent) agentReadiness {
+	strategy := strings.TrimSpace(entry.EntrypointStrategy)
+	if strategy == "" {
+		strategy = "native_acp"
+	}
+	readiness := agentReadiness{
+		EntrypointStrategy: strategy,
+		DisplayCommand:     entry.Command,
+		CredentialState:    passiveCredentialState(entry),
+		ProbeState:         "ready_to_probe",
+		StatusMessage:      "Configured ACP entrypoint is ready for a bounded initialize probe.",
+	}
+
+	if strings.TrimSpace(entry.Command) != "" {
+		readiness.DisplayBinaryFound = r.commandExists(entry.Command)
+	}
+
+	var blockers []string
+	if readiness.CredentialState == "missing" {
+		blockers = append(blockers, "credentials_missing")
+	}
+	acpCommand := strings.TrimSpace(entry.ACPCommand)
+	switch strategy {
+	case "native_acp":
+		if acpCommand == "" {
+			acpCommand = strings.TrimSpace(entry.Command)
+		}
+		if acpCommand == "" {
+			blockers = append(blockers, "entrypoint_strategy_missing")
+		} else if !r.commandExists(acpCommand) {
+			blockers = append(blockers, "binary_missing")
+		}
+	case "external_acp_adapter":
+		if acpCommand == "" {
+			blockers = append(blockers, "entrypoint_strategy_missing")
+		} else {
+			readiness.AdapterFound = r.commandExists(acpCommand)
+			if isMutableAdapterInvocation(acpCommand, entry.ACPArgs) {
+				blockers = append(blockers, "mutable_adapter_invocation")
+			}
+			if !readiness.AdapterFound {
+				blockers = append(blockers, "adapter_missing")
+			}
+		}
+		if strings.TrimSpace(entry.Command) != "" && !readiness.DisplayBinaryFound {
+			blockers = append(blockers, "agent_binary_missing")
+		}
+	case "documented_candidate":
+		blockers = append(blockers, "live_certification_required")
+	case "custom_template":
+		blockers = append(blockers, "custom_template")
+	default:
+		blockers = append(blockers, "entrypoint_strategy_missing")
+	}
+
+	if len(blockers) > 0 {
+		readiness.IsConfigured = false
+		readiness.ProbeState = "blocked"
+		readiness.PrimaryBlocker = blockers[0]
+		readiness.Blockers = dedupeStrings(blockers)
+		readiness.StatusMessage = passiveBlockedStatus(readiness.PrimaryBlocker)
+		return readiness
+	}
+
+	readiness.IsConfigured = true
+	return readiness
+}
+
+func (r *Runner) commandExists(command string) bool {
+	lookPath := r.lookPathFunc
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	_, err := lookPath(command)
+	return err == nil
+}
+
+func passiveCredentialState(entry config.RegisteredAgent) string {
+	switch strings.TrimSpace(entry.CredentialPolicy) {
+	case "delegated_to_adapter":
+		return "delegated"
+	case "none":
+		return "ready"
+	case "env_var":
+		if strings.TrimSpace(entry.RequiresAPIKey) == "" {
+			return "unknown"
+		}
+		if strings.TrimSpace(os.Getenv(entry.RequiresAPIKey)) == "" {
+			return "missing"
+		}
+		return "ready"
+	default:
+		if strings.TrimSpace(entry.RequiresAPIKey) != "" {
+			if strings.TrimSpace(os.Getenv(entry.RequiresAPIKey)) == "" {
+				return "missing"
+			}
+			return "ready"
+		}
+		return "unknown"
+	}
+}
+
+func isMutableAdapterInvocation(command string, args []string) bool {
+	if command != "npx" {
+		return false
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "@latest") {
+			return true
+		}
+	}
+	return false
+}
+
+func dedupeStrings(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func passiveBlockedStatus(blocker string) string {
+	switch blocker {
+	case "adapter_missing":
+		return "Configured ACP adapter command is not available on PATH."
+	case "agent_binary_missing":
+		return "Downstream agent CLI controlled by the adapter is not available on PATH."
+	case "binary_missing":
+		return "Configured ACP entrypoint command is not available on PATH."
+	case "credentials_missing":
+		return "Required API key or credential environment variable is missing."
+	case "mutable_adapter_invocation":
+		return "Configured ACP adapter invocation uses a mutable package version."
+	case "custom_template":
+		return "Create a named custom ACP profile with command, args, env, workspace policy, and evidence bundle."
+	default:
+		return "ACP entrypoint readiness is blocked until setup is complete."
+	}
 }
 
 func defaultAgentCapabilities() map[string]interface{} {
@@ -455,10 +682,9 @@ func (r *Runner) refreshCapabilities() map[string]interface{} {
 	if err != nil {
 		return nil
 	}
-	agentCfg := config.AgentConfig{
-		Command: agentEntry.Command,
-		Args:    agentEntry.Args,
-		Env:     expandAgentEnv(agentEntry.Env),
+	agentCfg, err := resolveLaunchAgentConfig(agentEntry)
+	if err != nil {
+		return nil
 	}
 	caps := r.probeAgentCapabilities(agentCfg, 5*time.Second)
 	if caps == nil {
@@ -471,15 +697,7 @@ func (r *Runner) refreshCapabilities() map[string]interface{} {
 }
 
 func (r *Runner) isAgentReady(entry config.RegisteredAgent) bool {
-	if strings.TrimSpace(entry.Command) == "" {
-		return false
-	}
-	agentCfg := config.AgentConfig{
-		Command: entry.Command,
-		Args:    entry.Args,
-		Env:     expandAgentEnv(entry.Env),
-	}
-	return r.probeAgentCapabilities(agentCfg, 2*time.Second) != nil
+	return r.passiveAgentReadiness(entry).IsConfigured
 }
 
 func expandAgentEnv(values []string) []string {

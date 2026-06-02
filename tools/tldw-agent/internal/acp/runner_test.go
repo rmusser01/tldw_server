@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,6 +88,173 @@ func TestRunnerDefaultAgentSkipsEmptyConfiguredDefault(t *testing.T) {
 	}
 	if explicit.Type != "custom" || explicit.Command != "" {
 		t.Fatalf("explicit custom should not fall back to goose: %#v", explicit)
+	}
+}
+
+func TestRunnerLaunchesACPCommandForExternalAdapter(t *testing.T) {
+	entry := config.RegisteredAgent{
+		Type:               "codex",
+		Command:            "codex",
+		Args:               []string{"--display"},
+		EntrypointStrategy: "external_acp_adapter",
+		ACPCommand:         "codex-acp",
+		ACPArgs:            []string{"--stdio"},
+	}
+
+	agentCfg, err := resolveLaunchAgentConfig(entry)
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if agentCfg.Command != "codex-acp" {
+		t.Fatalf("command = %q, want codex-acp", agentCfg.Command)
+	}
+	if !reflect.DeepEqual(agentCfg.Args, []string{"--stdio"}) {
+		t.Fatalf("args = %#v", agentCfg.Args)
+	}
+}
+
+func TestRunnerDoesNotFallbackExternalAdapterToDisplayCommand(t *testing.T) {
+	entry := config.RegisteredAgent{
+		Type:               "codex",
+		Command:            "codex",
+		EntrypointStrategy: "external_acp_adapter",
+		ACPCommand:         "",
+	}
+
+	_, err := resolveLaunchAgentConfig(entry)
+	if err == nil || !strings.Contains(err.Error(), "acp_command is required") {
+		t.Fatalf("expected missing acp command error, got %v", err)
+	}
+}
+
+func TestRunnerLegacyNativeACPFallsBackToCommand(t *testing.T) {
+	entry := config.RegisteredAgent{
+		Type:               "goose",
+		Command:            "goose",
+		Args:               []string{"acp"},
+		EntrypointStrategy: "native_acp",
+		ACPCommand:         "",
+	}
+
+	agentCfg, err := resolveLaunchAgentConfig(entry)
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if agentCfg.Command != "goose" {
+		t.Fatalf("command = %q", agentCfg.Command)
+	}
+	if !reflect.DeepEqual(agentCfg.Args, []string{"acp"}) {
+		t.Fatalf("args = %#v", agentCfg.Args)
+	}
+}
+
+func TestRunnerInitializeDoesNotSpawnDownstreamForPassiveCapabilities(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents.Default = "codex"
+	cfg.Agents.Agents = []config.RegisteredAgent{
+		{
+			Type:               "codex",
+			Name:               "Codex",
+			Command:            "codex",
+			EntrypointStrategy: "external_acp_adapter",
+			ACPCommand:         "codex-acp",
+		},
+	}
+	runner := NewRunner(cfg)
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		t.Fatalf("initialize must not spawn downstream agents for passive capabilities")
+		return nil, nil, nil
+	})
+
+	resp := callRunnerInitialize(t, runner)
+	if resp.AgentCapabilities == nil {
+		t.Fatalf("initialize should return default capability envelope")
+	}
+}
+
+func TestRunnerAgentListUsesPassiveReadinessWithoutSpawning(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents.Default = "codex"
+	cfg.Agents.Agents = []config.RegisteredAgent{
+		{
+			Type:               "codex",
+			Name:               "Codex",
+			Command:            "codex",
+			EntrypointStrategy: "external_acp_adapter",
+			ACPCommand:         "codex-acp",
+			AdapterDocsURL:     "https://github.com/zed-industries/codex-acp",
+			CredentialPolicy:   "delegated_to_adapter",
+		},
+	}
+	runner := NewRunner(cfg)
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		t.Fatalf("agent/list must not spawn or initialize downstream agents")
+		return nil, nil, nil
+	})
+	runner.SetLookPathFunc(func(command string) (string, error) {
+		switch command {
+		case "codex", "codex-acp":
+			return "/usr/bin/" + command, nil
+		default:
+			return "", exec.ErrNotFound
+		}
+	})
+
+	resp := callRunnerAgentList(t, runner)
+	agent := findAgentListItem(t, resp, "codex")
+
+	if !agent.IsConfigured {
+		t.Fatalf("codex should be passively configured when display and adapter commands resolve")
+	}
+	if agent.ProbeState != "ready_to_probe" {
+		t.Fatalf("probe state = %q", agent.ProbeState)
+	}
+	if agent.DisplayCommand != "codex" || !agent.DisplayBinaryFound || !agent.AdapterFound {
+		t.Fatalf("unexpected readiness metadata: %#v", agent)
+	}
+	if agent.CredentialState != "delegated" {
+		t.Fatalf("credential state = %q", agent.CredentialState)
+	}
+	if agent.AdapterDocsURL != "https://github.com/zed-industries/codex-acp" {
+		t.Fatalf("adapter docs url = %q", agent.AdapterDocsURL)
+	}
+}
+
+func TestRunnerAgentListBlocksMutableNpxLatestWithoutSpawning(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents.Default = "codex"
+	cfg.Agents.Agents = []config.RegisteredAgent{
+		{
+			Type:               "codex",
+			Name:               "Codex",
+			Command:            "codex",
+			EntrypointStrategy: "external_acp_adapter",
+			ACPCommand:         "npx",
+			ACPArgs:            []string{"@zed-industries/codex-acp@latest"},
+		},
+	}
+	runner := NewRunner(cfg)
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		t.Fatalf("agent/list must not execute npx")
+		return nil, nil, nil
+	})
+	runner.SetLookPathFunc(func(command string) (string, error) {
+		switch command {
+		case "codex", "npx":
+			return "/usr/bin/" + command, nil
+		default:
+			return "", exec.ErrNotFound
+		}
+	})
+
+	resp := callRunnerAgentList(t, runner)
+	agent := findAgentListItem(t, resp, "codex")
+
+	if agent.IsConfigured {
+		t.Fatalf("mutable npx @latest adapter invocation must not be passively configured")
+	}
+	if agent.PrimaryBlocker != "mutable_adapter_invocation" {
+		t.Fatalf("primary blocker = %q", agent.PrimaryBlocker)
 	}
 }
 
@@ -483,6 +651,89 @@ func extractSessionID(t *testing.T, raw json.RawMessage) string {
 	return payload.SessionID
 }
 
+type runnerInitializeResult struct {
+	AgentCapabilities map[string]interface{} `json:"agentCapabilities"`
+}
+
+func callRunnerInitialize(t *testing.T, runner *Runner) runnerInitializeResult {
+	t.Helper()
+	resp, err := runner.handleInitialize(&RPCMessage{
+		JSONRPC: JSONRPCVersion,
+		ID:      json.RawMessage(`1`),
+		Method:  "initialize",
+	})
+	if err != nil {
+		t.Fatalf("initialize returned error: %v", err)
+	}
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("initialize returned RPC error: %#v", resp)
+	}
+	var result runnerInitializeResult
+	if err := unmarshalRPCResult(resp.Result, &result); err != nil {
+		t.Fatalf("invalid initialize result: %v", err)
+	}
+	return result
+}
+
+type runnerAgentListItem struct {
+	Type               string   `json:"type"`
+	IsConfigured       bool     `json:"isConfigured"`
+	EntrypointStrategy string   `json:"entrypoint_strategy"`
+	ACPCommand         string   `json:"acp_command"`
+	ACPArgs            []string `json:"acp_args"`
+	AdapterFound       bool     `json:"adapter_found"`
+	AdapterDocsURL     string   `json:"adapter_docs_url"`
+	DisplayCommand     string   `json:"display_command"`
+	DisplayBinaryFound bool     `json:"display_binary_found"`
+	CredentialState    string   `json:"credential_state"`
+	ProbeState         string   `json:"probe_state"`
+	PrimaryBlocker     string   `json:"primary_blocker"`
+	Blockers           []string `json:"blockers"`
+}
+
+type runnerAgentListResult struct {
+	Agents []runnerAgentListItem `json:"agents"`
+}
+
+func callRunnerAgentList(t *testing.T, runner *Runner) runnerAgentListResult {
+	t.Helper()
+	resp, err := runner.handleAgentList(&RPCMessage{
+		JSONRPC: JSONRPCVersion,
+		ID:      json.RawMessage(`1`),
+		Method:  "agent/list",
+	})
+	if err != nil {
+		t.Fatalf("agent/list returned error: %v", err)
+	}
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("agent/list returned RPC error: %#v", resp)
+	}
+	var result runnerAgentListResult
+	if err := unmarshalRPCResult(resp.Result, &result); err != nil {
+		t.Fatalf("invalid agent/list result: %v", err)
+	}
+	return result
+}
+
+func unmarshalRPCResult(raw interface{}, target interface{}) error {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+
+func findAgentListItem(t *testing.T, result runnerAgentListResult, agentType string) runnerAgentListItem {
+	t.Helper()
+	for _, agent := range result.Agents {
+		if agent.Type == agentType {
+			return agent
+		}
+	}
+	t.Fatalf("agent %q not found in %#v", agentType, result.Agents)
+	return runnerAgentListItem{}
+}
+
 func TestRunnerAgentListReportsOnlyReadyAgentsAsConfigured(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agents.Default = "healthy"
@@ -507,79 +758,22 @@ func TestRunnerAgentListReportsOnlyReadyAgentsAsConfigured(t *testing.T) {
 		},
 	}
 	runner := NewRunner(cfg)
-
-	var (
-		mu           sync.Mutex
-		spawnedConns []net.Conn
-	)
-
-	runner.SetSpawnFunc(func(agent config.AgentConfig) (*Conn, *exec.Cmd, error) {
-		clientConn, serverConn := net.Pipe()
-
-		mu.Lock()
-		spawnedConns = append(spawnedConns, clientConn, serverConn)
-		mu.Unlock()
-
-		switch agent.Command {
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		t.Fatalf("agent/list must use passive readiness and not spawn downstream agents")
+		return nil, nil, nil
+	})
+	runner.SetLookPathFunc(func(command string) (string, error) {
+		switch command {
 		case "healthy-cmd":
-			stubConn := NewConn(serverConn, serverConn)
-			_ = newStubAgent(stubConn, "session_health", map[string]interface{}{})
-			go func() {
-				_ = stubConn.Run()
-			}()
+			return "/usr/bin/" + command, nil
 		default:
-			_ = serverConn.Close()
-		}
-
-		return NewConn(clientConn, clientConn), nil, nil
-	})
-
-	upstreamConn, runnerConn := net.Pipe()
-	upstream := NewConn(upstreamConn, upstreamConn)
-	go func() {
-		_ = upstream.Run()
-	}()
-
-	runErr := make(chan error, 1)
-	go func() {
-		runErr <- runner.Run(runnerConn, runnerConn)
-	}()
-
-	t.Cleanup(func() {
-		_ = upstreamConn.Close()
-		_ = runnerConn.Close()
-		mu.Lock()
-		conns := append([]net.Conn(nil), spawnedConns...)
-		mu.Unlock()
-		for _, conn := range conns {
-			_ = conn.Close()
-		}
-		select {
-		case <-runErr:
-		case <-time.After(time.Second):
+			return "", exec.ErrNotFound
 		}
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	resp, err := upstream.Call(ctx, "agent/list", map[string]interface{}{})
-	if err != nil {
-		t.Fatalf("agent/list failed: %v", err)
-	}
-
-	var payload struct {
-		Agents []struct {
-			Type         string `json:"type"`
-			IsConfigured bool   `json:"isConfigured"`
-		} `json:"agents"`
-	}
-	if err := json.Unmarshal(resp.Result, &payload); err != nil {
-		t.Fatalf("invalid agent/list result: %v", err)
-	}
-
+	result := callRunnerAgentList(t, runner)
 	byType := map[string]bool{}
-	for _, agent := range payload.Agents {
+	for _, agent := range result.Agents {
 		byType[agent.Type] = agent.IsConfigured
 	}
 
