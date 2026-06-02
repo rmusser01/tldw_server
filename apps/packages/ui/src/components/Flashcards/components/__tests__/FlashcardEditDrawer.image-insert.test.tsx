@@ -132,6 +132,7 @@ describe("FlashcardEditDrawer image insertion", () => {
             deleted: false,
             client_id: "1",
             version: 1,
+            review_prompt_side: "front",
             scheduler_type: "sm2_plus",
             review_prompt_side: "front",
             scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
