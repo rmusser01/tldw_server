@@ -265,6 +265,43 @@ def test_first_run_provider_save_rejects_blank_hosted_api_key_without_config_wri
     assert "openai_api_key" not in config_text
 
 
+def test_first_run_provider_save_keeps_existing_hosted_key_on_blank_update(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    config_path = tmp_path / "config.txt"
+    config_path.write_text(
+        "[API]\ndefault_api = openai\nopenai_api_key = sk-existing-secret\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={
+            "provider_key": "openai",
+            "api_key": "   ",
+            "model": "gpt-4.1-mini",
+            "make_default": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved"
+    assert body["credential_configured"] is True
+    assert body["masked_api_key"] is None
+    parser = ConfigParser()
+    parser.optionxform = str
+    parser.read(config_path, encoding="utf-8")
+    assert parser.get("API", "openai_api_key") == "sk-existing-secret"
+    assert parser.get("API", "openai_model") == "gpt-4.1-mini"
+
+
 def test_first_run_provider_save_writes_kobold_runtime_endpoint_key(
     monkeypatch,
     tmp_path,
@@ -294,6 +331,44 @@ def test_first_run_provider_save_writes_kobold_runtime_endpoint_key(
     assert "default_api = kobold" in config_text
     assert "kobold_api_IP = http://127.0.0.1:5001/api/v1/generate" in config_text
     assert "kobold_openai_api_IP" not in config_text
+
+
+def test_first_run_provider_save_marks_existing_local_endpoint_key_configured(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    config_path = tmp_path / "config.txt"
+    config_path.write_text(
+        "[API]\ndefault_api = openai\n\n"
+        "[Local-API]\n"
+        "ollama_api_key = local-existing-token\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={
+            "provider_key": "ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "llama3.1",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved"
+    assert body["credential_configured"] is True
+    assert body["masked_api_key"] is None
+    parser = ConfigParser()
+    parser.optionxform = str
+    parser.read(config_path, encoding="utf-8")
+    assert parser.get("Local-API", "ollama_api_key") == "local-existing-token"
+    assert parser.get("Local-API", "ollama_api_IP") == "http://127.0.0.1:11434/v1"
 
 
 def test_completed_setup_rejects_provider_save_through_first_run_write_guard(
@@ -1766,6 +1841,8 @@ def test_first_run_state_rejects_unsupported_public_step_data(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "unsupported_first_run_step_data"
+    if state_path.exists():
+        assert "raw-provider-secret" not in state_path.read_text(encoding="utf-8")
     state_response = setup_client.get("/api/v1/setup/first-run/state")
     assert state_response.status_code == 200
     assert "sk-raw" not in str(state_response.json())
@@ -1908,6 +1985,8 @@ def test_first_run_state_rejects_real_provider_credential_step_data(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "unsupported_first_run_step_data"
+    if state_path.exists():
+        assert "raw-provider-secret" not in state_path.read_text(encoding="utf-8")
     state_response = setup_client.get("/api/v1/setup/first-run/state")
     assert state_response.status_code == 200
     assert "raw-provider-secret" not in str(state_response.json())

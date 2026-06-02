@@ -393,6 +393,48 @@ describe("OptionIndex unified setup resolver", () => {
     }
   })
 
+  it("retries first-source ingest with the persisted source kind after reload", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    seedQuickIngestSession({
+      lifecycle: "completed",
+      openDetail: {
+        source: "first_source_milestone",
+        preferredPreset: "quick",
+        firstSource: true,
+        firstSourceKind: "paste_text"
+      },
+      firstSourceAddMode: "paste_text",
+      resultSummary: {
+        status: "error",
+        attemptedAt: 1,
+        completedAt: 2,
+        totalCount: 1,
+        successCount: 0,
+        failedCount: 1,
+        cancelledCount: 0,
+        firstMediaId: null,
+        primarySourceLabel: "Pasted notes",
+        errorMessage: "Upload failed"
+      }
+    })
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: /retry/i }))
+
+    expect(routeMocks.requestQuickIngestOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstSourceKind: "paste_text"
+      }),
+      { focusTrigger: true }
+    )
+  })
+
   it("does not show first-source processing for an unrelated processing session", async () => {
     routeMocks.firstRunState.current = createCompletedFirstRunState()
     seedQuickIngestSession({

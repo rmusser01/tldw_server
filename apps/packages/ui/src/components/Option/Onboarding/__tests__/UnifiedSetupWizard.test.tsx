@@ -227,6 +227,27 @@ describe("UnifiedSetupWizard", () => {
     ).toBeInTheDocument();
   });
 
+  it("handles setup readiness retry failures through the guarded refresh wrapper", async () => {
+    const consoleWarn = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    readinessHookMocks.refresh.mockRejectedValueOnce(
+      new Error("readiness refresh failed"),
+    );
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(<UnifiedSetupWizard />);
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    await waitFor(() => {
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Setup readiness summary could not be refreshed",
+        expect.any(Error),
+      );
+    });
+  });
+
   it("shows multi-user exit guidance instead of continuing solo wizard", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 

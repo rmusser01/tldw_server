@@ -223,7 +223,13 @@ const OptionIndex = () => {
             setLastFirstSourceKind(kind)
             openFirstSourceQuickIngest(kind)
           }}
-          onRetry={() => openFirstSourceQuickIngest(lastFirstSourceKind)}
+          onRetry={() =>
+            openFirstSourceQuickIngest(
+              firstSourceSession?.firstSourceAddMode ??
+                firstSourceSession?.openDetail?.firstSourceKind ??
+                lastFirstSourceKind
+            )
+          }
           onAskAboutSource={
             firstSourceMediaId && firstSourceAskReady
               ? () =>

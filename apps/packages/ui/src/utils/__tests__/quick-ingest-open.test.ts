@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import {
   buildQuickIngestOpenDetailFromUrl,
   createQuickIngestSessionSeedFromOpenDetail,
+  isFirstSourceOpenDetail,
   isQuickIngestPlaylistPreflightDetail,
   requestQuickIngestOpen
 } from "../quick-ingest-open"
@@ -98,6 +99,32 @@ describe("quick ingest open handoff", () => {
           document: { ocr: false }
         }
       }
+    })
+  })
+
+  it("keeps legacy first-source markers from narrowing to milestone-only source", () => {
+    const detail = {
+      source: "global",
+      firstSource: true,
+      firstSourceKind: "paste_text"
+    } as QuickIngestOpenDetail
+
+    expect(isFirstSourceOpenDetail(detail)).toBe(true)
+    if (isFirstSourceOpenDetail(detail)) {
+      expect(detail.source).toBe("global")
+      const narrowedSource: Exclude<
+        typeof detail.source,
+        "first_source_milestone"
+      > = detail.source
+      expect(narrowedSource).toBe("global")
+      expectTypeOf(detail.source).not.toEqualTypeOf<"first_source_milestone">()
+    }
+
+    expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
+      openDetail: detail,
+      firstSourceAddMode: "paste_text",
+      selectedPreset: "quick",
+      customBasePreset: "quick"
     })
   })
 

@@ -87,7 +87,6 @@ export const useSetupReadinessSummary = () => {
       return nextSummary;
     } catch {
       if (mounted.current && latestRequestId.current === requestId) {
-        setStatus(null);
         setError(SETUP_READINESS_ERROR);
       }
       return null;

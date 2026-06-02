@@ -65,7 +65,7 @@ export function FirstSourceMilestonePrompt({
                 : isReady
                   ? "Your first source is ready for grounded chat."
                   : isError
-                    ? "Source ingest did not finish. Retry or add a different source."
+                    ? "Source ingest did not finish. Retry when you are ready."
                     : "First chat is working. Add a source next so chat can use your own material."}
             </p>
             {lastSourceLabel ? (
@@ -125,7 +125,7 @@ export function FirstSourceMilestonePrompt({
             return (
               <label
                 key={kind}
-                className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium ${
+                className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium focus-within:outline-none focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-1 ${
                   selected
                     ? "border-primary bg-primary/10 text-text"
                     : "border-border bg-bg text-text-muted hover:bg-surface2"

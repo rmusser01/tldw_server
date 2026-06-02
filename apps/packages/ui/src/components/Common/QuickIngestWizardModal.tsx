@@ -612,7 +612,7 @@ const buildSessionPatchFromWizardState = (
     processingState: state.processingState,
     results: state.results,
     openDetail: buildOpenDetailPatch(state, session),
-    firstSourceAddMode: session.firstSourceAddMode ?? null,
+    firstSourceAddMode: state.firstSourceAddMode ?? null,
     badge: {
       queueCount:
         lifecycle === "draft"

@@ -92,6 +92,51 @@ describe("FirstSourceMilestonePrompt", () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
+  it("does not offer a hidden add-source action in error copy", async () => {
+    const { FirstSourceMilestonePrompt } = await import(
+      "../FirstSourceMilestonePrompt"
+    )
+
+    render(
+      <FirstSourceMilestonePrompt
+        readinessStatus="error"
+        onAddSource={vi.fn()}
+        onRetry={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText(/source ingest did not finish/i)).toHaveTextContent(
+      /retry/i
+    )
+    expect(screen.getByText(/source ingest did not finish/i)).not.toHaveTextContent(
+      /add a different source/i
+    )
+    expect(
+      screen.queryByRole("button", { name: /add source/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("exposes a focus-visible ring on source kind cards", async () => {
+    const { FirstSourceMilestonePrompt } = await import(
+      "../FirstSourceMilestonePrompt"
+    )
+
+    render(
+      <FirstSourceMilestonePrompt
+        readinessStatus="idle"
+        onAddSource={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    )
+
+    const pasteCard = screen
+      .getByRole("radio", { name: /paste/i })
+      .closest("label")
+
+    expect(pasteCard?.className).toContain("focus-within:ring-2")
+  })
+
   it("shows grounded chat action only when a ready source handler is provided", async () => {
     const onAskAboutSource = vi.fn()
     const { FirstSourceMilestonePrompt } = await import(

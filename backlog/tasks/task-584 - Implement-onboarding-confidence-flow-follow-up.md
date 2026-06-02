@@ -35,9 +35,12 @@ modified_files:
 - apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/QueueTab/FileDropZone.tsx
+- apps/packages/ui/src/components/Common/QuickIngest/__tests__/FileDropZone.acceptance.test.tsx
 - apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx
+- apps/tldw-frontend/e2e/smoke/smoke.setup.ts
+- apps/tldw-frontend/e2e/workflows/onboarding-ingestion-first.spec.ts
 - apps/tldw-frontend/e2e/workflows/unified-first-run-onboarding.spec.ts
 - tldw_Server_API/app/api/v1/endpoints/setup.py
 - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
@@ -222,13 +225,30 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
   - `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/schemas/setup_schemas.py tldw_Server_API/app/core/Setup/provider_validation.py tldw_Server_API/app/core/Setup/setup_manager.py tldw_Server_API/app/core/Setup/first_run_state.py -f json -o /tmp/bandit_task584_onboarding_confidence_flow.json` reported 0 results.
   - `git diff --check origin/dev..HEAD` and final unstaged `git diff --check` passed.
 - PR opened as draft for review: https://github.com/rmusser01/tldw_server/pull/2214. Human-written Change summary is still required before marking ready or merging per repo policy.
+- PR review follow-up after rebase:
+  - Rebased `codex/onboarding-confidence-flow` on latest `origin/dev`.
+  - Setup readiness refresh now preserves the last known status on refresh failure, labels non-ready chat states as first-chat blockers, avoids duplicate detail keys, and guards wizard retry refresh failures.
+  - First-chat retry clears stale response/error/category state before a new attempt.
+  - First-source recovery copy no longer points users to a hidden Add Source action, radio choices expose a keyboard focus ring, and retry after reload uses the persisted first-source add mode.
+  - Quick ingest preserves raw pasted-text whitespace, clears persisted first-source mode on reset, and file-drop autofocus is one-shot across disabled toggles.
+  - The first-source quick-ingest open-detail guard now has an honest predicate type for legacy `firstSource: true` markers instead of narrowing them to milestone-only source details.
+  - Backend first-run provider save handling now preserves existing hosted provider keys without overwriting secrets, reports existing local endpoint token configuration, and keeps rejected raw provider credentials out of persisted first-run state.
+  - Smoke and first-source E2E fixtures were updated to match the completed first-run app shell and current first-source milestone flow.
+- PR review follow-up verification:
+  - Focused frontend review suite: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx ../packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/FileDropZone.acceptance.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx --reporter=dot` passed, 9 files / 139 tests.
+  - Expanded frontend review suite with quick-ingest open-detail guard coverage: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx ../packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx ../packages/ui/src/utils/__tests__/quick-ingest-open.test.ts ../packages/ui/src/components/Common/QuickIngest/__tests__/FileDropZone.acceptance.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx --reporter=dot` passed, 10 files / 146 tests.
+  - Stage 6 interaction smoke: `bun run e2e:smoke:interaction:stage1 --project=chromium --reporter=line` passed, 2 tests, after rerunning outside the sandbox because the sandboxed server could not bind `0.0.0.0:8080`.
+  - Onboarding first-source E2E: `bun run e2e:onboarding --project=chromium --reporter=line` passed, 2 tests, after rerunning outside the sandbox for the same port-binding restriction.
+  - Focused backend setup suite: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py tldw_Server_API/tests/Setup/test_setup_first_chat_completion.py tldw_Server_API/tests/Setup/test_first_run_state.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -q` passed, 145 tests with 5 warnings.
+  - Bandit production scope: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py -f json -o /tmp/bandit_task584_pr2214_review_fixes.json` reported 0 results.
+  - `git diff --check` passed after the final review-fix edits.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the onboarding confidence flow follow-up as a rebased four-stage feature branch: provider validation before first chat, a backend-readiness panel inside the setup shell, inline first-chat recovery actions, and a post-onboarding first-source milestone integrated with quick ingest. Final verification after rebase: focused frontend onboarding/quick-ingest suite passed (11 files / 155 tests), focused unified first-run E2E passed (3 tests), focused backend setup/first-run suite passed (143 tests), Bandit on touched backend setup paths reported 0 results, and git diff whitespace checks passed. No known blockers remain.
+Implemented the onboarding confidence flow follow-up as a rebased four-stage feature branch: provider validation before first chat, a backend-readiness panel inside the setup shell, inline first-chat recovery actions, and a post-onboarding first-source milestone integrated with quick ingest. PR review feedback was addressed after rebasing on latest `origin/dev`, including readiness refresh resilience, first-chat retry state cleanup, first-source recovery/focus/retry fixes, quick-ingest paste/autofocus/session/type-guard cleanup fixes, hosted/local provider credential handling fixes, and refreshed smoke/first-source E2E coverage. Final verification after review fixes: expanded frontend review suite passed (10 files / 146 tests), Stage 6 smoke passed (2 tests), first-source onboarding E2E passed (2 tests), focused backend setup suite passed (145 tests, 5 warnings), Bandit on touched production setup endpoint code reported 0 results, and git diff whitespace checks passed. No known blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

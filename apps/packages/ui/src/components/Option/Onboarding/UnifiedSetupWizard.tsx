@@ -404,7 +404,7 @@ export function UnifiedSetupWizard({
         status={setupReadinessStatus}
         loading={setupReadinessLoading}
         error={setupReadinessError}
-        onRetry={refreshSetupReadinessStatus}
+        onRetry={refreshSetupReadiness}
       />
 
       <div className="rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6">

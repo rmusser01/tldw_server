@@ -634,12 +634,16 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     const pastedTextInput = await screen.findByRole("textbox", {
       name: /pasted text input/i
     })
-    await user.type(pastedTextInput, "These are first-source notes.")
+    const pastedText = "  These are first-source notes.\nKeep spacing.  "
+    await user.type(pastedTextInput, pastedText)
     await user.click(
       screen.getByRole("button", { name: /add pasted text to queue/i })
     )
 
     expect(await screen.findByText("pasted-text.txt")).toBeInTheDocument()
+    await expect(ctxRef?.state.queueItems[0]?.file?.text()).resolves.toBe(
+      pastedText
+    )
     expect(pastedTextInput).toHaveValue("")
   })
 

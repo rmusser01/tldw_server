@@ -72,6 +72,14 @@ export type QuickIngestSessionSeed = {
   presetConfig?: PresetConfig
 }
 
+export type FirstSourceOpenDetail =
+  | Extract<QuickIngestOpenDetail, { source: "first_source_milestone" }>
+  | (QuickIngestOpenDetail & {
+      firstSource: true
+      preferredPreset?: unknown
+      firstSourceKind?: unknown
+    })
+
 type QuickIngestWindow = Window & {
   __tldwPendingQuickIngestOpen?: QuickIngestPendingOpenRequest
 }
@@ -230,17 +238,14 @@ const isPreferredPreset = (
 
 export const isFirstSourceOpenDetail = (
   detail: QuickIngestOpenDetail | null | undefined
-): detail is Extract<
-  QuickIngestOpenDetail,
-  { source: "first_source_milestone" }
-> =>
+): detail is FirstSourceOpenDetail =>
   Boolean(
     detail &&
     (detail.source === "first_source_milestone" || detail.firstSource === true)
   )
 
 const getFirstSourceAddMode = (
-  detail: QuickIngestOpenDetail
+  detail: FirstSourceOpenDetail
 ): FirstSourceQuickIngestKind =>
   isFirstSourceQuickIngestKind(detail.firstSourceKind)
     ? detail.firstSourceKind

@@ -804,6 +804,11 @@ def _refresh_runtime_config_cache(context: str) -> bool:
     return True
 
 
+async def _is_secret_configured(section: str, key: str) -> bool:
+    """Return whether a setup secret is configured without blocking the event loop."""
+    return await asyncio.to_thread(setup_manager.is_secret_configured, section, key)
+
+
 def _sanitize_setup_payload(value: Any) -> Any:
     if isinstance(value, str):
         return _SANITIZED_SETUP_DETAIL_MESSAGE if _SUSPICIOUS_SETUP_DETAIL_RE.search(value) else value
@@ -1081,15 +1086,18 @@ async def save_first_run_provider(
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
     credential_configured = False
-    if entry.provider_type is SetupProviderType.HOSTED_API_KEY and entry.api_key_field:
+    if entry.api_key_field:
         normalized_api_key = payload.api_key.strip() if payload.api_key is not None else ""
         if normalized_api_key:
             payload = payload.model_copy(update={"api_key": normalized_api_key})
             credential_configured = True
-        elif setup_manager.is_secret_configured(entry.config_section, entry.api_key_field):
+        elif await _is_secret_configured(entry.config_section, entry.api_key_field):
+            payload = payload.model_copy(update={"api_key": None})
             credential_configured = True
-        else:
+        elif entry.provider_type is SetupProviderType.HOSTED_API_KEY:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="provider_api_key_required")
+        elif payload.api_key is not None:
+            payload = payload.model_copy(update={"api_key": None})
 
     updates = _provider_config_updates(payload)
     if not updates:

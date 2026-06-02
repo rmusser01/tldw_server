@@ -96,6 +96,59 @@ describe("SetupReadinessPanel", () => {
     expect(within(speechLane).getByText(/deferrable/i)).toBeInTheDocument();
   });
 
+  it("marks non-ready chat states as blocking first chat", () => {
+    render(
+      <SetupReadinessPanel
+        status={{
+          ...readinessStatus,
+          lanes: [
+            {
+              lane_id: "chat",
+              label: "Chat",
+              status: "not_configured",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const chatLane = screen.getByTestId("setup-readiness-lane-chat");
+
+    expect(within(chatLane).getByText(/blocks first chat/i)).toBeInTheDocument();
+  });
+
+  it("renders duplicate detail messages without React key warnings", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    render(
+      <SetupReadinessPanel
+        status={{
+          ...readinessStatus,
+          lanes: [
+            {
+              lane_id: "chat",
+              label: "Chat",
+              status: "failed",
+              warnings: [
+                "Retry provider validation.",
+                "Retry provider validation.",
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(
+      consoleError.mock.calls.some((call) =>
+        String(call[0]).includes("Encountered two children with the same key"),
+      ),
+    ).toBe(false);
+    consoleError.mockRestore();
+  });
+
   it("calls retry handler from the retry button", () => {
     const onRetry = vi.fn();
 

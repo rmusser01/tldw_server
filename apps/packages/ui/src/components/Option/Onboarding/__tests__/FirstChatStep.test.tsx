@@ -267,7 +267,7 @@ describe("FirstChatStep", () => {
     expect(onCheckEndpoint).toHaveBeenCalled();
   });
 
-  it("keeps the failed attempt visible while retrying until the new result arrives", async () => {
+  it("clears stale failed attempt details while retrying", async () => {
     let resolveRetry!: (value: {
       status: string;
       provider: string;
@@ -318,7 +318,10 @@ describe("FirstChatStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
 
     expect(verifyFirstChat).toHaveBeenCalledTimes(2);
-    expect(screen.getByText(/invalid api key/i)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid api key/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/credentials need attention/i),
+    ).not.toBeInTheDocument();
 
     resolveRetry({
       status: "ready",

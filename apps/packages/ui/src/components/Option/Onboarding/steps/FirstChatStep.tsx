@@ -170,6 +170,9 @@ export function FirstChatStep({
 
   const handleSend = async () => {
     setRunning(true);
+    setResponse(null);
+    setVerificationError(null);
+    setRequestFailureCategory(null);
     setCompletionError(null);
     try {
       let verification: FirstChatVerifyResponse;

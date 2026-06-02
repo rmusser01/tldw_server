@@ -93,8 +93,8 @@ const DetailList = ({
         {title}
       </dt>
       <dd className="mt-1 space-y-1">
-        {items.map((item) => (
-          <p key={item} className="text-xs text-text-muted">
+        {items.map((item, index) => (
+          <p key={`${item}-${index}`} className="text-xs text-text-muted">
             {item}
           </p>
         ))}
@@ -160,7 +160,8 @@ export function SetupReadinessPanel({
             const deferrable = isOptionalDeferrable(lane, overlays);
             const blocksFirstChat =
               lane.lane_id === "chat" &&
-              (lane.status === "failed" || lane.status === "blocked");
+              lane.status !== "ready" &&
+              lane.status !== "ready_with_warnings";
             return (
               <div
                 key={lane.lane_id}

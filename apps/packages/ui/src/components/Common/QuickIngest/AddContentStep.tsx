@@ -332,10 +332,11 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   }, [urlInput, queueItems, setQueueItems])
 
   const handleAddPastedText = useCallback(() => {
-    const text = pastedTextInput.trim()
-    if (!text) return
+    if (!pastedTextInput.trim()) return
 
-    const file = new File([text], "pasted-text.txt", { type: "text/plain" })
+    const file = new File([pastedTextInput], "pasted-text.txt", {
+      type: "text/plain"
+    })
     const detectedType = detectTypeFromFile(file)
     const item: WizardQueueItem = {
       id: crypto.randomUUID(),

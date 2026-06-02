@@ -168,6 +168,26 @@ describe("useSetupReadinessSummary", () => {
     expect(readinessMocks.getSetupReadinessProfiles).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the last readiness payload visible when refresh fails", async () => {
+    readinessMocks.getSetupReadinessStatus
+      .mockResolvedValueOnce(statusPayload)
+      .mockRejectedValueOnce(new Error("temporary readiness outage"));
+    const { useSetupReadinessSummary } = await import(
+      "../useSetupReadinessSummary"
+    );
+
+    const { result } = renderHook(() => useSetupReadinessSummary());
+    await waitFor(() => expect(result.current.status).toEqual(statusPayload));
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.status).toEqual(statusPayload);
+    expect(result.current.error).toBe("Setup readiness could not be loaded.");
+    expect(result.current.loading).toBe(false);
+  });
+
   it("exposes sanitized fallback error copy on failure", async () => {
     readinessMocks.getSetupReadinessStatus.mockRejectedValueOnce(
       new Error("Traceback: stack secret"),

@@ -47,12 +47,18 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   const inputRef = React.useRef<HTMLInputElement>(null)
   // Drag counter prevents flickering when dragging over nested elements
   const dragCounterRef = React.useRef(0)
+  const hasAutoFocusedRef = React.useRef(false)
 
   const disabled = running || !isOnlineForIngest
 
   React.useEffect(() => {
-    if (!autoFocus || disabled) return
+    if (!autoFocus) {
+      hasAutoFocusedRef.current = false
+      return
+    }
+    if (disabled || hasAutoFocusedRef.current) return
     dropZoneRef.current?.focus()
+    hasAutoFocusedRef.current = true
   }, [autoFocus, disabled])
 
   const qi = useCallback(

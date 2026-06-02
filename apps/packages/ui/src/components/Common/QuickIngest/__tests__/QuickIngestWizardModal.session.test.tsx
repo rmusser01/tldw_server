@@ -278,7 +278,7 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
     }: {
       onOpenCollection?: (collectionId: string) => void
     }) => {
-      const { state } = actual.useIngestWizard()
+      const { state, reset } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-results">
           {state.processingState.status}:{state.results.length}
@@ -295,6 +295,9 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
               Open collection
             </button>
           ) : null}
+          <button type="button" onClick={reset}>
+            Start over
+          </button>
         </div>
       )
     },
@@ -435,6 +438,25 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(useQuickIngestSessionStore.getState().session?.openDetail).toEqual(
       firstSourceDetail
     )
+  })
+
+  it("syncs cleared first-source add mode from wizard reset", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession({
+      firstSourceAddMode: "paste_text",
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await screen.findByTestId("wizard-results")
+    await user.click(screen.getByRole("button", { name: "Start over" }))
+
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.firstSourceAddMode,
+      ).toBeNull()
+    })
   })
 
   it("submits conference batch metadata and item overrides through the session payload", async () => {
