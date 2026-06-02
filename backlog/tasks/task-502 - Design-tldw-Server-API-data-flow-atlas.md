@@ -8,8 +8,13 @@ labels:
 priority: Medium
 documentation:
 - Docs/superpowers/specs/2026-06-02-data-flow-atlas-design.md
+- Docs/superpowers/plans/2026-06-02-data-flow-atlas-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-06-02-data-flow-atlas-design.md
+- Docs/superpowers/plans/2026-06-02-data-flow-atlas-implementation-plan.md
+- Docs/Code_Documentation/Data_Flow_Atlas.md
+- Docs/Architecture.md
+- Docs/Code_Documentation/Code_Map.md
 ---
 
 ## Description
@@ -28,7 +33,7 @@ Create the approved design spec for a newcomer- and maintainer-oriented Mermaid 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design spec written for a Mermaid-only layered data flow atlas. Implementation planning is intentionally deferred until user review approval per brainstorming workflow.
+Implementation is proceeding via Docs/superpowers/plans/2026-06-02-data-flow-atlas-implementation-plan.md. TASK-502 is the authoritative implementation and verification task; TASK-503 is planning-only.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
