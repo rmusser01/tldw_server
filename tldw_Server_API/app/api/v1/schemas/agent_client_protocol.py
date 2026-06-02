@@ -44,6 +44,7 @@ ACPEntryPointStrategy = Literal[
     "custom_template",
 ]
 ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+ACPCredentialState = Literal["ready", "missing", "delegated", "unknown"]
 ACPSetupHealthStatus = Literal["unknown", "ready", "blocked", "not_configured", "partial"]
 _LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
     "adapter_acp": "external_acp_adapter",
@@ -66,10 +67,14 @@ class ACPAgentEntrypointStatus(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     status_message: str = Field(default="")
     docs_url: str | None = Field(default=ACP_COMPATIBILITY_DOCS_URL)
-    credential_state: str | None = Field(default=None)
+    display_command: str = Field(default="")
+    display_binary_found: bool | None = Field(default=None)
+    adapter_found: bool | None = Field(default=None)
+    credential_state: ACPCredentialState = Field(default="unknown")
     adapter_source: str | None = Field(default=None)
+    adapter_package: str | None = Field(default=None)
     adapter_version: str | None = Field(default=None)
-    runtime_backend: str | None = Field(default=None)
+    runtime_backend: str = Field(default="acp_downstream")
 
     @field_validator("entrypoint_strategy", mode="before")
     @classmethod

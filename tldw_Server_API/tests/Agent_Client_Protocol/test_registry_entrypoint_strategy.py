@@ -463,6 +463,69 @@ def test_classifier_adapter_requires_adapter_command() -> None:
     assert result.primary_blocker == "adapter_missing"
 
 
+def test_external_adapter_reports_adapter_missing_without_falling_back_to_agent_command() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="codex-acp",
+        adapter_source="zed-industries/codex-acp",
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: "/usr/bin/codex" if command == "codex" else None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "adapter_missing"
+    assert "adapter_missing" in result.blockers
+    assert "binary_missing" not in result.blockers
+
+
+def test_external_adapter_reports_display_agent_binary_missing_separately() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="codex-acp",
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: "/usr/bin/codex-acp" if command == "codex-acp" else None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "agent_binary_missing"
+    assert "agent_binary_missing" in result.blockers
+
+
+def test_external_adapter_blocks_mutable_npx_latest_invocation() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="npx",
+        acp_args=["@zed-industries/codex-acp@latest"],
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "mutable_adapter_invocation"
+    assert "mutable_adapter_invocation" in result.blockers
+
+
 def test_classifier_custom_template_is_never_probe_ready() -> None:
     entry = AgentRegistryEntry(
         type="custom",
