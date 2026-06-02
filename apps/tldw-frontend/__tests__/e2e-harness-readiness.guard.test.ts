@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 
@@ -186,5 +186,40 @@ describe("e2e harness readiness contracts", () => {
     expect(interactiveReviewSource).toContain("waitForAppShell")
     expect(interactiveReviewSource).not.toContain("waitForLoadState('networkidle'")
     expect(interactiveReviewSource).not.toContain('waitForLoadState("networkidle"')
+  })
+
+  it("keeps onboarding UAT harnesses on real provider and backend behavior", () => {
+    const requiredHarnessFiles = [
+      "e2e/onboarding-uat/playwright.config.ts",
+      "e2e/onboarding-uat/fixtures.ts",
+      "e2e/onboarding-uat/helpers.ts",
+      "e2e/onboarding-uat/scenarios.ts",
+    ]
+    const declaredSpecFiles = [
+      "e2e/onboarding-uat/setup-happy-path.spec.ts",
+      "e2e/onboarding-uat/first-source.spec.ts",
+      "e2e/onboarding-uat/recovery.spec.ts",
+    ]
+    const forbiddenSnippets = [
+      "page.route(",
+      "seedAuth(",
+      "__tldw_first_run_complete",
+      "assistant_setup_dismissed",
+      "waitForTimeout(",
+    ]
+
+    for (const file of requiredHarnessFiles) {
+      expect(existsSync(path.join(process.cwd(), file)), `${file} should exist`).toBe(true)
+    }
+
+    for (const file of [
+      ...requiredHarnessFiles,
+      ...declaredSpecFiles.filter((file) => existsSync(path.join(process.cwd(), file))),
+    ]) {
+      const source = readSource(file)
+      for (const snippet of forbiddenSnippets) {
+        expect(source, `${file} should not contain ${snippet}`).not.toContain(snippet)
+      }
+    }
   })
 })

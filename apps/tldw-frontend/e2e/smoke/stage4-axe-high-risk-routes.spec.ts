@@ -81,11 +81,7 @@ async function waitForRouteToSettle(
     } catch {}
   }
 
-  try {
-    await page.waitForLoadState("networkidle", { timeout: 1_500 })
-  } catch {}
-
-  await page.waitForTimeout(250)
+  await waitForVisualSettle(page, Math.min(LOAD_TIMEOUT, 5_000))
 }
 
 async function analyzeA11yWithRetry(
@@ -170,33 +166,6 @@ function formatAxeViolations(routePath: string, violations: Awaited<ReturnType<A
       return `- ${violation.id} [${violation.impact ?? "unknown"}] -> ${nodes}`
     })
   ].join("\n")
-}
-
-function isTransientAxeNavigationError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /Execution context was destroyed|Frame was detached/i.test(message)
-}
-
-async function runStage4AxeScan(page: Parameters<typeof seedAuth>[0]) {
-  let lastError: unknown
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await waitForVisualSettle(page, LOAD_TIMEOUT)
-
-    try {
-      return await new AxeBuilder({ page })
-        .withRules(STAGE4_A11Y_RULES)
-        .disableRules(["color-contrast"])
-        .analyze()
-    } catch (error) {
-      lastError = error
-      if (!isTransientAxeNavigationError(error) || attempt === 2) {
-        throw error
-      }
-    }
-  }
-
-  throw lastError ?? new Error("Stage 4 Axe scan failed without a captured error.")
 }
 
 async function waitForHighRiskRouteReady(
