@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { resolveAudioCapturePlan } from "@/audio"
+import { resolveAudioCapturePlan, type AudioCaptureRequestedSource } from "@/audio"
 
 describe("resolveAudioCapturePlan", () => {
   it("forces browser dictation off when a non-default mic is selected", () => {
-    const requestedSource = { sourceKind: "mic_device", deviceId: "usb-1" } as const
+    const requestedSource: AudioCaptureRequestedSource = {
+      sourceKind: "mic_device",
+      deviceId: "usb-1"
+    }
     const plan = resolveAudioCapturePlan({
       featureGroup: "dictation",
       requestedSource,
