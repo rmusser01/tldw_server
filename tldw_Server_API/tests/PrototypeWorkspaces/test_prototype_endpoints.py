@@ -119,6 +119,56 @@ def _seed_external_access(
     )
 
 
+def _seed_pending_promotion_request(
+    services: SimpleNamespace,
+    *,
+    title: str,
+    share_link_id: int,
+    snapshot_id: str,
+    designated_promoter_ids: list[int] | None = None,
+) -> tuple[dict, dict, dict, dict]:
+    workspace, _seed_snapshot = _seed_workspace(
+        services,
+        title=title,
+        designated_promoter_ids=designated_promoter_ids,
+    )
+    access_context = _seed_external_access(
+        services,
+        prototype_workspace_id=workspace["id"],
+        share_link_id=share_link_id,
+    )
+    session_result = _run(
+        services.service.create_or_reuse_branch_session(
+            prototype_workspace_id=workspace["id"],
+            actor_type="external_collaborator",
+            actor_shared_actor_id=access_context.shared_actor_id,
+            request_nonce=f"req_{snapshot_id}",
+            share_link_id=share_link_id,
+        )
+    )
+    session = session_result["session"]
+    candidate_snapshot = _run(
+        services.repo.create_snapshot(
+            prototype_workspace_id=workspace["id"],
+            snapshot_id=snapshot_id,
+            created_by_shared_actor_id=access_context.shared_actor_id,
+            parent_snapshot_id=session["base_snapshot_id"],
+            created_from_session_id=session["id"],
+            storage_ref=f"prototype://{snapshot_id}",
+            prompt_summary="Ready for review",
+        )
+    )
+    promotion_request = _run(
+        services.repo.create_promotion_request(
+            prototype_workspace_id=workspace["id"],
+            prototype_session_id=session["id"],
+            candidate_snapshot_id=candidate_snapshot["snapshot_id"],
+            requested_by_shared_actor_id=access_context.shared_actor_id,
+        )
+    )
+    return workspace, session, candidate_snapshot, promotion_request
+
+
 @pytest.fixture
 def test_services(monkeypatch, repo, tmp_path):
     from tldw_Server_API.app.api.v1.endpoints import prototype_workspaces as prototype_endpoints
@@ -899,6 +949,202 @@ class TestPrototypeWorkspaceEndpoints:
         body = review.json()
         assert body["status"] == "promoted"
         assert body["canonical_snapshot_id"] == candidate_snapshot["snapshot_id"]
+
+    def test_review_endpoint_delegates_decision_to_service(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[dict] = []
+
+        async def fake_review_promotion_request(**kwargs):
+            calls.append(kwargs)
+            return {
+                "status": "rejected",
+                "prototype_workspace_id": "pw_delegated",
+                "candidate_snapshot_id": "psnap_delegated",
+                "canonical_snapshot_id": "psnap_canonical",
+                "details": {"review_notes": "Delegated"},
+            }
+
+        async def fail_if_endpoint_reads_request(_promotion_request_id: str):
+            raise AssertionError("endpoint should delegate promotion review lookup to the service")
+
+        monkeypatch.setattr(
+            test_services.service,
+            "review_promotion_request",
+            fake_review_promotion_request,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            test_services.repo,
+            "get_promotion_request",
+            fail_if_endpoint_reads_request,
+        )
+
+        review = client.post(
+            "/api/v1/prototype-promotions/ppr_delegated/review",
+            json={
+                "decision": "reject",
+                "review_notes": "Delegated",
+            },
+        )
+
+        assert review.status_code == 200
+        assert review.json() == {
+            "status": "rejected",
+            "failure_code": None,
+            "prototype_workspace_id": "pw_delegated",
+            "candidate_snapshot_id": "psnap_delegated",
+            "canonical_snapshot_id": "psnap_canonical",
+            "preview_handle": None,
+            "details": {"review_notes": "Delegated"},
+        }
+        assert calls == [
+            {
+                "promotion_request_id": "ppr_delegated",
+                "reviewer_user_id": 1,
+                "decision": "reject",
+                "review_notes": "Delegated",
+                "review_baseline_snapshot_id": None,
+            }
+        ]
+
+    def test_owner_can_reject_promotion_request(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, _session, candidate_snapshot, promotion_request = _seed_pending_promotion_request(
+            test_services,
+            title="Promotion reject prototype",
+            share_link_id=63,
+            snapshot_id="psnap_reject_candidate",
+        )
+
+        review = client.post(
+            f"/api/v1/prototype-promotions/{promotion_request['id']}/review",
+            json={
+                "decision": "reject",
+                "review_notes": "Needs another pass",
+            },
+        )
+
+        assert review.status_code == 200
+        body = review.json()
+        assert body["status"] == "rejected"
+        assert body["prototype_workspace_id"] == workspace["id"]
+        assert body["candidate_snapshot_id"] == candidate_snapshot["snapshot_id"]
+        assert body["canonical_snapshot_id"] == workspace["canonical_snapshot_id"]
+        assert body["details"] == {"review_notes": "Needs another pass"}
+        updated_request = _run(test_services.repo.get_promotion_request(promotion_request["id"]))
+        assert updated_request["status"] == "rejected"
+        assert updated_request["reviewed_by_user_id"] == 1
+
+    def test_non_promoter_cannot_review_promotion_request(
+        self,
+        test_app: FastAPI,
+        test_services: SimpleNamespace,
+    ) -> None:
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+
+        async def _fake_non_promoter() -> User:
+            return User(
+                id=3,
+                username="viewer",
+                email="viewer@test.com",
+                roles=[],
+                permissions=[],
+            )
+
+        test_app.dependency_overrides[get_request_user] = _fake_non_promoter
+        client = TestClient(test_app)
+        _workspace, _session, _candidate_snapshot, promotion_request = _seed_pending_promotion_request(
+            test_services,
+            title="Promotion forbidden prototype",
+            share_link_id=64,
+            snapshot_id="psnap_forbidden_review_candidate",
+        )
+
+        review = client.post(
+            f"/api/v1/prototype-promotions/{promotion_request['id']}/review",
+            json={
+                "decision": "reject",
+                "review_notes": "I should not be able to review this",
+            },
+        )
+
+        assert review.status_code == 403
+        _assert_prototype_error(
+            review,
+            category="unauthorized",
+            frontend_state="unauthorized",
+            retryable=False,
+        )
+        assert review.json()["detail"]["message"] == "Reviewer does not have promotion permissions"
+        updated_request = _run(test_services.repo.get_promotion_request(promotion_request["id"]))
+        assert updated_request["status"] == "pending"
+
+    def test_review_missing_promotion_request_returns_404(
+        self,
+        client: TestClient,
+    ) -> None:
+        review = client.post(
+            "/api/v1/prototype-promotions/ppr_missing/review",
+            json={
+                "decision": "reject",
+                "review_notes": "Cannot find it",
+            },
+        )
+
+        assert review.status_code == 404
+        _assert_prototype_error(
+            review,
+            category="missing",
+            frontend_state="missing",
+            retryable=False,
+        )
+        assert review.json()["detail"]["message"] == "Prototype promotion request not found"
+
+    def test_review_non_pending_promotion_request_returns_409(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        _workspace, _session, _candidate_snapshot, promotion_request = _seed_pending_promotion_request(
+            test_services,
+            title="Promotion already reviewed prototype",
+            share_link_id=65,
+            snapshot_id="psnap_already_reviewed_candidate",
+        )
+        _run(
+            test_services.repo.update_promotion_request(
+                promotion_request["id"],
+                status="rejected",
+                reviewed_by_user_id=1,
+                review_notes="Already decided",
+            )
+        )
+
+        review = client.post(
+            f"/api/v1/prototype-promotions/{promotion_request['id']}/review",
+            json={
+                "decision": "approve",
+                "review_notes": "Second decision",
+            },
+        )
+
+        assert review.status_code == 409
+        _assert_prototype_error(
+            review,
+            category="conflict",
+            frontend_state="conflict",
+            retryable=False,
+        )
+        assert review.json()["detail"]["message"] == (
+            "Prototype promotion request is not pending: rejected"
+        )
 
     def test_preview_grant_renewal_returns_updated_expiry(
         self,

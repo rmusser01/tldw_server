@@ -412,6 +412,64 @@ class PrototypeWorkspaceService:
             details={"preview_url": preview_grant["preview_url"]},
         ).to_dict()
 
+    async def review_promotion_request(
+        self,
+        *,
+        promotion_request_id: str,
+        reviewer_user_id: int,
+        decision: str,
+        review_notes: str | None = None,
+        review_baseline_snapshot_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Review a promotion request through one service-owned boundary."""
+        promotion_request = await self._repo.get_promotion_request(promotion_request_id)
+        if not promotion_request:
+            raise ValueError("Prototype promotion request not found")
+
+        workspace_id = str(promotion_request.get("prototype_workspace_id") or "")
+        workspace = await self._repo.get_workspace(workspace_id)
+        if not workspace:
+            raise ValueError("Prototype workspace not found")
+
+        reviewer_id = int(reviewer_user_id)
+        if not self._is_promoter(workspace, reviewer_id):
+            raise PermissionError("reviewer does not have prototype.promote permission")
+
+        normalized_decision = str(decision or "").strip().lower()
+        current_status = str(promotion_request.get("status") or "").strip().lower()
+        if current_status != "pending":
+            raise ValueError(f"Prototype promotion request is not pending: {current_status}")
+
+        candidate_snapshot_id = str(promotion_request.get("candidate_snapshot_id") or "")
+        if normalized_decision == "reject":
+            updated = await self._repo.update_promotion_request(
+                promotion_request_id,
+                status="rejected",
+                reviewed_by_user_id=reviewer_id,
+                review_notes=review_notes,
+            )
+            if not updated:
+                raise ValueError("Prototype promotion request not found")
+            return {
+                "status": "rejected",
+                "prototype_workspace_id": str(updated["prototype_workspace_id"]),
+                "candidate_snapshot_id": str(updated["candidate_snapshot_id"]),
+                "canonical_snapshot_id": workspace.get("canonical_snapshot_id"),
+                "details": {"review_notes": updated.get("review_notes")},
+            }
+
+        if normalized_decision == "approve":
+            return await self.promote_candidate(
+                prototype_workspace_id=workspace_id,
+                candidate_snapshot_id=candidate_snapshot_id,
+                reviewer_user_id=reviewer_id,
+                review_baseline_snapshot_id=review_baseline_snapshot_id,
+                promotion_request_id=promotion_request_id,
+                review_notes=review_notes,
+            )
+
+        raise ValueError(f"Unsupported promotion review decision: {decision}")
+
     async def _detect_stale_candidate(
         self,
         *,

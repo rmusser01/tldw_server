@@ -106,10 +106,15 @@ def _assert_sanitized_warning_log(
 
 class _FakeMediaAuxDb:
     def __init__(self, *, keywords: list[str] | None = None, media_exists: bool = True):
+        from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
+            ensure_sqlite_document_workspace_schema,
+        )
+
         self._keywords = keywords or []
         self._media_exists = media_exists
         self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        ensure_sqlite_document_workspace_schema(self._conn)
 
     def fetch_all_keywords(self) -> list[str]:
         return list(self._keywords)
@@ -132,6 +137,20 @@ class _FakeMediaAuxDb:
             self._conn.commit()
         finally:
             pass
+
+    def _execute_with_connection(self, conn, query, params=None):
+        cursor = conn.cursor()
+        cursor.execute(query, params or ())
+        return cursor
+
+    def _fetchone_with_connection(self, conn, query, params=None):
+        cursor = self._execute_with_connection(conn, query, params)
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def _fetchall_with_connection(self, conn, query, params=None):
+        cursor = self._execute_with_connection(conn, query, params)
+        return [dict(row) for row in cursor.fetchall()]
 
     def close(self) -> None:
         self._conn.close()
@@ -169,22 +188,10 @@ class _FailingReadingProgressDb(_FakeMediaAuxDb):
     def __init__(self, operation_exc: Exception):
         super().__init__()
         self._operation_exc = operation_exc
-        self._transaction_count = 0
 
     @contextmanager
     def transaction(self):
-        self._transaction_count += 1
-        if self._transaction_count > 1:
-            raise self._operation_exc
-
-        with super().transaction() as conn:
-            yield conn
-
-
-class _AlwaysFailingTransactionDb:
-    @contextmanager
-    def transaction(self):
-        raise _reading_progress_failure()
+        raise self._operation_exc
         yield
 
 
@@ -516,6 +523,50 @@ def test_reading_progress_returns_no_progress_payload_instead_of_500(media_auxil
     assert response.json() == {"media_id": 42, "has_progress": False}  # nosec B101
 
 
+def test_reading_progress_endpoint_delegates_to_repository(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import reading_progress as reading_progress_endpoints
+
+    repo_calls = []
+
+    class FakeRepository:
+        def get_reading_progress(self, *, media_id, user_id):
+            repo_calls.append(("get_reading_progress", media_id, user_id))
+            return {
+                "media_id": media_id,
+                "user_id": user_id,
+                "current_page": 3,
+                "total_pages": 10,
+                "zoom_level": 125,
+                "view_mode": "continuous",
+                "cfi": "epubcfi(/6/2)",
+                "percentage": 30.0,
+                "last_read_at": "2026-01-01T00:00:00+00:00",
+            }
+
+    class FakeRepositoryFactory:
+        @staticmethod
+        def from_media_db(db):
+            repo_calls.append(("from_media_db", db))
+            return FakeRepository()
+
+    monkeypatch.setattr(
+        reading_progress_endpoints,
+        "DocumentWorkspaceRepository",
+        FakeRepositoryFactory,
+        raising=False,
+    )
+
+    with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, db):
+        response = client.get("/api/v1/media/42/progress")
+
+    assert response.status_code == 200, response.text  # nosec B101
+    payload = response.json()
+    assert payload["media_id"] == 42  # nosec B101
+    assert payload["current_page"] == 3  # nosec B101
+    assert payload["percent_complete"] == 30.0  # nosec B101
+    assert repo_calls == [("from_media_db", db), ("get_reading_progress", 42, "1")]  # nosec B101
+
+
 def test_reading_progress_treats_corrupt_rows_as_missing_progress(media_auxiliary_client):
     client, db = media_auxiliary_client
 
@@ -549,19 +600,6 @@ def test_reading_progress_treats_corrupt_rows_as_missing_progress(media_auxiliar
 
     assert response.status_code == 200, response.text  # nosec B101
     assert response.json() == {"media_id": 99, "has_progress": False}  # nosec B101
-
-
-def test_reading_progress_sanitizes_table_ensure_warning(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints.media import reading_progress as reading_progress_endpoints
-
-    logger_stub = _patch_reading_progress_logger(monkeypatch)
-
-    reading_progress_endpoints._ensure_progress_table(_AlwaysFailingTransactionDb())
-
-    _assert_sanitized_warning_log(
-        logger_stub,
-        "Could not create reading progress table",
-    )
 
 
 def test_reading_progress_sanitizes_corrupt_row_warning(monkeypatch):

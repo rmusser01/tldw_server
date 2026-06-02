@@ -892,6 +892,30 @@ class JobEvent(BaseModel):
     created_at: str
 
 
+def _parse_job_event_attrs(attrs: Any) -> dict[str, Any]:
+    try:
+        attrs_obj = _json.loads(attrs) if isinstance(attrs, str) else (attrs or {})
+    except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
+        return {}
+    return attrs_obj if isinstance(attrs_obj, dict) else {}
+
+
+def _job_event_from_raw_row(row: dict[str, Any]) -> JobEvent:
+    return JobEvent(
+        id=int(row.get("id")),
+        job_id=row.get("job_id"),
+        domain=row.get("domain"),
+        queue=row.get("queue"),
+        job_type=row.get("job_type"),
+        event_type=str(row.get("event_type")),
+        attrs=_parse_job_event_attrs(row.get("attrs_json")),
+        owner_user_id=row.get("owner_user_id"),
+        request_id=row.get("request_id"),
+        trace_id=row.get("trace_id"),
+        created_at=str(row.get("created_at")),
+    )
+
+
 @router.get("/jobs/events", response_model=list[JobEvent])
 async def list_job_events(
     after_id: int = 0,
@@ -912,70 +936,20 @@ async def list_job_events(
         # Admin list; allow admin bypass with optional domain filter
         _set_pg_rls_for_user(admin_user, domain)
     jm = JobManager(backend=backend, db_url=db_url)
-    conn = jm._connect()
-    try:
-        rows = []
-        if jm.backend == "postgres":
-            with jm._pg_cursor(conn) as cur:
-                query = "SELECT id, job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at FROM job_events WHERE id > %s"
-                params = [int(after_id)]
-                if domain:
-                    query += " AND domain = %s"
-                    params.append(domain)
-                if queue:
-                    query += " AND queue = %s"
-                    params.append(queue)
-                if job_type:
-                    query += " AND job_type = %s"
-                    params.append(job_type)
-                query += " ORDER BY id ASC LIMIT %s"
-                params.append(int(min(1000, max(1, limit))))
-                cur.execute(query, tuple(params))
-                rows = cur.fetchall() or []
-        else:
-            query = "SELECT id, job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at FROM job_events WHERE id > ?"
-            params = [int(after_id)]
-            if domain:
-                query += " AND domain = ?"
-                params.append(domain)
-            if queue:
-                query += " AND queue = ?"
-                params.append(queue)
-            if job_type:
-                query += " AND job_type = ?"
-                params.append(job_type)
-            query += " ORDER BY id ASC LIMIT ?"
-            params.append(int(min(1000, max(1, limit))))
-            rows = conn.execute(query, tuple(params)).fetchall() or []
-        events: list[JobEvent] = []
-        for r in rows:
-            try:
-                # r can be dict-row or tuple
-                if isinstance(r, dict):
-                    attrs = r.get("attrs_json")
-                    try:
-                        attrs_obj = _json.loads(attrs) if isinstance(attrs, str) else (attrs or {})
-                    except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                        attrs_obj = {}
-                    events.append(JobEvent(
-                        id=int(r.get("id")), job_id=(r.get("job_id")), domain=r.get("domain"), queue=r.get("queue"), job_type=r.get("job_type"),
-                        event_type=str(r.get("event_type")), attrs=attrs_obj, owner_user_id=r.get("owner_user_id"), request_id=r.get("request_id"), trace_id=r.get("trace_id"), created_at=str(r.get("created_at"))
-                    ))
-                else:
-                    attrs_val = r[6]
-                    try:
-                        attrs_obj = _json.loads(attrs_val) if isinstance(attrs_val, str) else (attrs_val or {})
-                    except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                        attrs_obj = {}
-                    events.append(JobEvent(
-                        id=int(r[0]), job_id=(r[1]), domain=r[2], queue=r[3], job_type=r[4], event_type=str(r[5]), attrs=attrs_obj, owner_user_id=r[7], request_id=r[8], trace_id=r[9], created_at=str(r[10])
-                    ))
-            except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                continue
-        return events
-    finally:
-        with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
-            conn.close()
+    rows = jm.list_job_events_after(
+        after_id=int(after_id),
+        limit=limit,
+        domain=domain,
+        queue=queue,
+        job_type=job_type,
+    )
+    events: list[JobEvent] = []
+    for row in rows:
+        try:
+            events.append(_job_event_from_raw_row(row))
+        except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
+            continue
+    return events
 
 
 @router.get(
@@ -1064,52 +1038,19 @@ async def stream_job_events(
                     break
             except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
                 pass
-            conn = jm._connect()
             try:
-                if jm.backend == "postgres":
-                    with jm._pg_cursor(conn) as cur:
-                        query = "SELECT id, event_type, attrs_json FROM job_events WHERE id > %s"
-                        params: list[Any] = [int(nonlocal_after_id)]
-                        if domain:
-                            query += " AND domain = %s"
-                            params.append(domain)
-                        if queue:
-                            query += " AND queue = %s"
-                            params.append(queue)
-                        if job_type:
-                            query += " AND job_type = %s"
-                            params.append(job_type)
-                        query += " ORDER BY id ASC LIMIT 500"
-                        cur.execute(query, tuple(params))
-                        rows = cur.fetchall() or []
-                else:
-                    query = "SELECT id, event_type, attrs_json FROM job_events WHERE id > ?"
-                    params2: list[Any] = [int(nonlocal_after_id)]
-                    if domain:
-                        query += " AND domain = ?"
-                        params2.append(domain)
-                    if queue:
-                        query += " AND queue = ?"
-                        params2.append(queue)
-                    if job_type:
-                        query += " AND job_type = ?"
-                        params2.append(job_type)
-                    query += " ORDER BY id ASC LIMIT 500"
-                    rows = conn.execute(query, tuple(params2)).fetchall() or []
+                rows = jm.list_job_events_after(
+                    after_id=int(nonlocal_after_id),
+                    limit=500,
+                    domain=domain,
+                    queue=queue,
+                    job_type=job_type,
+                )
                 if rows:
-                    for r in rows:
-                        if isinstance(r, dict):
-                            eid = int(r.get("id"))
-                            et = str(r.get("event_type"))
-                            attrs = r.get("attrs_json")
-                        else:
-                            eid = int(r[0])
-                            et = str(r[1])
-                            attrs = r[2]
-                        try:
-                            attrs_obj = _json.loads(attrs) if isinstance(attrs, str) else (attrs or {})
-                        except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                            attrs_obj = {}
+                    for row in rows:
+                        eid = int(row.get("id"))
+                        et = str(row.get("event_type"))
+                        attrs_obj = _parse_job_event_attrs(row.get("attrs_json"))
                         # Preserve SSE id line for clients using Last-Event-ID
                         await stream.send_event("job", {"event": et, "attrs": attrs_obj}, event_id=str(eid))
                         with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
@@ -1126,9 +1067,6 @@ async def stream_job_events(
             except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
                 # Swallow transient errors and continue after a short delay; heartbeat covers liveness
                 await asyncio.sleep(poll_interval)
-            finally:
-                with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
-                    conn.close()
 
     async def _gen():
         prod_task = asyncio.create_task(_producer())

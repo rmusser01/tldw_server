@@ -593,72 +593,49 @@ async def create_promotion_request(
     response_model=PrototypePromotionReviewResponse,
     status_code=status.HTTP_200_OK,
     summary="Review a prototype promotion request",
-    responses=prototype_error_responses(status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+    responses=prototype_error_responses(
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+    ),
 )
 async def review_promotion_request(
     promotion_request_id: str,
     body: PrototypePromotionReviewRequest,
     user: User = Depends(get_request_user),
-    repo: Any = Depends(_repo_dependency),
     service: Any = Depends(_service_dependency),
 ) -> PrototypePromotionReviewResponse:
     """Review a promotion request and promote or reject the candidate snapshot."""
-    promotion_request = await repo.get_promotion_request(promotion_request_id)
-    if not promotion_request:
-        raise prototype_http_error(
-            status_code=status.HTTP_404_NOT_FOUND,
-            category="missing",
-            message="Prototype promotion request not found",
-            frontend_state="missing",
+    try:
+        result = await service.review_promotion_request(
+            promotion_request_id=promotion_request_id,
+            reviewer_user_id=_coerce_user_id(user),
+            decision=body.decision,
+            review_notes=body.review_notes,
+            review_baseline_snapshot_id=body.review_baseline_snapshot_id,
         )
-
-    workspace = await repo.get_workspace(str(promotion_request["prototype_workspace_id"]))
-    if not workspace:
-        raise prototype_http_error(
-            status_code=status.HTTP_404_NOT_FOUND,
-            category="missing",
-            message="Prototype workspace not found",
-            frontend_state="missing",
-        )
-    reviewer_user_id = _coerce_user_id(user)
-    if not service._is_promoter(workspace, reviewer_user_id):
+    except PermissionError as exc:
         raise prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
             category="unauthorized",
             message="Reviewer does not have promotion permissions",
             frontend_state="unauthorized",
-        )
-
-    if body.decision == "reject":
-        updated = await repo.update_promotion_request(
-            promotion_request_id,
-            status="rejected",
-            reviewed_by_user_id=reviewer_user_id,
-            review_notes=body.review_notes,
-        )
-        if not updated:
+        ) from exc
+    except ValueError as exc:
+        message = str(exc)
+        if "not pending" in message:
             raise prototype_http_error(
-                status_code=status.HTTP_404_NOT_FOUND,
-                category="missing",
-                message="Prototype promotion request not found",
-                frontend_state="missing",
-            )
-        return PrototypePromotionReviewResponse(
-            status="rejected",
-            prototype_workspace_id=str(updated["prototype_workspace_id"]),
-            candidate_snapshot_id=str(updated["candidate_snapshot_id"]),
-            canonical_snapshot_id=workspace.get("canonical_snapshot_id"),
-            details={"review_notes": updated.get("review_notes")},
-        )
-
-    result = await service.promote_candidate(
-        prototype_workspace_id=str(promotion_request["prototype_workspace_id"]),
-        candidate_snapshot_id=str(promotion_request["candidate_snapshot_id"]),
-        reviewer_user_id=reviewer_user_id,
-        review_baseline_snapshot_id=body.review_baseline_snapshot_id,
-        promotion_request_id=promotion_request_id,
-        review_notes=body.review_notes,
-    )
+                status_code=status.HTTP_409_CONFLICT,
+                category="conflict",
+                message=message,
+                frontend_state="conflict",
+            ) from exc
+        raise prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message=message,
+            frontend_state="missing",
+        ) from exc
     return PrototypePromotionReviewResponse.model_validate(result)
 
 

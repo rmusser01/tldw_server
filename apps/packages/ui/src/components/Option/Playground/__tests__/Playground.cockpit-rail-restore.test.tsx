@@ -42,7 +42,7 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
-  it("mounts the context restore control on the left edge while runtime stays expanded", () => {
+  it("mounts the context restore control beside the app rail lane while runtime stays expanded", () => {
     const { onLeftRailVisibleChange } = renderShell({
       leftRailVisible: false,
       rightRailVisible: true,
@@ -61,10 +61,11 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(contextRestore).toHaveTextContent("Context rail");
     expect(contextRestore.parentElement).toHaveClass(
       "absolute",
-      "left-0",
+      "left-10",
       "top-1/2",
       "-translate-y-1/2",
     );
+    expect(contextRestore.parentElement).not.toHaveClass("left-0");
     expect(contextRestore.parentElement).not.toHaveClass("relative");
     expect(
       screen

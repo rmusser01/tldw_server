@@ -417,37 +417,20 @@ async def stream_audio_job_progress(
             except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS:
                 pass
 
-            conn = jm._connect()
-            rows = []
             try:
-                if jm.backend == "postgres":
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
-                            "SELECT id, event_type, attrs_json FROM job_events WHERE job_id = %s AND id > %s ORDER BY id ASC LIMIT 200",
-                            (int(job_id), int(after_id)),
-                        )
-                        rows = cur.fetchall() or []
-                else:
-                    rows = conn.execute(
-                        "SELECT id, event_type, attrs_json FROM job_events WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT 200",
-                        (int(job_id), int(after_id)),
-                    ).fetchall() or []
+                rows = jm.list_job_events_after(
+                    after_id=int(after_id),
+                    limit=200,
+                    job_id=int(job_id),
+                )
             except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS:
                 rows = []
-            finally:
-                with contextlib.suppress(_AUDIO_JOBS_NONCRITICAL_EXCEPTIONS):
-                    conn.close()
 
             if rows:
-                for r in rows:
-                    if isinstance(r, dict):
-                        eid = int(r.get("id"))
-                        et = str(r.get("event_type"))
-                        attrs = r.get("attrs_json")
-                    else:
-                        eid = int(r[0])
-                        et = str(r[1])
-                        attrs = r[2]
+                for row in rows:
+                    eid = int(row.get("id"))
+                    et = str(row.get("event_type"))
+                    attrs = row.get("attrs_json")
                     try:
                         attrs_obj = json.loads(attrs) if isinstance(attrs, str) else (attrs or {})
                     except (TypeError, ValueError):

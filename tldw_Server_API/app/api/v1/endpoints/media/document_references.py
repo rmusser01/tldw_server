@@ -28,6 +28,9 @@ from tldw_Server_API.app.api.v1.utils.cache import (
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
+    DocumentWorkspaceRepository,
+)
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -72,7 +75,6 @@ REFERENCE_SECTION_END_CORE_PATTERN = re.compile(
 )
 
 REFERENCE_TAIL_NUMBERED_PATTERN = re.compile(r"^\s*(?:\[+\d{1,6}\]|\d+[\.\)])\s+")
-PARSED_REFERENCES_CACHE_TABLE = "document_parsed_references_cache"
 
 # DOI/arXiv extraction patterns
 DOI_PATTERN = r"(?:https?://(?:dx\.)?doi\.org/)?10\.\d{4,}/[^\s\]\)>\"']+"
@@ -198,135 +200,6 @@ def _set_provider_cooldown(provider: str) -> None:
 def _hash_reference_content(content: str) -> str:
     """Build a stable hash for parsed-reference cache keys."""
     return hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
-
-
-def _ensure_parsed_references_cache_table(db: Any) -> None:
-    """Ensure persistent parsed-reference cache table exists."""
-    create_sql = f"""
-    CREATE TABLE IF NOT EXISTS {PARSED_REFERENCES_CACHE_TABLE} (
-        media_id INTEGER NOT NULL,
-        user_id TEXT NOT NULL,
-        parser_version TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        references_json TEXT NOT NULL,
-        total_detected INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (media_id, user_id, parser_version, content_hash)
-    )
-    """
-    lookup_index_sql = f"""
-    CREATE INDEX IF NOT EXISTS idx_doc_refs_cache_lookup
-    ON {PARSED_REFERENCES_CACHE_TABLE}(media_id, user_id, parser_version)
-    """
-    try:
-        with db.transaction() as conn:
-            db.execute_query(create_sql, connection=conn)
-            db.execute_query(lookup_index_sql, connection=conn)
-    except Exception:
-        logger.warning("Could not ensure parsed references cache table")
-
-
-def _normalize_cached_reference_list(raw: Any) -> list[str]:
-    """Normalize cached reference payloads to a list of non-empty strings."""
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    for item in raw:
-        if isinstance(item, str):
-            text = item
-        elif isinstance(item, dict):
-            text = str(item.get("raw_text", ""))
-        else:
-            text = str(item)
-        cleaned = text.strip()
-        if cleaned:
-            out.append(cleaned)
-    return out
-
-
-def _load_parsed_references_cache(
-    db: Any,
-    *,
-    media_id: int,
-    user_id: str,
-    content_hash: str,
-) -> tuple[list[str], int] | None:
-    """Return cached parsed references for the current content hash, if available."""
-    query_template = """
-    SELECT references_json, total_detected
-    FROM {PARSED_REFERENCES_CACHE_TABLE}
-    WHERE media_id = ? AND user_id = ? AND parser_version = ? AND content_hash = ?
-    LIMIT 1
-    """
-    query = query_template.format(PARSED_REFERENCES_CACHE_TABLE=PARSED_REFERENCES_CACHE_TABLE)  # nosec B608
-    try:
-        cursor = db.execute_query(
-            query,
-            (media_id, user_id, REFERENCES_PARSER_VERSION, content_hash),
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        row_dict = dict(row)
-        payload = row_dict.get("references_json")
-        if not isinstance(payload, str) or not payload:
-            return None
-        parsed_payload = json.loads(payload)
-        parsed_refs = _normalize_cached_reference_list(parsed_payload)
-        total_detected = int(row_dict.get("total_detected") or len(parsed_refs))
-        if not parsed_refs and total_detected <= 0:
-            return None
-        return parsed_refs, max(total_detected, len(parsed_refs))
-    except Exception:
-        logger.debug("Failed loading parsed references cache")
-        return None
-
-
-def _save_parsed_references_cache(
-    db: Any,
-    *,
-    media_id: int,
-    user_id: str,
-    content_hash: str,
-    references: list[str],
-    total_detected: int,
-) -> None:
-    """Persist parsed references in DB for fast future reads."""
-    delete_sql_template = """
-    DELETE FROM {PARSED_REFERENCES_CACHE_TABLE}
-    WHERE media_id = ? AND user_id = ? AND parser_version = ?
-    """
-    delete_sql = delete_sql_template.format(PARSED_REFERENCES_CACHE_TABLE=PARSED_REFERENCES_CACHE_TABLE)  # nosec B608
-    insert_sql_template = """
-    INSERT INTO {PARSED_REFERENCES_CACHE_TABLE}
-    (media_id, user_id, parser_version, content_hash, references_json, total_detected, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """
-    insert_sql = insert_sql_template.format(PARSED_REFERENCES_CACHE_TABLE=PARSED_REFERENCES_CACHE_TABLE)  # nosec B608
-    references_json = json.dumps(references, ensure_ascii=False)
-    updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    try:
-        with db.transaction() as conn:
-            db.execute_query(
-                delete_sql,
-                (media_id, user_id, REFERENCES_PARSER_VERSION),
-                connection=conn,
-            )
-            db.execute_query(
-                insert_sql,
-                (
-                    media_id,
-                    user_id,
-                    REFERENCES_PARSER_VERSION,
-                    content_hash,
-                    references_json,
-                    int(total_detected),
-                    updated_at,
-                ),
-                connection=conn,
-            )
-    except Exception:
-        logger.debug("Failed saving parsed references cache")
 
 
 def _find_reference_section(content: str) -> str | None:
@@ -1530,14 +1403,18 @@ async def get_document_references(
         return response
 
     # 4. Parse individual references (with DB-backed parsed-reference cache)
-    _ensure_parsed_references_cache_table(db)
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     refs_hash = _hash_reference_content(refs_section)
-    cached_parsed = _load_parsed_references_cache(
-        db,
-        media_id=media_id,
-        user_id=user_id,
-        content_hash=refs_hash,
-    )
+    try:
+        cached_parsed = repo.get_parsed_references_cache(
+            media_id=media_id,
+            user_id=user_id,
+            parser_version=REFERENCES_PARSER_VERSION,
+            content_hash=refs_hash,
+        )
+    except Exception:
+        logger.debug("Failed loading parsed references cache")
+        cached_parsed = None
     if cached_parsed is not None:
         raw_refs_all, total_detected = cached_parsed
     else:
@@ -1546,14 +1423,18 @@ async def get_document_references(
             max_references=None,
         )
         if raw_refs_all:
-            _save_parsed_references_cache(
-                db,
-                media_id=media_id,
-                user_id=user_id,
-                content_hash=refs_hash,
-                references=raw_refs_all,
-                total_detected=total_detected,
-            )
+            try:
+                repo.upsert_parsed_references_cache(
+                    media_id=media_id,
+                    user_id=user_id,
+                    parser_version=REFERENCES_PARSER_VERSION,
+                    content_hash=refs_hash,
+                    references=raw_refs_all,
+                    total_detected=total_detected,
+                    updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                )
+            except Exception:
+                logger.debug("Failed saving parsed references cache")
 
     if not raw_refs_all:
         logger.debug("No individual references parsed from media_id={}", media_id)

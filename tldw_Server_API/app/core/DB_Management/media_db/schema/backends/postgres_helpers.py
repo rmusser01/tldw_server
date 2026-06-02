@@ -11,6 +11,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.policies import (
     ensure_postgres_policies,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
+    ensure_postgres_document_workspace_schema,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     apply_postgres_core_media_schema,
 )
@@ -54,6 +57,7 @@ def ensure_postgres_post_core_structures(
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)
     db._ensure_postgres_data_tables(conn)
+    ensure_postgres_document_workspace_schema(conn)
     db._ensure_postgres_source_hash_column(conn)
     db._ensure_postgres_claims_extensions(conn)
     db._ensure_postgres_email_schema(conn)
@@ -116,4 +120,8 @@ def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:
         ensure_postgres_post_core_structures(db, conn)
 
 
-__all__ = ["bootstrap_postgres_schema", "ensure_postgres_post_core_structures"]
+__all__ = [
+    "bootstrap_postgres_schema",
+    "ensure_postgres_document_workspace_schema",
+    "ensure_postgres_post_core_structures",
+]

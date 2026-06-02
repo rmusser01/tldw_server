@@ -1,4 +1,3 @@
-import os
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -67,3 +66,80 @@ def test_events_emitted_for_core_paths_sqlite(tmp_path, monkeypatch, events):
     affected = jm.apply_ttl_policies(age_seconds=0, runtime_seconds=None, action="cancel", domain="d")
     assert isinstance(affected, int)
     assert any(n == "jobs.ttl_sweep" for (n, _j, _a) in events)
+
+
+def test_list_job_events_after_filters_and_returns_canonical_raw_keys_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    jm = JobManager(tmp_path / "jobs.db")
+
+    matching = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="download",
+        payload={},
+        owner_user_id="u1",
+    )
+    jm.create_job(
+        domain="media_ingest",
+        queue="high",
+        job_type="download",
+        payload={},
+        owner_user_id="u1",
+    )
+    jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="transcode",
+        payload={},
+        owner_user_id="u1",
+    )
+    jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="download",
+        payload={},
+        owner_user_id="u1",
+    )
+    jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="download",
+        payload={},
+        owner_user_id="u2",
+    )
+
+    events = jm.list_job_events_after(
+        after_id=-5,
+        limit=10,
+        domain="media_ingest",
+        queue="default",
+        job_type="download",
+        job_id=int(matching["id"]),
+        owner_user_id="u1",
+        event_types=("job.created",),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["job_id"] == int(matching["id"])
+    assert event["domain"] == "media_ingest"
+    assert event["queue"] == "default"
+    assert event["job_type"] == "download"
+    assert event["owner_user_id"] == "u1"
+    assert event["event_type"] == "job.created"
+    assert set(event) >= {
+        "id",
+        "event_type",
+        "attrs_json",
+        "job_id",
+        "domain",
+        "queue",
+        "job_type",
+        "owner_user_id",
+        "request_id",
+        "trace_id",
+        "created_at",
+    }

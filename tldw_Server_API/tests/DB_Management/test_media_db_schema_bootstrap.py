@@ -167,6 +167,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
     db = SimpleNamespace(
         _ensure_postgres_collections_tables=lambda value: calls.append(("collections", value)),
         _ensure_postgres_tts_history=lambda value: calls.append(("tts_history", value)),
+        _ensure_postgres_audio_presets=lambda value: calls.append(("audio_presets", value)),
         _ensure_postgres_data_tables=lambda value: calls.append(("data_tables", value)),
         _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
         _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
@@ -179,13 +180,21 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         "ensure_postgres_policies",
         lambda value, connection: calls.append(("policies", value, connection)),
     )
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_document_workspace_schema",
+        lambda connection: calls.append(("document_workspace", connection)),
+        raising=False,
+    )
 
     postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
 
     assert calls == [
         ("collections", conn),
         ("tts_history", conn),
+        ("audio_presets", conn),
         ("data_tables", conn),
+        ("document_workspace", conn),
         ("source_hash", conn),
         ("claims_extensions", conn),
         ("email_schema", conn),
@@ -1382,13 +1391,16 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
     )
 
     calls: list[object] = []
+    audio_presets_sql = "CREATE TABLE IF NOT EXISTS audio_presets (id INTEGER PRIMARY KEY);"
 
     class FakeConn:
         def executescript(self, script: str) -> None:
-            calls.append(("collections_sql", script))
+            label = "audio_presets_sql" if script == audio_presets_sql else "collections_sql"
+            calls.append((label, script))
 
     conn = FakeConn()
     db = SimpleNamespace(
+        _AUDIO_PRESETS_TABLE_SQL=audio_presets_sql,
         _ensure_sqlite_data_tables=lambda value: calls.append(("data_tables", value)),
         _ensure_sqlite_visibility_columns=lambda value: calls.append(("visibility", value)),
         _ensure_sqlite_source_hash_column=lambda value: calls.append(("source_hash", value)),
@@ -1401,6 +1413,12 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
         "ensure_sqlite_fts_structures",
         lambda value, connection: calls.append(("fts", value, connection)),
     )
+    monkeypatch.setattr(
+        sqlite_helpers_module,
+        "ensure_sqlite_document_workspace_schema",
+        lambda connection: calls.append(("document_workspace", connection)),
+        raising=False,
+    )
 
     sqlite_helpers_module.ensure_sqlite_post_core_structures(db, conn)
 
@@ -1408,6 +1426,8 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
         "data_tables",
         "fts",
         "collections_sql",
+        "audio_presets_sql",
+        "document_workspace",
         "visibility",
         "source_hash",
         "claims_extensions",
@@ -1418,12 +1438,132 @@ def test_ensure_sqlite_post_core_structures_runs_followup_ensures(monkeypatch) -
     assert "CREATE TABLE IF NOT EXISTS output_templates" in calls[2][1]
     assert "CREATE TABLE IF NOT EXISTS content_items" in calls[2][1]
     assert "CREATE VIRTUAL TABLE IF NOT EXISTS content_items_fts" in calls[2][1]
-    assert calls[3:] == [
+    assert calls[3] == ("audio_presets_sql", audio_presets_sql)
+    assert calls[4:] == [
+        ("document_workspace", conn),
         ("visibility", conn),
         ("source_hash", conn),
         ("claims_extensions", conn),
         ("email_schema", conn),
     ]
+
+
+@pytest.mark.unit
+def test_ensure_sqlite_document_workspace_schema_creates_tables_indexes_and_columns() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
+        ensure_sqlite_document_workspace_schema,
+    )
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        ensure_sqlite_document_workspace_schema(conn)
+
+        table_names = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'document_%'"
+            ).fetchall()
+        }
+        assert {
+            "document_reading_progress",
+            "document_annotations",
+            "document_parsed_references_cache",
+        }.issubset(table_names)
+
+        progress_columns = {row["name"] for row in conn.execute("PRAGMA table_info(document_reading_progress)")}
+        annotation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(document_annotations)")}
+        cache_columns = {row["name"] for row in conn.execute("PRAGMA table_info(document_parsed_references_cache)")}
+
+        assert {"cfi", "percentage"}.issubset(progress_columns)
+        assert {"chapter_title", "percentage"}.issubset(annotation_columns)
+        assert {"references_json", "total_detected", "updated_at"}.issubset(cache_columns)
+
+        annotation_indexes = {row["name"] for row in conn.execute("PRAGMA index_list(document_annotations)")}
+        cache_indexes = {row["name"] for row in conn.execute("PRAGMA index_list(document_parsed_references_cache)")}
+        assert "idx_annotations_media_user" in annotation_indexes
+        assert "idx_doc_refs_cache_lookup" in cache_indexes
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotently() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
+        ensure_sqlite_document_workspace_schema,
+    )
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE document_reading_progress (
+                media_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                current_page INTEGER NOT NULL DEFAULT 1,
+                total_pages INTEGER NOT NULL DEFAULT 1,
+                zoom_level INTEGER NOT NULL DEFAULT 100,
+                view_mode TEXT NOT NULL DEFAULT 'single',
+                last_read_at TEXT NOT NULL,
+                PRIMARY KEY (media_id, user_id)
+            );
+            CREATE TABLE document_annotations (
+                id TEXT PRIMARY KEY,
+                media_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                location TEXT NOT NULL,
+                text TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT 'yellow',
+                note TEXT,
+                annotation_type TEXT NOT NULL DEFAULT 'highlight',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0
+            );
+            """
+        )
+
+        ensure_sqlite_document_workspace_schema(conn)
+        ensure_sqlite_document_workspace_schema(conn)
+
+        progress_columns = [row["name"] for row in conn.execute("PRAGMA table_info(document_reading_progress)")]
+        annotation_columns = [row["name"] for row in conn.execute("PRAGMA table_info(document_annotations)")]
+
+        assert progress_columns.count("cfi") == 1
+        assert progress_columns.count("percentage") == 1
+        assert annotation_columns.count("chapter_title") == 1
+        assert annotation_columns.count("percentage") == 1
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_ensure_postgres_document_workspace_schema_executes_expected_ddl() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
+        ensure_postgres_document_workspace_schema,
+    )
+
+    statements: list[str] = []
+
+    class FakePostgresConn:
+        def execute(self, statement: str) -> None:
+            statements.append(" ".join(statement.split()))
+
+    ensure_postgres_document_workspace_schema(FakePostgresConn())
+
+    joined = "\n".join(statements).lower()
+    assert "create table if not exists document_reading_progress" in joined
+    assert "primary key (media_id, user_id)" in joined
+    assert "create table if not exists document_annotations" in joined
+    assert "create index if not exists idx_annotations_media_user" in joined
+    assert "create table if not exists document_parsed_references_cache" in joined
+    assert "primary key (media_id, user_id, parser_version, content_hash)" in joined
+    assert "create index if not exists idx_doc_refs_cache_lookup" in joined
+    assert "alter table document_reading_progress add column if not exists cfi text" in joined
+    assert "alter table document_reading_progress add column if not exists percentage double precision" in joined
+    assert "alter table document_annotations add column if not exists chapter_title text" in joined
+    assert "alter table document_annotations add column if not exists percentage double precision" in joined
 
 
 @pytest.mark.unit
