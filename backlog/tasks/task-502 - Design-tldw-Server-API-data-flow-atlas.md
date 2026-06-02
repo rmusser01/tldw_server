@@ -1,7 +1,7 @@
 ---
 id: TASK-502
 title: Design tldw_Server_API data flow atlas
-status: In Progress
+status: Done
 labels:
 - docs
 - architecture
@@ -54,7 +54,7 @@ Implementation is proceeding via Docs/superpowers/plans/2026-06-02-data-flow-atl
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec drafted and tightened at Docs/superpowers/specs/2026-06-02-data-flow-atlas-design.md. Verification: local text sanity checks confirmed required scope terms, TASK-502 backlink, Mermaid-only requirement, phased delivery, router registration helper anchors, coverage table requirement, verification section, and docs-only Bandit skip. Independent spec review loop returned Approved after the router anchor improvement. User asked to continue into implementation planning.
+Created Docs/Code_Documentation/Data_Flow_Atlas.md as a Mermaid-only backend data flow atlas for tldw_Server_API, linked it from Docs/Architecture.md and Docs/Code_Documentation/Code_Map.md, and recorded grouped router/domain coverage plus maintenance guidance. Verification passed for required sections/source anchors, balanced Mermaid fences, atlas links, router coverage scan, and scoped whitespace checks. Mermaid render-check was skipped because mmdc is not installed. Bandit was skipped because no code changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
