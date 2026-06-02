@@ -39,6 +39,10 @@ function extractModelMetadataList(metadataPayload: unknown): unknown[] {
   )
 }
 
+/**
+ * Converts raw model metadata into the UI's model contract, including optional
+ * provider availability inherited from the provider catalog.
+ */
 export function normalizeTldwModels(
   metadataPayload: unknown,
   providerAvailability = new Map<string, ProviderAvailability>()
@@ -160,6 +164,10 @@ export function normalizeTldwModels(
   })
 }
 
+/**
+ * Fetches model metadata and lazily enriches it with provider availability only
+ * when the metadata does not already include model-level availability fields.
+ */
 export async function getNormalizedTldwModels(
   client: TldwModelsMetadataClient,
   options?: { refreshOpenRouter?: boolean }
