@@ -1,4 +1,5 @@
 {
+  "response_base_dir": "../responses",
   "server": {
     "host": "127.0.0.1",
     "port": 0,
@@ -25,7 +26,7 @@
     "chat_completions": {
       "patterns": [
         {
-          "match": { "content_regex": ".*summarize|source|research note.*" },
+          "match": { "content_regex": "(?i).*(summarize|source|research note).*" },
           "response_file": "chat/source-summary.json",
           "priority": 10
         }

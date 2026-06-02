@@ -65,7 +65,6 @@ describe("onboarding UAT static fixtures", () => {
     })
 
     const unavailable = configs["model-unavailable.json"]
-    const omitsSelectedModel = !modelIds(unavailable).includes("missing-uat-model")
     const failsSelectedChatModel = (
       unavailable.scenario_failures?.chat_completions ?? []
     ).some(
@@ -79,7 +78,35 @@ describe("onboarding UAT static fixtures", () => {
         failure.code === "model_not_found"
     )
 
-    expect(omitsSelectedModel || failsSelectedChatModel).toBe(true)
+    expect(modelIds(unavailable)).not.toContain("missing-uat-model")
+    expect(failsSelectedChatModel).toBe(true)
+  })
+
+  it("keeps mock response paths resolvable from each config file", () => {
+    for (const file of configFiles) {
+      const configPath = path.join(mockOpenAiRoot, "configs", file)
+      const config = readJson(`configs/${file}`)
+      const responseBaseDir = path.resolve(
+        path.dirname(configPath),
+        config.response_base_dir
+      )
+
+      expect(responseBaseDir).toBe(path.join(mockOpenAiRoot, "responses"))
+
+      for (const endpoint of Object.values(config.responses ?? {}) as Array<{
+        default?: string
+        patterns?: Array<{ response_file?: string }>
+      }>) {
+        if (endpoint.default) {
+          expect(existsSync(path.join(responseBaseDir, endpoint.default))).toBe(true)
+        }
+        for (const pattern of endpoint.patterns ?? []) {
+          if (pattern.response_file) {
+            expect(existsSync(path.join(responseBaseDir, pattern.response_file))).toBe(true)
+          }
+        }
+      }
+    }
   })
 
   it("keeps JSON fixtures static, synthetic, and free of obvious real-secret markers", () => {
@@ -117,6 +144,11 @@ describe("onboarding UAT static fixtures", () => {
       index: 0,
     })
     expect(embeddings.data?.[0]?.embedding.length).toBeGreaterThan(0)
+    const embeddingDimension = embeddings.data[0].embedding.length
+    expect(embeddings.data.length).toBeGreaterThanOrEqual(3)
+    for (const item of embeddings.data) {
+      expect(item.embedding.length).toBe(embeddingDimension)
+    }
     expect(
       embeddings.data[0].embedding.every((value: unknown) => typeof value === "number")
     ).toBe(true)

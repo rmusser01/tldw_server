@@ -56,9 +56,9 @@ def get_config_instance() -> MockConfig:
     return get_config()
 
 
-def get_response_manager() -> ResponseManager:
+def get_response_manager(config: MockConfig = Depends(get_config_instance)) -> ResponseManager:
     """Get the response manager instance."""
-    return ResponseManager()
+    return ResponseManager(responses_dir=config.response_base_dir)
 
 
 def get_streaming_generator(config: MockConfig = Depends(get_config_instance)) -> StreamingResponseGenerator:

@@ -408,6 +408,22 @@ class TestConfiguration:
         assert failures[0].error_type == "server_error"
         assert failures[1].error_type == "rate_limit_error"
 
+    def test_response_base_dir_resolves_relative_to_config_file(self, tmp_path):
+        """Test response fixtures can live next to static config directories."""
+        config_dir = tmp_path / "configs"
+        responses_dir = tmp_path / "responses"
+        config_dir.mkdir()
+        responses_dir.mkdir()
+        config_path = config_dir / "hosted-success.json"
+        config_path.write_text(
+            json.dumps({"response_base_dir": "../responses"}),
+            encoding="utf8",
+        )
+
+        config = MockConfig.from_file(config_path)
+
+        assert config.response_base_dir == responses_dir
+
     def test_scenario_failure_counts_are_config_local(self):
         """Test scenario failure counters stay isolated per config instance."""
         from ..mock_openai.server import (
@@ -493,6 +509,46 @@ class TestResponseManager:
         completion_response = manager.get_default_completion_response()
         assert completion_response["object"] == "text_completion"
         assert "choices" in completion_response
+
+    def test_response_file_embedding_batches_stay_deterministic(self, tmp_path):
+        """Test static embedding fixtures are reused for multi-input requests."""
+        responses_dir = tmp_path / "responses"
+        embedding_dir = responses_dir / "embeddings"
+        embedding_dir.mkdir(parents=True)
+        (embedding_dir / "default.json").write_text(
+            json.dumps(
+                {
+                    "object": "list",
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "index": 0,
+                            "embedding": [0.01, 0.02, 0.03, 0.04],
+                        }
+                    ],
+                    "model": "text-embedding-3-small",
+                    "usage": {"prompt_tokens": 4, "total_tokens": 4},
+                }
+            ),
+            encoding="utf8",
+        )
+
+        manager = ResponseManager(responses_dir=responses_dir)
+        response = manager.generate_embedding_response(
+            {
+                "model": "text-embedding-3-small",
+                "input": ["first", "second", "third"],
+            },
+            "embeddings/default.json",
+        )
+
+        assert len(response.data) == 3
+        assert [item.index for item in response.data] == [0, 1, 2]
+        assert [item.embedding for item in response.data] == [
+            [0.01, 0.02, 0.03, 0.04],
+            [0.01, 0.02, 0.03, 0.04],
+            [0.01, 0.02, 0.03, 0.04],
+        ]
 
 
 class TestErrorHandling:

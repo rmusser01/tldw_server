@@ -213,9 +213,15 @@ class ResponseManager:
 
         # Generate embeddings for each input
         embeddings = []
+        fixture_embeddings = response_data.get("data", [])
         for i, _ in enumerate(input_list):
-            if i < len(response_data.get("data", [])):
-                embedding_data = response_data["data"][i]
+            if i < len(fixture_embeddings):
+                embedding_data = fixture_embeddings[i]
+            elif fixture_embeddings:
+                embedding_data = {
+                    **fixture_embeddings[-1],
+                    "index": i,
+                }
             else:
                 # Generate random embedding for additional inputs
                 embedding_data = {

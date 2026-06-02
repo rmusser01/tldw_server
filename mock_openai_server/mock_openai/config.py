@@ -127,6 +127,7 @@ class MockConfig:
     responses: Dict[str, ResponseConfig] = field(default_factory=dict)
     scenario_failures: Dict[str, List[ScenarioFailure]] = field(default_factory=dict)
     models: List[Dict[str, Any]] = field(default_factory=list)
+    response_base_dir: Optional[Path] = None
     scenario_failure_counts: Dict[Tuple[str, int], int] = field(
         default_factory=dict,
         init=False,
@@ -155,12 +156,22 @@ class MockConfig:
             else:
                 data = json.load(f)
 
-        return cls.from_dict(data)
+        return cls.from_dict(data, config_dir=config_path.parent)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MockConfig":
+    def from_dict(
+        cls,
+        data: Dict[str, Any],
+        config_dir: Optional[Union[str, Path]] = None,
+    ) -> "MockConfig":
         """Create configuration from a dictionary."""
         config = cls()
+
+        if data.get("response_base_dir"):
+            response_base_dir = Path(str(data["response_base_dir"]))
+            if not response_base_dir.is_absolute() and config_dir is not None:
+                response_base_dir = Path(config_dir) / response_base_dir
+            config.response_base_dir = response_base_dir.resolve()
 
         # Parse server config
         if "server" in data:
