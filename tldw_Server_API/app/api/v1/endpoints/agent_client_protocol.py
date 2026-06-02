@@ -2287,8 +2287,14 @@ async def acp_register_agent(
         acp_command=request.acp_command,
         acp_args=request.acp_args,
         adapter_source=request.adapter_source,
+        adapter_package=request.adapter_package,
+        adapter_version=request.adapter_version,
+        adapter_version_policy=request.adapter_version_policy,
+        adapter_install_source=request.adapter_install_source,
         adapter_docs_url=request.adapter_docs_url,
         certification_blocker=request.certification_blocker,
+        credential_policy=request.credential_policy,
+        runtime_backend=request.runtime_backend,
     )
     _acp_record_audit_event(
         action="agent_registered",

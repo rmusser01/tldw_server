@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 14
+_SCHEMA_VERSION = 15
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -95,8 +95,14 @@ CREATE TABLE IF NOT EXISTS agent_registry (
     acp_command TEXT NOT NULL DEFAULT '',
     acp_args TEXT NOT NULL DEFAULT '[]',
     adapter_source TEXT,
+    adapter_package TEXT,
+    adapter_version TEXT,
+    adapter_version_policy TEXT NOT NULL DEFAULT 'unknown',
+    adapter_install_source TEXT NOT NULL DEFAULT 'unknown',
     adapter_docs_url TEXT,
     certification_blocker TEXT,
+    credential_policy TEXT NOT NULL DEFAULT 'unknown',
+    runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream',
     source TEXT NOT NULL DEFAULT 'api',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -213,8 +219,14 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "acp_command": "acp_command TEXT NOT NULL DEFAULT ''",
         "acp_args": "acp_args TEXT NOT NULL DEFAULT '[]'",
         "adapter_source": "adapter_source TEXT",
+        "adapter_package": "adapter_package TEXT",
+        "adapter_version": "adapter_version TEXT",
+        "adapter_version_policy": "adapter_version_policy TEXT NOT NULL DEFAULT 'unknown'",
+        "adapter_install_source": "adapter_install_source TEXT NOT NULL DEFAULT 'unknown'",
         "adapter_docs_url": "adapter_docs_url TEXT",
         "certification_blocker": "certification_blocker TEXT",
+        "credential_policy": "credential_policy TEXT NOT NULL DEFAULT 'unknown'",
+        "runtime_backend": "runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream'",
     },
     "permission_policies": {
         "conditions_json": "conditions_json TEXT",
@@ -337,8 +349,14 @@ class ACPSessionsDB:
                         acp_command TEXT NOT NULL DEFAULT '',
                         acp_args TEXT NOT NULL DEFAULT '[]',
                         adapter_source TEXT,
+                        adapter_package TEXT,
+                        adapter_version TEXT,
+                        adapter_version_policy TEXT NOT NULL DEFAULT 'unknown',
+                        adapter_install_source TEXT NOT NULL DEFAULT 'unknown',
                         adapter_docs_url TEXT,
                         certification_blocker TEXT,
+                        credential_policy TEXT NOT NULL DEFAULT 'unknown',
+                        runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream',
                         source TEXT NOT NULL DEFAULT 'api',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
@@ -583,6 +601,43 @@ class ACPSessionsDB:
                     "agent_registry",
                     "certification_blocker",
                     "certification_blocker TEXT",
+                )
+            if current_version < 15:
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_package",
+                    "adapter_package TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_version",
+                    "adapter_version TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_version_policy",
+                    "adapter_version_policy TEXT NOT NULL DEFAULT 'unknown'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_install_source",
+                    "adapter_install_source TEXT NOT NULL DEFAULT 'unknown'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "credential_policy",
+                    "credential_policy TEXT NOT NULL DEFAULT 'unknown'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "runtime_backend",
+                    "runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream'",
                 )
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
@@ -1683,11 +1738,19 @@ class ACPSessionsDB:
         mcp_max_iterations = int(entry_dict.get("mcp_max_iterations", 20))
         mcp_refresh_tools = int(bool(entry_dict.get("mcp_refresh_tools", 0)))
         entrypoint_strategy = entry_dict.get("entrypoint_strategy", "documented_candidate")
+        if str(entrypoint_strategy) == "adapter_acp":
+            entrypoint_strategy = "external_acp_adapter"
         acp_command = entry_dict.get("acp_command", "")
         acp_args = entry_dict.get("acp_args", "[]")
         adapter_source = entry_dict.get("adapter_source")
+        adapter_package = entry_dict.get("adapter_package")
+        adapter_version = entry_dict.get("adapter_version")
+        adapter_version_policy = entry_dict.get("adapter_version_policy") or "unknown"
+        adapter_install_source = entry_dict.get("adapter_install_source") or "unknown"
         adapter_docs_url = entry_dict.get("adapter_docs_url")
         certification_blocker = entry_dict.get("certification_blocker")
+        credential_policy = entry_dict.get("credential_policy") or "unknown"
+        runtime_backend = entry_dict.get("runtime_backend") or "acp_downstream"
         source = entry_dict.get("source", "api")
 
         conn.execute(
@@ -1698,9 +1761,12 @@ class ACPSessionsDB:
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
                 entrypoint_strategy, acp_command, acp_args,
-                adapter_source, adapter_docs_url, certification_blocker,
+                adapter_source, adapter_package, adapter_version,
+                adapter_version_policy, adapter_install_source,
+                adapter_docs_url, certification_blocker,
+                credential_policy, runtime_backend,
                 source, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_type) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -1722,8 +1788,14 @@ class ACPSessionsDB:
                 acp_command = excluded.acp_command,
                 acp_args = excluded.acp_args,
                 adapter_source = excluded.adapter_source,
+                adapter_package = excluded.adapter_package,
+                adapter_version = excluded.adapter_version,
+                adapter_version_policy = excluded.adapter_version_policy,
+                adapter_install_source = excluded.adapter_install_source,
                 adapter_docs_url = excluded.adapter_docs_url,
                 certification_blocker = excluded.certification_blocker,
+                credential_policy = excluded.credential_policy,
+                runtime_backend = excluded.runtime_backend,
                 source = excluded.source,
                 updated_at = excluded.updated_at
             """,
@@ -1733,7 +1805,10 @@ class ACPSessionsDB:
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
                 entrypoint_strategy, acp_command, acp_args,
-                adapter_source, adapter_docs_url, certification_blocker,
+                adapter_source, adapter_package, adapter_version,
+                adapter_version_policy, adapter_install_source,
+                adapter_docs_url, certification_blocker,
+                credential_policy, runtime_backend,
                 source, now, now,
             ),
         )

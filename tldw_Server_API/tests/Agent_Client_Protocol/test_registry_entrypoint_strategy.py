@@ -136,6 +136,43 @@ def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> No
     assert persisted.certification_blocker == "adapter_missing"
 
 
+def test_dynamic_registration_preserves_adapter_metadata_fields(acp_db) -> None:
+    registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+
+    entry = registry.register_agent(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="adapter_acp",
+        acp_command="codex-acp",
+        adapter_source="zed-industries/codex-acp",
+        adapter_package="@zed-industries/codex-acp",
+        adapter_version="0.15.0",
+        adapter_version_policy="exact_pin_required",
+        adapter_install_source="github_release_preferred",
+        credential_policy="delegated_to_adapter",
+        runtime_backend="acp_downstream",
+    )
+
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.adapter_version == "0.15.0"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.runtime_backend == "acp_downstream"
+
+    reloaded = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+    reloaded._load_api_entries()
+    persisted = reloaded.get_entry("codex")
+    assert persisted is not None
+    assert persisted.entrypoint_strategy == "external_acp_adapter"
+    assert persisted.adapter_source == "zed-industries/codex-acp"
+    assert persisted.adapter_package == "@zed-industries/codex-acp"
+    assert persisted.adapter_version == "0.15.0"
+    assert persisted.adapter_version_policy == "exact_pin_required"
+    assert persisted.adapter_install_source == "github_release_preferred"
+    assert persisted.credential_policy == "delegated_to_adapter"
+    assert persisted.runtime_backend == "acp_downstream"
+
+
 def test_update_agent_clears_nullable_entrypoint_metadata(acp_db) -> None:
     registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
     registry.register_agent(
@@ -163,6 +200,35 @@ def test_update_agent_clears_nullable_entrypoint_metadata(acp_db) -> None:
     assert persisted["adapter_source"] is None
     assert persisted["adapter_docs_url"] is None
     assert persisted["certification_blocker"] is None
+
+
+def test_update_agent_preserves_adapter_metadata_fields(acp_db) -> None:
+    registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+    registry.register_agent(type="codex", name="Codex")
+
+    updated = registry.update_agent(
+        "codex",
+        entrypoint_strategy="adapter_acp",
+        adapter_package="@zed-industries/codex-acp",
+        adapter_version="0.15.0",
+        adapter_version_policy="exact_pin_required",
+        adapter_install_source="github_release_preferred",
+        credential_policy="delegated_to_adapter",
+        runtime_backend="acp_downstream",
+    )
+
+    assert updated is not None
+    assert updated.entrypoint_strategy == "external_acp_adapter"
+    assert updated.adapter_version == "0.15.0"
+    assert updated.credential_policy == "delegated_to_adapter"
+    assert updated.runtime_backend == "acp_downstream"
+
+    persisted = acp_db.get_agent_entry("codex")
+    assert persisted is not None
+    assert persisted["entrypoint_strategy"] == "external_acp_adapter"
+    assert persisted["adapter_version"] == "0.15.0"
+    assert persisted["credential_policy"] == "delegated_to_adapter"
+    assert persisted["runtime_backend"] == "acp_downstream"
 
 
 def test_update_agent_ignores_none_for_required_name_without_db_failure(acp_db) -> None:

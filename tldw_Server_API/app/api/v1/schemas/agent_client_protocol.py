@@ -45,6 +45,15 @@ ACPEntryPointStrategy = Literal[
 ]
 ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
 ACPCredentialState = Literal["ready", "missing", "delegated", "unknown"]
+ACPAdapterVersionPolicy = Literal["exact_pin_required", "operator_managed", "unknown"]
+ACPAdapterInstallSource = Literal[
+    "github_release_preferred",
+    "npm_pinned_allowed",
+    "operator_managed",
+    "unknown",
+]
+ACPCredentialPolicy = Literal["env_var", "delegated_to_adapter", "none", "unknown"]
+ACPRuntimeBackend = Literal["acp_downstream", "codex_app_server", "runner_adapter", "unknown"]
 ACPSetupHealthStatus = Literal["unknown", "ready", "blocked", "not_configured", "partial"]
 _LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
     "adapter_acp": "external_acp_adapter",
@@ -188,8 +197,14 @@ class ACPAgentRegisterRequest(BaseModel):
     acp_command: str = Field(default="")
     acp_args: list[str] = Field(default_factory=list)
     adapter_source: str | None = Field(default=None)
+    adapter_package: str | None = Field(default=None)
+    adapter_version: str | None = Field(default=None)
+    adapter_version_policy: ACPAdapterVersionPolicy = Field(default="unknown")
+    adapter_install_source: ACPAdapterInstallSource = Field(default="unknown")
     adapter_docs_url: str | None = Field(default=None)
     certification_blocker: str | None = Field(default=None)
+    credential_policy: ACPCredentialPolicy = Field(default="unknown")
+    runtime_backend: ACPRuntimeBackend = Field(default="acp_downstream")
     mcp_orchestration: Literal["agent_driven", "llm_driven"] = Field(
         default="agent_driven",
         description="MCP orchestration mode when protocol='mcp'",
@@ -221,6 +236,10 @@ class ACPAgentUpdateRequest(BaseModel):
         "command",
         "entrypoint_strategy",
         "acp_command",
+        "adapter_version_policy",
+        "adapter_install_source",
+        "credential_policy",
+        "runtime_backend",
         "mcp_orchestration",
         "mcp_entry_tool",
         "mcp_structured_response",
@@ -240,8 +259,14 @@ class ACPAgentUpdateRequest(BaseModel):
     acp_command: str | None = None
     acp_args: list[str] | None = None
     adapter_source: str | None = None
+    adapter_package: str | None = None
+    adapter_version: str | None = None
+    adapter_version_policy: ACPAdapterVersionPolicy | None = None
+    adapter_install_source: ACPAdapterInstallSource | None = None
     adapter_docs_url: str | None = None
     certification_blocker: str | None = None
+    credential_policy: ACPCredentialPolicy | None = None
+    runtime_backend: ACPRuntimeBackend | None = None
     mcp_orchestration: Literal["agent_driven", "llm_driven"] | None = None
     mcp_entry_tool: str | None = None
     mcp_structured_response: bool | None = None

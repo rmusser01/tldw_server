@@ -501,7 +501,7 @@ class TestAgentRegistry:
         saved = db.save_agent_entry({
             "agent_type": "adapter",
             "name": "Adapter",
-            "entrypoint_strategy": "adapter_acp",
+            "entrypoint_strategy": "external_acp_adapter",
             "acp_command": "adapter-acp",
             "acp_args": '["--stdio"]',
             "adapter_source": "example/adapter",
@@ -510,11 +510,44 @@ class TestAgentRegistry:
             "source": "api",
         })
 
-        assert saved["entrypoint_strategy"] == "adapter_acp"
+        assert saved["entrypoint_strategy"] == "external_acp_adapter"
         assert saved["acp_command"] == "adapter-acp"
         assert saved["acp_args"] == '["--stdio"]'
         assert saved["adapter_source"] == "example/adapter"
         assert saved["certification_blocker"] == "adapter_missing"
+
+    def test_agent_registry_adapter_metadata_round_trips(self, db):
+        saved = db.save_agent_entry({
+            "agent_type": "codex",
+            "name": "Codex",
+            "command": "codex",
+            "entrypoint_strategy": "external_acp_adapter",
+            "acp_command": "codex-acp",
+            "adapter_source": "zed-industries/codex-acp",
+            "adapter_package": "@zed-industries/codex-acp",
+            "adapter_version": "0.15.0",
+            "adapter_version_policy": "exact_pin_required",
+            "adapter_install_source": "github_release_preferred",
+            "credential_policy": "delegated_to_adapter",
+            "runtime_backend": "acp_downstream",
+            "source": "api",
+        })
+
+        assert saved["entrypoint_strategy"] == "external_acp_adapter"
+        assert saved["adapter_source"] == "zed-industries/codex-acp"
+        assert saved["adapter_package"] == "@zed-industries/codex-acp"
+        assert saved["adapter_version"] == "0.15.0"
+        assert saved["adapter_version_policy"] == "exact_pin_required"
+        assert saved["adapter_install_source"] == "github_release_preferred"
+        assert saved["credential_policy"] == "delegated_to_adapter"
+        assert saved["runtime_backend"] == "acp_downstream"
+
+        listed = db.list_agent_entries(source="api")
+        codex = next(entry for entry in listed if entry["agent_type"] == "codex")
+        assert codex["entrypoint_strategy"] == "external_acp_adapter"
+        assert codex["adapter_version"] == "0.15.0"
+        assert codex["credential_policy"] == "delegated_to_adapter"
+        assert codex["runtime_backend"] == "acp_downstream"
 
 
 def test_legacy_agent_registry_rows_get_entrypoint_defaults(tmp_path):
@@ -567,6 +600,80 @@ def test_legacy_agent_registry_rows_get_entrypoint_defaults(tmp_path):
         assert entry.entrypoint_strategy == "documented_candidate"
         assert entry.acp_command == ""
         assert entry.acp_args == []
+    finally:
+        db.close()
+
+
+def test_legacy_agent_registry_rows_get_adapter_metadata_defaults(tmp_path):
+    db_path = tmp_path / "legacy_acp_sessions.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE agent_registry (
+            agent_type TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            command TEXT NOT NULL DEFAULT '',
+            args TEXT NOT NULL DEFAULT '[]',
+            env TEXT NOT NULL DEFAULT '{}',
+            requires_api_key TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            install_instructions TEXT NOT NULL DEFAULT '[]',
+            docs_url TEXT,
+            mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven',
+            mcp_entry_tool TEXT NOT NULL DEFAULT 'execute',
+            mcp_structured_response INTEGER NOT NULL DEFAULT 0,
+            mcp_llm_provider TEXT,
+            mcp_llm_model TEXT,
+            mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
+            mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+            entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+            acp_command TEXT NOT NULL DEFAULT '',
+            acp_args TEXT NOT NULL DEFAULT '[]',
+            adapter_source TEXT,
+            adapter_docs_url TEXT,
+            certification_blocker TEXT,
+            source TEXT NOT NULL DEFAULT 'api',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO agent_registry (
+            agent_type, name, command, source, created_at, updated_at
+        ) VALUES ('legacy_api', 'Legacy API', 'legacy-cli', 'api', '2026-01-01', '2026-01-01');
+        PRAGMA user_version=14;
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = ACPSessionsDB(db_path=str(db_path))
+    try:
+        columns = {
+            str(row[1])
+            for row in db._get_conn().execute('PRAGMA table_info("agent_registry")').fetchall()
+        }
+        assert {
+            "adapter_package",
+            "adapter_version",
+            "adapter_version_policy",
+            "adapter_install_source",
+            "credential_policy",
+            "runtime_backend",
+        }.issubset(columns)
+
+        row = db.get_agent_entry("legacy_api")
+        assert row is not None
+        assert row["adapter_package"] is None
+        assert row["adapter_version"] is None
+        assert row["adapter_version_policy"] == "unknown"
+        assert row["adapter_install_source"] == "unknown"
+        assert row["credential_policy"] == "unknown"
+        assert row["runtime_backend"] == "acp_downstream"
+
+        listed = db.list_agent_entries(source="api")
+        assert listed[0]["agent_type"] == "legacy_api"
+        assert listed[0]["adapter_version_policy"] == "unknown"
+        assert listed[0]["runtime_backend"] == "acp_downstream"
     finally:
         db.close()
 

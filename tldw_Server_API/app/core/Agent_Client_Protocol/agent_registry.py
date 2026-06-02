@@ -556,8 +556,14 @@ class AgentRegistry:
                     acp_command=row.get("acp_command", ""),
                     acp_args=self._load_json(row.get("acp_args"), []),
                     adapter_source=row.get("adapter_source"),
+                    adapter_package=row.get("adapter_package"),
+                    adapter_version=row.get("adapter_version"),
+                    adapter_version_policy=row.get("adapter_version_policy", "unknown"),
+                    adapter_install_source=row.get("adapter_install_source", "unknown"),
                     adapter_docs_url=row.get("adapter_docs_url"),
                     certification_blocker=row.get("certification_blocker"),
+                    credential_policy=row.get("credential_policy", "unknown"),
+                    runtime_backend=row.get("runtime_backend", "acp_downstream"),
                     mcp_orchestration=row.get("mcp_orchestration", "agent_driven"),
                     mcp_entry_tool=row.get("mcp_entry_tool", "execute"),
                     mcp_structured_response=bool(row.get("mcp_structured_response", 0)),
@@ -627,8 +633,14 @@ class AgentRegistry:
         acp_command: str = "",
         acp_args: list[str] | None = None,
         adapter_source: str | None = None,
+        adapter_package: str | None = None,
+        adapter_version: str | None = None,
+        adapter_version_policy: AdapterVersionPolicy = "unknown",
+        adapter_install_source: AdapterInstallSource = "unknown",
         adapter_docs_url: str | None = None,
         certification_blocker: str | None = None,
+        credential_policy: CredentialPolicy = "unknown",
+        runtime_backend: RuntimeBackend = "acp_downstream",
     ) -> AgentRegistryEntry:
         """Register or update a dynamic agent entry."""
         with self._lock:
@@ -654,8 +666,14 @@ class AgentRegistry:
                 acp_command=acp_command,
                 acp_args=acp_args or [],
                 adapter_source=adapter_source,
+                adapter_package=adapter_package,
+                adapter_version=adapter_version,
+                adapter_version_policy=adapter_version_policy,
+                adapter_install_source=adapter_install_source,
                 adapter_docs_url=adapter_docs_url,
                 certification_blocker=certification_blocker,
+                credential_policy=credential_policy,
+                runtime_backend=runtime_backend,
             )
             if self._db is not None:
                 self._db.save_agent_entry({
@@ -679,8 +697,14 @@ class AgentRegistry:
                     "acp_command": acp_command,
                     "acp_args": json.dumps(acp_args or []),
                     "adapter_source": adapter_source,
+                    "adapter_package": entry.adapter_package,
+                    "adapter_version": entry.adapter_version,
+                    "adapter_version_policy": entry.adapter_version_policy,
+                    "adapter_install_source": entry.adapter_install_source,
                     "adapter_docs_url": adapter_docs_url,
                     "certification_blocker": certification_blocker,
+                    "credential_policy": entry.credential_policy,
+                    "runtime_backend": entry.runtime_backend,
                     "source": "api",
                 })
             self._api_entries = [e for e in self._api_entries if e.type != type]
@@ -701,7 +725,9 @@ class AgentRegistry:
         "name", "description", "command", "args", "env",
         "requires_api_key", "install_instructions", "docs_url",
         "entrypoint_strategy", "acp_command", "acp_args", "adapter_source",
-        "adapter_docs_url", "certification_blocker",
+        "adapter_package", "adapter_version", "adapter_version_policy",
+        "adapter_install_source", "adapter_docs_url", "certification_blocker",
+        "credential_policy", "runtime_backend",
         "mcp_orchestration", "mcp_entry_tool", "mcp_structured_response",
         "mcp_llm_provider", "mcp_llm_model", "mcp_max_iterations", "mcp_refresh_tools",
     })
@@ -718,6 +744,10 @@ class AgentRegistry:
         "description",
         "command",
         "acp_command",
+        "adapter_version_policy",
+        "adapter_install_source",
+        "credential_policy",
+        "runtime_backend",
         "mcp_orchestration",
         "mcp_entry_tool",
         "mcp_structured_response",
@@ -744,6 +774,14 @@ class AgentRegistry:
                         continue
                     if key == "entrypoint_strategy":
                         value = _coerce_entrypoint_strategy(value)
+                    elif key == "adapter_version_policy":
+                        value = _coerce_literal(value, _ADAPTER_VERSION_POLICIES, "unknown")
+                    elif key == "adapter_install_source":
+                        value = _coerce_literal(value, _ADAPTER_INSTALL_SOURCES, "unknown")
+                    elif key == "credential_policy":
+                        value = _coerce_literal(value, _CREDENTIAL_POLICIES, "unknown")
+                    elif key == "runtime_backend":
+                        value = _coerce_literal(value, _RUNTIME_BACKENDS, "acp_downstream")
                     setattr(existing, key, value)
             if self._db is not None:
                 self._db.save_agent_entry({
@@ -767,8 +805,14 @@ class AgentRegistry:
                     "acp_command": existing.acp_command,
                     "acp_args": json.dumps(existing.acp_args),
                     "adapter_source": existing.adapter_source,
+                    "adapter_package": existing.adapter_package,
+                    "adapter_version": existing.adapter_version,
+                    "adapter_version_policy": existing.adapter_version_policy,
+                    "adapter_install_source": existing.adapter_install_source,
                     "adapter_docs_url": existing.adapter_docs_url,
                     "certification_blocker": existing.certification_blocker,
+                    "credential_policy": existing.credential_policy,
+                    "runtime_backend": existing.runtime_backend,
                     "source": "api",
                 })
             return existing
