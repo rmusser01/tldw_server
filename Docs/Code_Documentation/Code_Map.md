@@ -29,6 +29,8 @@ flowchart LR
     Client -->|HTTP/WebSocket| API --> CORE --> DATA
 ```
 
+For a deeper Mermaid atlas of request lifecycle, router groups, storage ownership, and subsystem data flows, see `Docs/Code_Documentation/Data_Flow_Atlas.md`.
+
 ## Top-Level Layout
 
 - Server entry: `tldw_Server_API/app/main.py`

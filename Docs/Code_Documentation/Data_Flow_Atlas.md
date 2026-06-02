@@ -2,6 +2,8 @@
 
 This atlas maps how data moves through `tldw_Server_API`. It is written for new contributors and maintainers who need to trace requests across FastAPI endpoints, dependencies, core modules, storage, providers, and background workers.
 
+File path: `Docs/Code_Documentation/Data_Flow_Atlas.md`
+
 ## Table Of Contents
 
 - [How To Read This Atlas](#how-to-read-this-atlas)
@@ -1266,8 +1268,25 @@ flowchart LR
 
 ## Router Coverage Matrix
 
-Placeholder: this section will track every major router group or domain, representative modules, the atlas section that covers it, and any known coverage limits.
+This table groups routers by the way they are registered and maintained, not by every concrete endpoint path. Use it to audit whether new router domains have a corresponding atlas entry and whether related diagrams were updated together.
+
+| Router group or domain | Representative routes/modules | Atlas section | Coverage note |
+| --- | --- | --- | --- |
+| Core/infrastructure | `main.py`, `router_registry.py`, `router_groups/core.py`, `router_groups/minimal.py`, setup, health, metrics, OpenAPI helpers | [System Context](#system-context), [Request Lifecycle](#request-lifecycle), [Router Group Map](#router-group-map) | Covers app startup, router registration, middleware/dependencies, and operational surfaces. Individual health/setup variants are grouped under infrastructure rather than listed one by one. |
+| Identity/config/sync | `auth.py`, `users.py`, `config.py`, `sync.py`, AuthNZ dependencies, provider-secret helpers | [Auth And User Context](#auth-and-user-context), [Admin, Ops, And Governance](#admin-ops-and-governance) | Groups identity, user context, configuration, sync, and provider-secret flows because they share AuthNZ/user-scope ownership. |
+| Chat/LLM | `chat.py`, OpenAI-compatible chat routes, `core/Chat/`, `core/LLM_Calls/`, provider routing | [Chat And LLM Provider Calls](#chat-and-llm-provider-calls) | Covers request shaping, optional RAG context, conversation persistence, provider selection, and streaming responses. Character-specific chat is cross-linked through the characters/workspaces row. |
+| ACP/MCP | `mcp_unified_endpoint.py`, ACP endpoints where enabled, `core/MCP_unified/` | [MCP Unified](#mcp-unified), [Router Group Map](#router-group-map) | Groups MCP and ACP-style tool/client protocols as external tool-control surfaces with shared auth, RBAC, and execution concerns. |
+| Content/RAG/media/audio/embeddings/evaluations/OCR | `media.py`, `media_embeddings.py`, `rag_unified.py`, `rag_health.py`, audio endpoint package, `embeddings_*`, `evaluations_unified.py`, `ocr.py`, ingestion/chunking/embedding/RAG/evaluation core modules | [Media Ingestion](#media-ingestion), [Audio STT/TTS](#audio-stttts), [Chunking And Embeddings](#chunking-and-embeddings), [RAG/Search](#ragsearch), [Evaluations](#evaluations) | Groups high-volume content processing domains that move data between uploads/providers, Media DB, vector stores, per-user evaluations storage, and response-first audio paths. |
+| Workflows/scheduler/jobs | `workflows.py`, jobs endpoints, Scheduler handlers, APScheduler bridges, WorkerSDK/background services | [Jobs And Scheduler](#jobs-and-scheduler), [Admin, Ops, And Governance](#admin-ops-and-governance) | Separates user-visible Jobs from internal Scheduler orchestration while showing where recurring schedules enqueue into each backend. |
+| Notes/prompts/prompt studio/workspaces/characters | notes/chatbook endpoints, prompt endpoints, `prompt_studio.py`, workspace routes including migrations, character endpoints and card/session helpers | [Prompt Studio](#prompt-studio), [Notes And Chatbooks](#notes-and-chatbooks), [Characters And Workspaces](#characters-and-workspaces) | Groups user-authored knowledge, conversation artifacts, prompt assets, workspace migration state, and character/session data because they primarily persist through ChaChaNotes and related per-user stores. |
+| Storage/files/outputs/sharing | file upload/download routes, outputs/artifacts, local storage helpers, sharing/export/import handlers, chatbooks | [Storage, Files, And Outputs](#storage-files-and-outputs), [Notes And Chatbooks](#notes-and-chatbooks), [Data Store Map](#data-store-map) | Covers storage ownership and file/output lifecycles at the domain level; concrete file routes are intentionally summarized by storage responsibility. |
+| Research/web scraping/connectors/integrations | `research.py`, `paper_search.py`, `web_scraping.py`, connectors, ingestion sources, Slack/Discord/Telegram/meeting routes where enabled | [Research And Web Scraping](#research-and-web-scraping), [Integrations And Connectors](#integrations-and-connectors) | Groups external-source ingestion and integration callbacks because both normalize provider/web payloads before handing off to media, notes, research, chat, or jobs. |
+| Admin/orgs/billing/resource governance/monitoring | admin routers, org/team routes, billing/subscription routes, resource governance, rate limits, metrics, audit/ops endpoints | [Admin, Ops, And Governance](#admin-ops-and-governance), [Request Lifecycle](#request-lifecycle) | Covers governance, quotas, RBAC, observability, and administrative controls as cross-cutting policy layers rather than feature-specific endpoint lists. |
 
 ## How To Update This Atlas
 
-Placeholder: this section will define the maintenance checklist for keeping diagrams, route groups, storage paths, and verification commands current.
+- Check `router_groups/*.py` and `router_registry.py` for router additions, removals, lazy imports, optional routes, or registration changes.
+- Check changed endpoint and core modules for new storage ownership, provider calls, background workers, queue paths, or persistence gates.
+- Update the relevant Mermaid diagram and the [Router Coverage Matrix](#router-coverage-matrix) together so coverage remains auditable.
+- Re-run Markdown/Mermaid text checks for changed headings, diagram syntax anchors, and required terms.
+- Record verification commands and results in the relevant Backlog task.
