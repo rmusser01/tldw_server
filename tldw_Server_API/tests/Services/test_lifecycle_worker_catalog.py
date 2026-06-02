@@ -59,6 +59,25 @@ LEGACY_MANAGED_WORKER_NAMES = (
     legacy_worker_names_from_ownership_matrix() | _runtime_managed_worker_names()
 )
 
+TASK5_JOB_POLLER_SPEC_NAMES = {
+    "core_jobs_task",
+    "files_jobs_task",
+    "data_tables_jobs_task",
+    "prompt_studio_jobs_task",
+    "study_pack_jobs_task",
+    "study_suggestions_jobs_task",
+    "privilege_snapshot_task",
+    "audio_jobs_task",
+    "audiobook_jobs_task",
+    "presentation_render_jobs_task",
+    "media_ingest_jobs_task",
+    "media_ingest_heavy_jobs_task",
+    "reading_digest_jobs_task",
+    "vn_asset_jobs_task",
+    "vn_asset_generation_jobs_task",
+    "companion_reflection_jobs_task",
+}
+
 
 @pytest.mark.unit
 def test_collect_worker_specs_collects_specs_from_provider_functions() -> None:
@@ -96,6 +115,35 @@ def test_collect_worker_specs_rejects_duplicate_provider_names_through_graph_val
 
     with pytest.raises(WorkerSpecValidationError, match="duplicate.*duplicate_worker"):
         collect_worker_specs(_context(), [first_provider, second_provider])
+
+
+@pytest.mark.unit
+def test_collect_worker_specs_accepts_task5_job_poller_spec_providers() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_catalog import (
+        assert_legacy_worker_spec_parity,
+        collect_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_content_jobs_pollers import (
+        provide_content_jobs_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_primary_jobs_pollers import (
+        provide_primary_jobs_worker_specs,
+    )
+    from tldw_Server_API.app.services.startup_study_privilege_jobs_pollers import (
+        provide_study_privilege_jobs_worker_specs,
+    )
+
+    specs = collect_worker_specs(
+        _context(),
+        [
+            provide_primary_jobs_worker_specs,
+            provide_study_privilege_jobs_worker_specs,
+            provide_content_jobs_worker_specs,
+        ],
+    )
+
+    assert {spec.name for spec in specs} == TASK5_JOB_POLLER_SPEC_NAMES
+    assert_legacy_worker_spec_parity(TASK5_JOB_POLLER_SPEC_NAMES, specs)
 
 
 @pytest.mark.unit

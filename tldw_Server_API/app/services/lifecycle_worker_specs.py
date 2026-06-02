@@ -73,6 +73,47 @@ class WorkerSpec:
     failure_policy: WorkerFailurePolicy = WorkerFailurePolicy.SKIP
 
 
+def stop_event_worker_spec(
+    *,
+    name: str,
+    worker_service: Callable[[Any], Awaitable[Any]],
+    category: str,
+    phase: ShutdownPhase,
+    enabled: Callable[[WorkerLifecycleContext], bool] = always_enabled,
+    timeout_sec: float = 5.0,
+) -> WorkerSpec:
+    """Build a standard stop-event task worker spec."""
+
+    def _factory(
+        _context: WorkerLifecycleContext,
+        stop_event: asyncio.Event,
+    ) -> Awaitable[Any]:
+        return worker_service(stop_event)
+
+    return WorkerSpec(
+        name=name,
+        task_name=name,
+        category=category,
+        phase=phase,
+        timeout_sec=timeout_sec,
+        enabled=enabled,
+        factory=_factory,
+    )
+
+
+def route_enabled_predicate(
+    flag_key: str,
+    route_key: str,
+    **route_kwargs: object,
+) -> Callable[[WorkerLifecycleContext], bool]:
+    """Return a worker predicate backed by the lifecycle route gate."""
+
+    def _enabled(context: WorkerLifecycleContext) -> bool:
+        return context.route_enabled(flag_key, route_key, **route_kwargs)
+
+    return _enabled
+
+
 @dataclass(frozen=True)
 class WorkerSpecGraph:
     """Validated worker spec graph indexed by worker name."""

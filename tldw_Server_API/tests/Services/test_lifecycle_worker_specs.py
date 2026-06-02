@@ -1,4 +1,5 @@
 import pytest
+from fastapi import FastAPI
 
 
 async def _noop_callback() -> None:
@@ -20,6 +21,79 @@ def _worker_spec(**overrides: object):
     }
     values.update(overrides)
     return WorkerSpec(**values)
+
+
+def _context(*, route_enabled):
+    from tldw_Server_API.app.services.lifecycle_worker_specs import WorkerLifecycleContext
+
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=route_enabled,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+@pytest.mark.unit
+def test_stop_event_worker_spec_builds_standard_stop_event_spec_and_delegates_directly() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_specs import (
+        ShutdownPhase,
+        WorkerStrategy,
+        stop_event_worker_spec,
+    )
+
+    calls = []
+
+    def _worker_service(stop_event):
+        calls.append(stop_event)
+        return "worker-awaitable"
+
+    spec = stop_event_worker_spec(
+        name="example_jobs_task",
+        category="jobs",
+        phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+        worker_service=_worker_service,
+    )
+
+    assert spec.name == "example_jobs_task"
+    assert spec.task_name == "example_jobs_task"
+    assert spec.category == "jobs"
+    assert spec.phase is ShutdownPhase.JOB_POLLER_QUIESCE
+    assert spec.timeout_sec == 5.0
+    assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert spec.factory is not None
+    assert spec.factory(_context(route_enabled=lambda *_args, **_kwargs: True), "stop-event") == "worker-awaitable"
+    assert calls == ["stop-event"]
+
+
+@pytest.mark.unit
+def test_route_enabled_predicate_forwards_flag_route_and_kwargs() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_specs import (
+        route_enabled_predicate,
+    )
+
+    calls = []
+
+    def _route_enabled(*args, **kwargs):
+        calls.append((args, kwargs))
+        return False
+
+    predicate = route_enabled_predicate(
+        "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+        "media-ingest-heavy-jobs",
+        default_stable=False,
+    )
+
+    assert predicate(_context(route_enabled=_route_enabled)) is False
+    assert calls == [
+        (
+            ("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "media-ingest-heavy-jobs"),
+            {"default_stable": False},
+        )
+    ]
 
 
 @pytest.mark.unit
