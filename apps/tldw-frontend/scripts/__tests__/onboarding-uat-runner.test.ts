@@ -1,10 +1,30 @@
 import { describe, expect, it } from "vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { createServer } from "node:http"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { reservePort, reservePorts } from "../onboarding-uat/ports.mjs"
+import {
+  SYNTHETIC_SECRETS,
+  assertNoSecretLeaks,
+  cleanupRunArtifacts,
+  createRunArtifacts,
+  redactText,
+} from "../onboarding-uat/artifacts.mjs"
+import {
+  buildBackendEnv,
+  createRuntimeProfile,
+} from "../onboarding-uat/profile.mjs"
+import {
+  spawnLoggedProcess,
+  stopProcessTree,
+  waitForHttpOk,
+} from "../onboarding-uat/processes.mjs"
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(testDir, "../..")
+const repoRoot = path.resolve(frontendRoot, "../..")
 const mockOpenAiRoot = path.join(frontendRoot, "e2e/onboarding-uat/mock-openai")
 
 const configFiles = [
@@ -176,6 +196,193 @@ describe("onboarding UAT static fixtures", () => {
       expect(fixture).toContain("Verify first chat")
       expect(fixture).toContain("Add one source")
       expect(fixture).toContain("Ask for a summary")
+    }
+  })
+})
+
+describe("onboarding UAT runner helpers", () => {
+  it("redacts synthetic secrets and common API key carrier formats", () => {
+    const redacted = redactText(
+      [
+        "plain sk-uat-mock-openai",
+        "api THIS-IS-A-SECURE-KEY-123-UAT",
+        "Authorization: Bearer sk-live-never-log-this",
+        "x-api-key: sk-header-never-log-this",
+      ].join("\n")
+    )
+
+    for (const secret of SYNTHETIC_SECRETS) {
+      expect(redacted).not.toContain(secret)
+    }
+    expect(redacted).toContain("Bearer [REDACTED]")
+    expect(redacted).toContain("x-api-key: [REDACTED]")
+  })
+
+  it("creates and cleans up the expected artifact layout", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-artifacts",
+      preserve: false,
+    })
+
+    expect(artifacts.root).toBe(
+      path.join(frontendRoot, "test-results/onboarding-uat/unit-artifacts")
+    )
+    expect(existsSync(artifacts.summaryPath)).toBe(true)
+    expect(existsSync(artifacts.logs.backend)).toBe(true)
+    expect(existsSync(artifacts.logs.frontend)).toBe(true)
+    expect(existsSync(artifacts.logs.mockOpenai)).toBe(true)
+    expect(existsSync(artifacts.logs.runner)).toBe(true)
+    expect(existsSync(artifacts.browserDiagnosticsPath)).toBe(true)
+    expect(existsSync(artifacts.screenshotsDir)).toBe(true)
+    expect(existsSync(artifacts.runtimeProfileManifestPath)).toBe(true)
+
+    cleanupRunArtifacts(artifacts)
+
+    expect(existsSync(artifacts.root)).toBe(false)
+  })
+
+  it("detects unredacted synthetic secret leaks in artifact files", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-leak-check",
+      preserve: false,
+    })
+
+    try {
+      writeFileSync(artifacts.logs.runner, "leaked sk-uat-mock-openai", "utf8")
+
+      expect(() => assertNoSecretLeaks(artifacts.root)).toThrow(
+        /synthetic secret leak/i
+      )
+    } finally {
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
+  it("creates an isolated runtime profile and backend env for the mock provider", () => {
+    const profile = createRuntimeProfile({
+      repoRoot,
+      frontendRoot,
+      runId: "unit-profile",
+      mockPort: 43210,
+      baseTmpDir: path.join(tmpdir(), "tldw-onboarding-uat-tests"),
+    })
+
+    try {
+      const config = readFileSync(profile.configPath, "utf8")
+      const envText = readFileSync(profile.envPath, "utf8")
+
+      expect(config).toContain("enable_first_time_setup = true")
+      expect(config).toContain("setup_completed = false")
+      expect(config).toContain("openai_model = gpt-4.1-mini")
+      expect(config).toContain("custom_openai_api_ip = http://127.0.0.1:43210/v1")
+      expect(config).toContain("custom_openai_api_model = local-uat-chat")
+      expect(config).toContain("ollama_api_IP = http://127.0.0.1:43210/v1")
+      expect(config).toContain("ollama_model = llama3.2:3b")
+      expect(config).toContain(
+        `USER_DB_BASE_DIR = ${path.join(profile.root, "Databases/user_databases")}`
+      )
+      expect(config).not.toContain("ingestion_source_allowed_roots =")
+
+      expect(envText).toContain("AUTH_MODE=single_user")
+      expect(envText).toContain("SINGLE_USER_API_KEY=THIS-IS-A-SECURE-KEY-123-UAT")
+      expect(envText).toContain("DEFAULT_LLM_PROVIDER=openai")
+      expect(envText).toContain("OPENAI_API_KEY=sk-uat-mock-openai")
+      expect(envText).toContain("OPENAI_API_BASE_URL=http://127.0.0.1:43210/v1")
+      expect(envText).toContain(`DATABASE_URL=sqlite:///${profile.usersDbPath}`)
+      expect(envText).not.toContain(path.join(repoRoot, "tldw_Server_API/Config_Files/.env"))
+
+      const backendEnv = buildBackendEnv({
+        profile,
+        mockPort: 43210,
+        baseEnv: { PATH: "/test/bin", OPENAI_API_KEY: "real-key" },
+      })
+
+      expect(backendEnv.PATH).toBe("/test/bin")
+      expect(backendEnv.TLDW_CONFIG_FILE).toBe(profile.configPath)
+      expect(backendEnv.TLDW_ENV_FILE).toBe(profile.envPath)
+      expect(backendEnv.DATABASE_URL).toBe(`sqlite:///${profile.usersDbPath}`)
+      expect(backendEnv.AUTH_MODE).toBe("single_user")
+      expect(backendEnv.SINGLE_USER_API_KEY).toBe("THIS-IS-A-SECURE-KEY-123-UAT")
+      expect(backendEnv.DEFAULT_LLM_PROVIDER).toBe("openai")
+      expect(backendEnv.OPENAI_API_KEY).toBe("sk-uat-mock-openai")
+      expect(backendEnv.OPENAI_API_BASE_URL).toBe("http://127.0.0.1:43210/v1")
+    } finally {
+      rmSync(profile.root, { recursive: true, force: true })
+    }
+  })
+
+  it("reserves distinct loopback ports", async () => {
+    const onePort = await reservePort()
+    const ports = await reservePorts(["backend", "web", "mock"])
+
+    expect(onePort).toBeGreaterThan(0)
+    expect(ports).toEqual({
+      backend: expect.any(Number),
+      web: expect.any(Number),
+      mock: expect.any(Number),
+    })
+    expect(new Set(Object.values(ports)).size).toBe(3)
+  })
+
+  it("waits for HTTP readiness against a local server", async () => {
+    const port = await reservePort()
+    const server = createServer((request, response) => {
+      if (request.url === "/ready") {
+        response.writeHead(204)
+      } else {
+        response.writeHead(404)
+      }
+      response.end()
+    })
+
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", resolve)
+    })
+
+    try {
+      await expect(
+        waitForHttpOk(`http://127.0.0.1:${port}/ready`, {
+          timeoutMs: 500,
+          intervalMs: 10,
+        })
+      ).resolves.toMatchObject({ ok: true, status: 204 })
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+    }
+  })
+
+  it("writes redacted child process output to logs", async () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-process",
+      preserve: false,
+    })
+
+    const record = spawnLoggedProcess({
+      name: "unit-child",
+      command: process.execPath,
+      args: ["-e", "console.log('token sk-uat-mock-openai')"],
+      cwd: frontendRoot,
+      env: process.env,
+      logPath: artifacts.logs.runner,
+    })
+
+    try {
+      const exitCode = await new Promise<number | null>((resolve) => {
+        record.child.once("exit", (code) => resolve(code))
+      })
+
+      expect(exitCode).toBe(0)
+      const log = readFileSync(artifacts.logs.runner, "utf8")
+      expect(log).toContain("[REDACTED]")
+      expect(log).not.toContain("sk-uat-mock-openai")
+    } finally {
+      await stopProcessTree(record, { timeoutMs: 50 })
+      cleanupRunArtifacts(artifacts)
     }
   })
 })
