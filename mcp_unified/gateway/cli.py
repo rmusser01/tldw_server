@@ -27,6 +27,7 @@ from .config import (
     build_gateway_profile_storage,
     credential_grant_manager_from_storage,
     external_registry_manager_from_storage,
+    gateway_config_snapshot_manager_from_storage,
     load_gateway_profile_bootstrap_config,
 )
 from .credential_grants import (
@@ -38,6 +39,10 @@ from .external_registry import (
     GatewayExternalRegistryManager,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
+from .snapshots import (
+    GatewayConfigSnapshotManagementError,
+    GatewayConfigSnapshotManager,
+)
 
 _ProfileOperation = Callable[
     [GatewayProfileManager],
@@ -50,6 +55,10 @@ _ExternalRegistryOperation = Callable[
 _CredentialGrantOperation = Callable[
     [GatewayCredentialGrantManager],
     Coroutine[Any, Any, dict[str, Any]],
+]
+_ConfigSnapshotOperation = Callable[
+    [GatewayConfigSnapshotManager],
+    Coroutine[Any, Any, Mapping[str, Any]],
 ]
 
 
@@ -362,6 +371,36 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(delete_credential_grant)
     delete_credential_grant.set_defaults(handler=_handle_delete_credential_grant)
 
+    export_config = subparsers.add_parser(
+        "export-config",
+        help="Export a persistent gateway config snapshot.",
+    )
+    export_config.add_argument(
+        "--output",
+        type=Path,
+        help="Optional file path to write the snapshot JSON.",
+    )
+    _add_profile_config_argument(export_config)
+    export_config.set_defaults(handler=_handle_export_config)
+
+    import_config = subparsers.add_parser(
+        "import-config",
+        help="Import a persistent gateway config snapshot.",
+    )
+    import_config.add_argument(
+        "--snapshot-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON config snapshot object, or '-' to read from stdin.",
+    )
+    import_config.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and report planned mutations without writing.",
+    )
+    _add_profile_config_argument(import_config)
+    import_config.set_defaults(handler=_handle_import_config)
+
     get_default_profile = subparsers.add_parser(
         "get-default-profile",
         help="Show the active gateway default profile.",
@@ -613,6 +652,31 @@ def _handle_delete_credential_grant(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_export_config(args: argparse.Namespace) -> int:
+    """Export a gateway config snapshot to stdout or a JSON file."""
+
+    return _handle_config_snapshot_command(
+        args,
+        lambda manager: _export_config_for_cli(
+            manager,
+            output_path=args.output,
+        ),
+    )
+
+
+def _handle_import_config(args: argparse.Namespace) -> int:
+    """Import a gateway config snapshot from a JSON file or stdin."""
+
+    return _handle_config_snapshot_command(
+        args,
+        lambda manager: _import_config_for_cli(
+            manager,
+            snapshot_file=args.snapshot_file,
+            dry_run=bool(args.dry_run),
+        ),
+    )
+
+
 def _handle_get_default_profile(args: argparse.Namespace) -> int:
     """Show the active gateway default profile."""
 
@@ -823,6 +887,76 @@ def _handle_credential_grant_command(
             _run_async(_close_external_registry_bundle(external_bundle))
 
 
+def _handle_config_snapshot_command(
+    args: argparse.Namespace,
+    operation: _ConfigSnapshotOperation,
+) -> int:
+    """Run a config snapshot command against persistent gateway stores."""
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    external_bundle: GatewayExternalRegistryStorageBundle | None = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            external_bundle = build_gateway_external_registry_storage(config.store)
+            if (
+                not profile_bundle.metadata.persistent
+                or not external_bundle.metadata.persistent
+            ):
+                raise GatewayConfigSnapshotManagementError(
+                    "Config snapshots require a persistent gateway store",
+                    reason_code="config_snapshot_store_unavailable",
+                )
+            manager = gateway_config_snapshot_manager_from_storage(
+                profile_bundle,
+                external_bundle,
+            )
+        except _CliArgumentError:
+            raise
+        except GatewayConfigSnapshotManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            unavailable_error = _config_snapshot_storage_unavailable_error(exc)
+            if unavailable_error is not None:
+                _emit_json(unavailable_error.to_payload(), sys.stderr)
+                return 1
+            _emit_json(
+                {
+                    "error": str(exc),
+                    "ok": False,
+                    "path": str(config_path),
+                },
+                sys.stderr,
+            )
+            return 1
+
+        try:
+            payload = _run_async(operation(manager))
+        except _CliArgumentError:
+            raise
+        except GatewayConfigSnapshotManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception:  # noqa: BLE001
+            unavailable_error = GatewayConfigSnapshotManagementError(
+                "Config snapshot store unavailable",
+                reason_code="config_snapshot_store_unavailable",
+            )
+            _emit_json(unavailable_error.to_payload(), sys.stderr)
+            return 1
+
+        _emit_json(dict(payload), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        if external_bundle is not None:
+            _run_async(_close_external_registry_bundle(external_bundle))
+
+
 def _credential_grant_storage_unavailable_error(
     exc: Exception,
 ) -> GatewayCredentialGrantManagementError | None:
@@ -846,6 +980,19 @@ def _external_registry_storage_unavailable_error(
     return GatewayExternalRegistryManagementError(
         str(exc),
         reason_code="external_registry_store_unavailable",
+    )
+
+
+def _config_snapshot_storage_unavailable_error(
+    exc: Exception,
+) -> GatewayConfigSnapshotManagementError | None:
+    """Map expected unavailable config snapshot storage build failures."""
+
+    if not isinstance(exc, ExternalRegistryStorageConfigurationError):
+        return None
+    return GatewayConfigSnapshotManagementError(
+        str(exc),
+        reason_code="config_snapshot_store_unavailable",
     )
 
 
@@ -924,6 +1071,44 @@ async def _set_default_profile_for_cli(
     }
 
 
+async def _export_config_for_cli(
+    manager: GatewayConfigSnapshotManager,
+    *,
+    output_path: Path | None,
+) -> dict[str, Any]:
+    """Export a snapshot, optionally writing it to a file."""
+
+    snapshot = await manager.export_snapshot()
+    payload = snapshot.model_dump(mode="json")
+    if output_path is None:
+        return payload
+    try:
+        output_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise _CliArgumentError(f"Unable to write snapshot JSON: {exc}") from exc
+    return {
+        "ok": True,
+        "output": str(output_path),
+        "schema": payload["schema"],
+        "version": payload["version"],
+    }
+
+
+async def _import_config_for_cli(
+    manager: GatewayConfigSnapshotManager,
+    *,
+    snapshot_file: Path,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Import a config snapshot from a JSON file or stdin."""
+
+    snapshot = _load_json_argument_file(snapshot_file, label="snapshot")
+    return await manager.import_snapshot(snapshot, dry_run=dry_run)
+
+
 async def _seed_readonly_memory_store(
     bundle: GatewayProfileStorageBundle,
     config: GatewayProfileBootstrapConfig,
@@ -997,7 +1182,7 @@ async def _close_external_registry_bundle(
     return {}
 
 
-def _run_async(coro: Coroutine[Any, Any, dict[str, Any]]) -> dict[str, Any]:
+def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Run an async profile-management operation from a sync CLI handler."""
 
     return asyncio.run(coro)

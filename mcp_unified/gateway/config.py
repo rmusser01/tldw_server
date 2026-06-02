@@ -34,6 +34,7 @@ from .external_registry import GatewayExternalRegistryManager, GatewayStoreMetad
 from .lifecycle import GatewayExternalRuntimeLifecycleConfig
 from .profiles import GatewayProfileStoreMetadata
 from .runtime import GatewayRuntime
+from .snapshots import GatewayConfigSnapshotManager
 
 if TYPE_CHECKING:
     from mcp_unified.federation.installers import ExternalServerInstaller
@@ -549,6 +550,36 @@ def credential_grant_manager_from_storage(
         if audit_store is not None
         else external_registry_storage.audit_store,
         store_metadata=external_registry_storage.metadata,
+    )
+
+
+def gateway_config_snapshot_manager_from_storage(
+    profile_storage: GatewayProfileStorageBundle,
+    external_registry_storage: GatewayExternalRegistryStorageBundle,
+    *,
+    credential_grant_store: CredentialGrantStore | None = None,
+    audit_store: AuditStore | None = None,
+) -> GatewayConfigSnapshotManager:
+    """Build a config snapshot manager from resolved storage dependencies."""
+
+    resolved_credential_store = (
+        credential_grant_store
+        if credential_grant_store is not None
+        else external_registry_storage.credential_grant_store
+    )
+    if resolved_credential_store is None:
+        raise ExternalRegistryStorageConfigurationError(
+            "config snapshots require a credential grant store"
+        )
+
+    return GatewayConfigSnapshotManager(
+        profile_store=profile_storage.profile_store,
+        assignment_store=profile_storage.assignment_store,
+        external_registry_store=external_registry_storage.external_registry_store,
+        credential_grant_store=resolved_credential_store,
+        audit_store=audit_store
+        if audit_store is not None
+        else profile_storage.audit_store or external_registry_storage.audit_store,
     )
 
 
