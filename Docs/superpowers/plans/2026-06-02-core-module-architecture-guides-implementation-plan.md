@@ -530,7 +530,7 @@ git commit -m "docs: complete core architecture guide review"
 
 **Tests:** README coverage, placeholder scan, Markdown link sanity, inventory completion parser, `git diff --check`, branch docs-only diff review. Bandit is skipped and documented if no runtime code changed.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 6: Verify And Close TASK-589
 
