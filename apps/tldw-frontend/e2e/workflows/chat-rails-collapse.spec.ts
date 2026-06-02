@@ -112,6 +112,32 @@ const expectRightEdgeHandle = async (page: Page, button: Locator) => {
 }
 
 test.describe("/chat siderail collapse", () => {
+  test("desktop cockpit restore stays clickable above the collapsed chat rail edge", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 960 })
+    await prepareChatRailPage(page)
+    await page.goto("/chat", { waitUntil: "domcontentloaded" })
+    await waitForAppShell(page)
+
+    const chatRailEdge = page.getByTestId("chat-sidebar-edge-expand")
+    await expect(chatRailEdge).toBeVisible()
+
+    const cockpitLeftRail = page.getByTestId("playground-cockpit-left-rail")
+    await expect(cockpitLeftRail).toBeVisible()
+    await cockpitLeftRail
+      .getByRole("button", { name: "Collapse context sidechannel" })
+      .click()
+
+    const cockpitRestore = page.getByTestId(
+      "playground-cockpit-left-rail-restore",
+    )
+    await expect(cockpitRestore).toBeVisible()
+    await expect(chatRailEdge).toBeVisible()
+
+    await cockpitRestore.click()
+    await expect(cockpitLeftRail).toBeVisible()
+    await expect(chatRailEdge).toBeVisible()
+  })
+
   test("desktop default composer keeps collapsed rails recoverable from the same edge", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 960 })
     await prepareChatRailPage(page)
