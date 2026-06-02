@@ -389,6 +389,34 @@ def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata() -> No
     assert "commit 53c018269" in entry.compatibility_notes
 
 
+def test_default_agents_yaml_includes_codex_backend_live_e2e_metadata() -> None:
+    """Codex is shipped as an external adapter profile with backend live-E2E evidence."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("codex")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "codex"
+    assert entry.acp_command == "codex-acp"
+    assert entry.acp_args == []
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+    assert entry.certification_blocker is None
+    assert entry.adapter_package == "@zed-industries/codex-acp"
+    assert entry.adapter_version == "0.15.0"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert "backend live E2E" in entry.compatibility_notes
+    assert "codex/acp-codex-orchestration-progress" in entry.compatibility_notes
+
+
 def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint() -> None:
     """Aider can be locally configured while remaining blocked for ACP certification."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
@@ -434,6 +462,32 @@ def test_default_runner_home_config_exposes_goose_backend_profile() -> None:
     assert goose["args"] == ["acp"]
     assert "TERM=xterm-256color" in goose["env"]
     assert "HOME=${TLDW_ACP_HOST_HOME}" in goose["env"]
+
+
+def test_default_runner_home_config_exposes_codex_external_adapter_profile() -> None:
+    """The bundled runner config should launch Codex through codex-acp."""
+    runner_config = os.path.abspath(os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "acp_runner_home", ".tldw-agent", "config.yaml",
+    ))
+
+    with open(runner_config, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+
+    entries = {
+        entry["type"]: entry
+        for entry in payload["agents"]["agents"]
+    }
+
+    codex = entries["codex"]
+    assert codex["command"] == "codex"
+    assert codex["entrypoint_strategy"] == "external_acp_adapter"
+    assert codex["acp_command"] == "codex-acp"
+    assert codex["acp_args"] == []
+    assert codex["adapter_package"] == "@zed-industries/codex-acp"
+    assert codex["adapter_version"] == "0.15.0"
+    assert codex["credential_policy"] == "delegated_to_adapter"
+    assert "HOME=${TLDW_ACP_HOST_HOME}" in codex["env"]
 
 
 # ---------------------------------------------------------------------------

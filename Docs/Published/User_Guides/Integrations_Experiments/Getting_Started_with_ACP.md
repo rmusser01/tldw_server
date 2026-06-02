@@ -295,6 +295,12 @@ configuration.
 Passive readiness checks only inspect configured binaries and metadata. They do
 not install packages, invoke package managers, or run `npx @latest`.
 
+Codex CLI `0.128.0` through `codex-acp` `0.15.0` has backend live E2E
+coverage on the macOS host runner for health/setup-guide, session creation,
+prompting, redacted support views, diagnostics, cancel, and close. Sandbox,
+non-empty MCP injection, artifact-producing workflows, and reviewer-loop
+behavior remain unverified.
+
 ```yaml
 # tldw_Server_API/Config_Files/agents.yaml
 - type: codex
@@ -307,8 +313,8 @@ not install packages, invoke package managers, or run `npx @latest`.
   adapter_version_policy: exact_pin_required
   adapter_install_source: github_release_preferred
   credential_policy: delegated_to_adapter
-  support_state: experimental
-  verification_level: documented_only
+  support_state: supported_with_caveats
+  verification_level: live_e2e_tested
 ```
 
 ### OpenCode

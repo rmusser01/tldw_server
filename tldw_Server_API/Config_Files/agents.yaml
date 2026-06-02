@@ -58,9 +58,9 @@ agents:
       - "Install OpenAI Codex CLI using the current OpenAI instructions."
       - "Install zed-industries/codex-acp 0.15.0 from the GitHub release artifact and ensure codex-acp is on PATH."
     docs_url: "https://github.com/openai/codex"
-    support_state: experimental
-    verification_level: documented_only
-    compatibility_notes: "Codex can be reached through zed-industries/codex-acp, but this tldw profile remains experimental until live ACP certification passes."
+    support_state: supported_with_caveats
+    verification_level: live_e2e_tested
+    compatibility_notes: "Codex CLI 0.128.0 via zed-industries/codex-acp 0.15.0 completed June 2, 2026 backend live E2E through the macOS host runner on branch codex/acp-codex-orchestration-progress with tldw-agent runner 0.1.0: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: external_acp_adapter
     acp_command: codex-acp
@@ -73,7 +73,6 @@ agents:
     adapter_install_source: github_release_preferred
     credential_policy: delegated_to_adapter
     runtime_backend: acp_downstream
-    certification_blocker: live_certification_required
 
   - type: aider
     name: Aider

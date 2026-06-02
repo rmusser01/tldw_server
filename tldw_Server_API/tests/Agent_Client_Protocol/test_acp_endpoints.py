@@ -382,7 +382,7 @@ def test_entrypoint_setup_steps_include_live_certification_required() -> None:
         "blockers": ["live_certification_required"],
     })
 
-    assert steps == ["Run live ACP certification before marking this adapter ready."]
+    assert steps == ["Run live ACP certification before claiming this agent is supported."]
 
 
 def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):
