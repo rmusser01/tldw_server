@@ -87,10 +87,21 @@ const storeOptionState = vi.hoisted(() => ({
   }
 }))
 
+type ChatSettingsSyncParams = {
+  historyId: string | null
+  serverChatId: string | null
+}
+
+type ChatSettingsPatchParams = ChatSettingsSyncParams & {
+  patch: Record<string, unknown>
+}
+
 const chatSettingsState = vi.hoisted(() => ({
-  syncChatSettingsForServerChat: vi.fn(async (_options?: unknown) => null),
+  syncChatSettingsForServerChat: vi.fn(
+    async (_params: ChatSettingsSyncParams): Promise<unknown> => null
+  ),
   applyChatSettingsPatch: vi.fn(
-    async (_serverChatId?: unknown, _patch?: unknown) => null
+    async (_params: ChatSettingsPatchParams): Promise<unknown> => null
   )
 }))
 
@@ -470,14 +481,15 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => mobileViewportState.value
+  useMobile: () => mobileViewportState.value,
+  useDesktop: () => !mobileViewportState.value
 }))
 
 vi.mock("@/services/chat-settings", () => ({
-  syncChatSettingsForServerChat: (options: unknown) =>
-    chatSettingsState.syncChatSettingsForServerChat(options),
-  applyChatSettingsPatch: (serverChatId: unknown, patch: unknown) =>
-    chatSettingsState.applyChatSettingsPatch(serverChatId, patch)
+  syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
+    chatSettingsState.syncChatSettingsForServerChat(params),
+  applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
+    chatSettingsState.applyChatSettingsPatch(params)
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
