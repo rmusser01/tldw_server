@@ -31,6 +31,36 @@ type FirstChatResponsePayload = {
   message?: string | null
 }
 
+type FirstSourceResultSummary = {
+  status?: string
+  firstMediaId?: string | null
+  primarySourceLabel?: string | null
+  errorMessage?: string | null
+}
+
+export type FirstSourceSessionSummary = {
+  lifecycle?: string
+  firstSourceAddMode?: string | null
+  resultSummary?: FirstSourceResultSummary | null
+}
+
+export type FirstSourceStarterHandoff = {
+  mediaId?: string
+  title?: string
+  mode?: string
+  content?: string
+}
+
+const FIRST_SOURCE_PASTE_FIXTURE = [
+  "Onboarding UAT research note",
+  "",
+  "Date: 2026-06-02",
+  "",
+  "- Claim: The harness verifies first-value onboarding.",
+  "- Action item: Ask a starter question after ingest.",
+  "- Detail: Starter questions must be shown only after source readiness.",
+].join("\n")
+
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -246,6 +276,115 @@ export async function sendWizardFirstChatAndWaitForMilestone(
     page.getByRole("heading", { name: /add your first source/i })
   ).toBeVisible({ timeout: 60_000 })
   return payload
+}
+
+export async function completeFirstSourcePasteIngest(
+  page: Page
+): Promise<FirstSourceSessionSummary> {
+  await expect(
+    page.getByRole("textbox", { name: /pasted text input/i })
+  ).toBeVisible({ timeout: 20_000 })
+  await page
+    .getByRole("textbox", { name: /pasted text input/i })
+    .fill(FIRST_SOURCE_PASTE_FIXTURE)
+  await page
+    .getByRole("button", { name: /add pasted text to queue/i })
+    .click()
+  await expect(page.getByText(/queued/i)).toBeVisible({ timeout: 20_000 })
+  await page.getByRole("button", { name: /use defaults & process/i }).click()
+  await expect(page.getByTestId("wizard-results-step")).toBeVisible({
+    timeout: 120_000,
+  })
+
+  const sessionHandle = await page.waitForFunction(
+    () => {
+      type QuickIngestSessionStoreWindow = Window & {
+        __tldw_useQuickIngestSessionStore?: {
+          getState?: () => {
+            session?: FirstSourceSessionSummary | null
+          }
+        }
+      }
+      const store = (window as QuickIngestSessionStoreWindow)
+        .__tldw_useQuickIngestSessionStore
+      const session = store?.getState?.().session
+      if (
+        session?.resultSummary?.status === "success" &&
+        session.resultSummary.firstMediaId
+      ) {
+        return {
+          lifecycle: session.lifecycle,
+          firstSourceAddMode: session.firstSourceAddMode,
+          resultSummary: session.resultSummary,
+        }
+      }
+      return null
+    },
+    undefined,
+    { timeout: 120_000 }
+  )
+  const summary =
+    (await sessionHandle.jsonValue()) as FirstSourceSessionSummary
+
+  const resultsStep = page.getByTestId("wizard-results-step")
+  await resultsStep
+    .getByRole("button", { name: /close the ingest wizard/i })
+    .click()
+  await expect(resultsStep).toBeHidden({ timeout: 10_000 })
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          type QuickIngestSessionStoreWindow = Window & {
+            __tldw_useQuickIngestSessionStore?: {
+              getState?: () => {
+                session?: { visibility?: string } | null
+              }
+            }
+          }
+          const store = (window as QuickIngestSessionStoreWindow)
+            .__tldw_useQuickIngestSessionStore
+          return store?.getState?.().session?.visibility ?? null
+        }),
+      { timeout: 10_000 }
+    )
+    .not.toBe("visible")
+  await expect(page.getByText(/starter questions/i)).toBeVisible({
+    timeout: 30_000,
+  })
+  return summary
+}
+
+export async function clickFirstSourceStarterQuestion(
+  page: Page,
+  question = "Summarize this source."
+): Promise<FirstSourceStarterHandoff> {
+  await page.evaluate(() => {
+    type DiscussMediaWindow = Window & {
+      __tldwLastDiscussMediaDetail?: FirstSourceStarterHandoff | null
+    }
+    const target = window as DiscussMediaWindow
+    target.__tldwLastDiscussMediaDetail = null
+    window.addEventListener(
+      "tldw:discuss-media",
+      ((event: CustomEvent<FirstSourceStarterHandoff>) => {
+        target.__tldwLastDiscussMediaDetail = event.detail
+      }) as EventListener,
+      { once: true }
+    )
+  })
+  await page.getByRole("button", { name: question }).click()
+  const handoffHandle = await page.waitForFunction(
+    () =>
+      (
+        window as Window & {
+          __tldwLastDiscussMediaDetail?: FirstSourceStarterHandoff | null
+        }
+      ).__tldwLastDiscussMediaDetail,
+    undefined,
+    { timeout: 10_000 }
+  )
+  return (await handoffHandle.jsonValue()) as FirstSourceStarterHandoff
 }
 
 export async function waitForWizardFirstChatRecovery(

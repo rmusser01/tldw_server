@@ -2,6 +2,8 @@ import { test, expect } from "./fixtures"
 import {
   assertNoCriticalDiagnostics,
   captureStep,
+  clickFirstSourceStarterQuestion,
+  completeFirstSourcePasteIngest,
   openFirstRunSetup,
   prepareHostedOpenAiFirstChat,
   sendWizardFirstChatAndWaitForMilestone,
@@ -53,6 +55,39 @@ test.describe("Onboarding UAT first source milestone", () => {
     })
     await captureStep(page, artifact, scenarioId, "05-quick-ingest-open", {
       quick_ingest_detail: quickIngestDetail,
+    })
+
+    const firstSourceSession = await completeFirstSourcePasteIngest(page)
+    const firstMediaId = firstSourceSession.resultSummary?.firstMediaId
+    expect(firstSourceSession.lifecycle).toBe("completed")
+    expect(firstSourceSession.resultSummary?.status).toBe("success")
+    expect(firstMediaId).toBeTruthy()
+    await expect(page.getByText(/starter questions/i)).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Summarize this source." })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "List the key claims." })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "What should I remember?" })
+    ).toBeVisible()
+    await captureStep(page, artifact, scenarioId, "06-first-source-ready", {
+      first_source_session: firstSourceSession,
+    })
+
+    const starterHandoff = await clickFirstSourceStarterQuestion(
+      page,
+      "Summarize this source."
+    )
+    expect(starterHandoff).toMatchObject({
+      mediaId: firstMediaId,
+      mode: "rag_media",
+      content: "Summarize this source.",
+    })
+    expect(starterHandoff.title).toBeTruthy()
+    await captureStep(page, artifact, scenarioId, "07-starter-question-handoff", {
+      starter_handoff: starterHandoff,
     })
 
     assertNoCriticalDiagnostics(diagnostics)
