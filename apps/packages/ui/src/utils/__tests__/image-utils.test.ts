@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  IMAGE_ATTACHMENT_MIME_TYPES,
   createImageDataUrl,
   inferImageAttachmentMimeType,
   normalizeImageDataUrlMime,
@@ -50,6 +51,9 @@ describe("image utils", () => {
     expect(inferImageAttachmentMimeType({ name: "photo.jpg", type: "" })).toBe(
       "image/jpeg"
     )
+    expect(inferImageAttachmentMimeType({ name: "favicon.ico", type: "" })).toBe(
+      "image/ico"
+    )
     expect(inferImageAttachmentMimeType({ name: "png", type: "" })).toBeNull()
     expect(
       inferImageAttachmentMimeType({
@@ -73,5 +77,10 @@ describe("image utils", () => {
 
     expect(normalizeImageDataUrlMime(dataUrl, null)).toBe(dataUrl)
     expect(normalizeImageDataUrlMime(dataUrl, undefined)).toBe(dataUrl)
+  })
+
+  it("keeps the shared unsupported image MIME policy aligned with legacy ico MIME", () => {
+    expect(IMAGE_ATTACHMENT_MIME_TYPES.has("image/ico")).toBe(true)
+    expect(IMAGE_ATTACHMENT_MIME_TYPES.has("image/x-icon")).toBe(false)
   })
 })

@@ -84,4 +84,57 @@ describe("model normalization helpers", () => {
       output: ["text"]
     })
   })
+
+  it("derives capability flags from array-shaped capability metadata", () => {
+    const models = normalizeTldwModels({
+      models: [
+        {
+          id: "openai/gpt-4o-mini",
+          provider: "openai",
+          capabilities: ["vision", "tool_use", "json_mode"]
+        },
+        {
+          id: "anthropic/claude-sonnet-4",
+          provider: "anthropic",
+          features: ["function_calling", "json_output"]
+        }
+      ]
+    })
+
+    expect(models[0]).toEqual(
+      expect.objectContaining({
+        vision: true,
+        function_calling: true,
+        json_output: true
+      })
+    )
+    expect(models[1]).toEqual(
+      expect.objectContaining({
+        vision: false,
+        function_calling: true,
+        json_output: true
+      })
+    )
+  })
+
+  it("preserves explicit false capability flags over alternate capability keys", () => {
+    const models = normalizeTldwModels({
+      models: [
+        {
+          id: "local/tool-model",
+          provider: "local",
+          capabilities: {
+            function_calling: false,
+            tool_use: true
+          }
+        }
+      ]
+    })
+
+    expect(models[0]).toEqual(
+      expect.objectContaining({
+        function_calling: false
+      })
+    )
+  })
 })

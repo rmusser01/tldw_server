@@ -11,7 +11,7 @@ export const IMAGE_ATTACHMENT_MIME_BY_EXTENSION = new Map<string, string>([
   ["gif", "image/gif"],
   ["heic", "image/heic"],
   ["heif", "image/heif"],
-  ["ico", "image/x-icon"],
+  ["ico", "image/ico"],
   ["jpeg", "image/jpeg"],
   ["jpg", "image/jpeg"],
   ["png", "image/png"],

@@ -561,9 +561,6 @@ export interface TldwModel {
     input?: string[]
     output?: string[]
   }
-  is_configured?: boolean
-  provider_enabled?: boolean
-  availability?: string
 }
 
 export type ChatCompletionContentPartText = {

@@ -66,6 +66,17 @@ export function normalizeTldwModels(
       normalizeProviderAvailabilityKey(provider) || ""
     )
     const capabilities = isRecord(m.capabilities) ? m.capabilities : undefined
+    const capabilityList = (
+      Array.isArray(m.capabilities)
+        ? m.capabilities
+        : Array.isArray(m.features)
+          ? m.features
+          : []
+    ).map((v: unknown) => String(v).toLowerCase())
+    const hasCapability = (...names: string[]): boolean | undefined =>
+      capabilityList.length > 0
+        ? capabilityList.some((value) => names.includes(value))
+        : undefined
 
     return {
       ...m,
@@ -86,13 +97,20 @@ export function normalizeTldwModels(
             : typeof m.contextLength === "number"
               ? m.contextLength
               : undefined,
-      vision: Boolean(capabilities?.vision ?? m.vision),
+      vision: Boolean(
+        capabilities?.vision ?? hasCapability("vision") ?? m.vision
+      ),
       function_calling: Boolean(
-        (capabilities &&
-          (capabilities.function_calling || capabilities.tool_use)) ??
+        capabilities?.function_calling ??
+          capabilities?.tool_use ??
+          hasCapability("function_calling", "tool_use") ??
           m.function_calling
       ),
-      json_output: Boolean(capabilities?.json_mode ?? m.json_output),
+      json_output: Boolean(
+        capabilities?.json_mode ??
+          hasCapability("json_mode", "json_output") ??
+          m.json_output
+      ),
       type: typeof m.type === "string" ? m.type : undefined,
       modalities:
         isRecord(m.modalities)
