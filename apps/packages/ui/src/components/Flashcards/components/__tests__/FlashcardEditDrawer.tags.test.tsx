@@ -105,7 +105,6 @@ const decks = [
     version: 1,
     review_prompt_side: "front" as const,
     scheduler_type: "sm2_plus" as const,
-    review_prompt_side: "front" as const,
     scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
   }
 ]
