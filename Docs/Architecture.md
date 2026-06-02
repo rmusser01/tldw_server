@@ -278,8 +278,9 @@ Note: `<USER_DB_BASE_DIR>` is defined in `tldw_Server_API.app.core.config`, defa
 - Per-user prompts DB under `<USER_DB_BASE_DIR>/<user_id>/prompts_user_dbs/user_prompts_v2.sqlite`.
 
 ### Evaluations DB
-- `Databases/evaluations.db`.
-- Centralized schema for evaluations, metrics, and audit logs.
+- Per-user SQLite DB under `<USER_DB_BASE_DIR>/<user_id>/evaluations/evaluations.db`.
+- Stores evaluations, metrics, and audit logs for the resolved user context.
+- Root-level `Databases/evaluations.db` may exist as a legacy/fallback path; use `DatabasePaths.get_evaluations_db_path(user_id)` for normal access.
 
 ### Vector Store
 - Default: ChromaDB, usually per-user under `<USER_DB_BASE_DIR>/<user_id>/chroma_storage/`.

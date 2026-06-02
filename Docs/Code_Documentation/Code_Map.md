@@ -88,7 +88,7 @@ Routers are mounted in `main.py` with prefix `/api/v1`.
 - AuthNZ (Users):
   - `DATABASE_URL` (env) - default in single-user mode resolves to `sqlite:///<USER_DB_BASE_DIR>/<SINGLE_USER_FIXED_ID>/tldw.db`
   - PostgreSQL recommended for multi-user mode
-- Evaluations DB: `Databases/evaluations.db` (unified schema + audit; DI can map per-user audit paths)
+- Evaluations DB: `<USER_DB_BASE_DIR>/<user_id>/evaluations/evaluations.db` (per-user unified schema + audit; root `Databases/evaluations.db` is legacy/fallback)
 - Per-user notes/chats: `<USER_DB_BASE_DIR>/<user_id>/ChaChaNotes.db`
 - Per-user prompts: `<USER_DB_BASE_DIR>/<user_id>/prompts_user_dbs/user_prompts_v2.sqlite`
 - Prompt Studio DB: `<USER_DB_BASE_DIR>/<user_id>/prompt_studio_dbs/prompt_studio.db`

@@ -25,9 +25,9 @@ Create the approved design spec for a newcomer- and maintainer-oriented Mermaid 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design spec captures the approved layered atlas structure and scope.
-- [ ] #2 Spec documents Mermaid-only diagrams, target audience, verification, and maintenance approach.
-- [ ] #3 Backlog task is kept current with spec path and verification results.
+- [x] #1 Design spec captures the approved layered atlas structure and scope.
+- [x] #2 Spec documents Mermaid-only diagrams, target audience, verification, and maintenance approach.
+- [x] #3 Backlog task is kept current with spec path and verification results.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,10 +59,10 @@ Created Docs/Code_Documentation/Data_Flow_Atlas.md as a Mermaid-only backend dat
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
