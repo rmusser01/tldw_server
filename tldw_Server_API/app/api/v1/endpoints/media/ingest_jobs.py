@@ -947,51 +947,22 @@ async def stream_media_ingest_job_events(
             except (AttributeError, RuntimeError):
                 pass
 
-            conn = jm._connect()
-            rows: list[Any] = []
             try:
-                if jm.backend == "postgres":
-                    with jm._pg_cursor(conn) as cur:
-                        query = (
-                            "SELECT id, job_id, event_type, attrs_json, owner_user_id "
-                            "FROM job_events WHERE id > %s AND domain = %s"
-                        )
-                        params: list[Any] = [int(after_id), "media_ingest"]
-                        if owner_filter is not None:
-                            query += " AND owner_user_id = %s"
-                            params.append(owner_filter)
-                        query += " ORDER BY id ASC LIMIT 500"
-                        cur.execute(query, tuple(params))
-                        rows = cur.fetchall() or []
-                else:
-                    query = (
-                        "SELECT id, job_id, event_type, attrs_json, owner_user_id "
-                        "FROM job_events WHERE id > ? AND domain = ?"
-                    )
-                    params_sqlite: list[Any] = [int(after_id), "media_ingest"]
-                    if owner_filter is not None:
-                        query += " AND owner_user_id = ?"
-                        params_sqlite.append(owner_filter)
-                    query += " ORDER BY id ASC LIMIT 500"
-                    rows = conn.execute(query, tuple(params_sqlite)).fetchall() or []
+                rows = jm.list_job_events_after(
+                    after_id=int(after_id),
+                    limit=500,
+                    domain="media_ingest",
+                    owner_user_id=owner_filter,
+                )
             except (OSError, RuntimeError, TypeError, ValueError):
                 rows = []
-            finally:
-                with contextlib.suppress(OSError, RuntimeError, TypeError, ValueError):
-                    conn.close()
 
             if rows:
                 for row in rows:
-                    if isinstance(row, dict):
-                        event_id = int(row.get("id"))
-                        job_id = int(row.get("job_id"))
-                        event_type = str(row.get("event_type"))
-                        attrs_raw = row.get("attrs_json")
-                    else:
-                        event_id = int(row[0])
-                        job_id = int(row[1])
-                        event_type = str(row[2])
-                        attrs_raw = row[3]
+                    event_id = int(row.get("id"))
+                    job_id = int(row.get("job_id"))
+                    event_type = str(row.get("event_type"))
+                    attrs_raw = row.get("attrs_json")
                     if tracked_job_ids and job_id not in tracked_job_ids:
                         after_id = event_id
                         continue
