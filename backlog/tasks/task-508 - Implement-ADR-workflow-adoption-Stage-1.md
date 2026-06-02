@@ -1,7 +1,7 @@
 ---
 id: TASK-508
 title: Implement ADR workflow adoption Stage 1
-status: To Do
+status: In Progress
 labels:
 - docs
 - process
@@ -22,6 +22,12 @@ Implement Stage 1 of the ADR workflow adoption: create Docs/ADR framework, add r
 - [ ] #4 Follow-up Backlog tasks exist for decision inventory/backfill and global Superpowers ADR workflow review.
 - [ ] #5 Verification commands pass, including git diff --check; Bandit is recorded as not applicable for docs-only changes unless code is touched.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Executing Docs/superpowers/plans/2026-06-02-adr-workflow-adoption-stage-1-implementation-plan.md in isolated worktree .worktrees/adr-workflow-stage-1 on branch codex/adr-workflow-stage-1. Baseline: git status --short clean; git diff --check clean; .venv absent, so no Python baseline tests run for this docs-only stage.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
