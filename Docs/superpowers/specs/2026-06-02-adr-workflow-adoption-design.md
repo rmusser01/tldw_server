@@ -3,7 +3,7 @@
 Date: 2026-06-02
 Owner: Codex collaboration session
 Backlog task: TASK-506
-Status: User-approved design, pending spec review and implementation planning
+Status: Spec reviewed and approved, pending user review and implementation planning
 
 ## Summary
 
@@ -147,7 +147,7 @@ If `Required: yes`, implementation planning should include a concrete task for c
 
 ### Implementation Plans
 
-Implementation plans should include an ADR task when the approved design requires one. The plan should also list any existing ADRs that govern the work.
+Substantial implementation plans should include an `ADR Assessment` section or explicitly reference the approved design spec's ADR assessment when the plan introduces no new durable decision. Plans should include an ADR task when the approved design requires one. The plan should also list any existing ADRs that govern the work.
 
 ### Review And Verification
 
@@ -190,7 +190,7 @@ If implementation discovers that one of these seed decisions is already fully co
 
 ### Stage 2: Decision Inventory
 
-Audit existing decision sources and produce an inventory covering:
+Audit existing decision sources and produce a default inventory at `Docs/ADR/inventory/YYYY-MM-DD-decision-inventory.md` covering:
 
 - `Docs/Design/**`
 - `Docs/Plans/**`

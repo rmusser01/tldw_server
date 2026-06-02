@@ -27,7 +27,7 @@ Design a repo-local Architecture Decision Record workflow for tldw_server that i
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design spec written and reviewed. Spec review iteration 1 found scope ambiguity and backfill-status ambiguity. Spec was revised to split Stage 1 implementation from the broader migration program, clarify that backfill is metadata rather than status, and make Stage 1 seed ADRs deterministic. Spec review iteration 2 approved with no blocking issues. Advisory implementation-plan notes: make 'substantial spec, plan, or PR' operational by pointing to the ADR trigger list, and name follow-up Backlog tasks for inventory/backfill and global Superpowers review.
+Design spec written and reviewed. Spec review iteration 1 found scope ambiguity and backfill-status ambiguity. Spec was revised to split Stage 1 implementation from the broader migration program, clarify that backfill is metadata rather than status, and make Stage 1 seed ADRs deterministic. Spec review iteration 2 approved with no blocking issues. User then requested a cleanup review pass before implementation planning. Cleanup patch updated stale status text, required substantial implementation plans to include or reference ADR assessment, and named the default decision inventory path as Docs/ADR/inventory/YYYY-MM-DD-decision-inventory.md. Spec review iteration 3 approved with no blocking issues. Advisory implementation-plan notes: make 'substantial spec, plan, or PR' operational by pointing to the ADR trigger list, and name follow-up Backlog tasks for inventory/backfill and global Superpowers review.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
