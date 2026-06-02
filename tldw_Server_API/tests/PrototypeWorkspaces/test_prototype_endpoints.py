@@ -1107,6 +1107,45 @@ class TestPrototypeWorkspaceEndpoints:
         )
         assert review.json()["detail"]["message"] == "Prototype promotion request not found"
 
+    def test_review_non_pending_promotion_request_returns_409(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        _workspace, _session, _candidate_snapshot, promotion_request = _seed_pending_promotion_request(
+            test_services,
+            title="Promotion already reviewed prototype",
+            share_link_id=65,
+            snapshot_id="psnap_already_reviewed_candidate",
+        )
+        _run(
+            test_services.repo.update_promotion_request(
+                promotion_request["id"],
+                status="rejected",
+                reviewed_by_user_id=1,
+                review_notes="Already decided",
+            )
+        )
+
+        review = client.post(
+            f"/api/v1/prototype-promotions/{promotion_request['id']}/review",
+            json={
+                "decision": "approve",
+                "review_notes": "Second decision",
+            },
+        )
+
+        assert review.status_code == 409
+        _assert_prototype_error(
+            review,
+            category="conflict",
+            frontend_state="conflict",
+            retryable=False,
+        )
+        assert review.json()["detail"]["message"] == (
+            "Prototype promotion request is not pending: rejected"
+        )
+
     def test_preview_grant_renewal_returns_updated_expiry(
         self,
         client: TestClient,

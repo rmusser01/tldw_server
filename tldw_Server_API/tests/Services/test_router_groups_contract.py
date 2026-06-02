@@ -4269,6 +4269,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
         "tldw_Server_API.app.api.v1.endpoints.health",
         "tldw_Server_API.app.api.v1.endpoints.paper_search",
         "tldw_Server_API.app.api.v1.endpoints.research",
+        "tldw_Server_API.app.api.v1.endpoints.research_workspace",
         "tldw_Server_API.app.api.v1.endpoints.research_runs",
         "tldw_Server_API.app.api.v1.endpoints.vn_play",
         "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
@@ -4294,7 +4295,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
     specs = list(iter_minimal_test_router_specs())
 
     assert import_attempts == []
-    assert len(specs) == 14
+    assert len(specs) == 15
     assert all(not isinstance(spec.router, APIRouter) for spec in specs)
 
 
@@ -4321,6 +4322,7 @@ def test_minimal_test_router_specs_participate_in_route_policy(
         ("auth", True),
         ("research", True),
         ("research", True),
+        ("research-workspace", True),
         ("paper-search", True),
         ("chat", True),
         ("chat", True),

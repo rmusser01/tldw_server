@@ -436,6 +436,10 @@ class PrototypeWorkspaceService:
             raise PermissionError("reviewer does not have prototype.promote permission")
 
         normalized_decision = str(decision or "").strip().lower()
+        current_status = str(promotion_request.get("status") or "").strip().lower()
+        if current_status != "pending":
+            raise ValueError(f"Prototype promotion request is not pending: {current_status}")
+
         candidate_snapshot_id = str(promotion_request.get("candidate_snapshot_id") or "")
         if normalized_decision == "reject":
             updated = await self._repo.update_promotion_request(

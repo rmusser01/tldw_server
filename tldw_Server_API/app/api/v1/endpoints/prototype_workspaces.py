@@ -593,7 +593,11 @@ async def create_promotion_request(
     response_model=PrototypePromotionReviewResponse,
     status_code=status.HTTP_200_OK,
     summary="Review a prototype promotion request",
-    responses=prototype_error_responses(status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+    responses=prototype_error_responses(
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+    ),
 )
 async def review_promotion_request(
     promotion_request_id: str,
@@ -618,10 +622,18 @@ async def review_promotion_request(
             frontend_state="unauthorized",
         ) from exc
     except ValueError as exc:
+        message = str(exc)
+        if "not pending" in message:
+            raise prototype_http_error(
+                status_code=status.HTTP_409_CONFLICT,
+                category="conflict",
+                message=message,
+                frontend_state="conflict",
+            ) from exc
         raise prototype_http_error(
             status_code=status.HTTP_404_NOT_FOUND,
             category="missing",
-            message=str(exc),
+            message=message,
             frontend_state="missing",
         ) from exc
     return PrototypePromotionReviewResponse.model_validate(result)

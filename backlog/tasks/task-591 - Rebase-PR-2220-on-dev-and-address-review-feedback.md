@@ -31,12 +31,14 @@ Rebased the API-boundary remediation series onto origin/dev and kept only the re
 Confirmed the Gemini Dockerfile inline comment is obsolete after rebasing/switching the PR base to dev because Dockerfiles/entrypoints/tldw-app-first-run.sh is no longer in the PR diff. Updated focused tests for dev-side audio preset bootstrap ordering and structured prototype error envelopes.
 
 Resolved obsolete outdated review threads after the base correction left zero active unresolved review threads. Addressed the remaining CodeQL PR check failure by parsing URL hostnames before classifying Research Workspace source URLs as YouTube/Vimeo video sources, preventing spoofed URLs from matching by substring.
+
+Reviewed and addressed the active Cubic follow-up comments: completed/anchored the affected Backlog task records, derived the minimal-test research workspace router from canonical metadata, rejected null-only media item updates, allowed document annotation notes to be explicitly cleared, returned batch annotation sync results through one bulk read, and moved promotion review pending-state enforcement into the service with endpoint 409 conflict mapping.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #2220 has been rebased onto origin/dev locally. The remaining rebase follow-up updates test expectations for dev audio preset bootstrap and structured prototype promotion review errors, and fixes the CodeQL URL-substring sanitization finding in Research Workspace source type detection. Verification: the four previously failing tests passed; the focused API-boundary suite passed with 392 tests; AddSourceModal Stage 2 Vitest passed with 19 tests; git diff --check passed; Bandit over touched production paths reported 0 results and 0 errors.
+PR #2220 has been rebased onto origin/dev locally. The rebase follow-up updates test expectations for dev audio preset bootstrap and structured prototype promotion review errors, fixes the CodeQL URL-substring sanitization finding in Research Workspace source type detection, and addresses the active Cubic review comments on minimal router coverage, media null updates, document annotation sync/update behavior, promotion request state handling, and Backlog task metadata. Verification: the Cubic-focused targeted tests passed with 5 tests; the focused API-boundary backend suite passed with 395 tests; AddSourceModal Stage 2 Vitest passed with 19 tests; git diff --check passed; Bandit over touched production paths reported 0 results and 0 errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

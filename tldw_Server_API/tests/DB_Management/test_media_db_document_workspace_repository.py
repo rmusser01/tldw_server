@@ -175,13 +175,24 @@ def test_document_workspace_repository_manages_annotation_lifecycle() -> None:
         assert changed["color"] == "blue"
         assert changed["note"] == "review"
 
+        cleared = repo.update_annotation(
+            annotation_id="ann_repo_1",
+            media_id=9,
+            user_id="1",
+            note=None,
+            updated_at=_now(),
+        )
+
+        assert cleared is not None
+        assert cleared["note"] is None
+
         unchanged = repo.update_annotation(
             annotation_id="ann_repo_1",
             media_id=9,
             user_id="1",
             updated_at=_now(),
         )
-        assert unchanged == changed
+        assert unchanged == cleared
 
         assert repo.soft_delete_annotation(annotation_id="ann_repo_1", media_id=9, user_id="1", updated_at=_now())
         assert repo.list_annotations(media_id=9, user_id="1") == []
@@ -205,7 +216,7 @@ def test_document_workspace_repository_uses_backend_helpers_for_postgres_annotat
         "updated_at": now,
     }
     db = _PostgresLikeDb(
-        fetchall_results=[[row]],
+        fetchall_results=[[row], [row]],
         fetchone_results=[row, row, row, row, row],
     )
     repo = DocumentWorkspaceRepository.from_media_db(db)
@@ -267,7 +278,7 @@ def test_document_workspace_repository_uses_backend_helpers_for_postgres_annotat
         "fetchone",
         "execute",
         "execute",
-        "fetchone",
+        "fetchall",
     ]
 
 

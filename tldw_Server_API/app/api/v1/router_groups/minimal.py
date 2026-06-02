@@ -35,6 +35,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "auth",
     "research",
     "research_runs",
+    "research_workspace",
     "paper_search",
     "chat",
     "chat_loop",

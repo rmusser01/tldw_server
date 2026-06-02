@@ -7,6 +7,8 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
+_UNSET = object()
+
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     if isinstance(row, dict):
@@ -193,9 +195,9 @@ class DocumentWorkspaceRepository:
         annotation_id: str,
         media_id: int,
         user_id: str,
-        text: str | None = None,
-        color: str | None = None,
-        note: str | None = None,
+        text: Any = _UNSET,
+        color: Any = _UNSET,
+        note: Any = _UNSET,
         updated_at: str,
     ) -> dict[str, Any] | None:
         """Update mutable annotation fields and return the active row."""
@@ -205,13 +207,13 @@ class DocumentWorkspaceRepository:
 
         updates: list[str] = []
         params: list[Any] = []
-        if text is not None:
+        if text is not _UNSET:
             updates.append("text = ?")
             params.append(text)
-        if color is not None:
+        if color is not _UNSET:
             updates.append("color = ?")
             params.append(color)
-        if note is not None:
+        if note is not _UNSET:
             updates.append("note = ?")
             params.append(note)
 
@@ -229,6 +231,37 @@ class DocumentWorkspaceRepository:
         with self.db.transaction() as conn:
             self.db._execute_with_connection(conn, update_sql, tuple(params))
         return self.get_annotation(annotation_id=annotation_id, media_id=media_id, user_id=user_id)
+
+    def _list_annotations_by_ids(
+        self,
+        *,
+        media_id: int,
+        user_id: str,
+        annotation_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return active annotation rows in the caller-provided id order."""
+        if not annotation_ids:
+            return []
+
+        placeholders = ", ".join("?" for _ in annotation_ids)
+        # Dynamic placeholder count is generated here; values remain bound parameters.
+        query = f"""
+        SELECT id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = 0 AND id IN ({placeholders})
+        """  # nosec B608
+        with self.db.transaction() as conn:
+            rows = self.db._fetchall_with_connection(
+                conn,
+                query,
+                tuple([media_id, user_id, *annotation_ids]),
+            )
+        rows_by_id = {normalized["id"]: normalized for normalized in (_row_to_dict(row) for row in rows)}
+        return [
+            rows_by_id[annotation_id]
+            for annotation_id in annotation_ids
+            if annotation_id in rows_by_id
+        ]
 
     def sync_annotations(
         self,
@@ -263,14 +296,11 @@ class DocumentWorkspaceRepository:
                         row["updated_at"],
                     ),
                 )
-        return [
-            row
-            for row in (
-                self.get_annotation(annotation_id=item["id"], media_id=media_id, user_id=user_id)
-                for item in annotation_rows
-            )
-            if row is not None
-        ]
+        return self._list_annotations_by_ids(
+            media_id=media_id,
+            user_id=user_id,
+            annotation_ids=[str(item["id"]) for item in annotation_rows],
+        )
 
     def soft_delete_annotation(
         self,

@@ -35,13 +35,14 @@ def apply_media_item_update(
     analysis_content: str | None = None,
 ) -> dict[str, Any]:
     """Apply a user-facing media item update and return side-effect metadata."""
-    if not fields:
-        raise InputError("At least one media update field is required.")  # noqa: TRY003
-
     unsupported_fields = sorted(set(fields) - _OWNED_UPDATE_FIELDS)
     if unsupported_fields:
         joined = ", ".join(unsupported_fields)
         raise InputError(f"Unsupported media update field(s): {joined}")  # noqa: TRY003
+
+    fields = {key: value for key, value in fields.items() if value is not None}
+    if not fields:
+        raise InputError("At least one media update field is required.")  # noqa: TRY003
 
     client_id = self.client_id
     current_time = self._get_current_utc_timestamp_str()

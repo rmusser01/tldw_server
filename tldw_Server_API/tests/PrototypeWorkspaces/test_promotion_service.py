@@ -287,6 +287,36 @@ async def test_review_promotion_request_rejects_non_promoter(
 
 
 @pytest.mark.asyncio
+async def test_review_promotion_request_rejects_non_pending_request(
+    repo,
+    prototype_db,
+    passing_promotion_service,
+):
+    _workspace, _base_snapshot, _session, _candidate, promotion_request = await _seed_promotion_request(
+        repo,
+        prototype_db,
+    )
+    await repo.update_promotion_request(
+        promotion_request["id"],
+        status="rejected",
+        reviewed_by_user_id=1,
+        review_notes="Already decided",
+    )
+
+    with pytest.raises(ValueError, match="not pending"):
+        await passing_promotion_service.review_promotion_request(
+            promotion_request_id=promotion_request["id"],
+            reviewer_user_id=1,
+            decision="approve",
+            review_notes="Second pass",
+        )
+
+    updated_request = await repo.get_promotion_request(promotion_request["id"])
+    assert updated_request["status"] == "rejected"
+    assert updated_request["review_notes"] == "Already decided"
+
+
+@pytest.mark.asyncio
 async def test_review_promotion_request_missing_request_raises_value_error(
     passing_promotion_service,
 ):

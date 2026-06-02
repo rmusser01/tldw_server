@@ -73,6 +73,17 @@ def test_apply_media_item_update_rejects_empty_fields() -> None:
         )
 
 
+def test_apply_media_item_update_rejects_null_only_fields() -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+
+    with pytest.raises(InputError, match="At least one media update field is required"):
+        media_item_update_ops_module.apply_media_item_update(
+            SimpleNamespace(),
+            media_id=9,
+            fields={"title": None, "content": None},
+        )
+
+
 def test_apply_media_item_update_rejects_missing_media() -> None:
     media_item_update_ops_module = _load_media_item_update_ops_module()
 

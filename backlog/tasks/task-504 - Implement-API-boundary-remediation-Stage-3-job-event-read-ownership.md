@@ -39,7 +39,7 @@ Implement Stage 3 of the accepted API boundary remediation plan: expand JobManag
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Docs/superpowers/plans/2026-06-01-api-boundary-remediation-implementation-plan.md#stage-3-jobs-events-read-ownership
+Docs/superpowers/plans/2026-06-01-api-boundary-remediation-implementation-plan.md#stage-3-jobs-event-query-ownership
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
