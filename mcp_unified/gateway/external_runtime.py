@@ -793,7 +793,7 @@ class GatewayExternalRuntimeManager:
                 timeout=self._installer_status_timeout_seconds,
             )
         except asyncio.TimeoutError:
-            logger.opt(exception=True).error(
+            logger.error(
                 "External installer status timed out server_id={!r}",
                 server.id,
             )
@@ -846,7 +846,7 @@ class GatewayExternalRuntimeManager:
                 f"External server {operation} failed",
                 reason_code=failure_reason_code,
                 server_id=server.id,
-            ) from exc
+            ) from None
         return self._installer_payload(
             payload,
             server=server,

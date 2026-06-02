@@ -16,6 +16,8 @@ from mcp_unified.profiles.resolver import StoreBackedProfileResolver
 
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 
+EFFECTIVE_POLICY_METADATA_KEY = "_gateway_effective_policy"
+
 
 class GatewayProfileResolver(Protocol):
     """Structured profile resolver needed by the profile-aware gateway runtime."""
@@ -113,7 +115,11 @@ class ProfileAwareGatewayRuntime:
                 policy_result,
                 message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
             )
-        return await self._backend.call_tool(name, arguments, context)
+        return await self._backend.call_tool(
+            name,
+            arguments,
+            _context_with_effective_policy(context, policy_result.policy),
+        )
 
     async def list_resources(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
         """Delegate resource discovery unchanged for this profile slice."""
@@ -202,6 +208,34 @@ def _context_profile_id(context: GatewayRequestContext) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _context_with_effective_policy(
+    context: GatewayRequestContext,
+    policy: Any,
+) -> GatewayRequestContext:
+    """Return a copy of the context carrying resolved effective policy data."""
+
+    if policy is None:
+        return context
+    metadata = dict(context.metadata)
+    metadata[EFFECTIVE_POLICY_METADATA_KEY] = _json_safe_model(policy)
+    return GatewayRequestContext(
+        request_id=context.request_id,
+        client_id=context.client_id,
+        user_id=context.user_id,
+        metadata=metadata,
+    )
+
+
+def _json_safe_model(value: Any) -> Any:
+    """Dump pydantic models to JSON-safe mappings with v1/v2 compatibility."""
+
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if hasattr(value, "dict"):
+        return value.dict()
+    return value
 
 
 def _tool_name(tool: Any) -> str | None:
