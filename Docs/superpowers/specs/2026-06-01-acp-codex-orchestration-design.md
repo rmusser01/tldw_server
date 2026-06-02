@@ -2,7 +2,7 @@
 
 Date: 2026-06-01
 Status: Spec review approved; awaiting user approval for implementation planning
-Tracking: TASK-582
+Tracking: TASK-591
 
 ## Summary
 

@@ -1,5 +1,5 @@
 ---
-id: TASK-582
+id: TASK-591
 title: Design Codex ACP adapter and app-server orchestration model
 status: In Progress
 labels:
