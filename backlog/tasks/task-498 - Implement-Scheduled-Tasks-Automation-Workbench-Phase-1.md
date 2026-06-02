@@ -94,6 +94,8 @@ Task 1 review clarification: failure-like status tokens (fail, error, missed) ta
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Scheduled Tasks Automation Workbench Phase 1 implemented. User-facing statuses, overview metrics and states, searchable/filterable table, detail drawer, Watchlists deep links without Watchlists edit ownership, safer reminder schedule controls, and extension route copy parity. Verification: frontend focused Vitest passed 6 files / 61 tests; backend scheduled-tasks control-plane pytest passed 4 tests; git diff --check passed; final code review approved. Bandit skipped because no backend Python changed. Manual live-data browser verification skipped because no seeded backend/dev data environment is available; component tests cover empty, partial, loaded reminder, loaded Watchlists, filters/search, detail drawer, reminder scheduling, and Watchlists links. Follow-up phases remain templates for GitHub/YouTube/RAG/agents plus Home/results surfacing.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2217
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
