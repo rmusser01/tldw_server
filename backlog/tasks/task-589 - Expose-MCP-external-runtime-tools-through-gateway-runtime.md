@@ -28,6 +28,12 @@ Adapt GatewayExternalRuntimeManager into the standalone gateway GatewayRuntime s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 External virtual tools are exposed through GatewayRuntime tools/list descriptors with external metadata and safe nullable schema defaults.
+- [x] #2 GatewayRuntime tools/call dispatches active external virtual tool names through GatewayExternalRuntimeManager while preserving local base-runtime delegation.
+- [x] #3 ProfileAwareGatewayRuntime forwards resolved effective policy metadata without mutating the original GatewayRequestContext, including metadata=None callers.
+- [x] #4 External runtime call routing uses a direct virtual-tool membership check instead of list/sort/deep-copy catalog scans.
+- [x] #5 Installer timeout and operation failures retain sanitized diagnostic context without exposing secret-looking values in public payloads or test log arguments.
+- [x] #6 Focused MCP tests, Ruff, Bandit, and diff hygiene checks are recorded and passing.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,10 +56,10 @@ PR #2219 review follow-up complete. Rebased on current origin/dev (already up to
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
