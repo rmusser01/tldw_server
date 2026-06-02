@@ -113,10 +113,22 @@ export async function stopProcessTree(childOrRecord, { timeoutMs = 5_000 } = {})
 
     child.once("exit", finish)
     signalChild(child, "SIGTERM")
+    if (childHasExited(child)) {
+      finish()
+      return
+    }
 
     termTimer = setTimeout(() => {
+      if (childHasExited(child)) {
+        finish()
+        return
+      }
       if (!settled && !childHasExited(child)) {
         signalChild(child, "SIGKILL")
+        if (childHasExited(child)) {
+          finish()
+          return
+        }
         killFallbackTimer = setTimeout(finish, Math.max(1000, timeoutMs))
         killFallbackTimer.unref?.()
       }

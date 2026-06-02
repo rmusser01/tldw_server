@@ -39,7 +39,7 @@ Build the onboarding UAT helper layer for port reservation, process management, 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented onboarding UAT runner helper modules and extended the focused Vitest suite. Quality-review follow-up hardened backend env allowlisting to avoid passing developer provider secrets, added local-ingest fixture roots to config and env, guarded artifact cleanup with an onboarding marker/root check, expanded artifact secret leak scanning, and made process cleanup wait for exit after SIGKILL escalation. Verification: `bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts` from `apps/tldw-frontend` passed with 16 tests; `git diff --check` from repo root passed. Bandit skipped: no Python touched by Task 3.
+Implemented onboarding UAT runner helper modules and extended the focused Vitest suite. Quality-review follow-up hardened backend env allowlisting to avoid passing developer provider secrets, added local-ingest fixture roots to config and env, guarded artifact cleanup with an onboarding marker/root check, expanded artifact secret leak scanning for assignment, JSON-shaped, and raw token/private-key forms, and made process cleanup wait for exit after SIGTERM/SIGKILL races. Verification: `bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts` from `apps/tldw-frontend` passed with 18 tests; `git diff --check` from repo root passed. Bandit skipped: no Python touched by Task 3.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

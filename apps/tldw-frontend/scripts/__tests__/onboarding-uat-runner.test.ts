@@ -288,6 +288,37 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("detects raw and JSON-shaped secret-like artifact leaks", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-json-secret-leak-check",
+      preserve: false,
+    })
+
+    try {
+      writeFileSync(
+        artifacts.browserDiagnosticsPath,
+        JSON.stringify(
+          {
+            headers: { "x-api-key": "sk-live-json-leak" },
+            env: { OPENAI_API_KEY: "sk-live-json-leak" },
+            tokens: ["ghp_realgithubtoken", "xoxb-real-slack-token", "AKIAIOSFODNN7EXAMPLE"],
+            privateKey: "-----BEGIN PRIVATE KEY-----",
+          },
+          null,
+          2
+        ),
+        "utf8"
+      )
+
+      expect(() => assertNoSecretLeaks(artifacts.root)).toThrow(
+        /secret leak/i
+      )
+    } finally {
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
   it("creates an isolated runtime profile and backend env for the mock provider", () => {
     const profile = createRuntimeProfile({
       repoRoot,
@@ -481,5 +512,27 @@ describe("onboarding UAT runner helpers", () => {
 
     expect(child.signals).toEqual(["SIGTERM", "SIGKILL"])
     expect(child.signalCode).toBe("SIGKILL")
+  })
+
+  it("returns when a child exits before the stop listener settles", async () => {
+    class AlreadyExitedChild extends EventEmitter {
+      pid = 123457
+      exitCode: number | null = null
+      signalCode: string | null = null
+      killed = false
+      signals: string[] = []
+
+      kill(signal: string) {
+        this.signals.push(signal)
+        this.exitCode = 0
+        return true
+      }
+    }
+
+    const child = new AlreadyExitedChild()
+    await stopProcessTree(child, { timeoutMs: 0 })
+
+    expect(child.signals).toEqual(["SIGTERM"])
+    expect(child.exitCode).toBe(0)
   })
 })

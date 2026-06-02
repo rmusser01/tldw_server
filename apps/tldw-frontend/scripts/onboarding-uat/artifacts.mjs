@@ -23,8 +23,15 @@ export const SYNTHETIC_SECRETS = [
 
 const genericSecretPatterns = [
   /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET)\s*=\s*(?!\[REDACTED\]\b)[^\s]+/i,
+  /"(?:[^"]*(?:api[_-]?key|token|secret)[^"]*)"\s*:\s*"(?!\[REDACTED\]")[^"]+"/i,
   /Bearer\s+sk-[A-Za-z0-9._-]+/i,
   /x-api-key:\s*(?!\[REDACTED\]\b)[A-Za-z0-9._-]+/i,
+  /"x-api-key"\s*:\s*"(?!\[REDACTED\]")[^"]+"/i,
+  /\bsk-[A-Za-z0-9._-]{8,}\b/,
+  /\bgh[pousr]_[A-Za-z0-9_]{8,}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{8,}\b/,
+  /\bAKIA[0-9A-Z]{12,}\b/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
 ]
 
 function createRunId() {
@@ -48,9 +55,22 @@ export function redactText(value) {
   out = out.replace(/Bearer\s+sk-[A-Za-z0-9._-]+/g, "Bearer [REDACTED]")
   out = out.replace(/x-api-key:\s*[A-Za-z0-9._-]+/gi, "x-api-key: [REDACTED]")
   out = out.replace(
+    /("x-api-key"\s*:\s*")[^"]+"/gi,
+    "$1[REDACTED]\""
+  )
+  out = out.replace(
+    /("([^"]*(?:api[_-]?key|token|secret)[^"]*)"\s*:\s*")[^"]+"/gi,
+    "$1[REDACTED]\""
+  )
+  out = out.replace(
     /\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET))\s*=\s*[^\s]+/gi,
     "$1=[REDACTED]"
   )
+  out = out.replace(/\bsk-[A-Za-z0-9._-]{8,}\b/g, "[REDACTED]")
+  out = out.replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+  out = out.replace(/\bxox[baprs]-[A-Za-z0-9-]{8,}\b/g, "[REDACTED]")
+  out = out.replace(/\bAKIA[0-9A-Z]{12,}\b/g, "[REDACTED]")
+  out = out.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/g, "[REDACTED]")
   return out
 }
 
