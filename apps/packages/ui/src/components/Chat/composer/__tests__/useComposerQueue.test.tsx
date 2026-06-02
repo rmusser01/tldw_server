@@ -2,10 +2,11 @@ import React from "react"
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useComposerQueue } from "../hooks/useComposerQueue"
+import {
+  useComposerQueue,
+  type UseComposerQueueOptions
+} from "../hooks/useComposerQueue"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
-import type { QueuedRequestSnapshot } from "@/utils/chat-request-queue"
-import type { ChatDocuments } from "@/models/ChatTypes"
 
 // Mock the lower-level primitive so we can inspect the orchestration layer
 // without touching real queue mutations.
@@ -60,13 +61,13 @@ type BaseProps = {
   isConnectionReady?: boolean
   isQueuedDispatchBlocked?: boolean
   cancelCurrentAndRunDisabledReasonText?: string | null
-  onEnqueueBlocked?: (reason: string) => void
-  onEnqueueSuccess?: (isStreaming: boolean, item: QueuedRequest) => void
-  resolveConversationId?: () => string | null
-  buildQueuedDocuments?: () => ChatDocuments
-  buildQueuedRequestSnapshot?: () => Partial<QueuedRequestSnapshot>
-  sendQueuedRequest?: (item: QueuedRequest) => Promise<void>
-  stopStreamingRequest?: (options?: { discardTurn?: boolean }) => void
+  onEnqueueBlocked?: UseComposerQueueOptions["onEnqueueBlocked"]
+  onEnqueueSuccess?: UseComposerQueueOptions["onEnqueueSuccess"]
+  resolveConversationId?: UseComposerQueueOptions["resolveConversationId"]
+  buildQueuedDocuments?: UseComposerQueueOptions["buildQueuedDocuments"]
+  buildQueuedRequestSnapshot?: UseComposerQueueOptions["buildQueuedRequestSnapshot"]
+  sendQueuedRequest?: UseComposerQueueOptions["sendQueuedRequest"]
+  stopStreamingRequest?: UseComposerQueueOptions["stopStreamingRequest"]
 }
 
 const renderComposerQueue = (props: BaseProps = {}) => {
@@ -77,8 +78,12 @@ const renderComposerQueue = (props: BaseProps = {}) => {
       isStreaming: props.isStreaming ?? false,
       queuedMessages: props.queuedMessages ?? [],
       setQueuedMessages,
-      sendQueuedRequest: props.sendQueuedRequest ?? vi.fn(async () => {}),
-      stopStreamingRequest: props.stopStreamingRequest ?? vi.fn(),
+      sendQueuedRequest:
+        props.sendQueuedRequest ??
+        vi.fn<UseComposerQueueOptions["sendQueuedRequest"]>(async () => {}),
+      stopStreamingRequest:
+        props.stopStreamingRequest ??
+        vi.fn<UseComposerQueueOptions["stopStreamingRequest"]>(),
       resolveConversationId:
         props.resolveConversationId ?? (() => "conv-1"),
       buildQueuedDocuments:
@@ -126,7 +131,8 @@ describe("useComposerQueue", () => {
   })
 
   it("returns null and fires onEnqueueBlocked when blockedReason is set", () => {
-    const onEnqueueBlocked = vi.fn()
+    const onEnqueueBlocked =
+      vi.fn<NonNullable<UseComposerQueueOptions["onEnqueueBlocked"]>>()
     const { hook } = renderComposerQueue({ onEnqueueBlocked })
 
     let result: QueuedRequest | null = null
@@ -191,7 +197,8 @@ describe("useComposerQueue", () => {
   })
 
   it("fires onEnqueueSuccess with the isStreaming flag and the new item", () => {
-    const onEnqueueSuccess = vi.fn()
+    const onEnqueueSuccess =
+      vi.fn<NonNullable<UseComposerQueueOptions["onEnqueueSuccess"]>>()
     const { hook } = renderComposerQueue({
       isStreaming: true,
       onEnqueueSuccess
