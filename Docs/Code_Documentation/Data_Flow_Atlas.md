@@ -767,43 +767,497 @@ flowchart LR
 
 ## Extended Domain Maps
 
-Placeholder: this section will collect additional domain maps once the foundation and core flows are in place.
+These maps cover the remaining router domains at group level. They avoid endpoint inventory detail, but each section names the route families, core services, storage, providers, and handoff points needed to trace a domain end to end.
 
 ### Evaluations
 
-Placeholder: this flow will trace evaluation runs, recipes, metrics, audit records, and batch execution.
+**Purpose:** Manage evaluation recipes, datasets, runs, model-graded checks, RAG evaluations, metrics, and result persistence without mixing evaluation state into chat or media storage.
+
+**Primary entrypoints:** `/api/v1/evaluations`, `/api/v1/evaluations/datasets`, `/api/v1/evaluations/{eval_id}/runs`, recipes, synthetic datasets, RAG pipeline evaluation, embeddings A/B tests, benchmarks, webhooks, and evaluation history/status routes.
+
+```mermaid
+flowchart LR
+    subgraph Routes["Evaluation routes"]
+        CRUD[Recipes and evaluation CRUD]
+        Datasets[Datasets and samples]
+        Runs[Runs, cancel, history, status]
+        RAGHooks[RAG eval and benchmark hooks]
+    end
+
+    subgraph Services["core/Evaluations"]
+        Unified[UnifiedEvaluationService]
+        Runner[Evaluation runner and recipe executors]
+        Judge[GEval, response quality, LLM judge]
+        Metrics[Metrics, audit, webhooks]
+    end
+
+    subgraph External["Inputs and providers"]
+        RAG[RAG/Search results and traces]
+        LLM[LLM provider or BYOK judge call]
+        Embed[Embedding provider for A/B tests]
+    end
+
+    subgraph Storage["Per-user evaluation storage"]
+        EvalDB["USER_DB_BASE_DIR/<user_id>/evaluations/evaluations.db"]
+        Audit[Unified audit events]
+        Results[Metrics, outputs, run state]
+    end
+
+    CRUD --> Unified
+    Datasets --> Unified
+    Runs --> Runner
+    RAGHooks --> Runner
+    Unified --> EvalDB
+    Runner --> RAG
+    Runner --> Judge
+    Judge --> LLM
+    Runner --> Embed
+    Runner --> Results --> EvalDB
+    Metrics --> Audit
+    Metrics --> EvalDB
+```
+
+**Key storage/provider touchpoints:** Evaluations use per-user evaluation storage where user context is available, including recipes, datasets, runs, idempotency keys, metrics, and results. LLM judge calls go through configured provider/BYOK resolution; RAG evaluation reads RAG outputs and persists evaluation metrics rather than changing RAG storage directly.
+
+**Where to look in code:** `app/api/v1/endpoints/evaluations/`, `app/core/Evaluations/`, `app/core/DB_Management/Evaluations_DB.py`, `app/core/DB_Management/db_path_utils.py`, `Docs/Code_Documentation/Evaluations_Developer_Guide.md`, and RAG evaluation helpers under `app/core/RAG/`.
 
 ### MCP Unified
 
-Placeholder: this flow will trace MCP status, tool execution, WebSocket handling, auth context, and core MCP services.
+**Purpose:** Expose MCP over HTTP and WebSocket with AuthNZ/RBAC, module/tool discovery, domain dispatch, health, metrics, and tool execution responses.
+
+**Primary entrypoints:** `/api/v1/mcp`, `/api/v1/mcp/request/batch`, `/api/v1/mcp/ws`, `/api/v1/mcp/status`, `/api/v1/mcp/metrics`, `/api/v1/mcp/tools`, `/api/v1/mcp/tools/execute`, `/api/v1/mcp/modules`, `/api/v1/mcp/resources`, `/api/v1/mcp/prompts`, MCP token routes, hub routes, and scoped tool catalog routes.
+
+```mermaid
+flowchart LR
+    subgraph Entrypoints["MCP entrypoints"]
+        HTTP[MCP JSON-RPC HTTP]
+        Batch[Batch request]
+        WS[WebSocket session]
+        Status[Status, metrics, health]
+        Tools[Tools, modules, resources, prompts]
+    end
+
+    subgraph Security["Auth and governance"]
+        Auth[API key, JWT, or MCP JWT]
+        RBAC[Permissions and RBAC]
+        Catalogs[Tool catalogs and org/team scope]
+    end
+
+    subgraph Server["core/MCP_unified"]
+        ServerCore[Unified MCP server]
+        Registry[Module and tool registry]
+        Dispatch[Domain dispatch]
+        Monitor[Metrics and monitoring]
+    end
+
+    subgraph Domains["Tool domains"]
+        Content[Content, RAG, notes, media]
+        Admin[Admin and configuration tools]
+        External[External MCP servers and hub]
+    end
+
+    subgraph Output["Responses and telemetry"]
+        ToolResult[Tool execution result]
+        Lists[Filtered discovery lists]
+        Health[Status and Prometheus metrics]
+    end
+
+    HTTP --> Auth
+    Batch --> Auth
+    WS --> Auth
+    Tools --> Auth
+    Status --> RBAC
+    Auth --> RBAC --> Catalogs --> ServerCore
+    ServerCore --> Registry --> Dispatch
+    Dispatch --> Content
+    Dispatch --> Admin
+    Dispatch --> External
+    Dispatch --> ToolResult
+    Registry --> Lists
+    Monitor --> Health
+    ServerCore --> Monitor
+```
+
+**Key storage/provider touchpoints:** AuthNZ stores identities, permissions, org/team membership, provider secrets, and tool catalog metadata. MCP runtime state, metrics, external server settings, and tool/module health live in MCP unified services. Tool execution then touches the target domain storage or provider through the dispatched module.
+
+**Where to look in code:** `app/api/v1/endpoints/mcp_unified_endpoint.py`, `app/api/v1/endpoints/mcp_hub_management.py`, `app/api/v1/endpoints/mcp_catalogs_manage.py`, `app/core/MCP_unified/`, `app/services/admin_tool_catalog_service.py`, `Docs/MCP/`, and `Docs/MCP/Unified/`.
 
 ### Prompt Studio
 
-Placeholder: this flow will trace prompt project, prompt version, test, optimization, and persistence paths.
+**Purpose:** Manage prompt projects, prompt versions, test cases, evaluations, optimization jobs, live status, and WebSocket progress around provider-backed prompt execution.
+
+**Primary entrypoints:** Prompt Studio project, prompt, test case, evaluation, optimization, status, and WebSocket routers under `/api/v1/prompt-studio`.
+
+```mermaid
+flowchart LR
+    subgraph Routes["Prompt Studio routes"]
+        Projects[Projects]
+        Prompts[Prompts and versions]
+        Cases[Test cases]
+        Eval[Evaluations]
+        Opt[Optimization]
+        Status[Status and WebSocket]
+    end
+
+    subgraph Services["prompt_studio core"]
+        DBDep[Prompt Studio DB dependency]
+        Executor[Prompt executor]
+        TestRunner[Test runner]
+        Optimizer[Optimization strategies]
+        JobsAdapter[Jobs adapter]
+    end
+
+    subgraph Providers
+        LLM[LLM provider calls]
+        Jobs[Core Jobs backend and worker]
+    end
+
+    subgraph Storage
+        PromptDB["USER_DB_BASE_DIR/<user_id>/prompt_studio_dbs/prompt_studio.db"]
+        Results[Test, evaluation, optimization results]
+    end
+
+    Projects --> DBDep
+    Prompts --> DBDep
+    Cases --> DBDep
+    Eval --> TestRunner
+    Opt --> Optimizer
+    Status --> JobsAdapter
+    DBDep --> PromptDB
+    TestRunner --> Executor --> LLM
+    Optimizer --> TestRunner
+    Eval --> JobsAdapter --> Jobs
+    Opt --> JobsAdapter --> Jobs
+    Jobs --> Results --> PromptDB
+```
+
+**Key storage/provider touchpoints:** Prompt Studio persists projects, signatures, prompts, versions, test cases, evaluation runs, optimization runs, and job metadata in the per-user Prompt Studio DB. Prompt execution and optimization call LLM providers through the existing provider layer. Longer evaluation, generation, and optimization work can run through the core Jobs backend and prompt-studio worker.
+
+**Where to look in code:** `app/api/v1/endpoints/prompt_studio/`, `app/api/v1/API_Deps/prompt_studio_deps.py`, `app/core/Prompt_Management/prompt_studio/`, `app/core/Prompt_Management/prompt_studio/services/jobs_worker.py`, and `Docs/Code_Documentation/Database.md`.
 
 ### Notes And Chatbooks
 
-Placeholder: this flow will trace notes, chats, character sessions, chatbook export/import, and background job handling.
+**Purpose:** Store notes and graph links, support web clipper style captures, and export/import portable Chatbooks that can include notes, conversations, characters, and related artifacts.
+
+**Primary entrypoints:** `/api/v1/notes`, `/api/v1/notes/graph`, web clipper/capture paths where enabled, `/api/v1/chatbooks/export`, `/api/v1/chatbooks/import`, preview, continuation, download, and export/import job status routes.
+
+```mermaid
+flowchart LR
+    subgraph NotesRoutes["Notes routes"]
+        Notes[Notes CRUD and search]
+        Graph[Graph and links]
+        Clip[Web clipper or captured content]
+    end
+
+    subgraph ChatbookRoutes["Chatbook routes"]
+        Export[Export selection]
+        Import[Import ZIP]
+        Preview[Preview and continuation]
+        Jobs[Export/import jobs]
+    end
+
+    subgraph Core["Core services"]
+        NotesCore[Notes service]
+        GraphCore[Notes graph service]
+        ChatbookSvc[ChatbookService]
+        Validator[ChatbookValidator and quotas]
+    end
+
+    subgraph Storage
+        ChaCha[Per-user ChaChaNotes DB]
+        Temp[Per-user chatbooks temp]
+        Archives[Generated chatbook archives]
+        Audit[Audit and metrics]
+    end
+
+    Notes --> NotesCore --> ChaCha
+    Graph --> GraphCore --> ChaCha
+    Clip --> NotesCore
+    Export --> Validator --> ChatbookSvc
+    Import --> Validator --> ChatbookSvc
+    Preview --> ChatbookSvc
+    ChatbookSvc --> ChaCha
+    ChatbookSvc --> Temp
+    ChatbookSvc --> Archives
+    Jobs --> ChatbookSvc
+    ChatbookSvc --> Audit
+```
+
+**Key storage/provider touchpoints:** Notes, graph edges, chats, and characters are stored in the per-user ChaChaNotes DB. Chatbook import/export uses per-user chatbook temp/export directories, validates archive content, tracks quotas/jobs, and writes audit/metrics events. Generated archives are returned through job-backed download metadata.
+
+**Where to look in code:** `app/api/v1/endpoints/notes.py`, `app/api/v1/endpoints/notes_graph.py`, `app/api/v1/endpoints/chatbooks.py`, `app/core/Notes/`, `app/core/Notes_Graph/`, `app/core/WebClipper/`, `app/core/Chatbooks/`, and `app/core/DB_Management/ChaChaNotes_DB.py`.
 
 ### Research And Web Scraping
 
-Placeholder: this flow will trace research and scraping requests through provider selection, extraction, aggregation, and storage.
+**Purpose:** Search papers, perform multi-provider web search, scrape web content, run deeper research sessions, and hand useful results to ingestion, Media DB, or RAG-ready storage.
+
+**Primary entrypoints:** `/api/v1/research/websearch`, preferred `/api/v1/paper-search/*` routes, deprecated research shims, `/api/v1/research/runs`, web scraping service/job/progress routes, media web scraping process routes, and optional ingestion handoff routes.
+
+```mermaid
+flowchart LR
+    subgraph Routes["Research and scrape routes"]
+        Paper[Paper search]
+        WebSearch[Web search and aggregation]
+        Scrape[Web scraping service]
+        Deep[Deep research runs]
+        Process[Media web scrape process]
+    end
+
+    subgraph Sources["External sources"]
+        PaperSrc[arXiv, Semantic Scholar, PubMed, OSF, Zenodo]
+        SearchSrc[Searx, Tavily, Serper, Google-like providers]
+        Web[Target web pages and feeds]
+        LLM[LLM aggregation and relevance calls]
+    end
+
+    subgraph Core["Research core"]
+        Normalize[Normalize and rank results]
+        Policy[Egress, robots, rate, dedupe policy]
+        Extract[Article extraction and scraping]
+        Bundle[Research bundles and artifacts]
+    end
+
+    subgraph Handoff["Persistence and handoff"]
+        Ingest[Ingestion handoff]
+        MediaDB[Per-user Media DB]
+        RAG[RAG/Search availability]
+        Outputs[Research outputs/artifacts]
+    end
+
+    Paper --> PaperSrc --> Normalize
+    WebSearch --> SearchSrc --> Normalize
+    WebSearch --> LLM
+    Scrape --> Policy --> Web --> Extract
+    Deep --> Bundle
+    Process --> Extract
+    Normalize --> Ingest
+    Extract --> Ingest
+    Bundle --> Outputs
+    Ingest --> MediaDB --> RAG
+```
+
+**Key storage/provider touchpoints:** Paper and web providers are external and may require API keys or configured endpoints. Scraping applies outbound/robots/rate/dedupe policy before extraction. Ingestion handoff writes normalized content to the per-user Media DB and can make content available for FTS, embeddings, and RAG; deep research can also produce allowlisted output artifacts.
+
+**Where to look in code:** `app/api/v1/endpoints/research.py`, `app/api/v1/endpoints/research_runs.py`, `app/api/v1/endpoints/paper_search.py`, `app/api/v1/endpoints/web_scraping.py`, `app/api/v1/endpoints/media/process_web_scraping.py`, `app/core/Search_and_Research/README.md`, `app/core/Web_Scraping/`, `app/core/WebSearch/`, and `app/core/Research/`.
 
 ### Storage, Files, And Outputs
 
-Placeholder: this flow will trace upload handling, generated outputs, per-user file storage, temporary files, and cleanup responsibilities.
+**Purpose:** Track generated files, user folders, trash, downloads, quotas, output templates, and generated artifacts consistently across features.
+
+**Primary entrypoints:** `/api/v1/storage/files`, storage usage, folders, trash, download routes, admin storage quota routes, `/api/v1/outputs`, output template routes, and feature-specific generated file registration helpers.
+
+```mermaid
+flowchart LR
+    subgraph Routes["Storage and output routes"]
+        Files[User files]
+        Folders[Virtual folders]
+        Trash[Trash and restore]
+        Download[Download and signed access]
+        Usage[Usage and quotas]
+        Outputs[Outputs and templates]
+    end
+
+    subgraph Services["Storage services"]
+        Quota[StorageQuotaService]
+        Repo[Generated files repo]
+        Helpers[Generated file helpers]
+        Guard[Storage quota guard]
+    end
+
+    subgraph Producers["Artifact producers"]
+        TTS[TTS and voice clones]
+        Chatbooks[Chatbooks]
+        Research[Research artifacts]
+        Media[Media and ingestion outputs]
+    end
+
+    subgraph Storage
+        FileStore["USER_DB_BASE_DIR/<user_id>/outputs and voices"]
+        Metadata[Generated files metadata]
+        Templates[Output templates]
+        Quotas[User, team, org quotas]
+    end
+
+    Producers --> Helpers --> Quota
+    Files --> Repo
+    Folders --> Repo
+    Trash --> Repo
+    Download --> Repo
+    Usage --> Quota
+    Outputs --> Templates
+    Guard --> Quota
+    Quota --> Repo --> Metadata
+    Repo --> FileStore
+    Quota --> Quotas
+```
+
+**Key storage/provider touchpoints:** Generated file metadata, access times, soft delete state, folders, and quota accounting are stored through AuthNZ/generated-file repositories and storage services, while bytes live under per-user outputs/voices or feature-specific directories. Download routes verify ownership and path containment; signed download behavior is documented for job-backed/generated artifacts where the feature exposes expiring download URLs.
+
+**Where to look in code:** `app/api/v1/endpoints/storage.py`, `storage_user_files.py`, `storage_user_folders.py`, `storage_trash.py`, `storage_usage.py`, `storage_download.py`, `storage_admin_quotas.py`, `outputs.py`, `outputs_templates.py`, `app/services/storage_quota_service.py`, `app/api/v1/API_Deps/storage_quota_guard.py`, and `app/core/Storage/`.
 
 ### Admin, Ops, And Governance
 
-Placeholder: this flow will trace admin routes, monitoring, metrics, resource governance, rate limits, and operational controls.
+**Purpose:** Centralize operator controls for users, RBAC, monitoring, audit, orgs, billing, config, jobs, resource limits, usage, and operational safety surfaces.
+
+**Primary entrypoints:** Admin route group under `/api/v1/admin/*`, jobs admin routes, config admin routes, monitoring/metrics/audit routes, org/team/billing/privilege routes, resource governor and quota routes, MCP catalog/hub admin routes, and startup/system diagnostics.
+
+```mermaid
+flowchart LR
+    subgraph AdminRoutes["Admin routes"]
+        Users[Users, sessions, MFA, API keys]
+        RBAC[RBAC, privileges, orgs, billing]
+        Ops[Monitoring, metrics, audit, system]
+        Config[Config admin and profiles]
+        JobsAdmin[Jobs admin]
+        Governor[Resource governor and quotas]
+    end
+
+    subgraph Deps["Admin dependencies"]
+        Role[RequireRole admin]
+        Perm[Permission and scope guards]
+        Rate[Rate limits]
+        AuditDep[Audit context]
+    end
+
+    subgraph Core["Admin core services"]
+        AuthNZ[AuthNZ services and repos]
+        Metrics[Metrics manager]
+        Jobs[JobManager and RLS/domain controls]
+        ConfigSvc[Config/profile stores]
+        Governance[Moderation, resource, policy services]
+    end
+
+    subgraph Storage
+        AuthDB[AuthNZ users, roles, orgs, billing, BYOK]
+        Usage[Usage, audit, metrics, quotas]
+        JobsDB[Jobs DB or archive]
+        ConfigFiles[Config files and snapshots]
+    end
+
+    AdminRoutes --> Role --> Perm --> Rate --> AuditDep
+    AuditDep --> AuthNZ
+    Users --> AuthNZ --> AuthDB
+    RBAC --> AuthNZ
+    Ops --> Metrics --> Usage
+    Config --> ConfigSvc --> ConfigFiles
+    JobsAdmin --> Jobs --> JobsDB
+    Governor --> Governance --> Usage
+    AuditDep --> Usage
+```
+
+**Key storage/provider touchpoints:** Admin surfaces primarily touch shared AuthNZ/usage/audit storage, org/team/billing/privilege tables, config snapshots/files, resource governor quota state, and Jobs persistence/archive state. Domain-scoped admin controls may apply RBAC and RLS context before listing, mutating, or sweeping operational records.
+
+**Where to look in code:** `app/api/v1/endpoints/admin/`, `app/api/v1/endpoints/jobs_admin.py`, `app/api/v1/endpoints/config_admin.py`, `app/core/AuthNZ/`, `app/core/Jobs/`, `app/core/Metrics/`, `app/core/Moderation/`, `app/services/*admin*`, and `Docs/API-related/User_Registration_API_Documentation.md`.
 
 ### Characters And Workspaces
 
-Placeholder: this flow will trace character card data, workspace state, chat/session links, and related per-user storage.
+**Purpose:** Manage character cards, character chat sessions/messages/memory, workspace sources/artifacts/notes, and their handoff into chat and LLM generation.
+
+**Primary entrypoints:** Character endpoints, character session/message/memory routes, workspace CRUD, workspace sources/artifacts/notes/capabilities/status routes, and prototype workspace/session routes.
+
+```mermaid
+flowchart LR
+    subgraph Routes["Character and workspace routes"]
+        Characters[Character CRUD and cards]
+        Sessions[Character sessions/messages/memory]
+        Workspaces[Workspaces]
+        Sources[Workspace sources, artifacts, notes]
+        Prototype[Prototype workspaces and branch sessions]
+    end
+
+    subgraph Core["Core services"]
+        CharCore[Character_Chat modules]
+        WorkspaceCore[Workspace capability and DB helpers]
+        ProtoCore[Prototype workspace orchestration]
+        ChatHandoff[Chat orchestration handoff]
+    end
+
+    subgraph Storage
+        ChaCha[Per-user ChaChaNotes DB]
+        AuthDB[AuthNZ prototype workspace repos]
+        Jobs[Jobs for branch/source bootstrap]
+    end
+
+    subgraph Providers
+        LLM[LLM providers]
+        RAG[RAG context from workspace sources]
+    end
+
+    Characters --> CharCore --> ChaCha
+    Sessions --> CharCore --> ChaCha
+    Workspaces --> WorkspaceCore --> ChaCha
+    Sources --> WorkspaceCore --> ChaCha
+    Prototype --> ProtoCore --> AuthDB
+    Prototype --> Jobs
+    CharCore --> ChatHandoff
+    WorkspaceCore --> ChatHandoff
+    ChatHandoff --> RAG
+    ChatHandoff --> LLM
+```
+
+**Key storage/provider touchpoints:** Characters, sessions, messages, memories, workspaces, workspace sources, artifacts, and notes live primarily in the per-user ChaChaNotes DB. Prototype workspace collaboration uses AuthNZ repository storage and Jobs for branch/session bootstrap. Character and workspace context can be passed to chat orchestration, which then calls RAG and LLM providers.
+
+**Where to look in code:** `app/api/v1/endpoints/characters_endpoint.py`, `app/api/v1/endpoints/workspaces.py`, `app/api/v1/endpoints/prototype_workspaces.py`, `app/core/Character_Chat/`, `app/core/Workspaces/`, `app/core/Prototype_Workspaces/`, `app/core/DB_Management/ChaChaNotes_DB.py`, and chat orchestration modules.
 
 ### Integrations And Connectors
 
-Placeholder: this flow will trace connector routes, external integrations, optional dependency behavior, and provider handoffs.
+**Purpose:** Connect external systems, ingestion sources, and chat/meeting integrations to the same ingestion, research, Jobs, AuthNZ, and provider-secret paths used by internal workflows.
+
+**Primary entrypoints:** `/api/v1/connectors`, `/api/v1/ingestion-sources`, Slack events/commands/OAuth/admin routes, Discord routes/OAuth/admin helpers, Telegram admin/webhook routes, meetings routes, and optional connector or integration routers gated by configuration/dependencies.
+
+```mermaid
+flowchart LR
+    subgraph Routes["Integration routes"]
+        Connectors[Connectors and OAuth]
+        Sources[Ingestion sources and sync]
+        ChatOps[Slack, Discord, Telegram]
+        Meetings[Meetings]
+        Optional[Optional gated routes]
+    end
+
+    subgraph AuthConfig["Auth, secrets, and gating"]
+        Auth[User, org, team identity]
+        Secrets[Provider secrets and installs]
+        Gates[Feature/config gates]
+        Verify[Webhook signatures and policies]
+    end
+
+    subgraph Work["Processing path"]
+        Queue[Connector or ingestion Jobs]
+        Normalize[Normalize external payloads]
+        Ingest[Ingestion handoff]
+        Research[Research/search handoff]
+        Chat[Chat/LLM handoff]
+    end
+
+    subgraph StorageProviders["Storage and providers"]
+        AuthDB[AuthNZ secrets, installs, approvals]
+        MediaDB[Media DB]
+        NotesDB[ChaChaNotes]
+        External[External APIs and webhooks]
+    end
+
+    Connectors --> Auth
+    Sources --> Auth
+    ChatOps --> Verify
+    Meetings --> Auth
+    Optional --> Gates
+    Auth --> Secrets --> AuthDB
+    Verify --> Secrets
+    Connectors --> External
+    ChatOps --> External
+    Sources --> Queue
+    Connectors --> Queue
+    Queue --> Normalize
+    Normalize --> Ingest --> MediaDB
+    Normalize --> Research
+    Normalize --> Chat
+    Chat --> NotesDB
+```
+
+**Key storage/provider touchpoints:** AuthNZ stores user/org/team identities, provider secrets, OAuth installs, linked actors, approvals, and connector metadata. Ingestion-source syncs and connector jobs enqueue work, normalize external payloads, and hand content to ingestion/Media DB, notes, research, or chat/LLM providers. Optional routes may be gated by config, dependency availability, or explicit feature flags.
+
+**Where to look in code:** `app/api/v1/endpoints/connectors.py`, `app/api/v1/endpoints/ingestion_sources.py`, Slack/Discord/Telegram endpoint and support files, `app/api/v1/endpoints/meetings.py`, `app/core/Ingestion_Sources/`, connector services under `app/core/External_Sources/` where present, provider-secret repos under `app/core/AuthNZ/`, and media/research ingestion handoff modules.
 
 ## Router Coverage Matrix
 
