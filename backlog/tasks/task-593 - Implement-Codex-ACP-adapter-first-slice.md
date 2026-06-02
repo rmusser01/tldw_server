@@ -4,7 +4,7 @@ title: Implement Codex ACP adapter first slice
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-02 04:33'
+updated_date: '2026-06-01 23:40'
 labels:
   - ACP
   - Codex
@@ -38,6 +38,8 @@ Execute the approved first-slice Codex ACP adapter implementation plan. Scope in
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete and approved. Commit d7651601c3 implements canonical external_acp_adapter strategy normalization, legacy adapter_acp import aliasing in registry/schema/endpoint helpers, Codex static fallback external-adapter/delegated-auth semantics, endpoint test update for canonical forwarded strategy, and live_certification_required setup-step coverage. Verification: focused pytest command passed locally with 36 passed and 6 warnings using /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv; git diff --check passed; Bandit on touched backend files passed with no findings. Review: spec compliance passed after adding explicit ACPAgentEntrypointStatus legacy alias coverage; code quality issues were fixed before approval.
+
+Task 2 complete and approved. Commit e86d935951 exposes ACP adapter readiness metadata, separates display-agent binary readiness from external adapter availability, blocks mutable npx @latest adapter invocations, adds credential/runtime/adapter metadata to registry and public entrypoint status payloads, maps new blocker codes into setup guide copy, and keeps delegated adapter credentials passive without OPENAI_API_KEY blocking. Verification: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_health.py` passed with 47 passed and 6 warnings; `git diff --check` passed; Bandit on touched backend files passed with no findings. Review: spec compliance and code quality approved locally after delegated reviewers stalled due agent latency.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
