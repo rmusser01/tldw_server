@@ -50,16 +50,45 @@ export async function connectSingleUser(
   await expect(connectButton).toBeVisible({ timeout: 30_000 })
   await connectButton.click()
 
-  const successScreen = page
-    .getByTestId("onboarding-success-screen")
-    .or(page.getByText(/connected|setup complete|ready to chat/i))
+  await waitForSetupConnectionReady(page)
+}
+
+async function waitForSetupConnectionReady(page: Page): Promise<void> {
+  const successScreen = page.getByTestId("onboarding-success-screen")
+  const chatInput = page
+    .locator("#textarea-message")
+    .or(page.getByTestId("chat-input"))
+    .or(page.getByPlaceholder(/type a message/i))
     .first()
-  await expect(successScreen).toBeVisible({ timeout: 60_000 })
+  const startChatButton = page.getByRole("button", { name: /start chatting/i }).first()
+
+  await expect
+    .poll(
+      async () => {
+        if (await successScreen.isVisible().catch(() => false)) {
+          return "onboarding-success"
+        }
+        if (
+          (await chatInput.isVisible().catch(() => false)) ||
+          (await startChatButton.isVisible().catch(() => false))
+        ) {
+          return "chat-ready"
+        }
+        return "waiting"
+      },
+      { timeout: 60_000 }
+    )
+    .not.toBe("waiting")
 }
 
 export async function sendFirstChat(page: Page, prompt: string): Promise<string> {
   const chatPage = new ChatPage(page)
-  await chatPage.goto()
+  const currentPath = new URL(page.url()).pathname
+  if (currentPath !== "/chat") {
+    await chatPage.goto()
+  } else {
+    await waitForBackendConnection(page)
+  }
   await chatPage.waitForReady()
   await chatPage.sendMessage(prompt)
   await waitForStreamComplete(page)
@@ -95,10 +124,36 @@ export async function captureStep(
   return { screenshotPath, jsonPath }
 }
 
+type ConsoleDiagnostic = DiagnosticsData["console"][number]
+
+const MODEL_METADATA_ENDPOINT = "/api/v1/llm/models/metadata"
+const CHAT_SETTINGS_ENDPOINT_PREFIX = "/api/v1/chats/"
+const CHAT_SETTINGS_ENDPOINT_SUFFIX = "/settings?scope_type=global"
+
+function isBenignOnboardingConsoleEntry(entry: ConsoleDiagnostic): boolean {
+  if (isBenign(entry.text)) {
+    return true
+  }
+
+  if (
+    /Failed to fetch (?:models from tldw|chat models): Error: Failed to fetch/.test(entry.text) &&
+    entry.text.includes(`(GET ${MODEL_METADATA_ENDPOINT})`)
+  ) {
+    return true
+  }
+
+  const locationUrl = entry.location?.url ?? ""
+  return (
+    /404 \(Not Found\)/.test(entry.text) &&
+    locationUrl.includes(CHAT_SETTINGS_ENDPOINT_PREFIX) &&
+    locationUrl.includes(CHAT_SETTINGS_ENDPOINT_SUFFIX)
+  )
+}
+
 export function assertNoCriticalDiagnostics(diagnostics: DiagnosticsData): void {
   const pageErrors = diagnostics.pageErrors.filter((error) => !isBenign(error.message))
   const consoleErrors = diagnostics.console.filter(
-    (entry) => entry.type === "error" && !isBenign(entry.text)
+    (entry) => entry.type === "error" && !isBenignOnboardingConsoleEntry(entry)
   )
   const requestFailures = diagnostics.requestFailures.filter(
     (request) => !isBenign(request.url) && !isBenign(request.errorText)

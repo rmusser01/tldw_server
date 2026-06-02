@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
-import { cpSync, existsSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -321,7 +321,8 @@ async function runCommand(commandRecord, { logPath }) {
       stdio: ["ignore", "pipe", "pipe"],
     })
     const write = (chunk) => {
-      writeFileSync(logPath, redactText(chunk), { flag: "a", encoding: "utf8" })
+      mkdirSync(path.dirname(logPath), { recursive: true })
+      appendFileSync(logPath, redactText(chunk), "utf8")
     }
     child.stdout?.on("data", write)
     child.stderr?.on("data", write)
@@ -329,7 +330,7 @@ async function runCommand(commandRecord, { logPath }) {
       write(`[${commandRecord.name}] error: ${error.message}\n`)
       resolve({ code: null, signal: null, error })
     })
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
       resolve({ code, signal })
     })
   })

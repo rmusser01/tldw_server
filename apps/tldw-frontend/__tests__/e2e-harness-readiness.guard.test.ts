@@ -194,6 +194,7 @@ describe("e2e harness readiness contracts", () => {
       "e2e/onboarding-uat/fixtures.ts",
       "e2e/onboarding-uat/helpers.ts",
       "e2e/onboarding-uat/scenarios.ts",
+      "e2e/onboarding-uat/setup-happy-path.spec.ts",
     ]
     const declaredSpecFiles = [
       "e2e/onboarding-uat/setup-happy-path.spec.ts",
@@ -221,5 +222,45 @@ describe("e2e harness readiness contracts", () => {
         expect(source, `${file} should not contain ${snippet}`).not.toContain(snippet)
       }
     }
+  })
+
+  it("keeps onboarding UAT setup completion tied to concrete post-connect UI state", () => {
+    const helperSource = readSource("e2e/onboarding-uat/helpers.ts")
+    const setupSpecSource = readSource("e2e/onboarding-uat/setup-happy-path.spec.ts")
+
+    expect(helperSource).toContain("waitForSetupConnectionReady")
+    expect(helperSource).toContain('getByTestId("onboarding-success-screen")')
+    expect(helperSource).toContain("getByPlaceholder(/type a message/i)")
+    expect(helperSource).not.toContain("setup complete|ready to chat")
+    expect(helperSource).not.toContain("getByText(/connected")
+    expect(setupSpecSource).not.toContain('getByTestId("onboarding-success-screen")')
+  })
+
+  it("keeps onboarding UAT first chat on the already-reached chat surface", () => {
+    const helperSource = readSource("e2e/onboarding-uat/helpers.ts")
+
+    expect(helperSource).toContain("new URL(page.url()).pathname")
+    expect(helperSource).toContain('if (currentPath !== "/chat")')
+    expect(helperSource).not.toContain("await chatPage.goto()\n  await chatPage.waitForReady()")
+  })
+
+  it("keeps onboarding UAT diagnostics strict with narrow route-transition exceptions", () => {
+    const helperSource = readSource("e2e/onboarding-uat/helpers.ts")
+
+    expect(helperSource).toContain("isBenignOnboardingConsoleEntry")
+    expect(helperSource).toContain("/api/v1/llm/models/metadata")
+    expect(helperSource).toContain("/api/v1/chats/")
+    expect(helperSource).toContain("/settings?scope_type=global")
+    expect(helperSource).not.toContain("Failed to load resource: the server responded")
+  })
+
+  it("keeps source-imported UI workspace dependencies resolvable from the UI package", () => {
+    const uiPackage = JSON.parse(readSource("../packages/ui/package.json")) as {
+      devDependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+    }
+
+    expect(uiPackage.peerDependencies?.antd).toBeDefined()
+    expect(uiPackage.devDependencies?.antd).toBe(uiPackage.peerDependencies?.antd)
   })
 })

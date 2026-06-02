@@ -497,6 +497,13 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("waits for one-shot child process stdio close before artifact cleanup", () => {
+    const runnerSource = readText("scripts/onboarding-uat/run.mjs")
+
+    expect(runnerSource).toContain('child.once("close"')
+    expect(runnerSource).not.toContain('child.once("exit"')
+  })
+
   it("waits for process exit after SIGKILL escalation", async () => {
     const artifacts = createRunArtifacts({
       frontendRoot,
