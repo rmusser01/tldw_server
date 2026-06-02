@@ -505,6 +505,8 @@ flowchart TB
         ValidateAudio[Validate file and options]
         STTBackend[Select STT backend: faster_whisper, NeMo, Qwen, local]
         Transcript[Transcript, segments, SRT/VTT/JSON]
+        STTResponse[Return transcript response]
+        UploadRetention[Uploaded audio retained only by STT policy]
     end
 
     subgraph StreamSTT["Streaming transcription path"]
@@ -513,6 +515,8 @@ flowchart TB
         StreamConfig[Streaming model config]
         AudioChunks[Incoming audio chunks]
         PartialFinal[Partial and final transcript frames]
+        PersistGate{persist_transcript and media_id?}
+        NoPersist[No Media DB transcript write]
     end
 
     subgraph TTSPath["TTS path"]
@@ -523,33 +527,34 @@ flowchart TB
     end
 
     subgraph OptionalPersistence["Optional persistence and background tracking"]
-        History[Audio history and job records]
-        MediaPersist[Persist as media transcript]
-        ChunkSearch[Chunk and index transcript]
+        TTSHistory[TTS history and audio job records]
+        MediaPersist[upsert_transcript writes media transcript]
+        ChunkSearch[Optional chunk and index transcript]
         MediaDB[Per-user Media DB and FTS]
         Vector[Optional embeddings and vector store]
-        Files[Per-user outputs, voices, temp files]
-        Jobs[Jobs/background workers]
+        Files[Per-user outputs, voices, retained artifacts]
+        Jobs[Audio Jobs/background workers]
     end
 
     FileReq --> ValidateAudio --> STTBackend --> Transcript
+    FileReq --> UploadRetention --> Files
     WSReq --> StreamAuth --> StreamConfig --> AudioChunks --> PartialFinal
     SpeechReq --> VoiceCatalog --> TTSBackend --> AudioOut
-    Transcript --> History
-    PartialFinal --> History
-    AudioOut --> History
-    Transcript --> MediaPersist
-    PartialFinal --> MediaPersist
+    Transcript --> STTResponse
+    PartialFinal --> PersistGate
+    PersistGate -->|yes| MediaPersist
+    PersistGate -->|no| NoPersist
+    AudioOut --> TTSHistory
     MediaPersist --> ChunkSearch
     ChunkSearch --> MediaDB
     ChunkSearch --> Vector
     AudioOut --> Files
-    History --> Jobs
+    TTSHistory --> Jobs
 ```
 
-**Key storage/provider touchpoints:** STT and TTS providers may be local runtimes or external OpenAI-compatible services. File outputs and voices live under the per-user root. Transcripts can remain as responses/history or be persisted as media, then chunked, indexed with FTS, and embedded for RAG.
+**Key storage/provider touchpoints:** STT and TTS providers may be local runtimes or external OpenAI-compatible services. File STT usually returns transcript responses; uploaded audio may be retained according to STT policy. Streaming transcript persistence is opt-in and requires `persist_transcript` plus `media_id` before `upsert_transcript` writes to the Media DB. TTS has history/audio jobs, and generated or uploaded artifacts may be retained by policy. Media transcript persistence is optional and conditional; only persisted transcripts can later be chunked, indexed with FTS, and embedded for RAG.
 
-**Where to look in code:** `app/api/v1/endpoints/audio.py`, `app/core/Ingestion_Media_Processing/Audio/`, `app/core/TTS/`, `Docs/STT-TTS/`, and media persistence helpers when transcription is saved as content.
+**Where to look in code:** `app/api/v1/endpoints/audio/`, especially `audio.py`, `audio_transcriptions.py`, `audio_streaming.py`, `audio_tts.py`, `audio_history.py`, and `audio_jobs.py`; also `app/core/Ingestion_Media_Processing/Audio/`, `app/core/TTS/`, `Docs/STT-TTS/`, and media persistence helpers when transcription is saved as content.
 
 ### Chunking And Embeddings
 
