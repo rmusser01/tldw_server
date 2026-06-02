@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
@@ -432,7 +431,10 @@ async def update_media_item(
         payload.model_dump(exclude_unset=True),
     )
 
-    update_fields: dict[str, Any] = payload.model_dump(exclude_unset=True)
+    update_fields: dict[str, Any] = payload.model_dump(
+        exclude_unset=True,
+        exclude={"prompt", "analysis", "keywords"},
+    )
 
     # No-op update: return current representation if the item exists,
     # matching the legacy handler's behaviour.
@@ -468,174 +470,13 @@ async def update_media_item(
         invalidate_rag_caches(current_user, media_id=media_id)
         return MediaDetailResponse(**details)
 
-    new_doc_version_info: dict[str, Any] | None = None
-
     try:
-        # Single transaction for all DB operations.
-        with db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT id, uuid, content_hash, version
-                FROM Media
-                WHERE id = ? AND deleted = 0 AND is_trash = 0
-                """,
-                (media_id,),
-            )
-            current_media = cursor.fetchone()
-            if not current_media:
-                logger.warning(
-                    "Update failed: Media not found or inactive/trashed for ID {}",
-                    media_id,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Media item not found or is inactive/trashed",
-                )
-
-            current_hash = current_media["content_hash"]
-            current_sync_version = current_media["version"]
-            media_uuid = current_media["uuid"]
-            new_sync_version = current_sync_version + 1
-
-            content_updated = "content" in update_fields and update_fields["content"] is not None
-            new_content = update_fields.get("content") if content_updated else None
-            new_content_hash = hashlib.sha256(new_content.encode()).hexdigest() if content_updated else current_hash
-            content_actually_changed = content_updated and (new_content_hash != current_hash)
-
-            set_parts = []
-            params: list[Any] = []
-
-            current_time = db._get_current_utc_timestamp_str()
-            client_id = db.client_id
-            set_parts.extend(
-                [
-                    "last_modified = ?",
-                    "version = ?",
-                    "client_id = ?",
-                ],
-            )
-            params.extend([current_time, new_sync_version, client_id])
-
-            if "title" in update_fields:
-                set_parts.append("title = ?")
-                params.append(update_fields["title"])
-            if "author" in update_fields:
-                set_parts.append("author = ?")
-                params.append(update_fields["author"])
-            if "type" in update_fields:
-                set_parts.append("type = ?")
-                params.append(update_fields["type"])
-
-            if content_actually_changed:
-                logger.info(
-                    "Content changed for media {}. Updating content and hash.",
-                    media_id,
-                )
-                set_parts.extend(["content = ?", "content_hash = ?"])
-                params.extend([new_content, new_content_hash])
-                set_parts.append("chunking_status = ?")
-                params.append("pending")
-            elif content_updated and not content_actually_changed:
-                logger.info(
-                    "Content provided for media {} but hash is identical. " "Content field not updated.",
-                    media_id,
-                )
-
-            sql_set_clause = ", ".join(set_parts)
-            update_query_template = "UPDATE Media SET {sql_set_clause} WHERE id = ? AND version = ?"
-            update_query = update_query_template.format_map(locals())  # nosec B608
-            update_params = tuple(params + [media_id, current_sync_version])
-
-            logger.debug(
-                "Executing Media UPDATE: {} | Params: {}",
-                update_query,
-                update_params,
-            )
-            update_cursor = conn.cursor()
-            update_cursor.execute(update_query, update_params)
-
-            if update_cursor.rowcount == 0:
-                cursor.execute(
-                    "SELECT version FROM Media WHERE id = ?",
-                    (media_id,),
-                )
-                check_conflict = cursor.fetchone()
-                if check_conflict and check_conflict["version"] != current_sync_version:
-                    raise ConflictError("Media", media_id)
-                raise DatabaseError(
-                    f"Failed to update media {media_id}, possibly deleted concurrently.",
-                )
-
-            logger.info(
-                "Successfully updated Media record for ID: {}. New sync version: {}",
-                media_id,
-                new_sync_version,
-            )
-
-            fts_title = update_fields.get("title")
-            if fts_title is None:
-                cursor.execute(
-                    "SELECT title FROM Media WHERE id = ?",
-                    (media_id,),
-                )
-                fts_title = cursor.fetchone()["title"]
-
-            fts_content = None
-            if content_actually_changed:
-                fts_content = new_content
-            else:
-                # Reuse existing DB content whenever we didn't change the hash,
-                # regardless of whether the client provided `content` in payload.
-                cursor.execute(
-                    "SELECT content FROM Media WHERE id = ?",
-                    (media_id,),
-                )
-                fts_content = cursor.fetchone()["content"]
-
-            if "title" in update_fields or content_actually_changed:
-                logger.debug(
-                    "Updating FTS for media {} due to title/content change.",
-                    media_id,
-                )
-                db._update_fts_media(conn, media_id, fts_title, fts_content)
-            if content_updated:
-                logger.info(
-                    "Content was present in update payload for media {}. " "Creating new document version.",
-                    media_id,
-                )
-                new_doc_version_info = db.create_document_version(
-                    media_id=media_id,
-                    content=new_content,
-                    prompt=payload.prompt,
-                    analysis_content=payload.analysis,
-                )
-                logger.info(
-                    "Created new version {} (UUID: {}) for media {} during update.",
-                    new_doc_version_info.get("version_number"),
-                    new_doc_version_info.get("uuid"),
-                    media_id,
-                )
-
-            cursor.execute(
-                "SELECT * FROM Media WHERE id = ?",
-                (media_id,),
-            )
-            updated_media_info = dict(cursor.fetchone())
-            if new_doc_version_info:
-                updated_media_info["created_doc_ver_uuid"] = new_doc_version_info.get(
-                    "uuid",
-                )
-                updated_media_info["created_doc_ver_num"] = new_doc_version_info.get("version_number")
-
-            db._log_sync_event(
-                conn,
-                "Media",
-                media_uuid,
-                "update",
-                new_sync_version,
-                updated_media_info,
-            )
+        effects = db.apply_media_item_update(
+            media_id=media_id,
+            fields=update_fields,
+            prompt=payload.prompt,
+            analysis_content=payload.analysis,
+        )
 
         details = get_full_media_details_rich(
             db,
@@ -649,11 +490,23 @@ async def update_media_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Media not found after update",
             )
-        invalidate_rag_caches(current_user, media_id=media_id)
+        if effects.get("invalidate_rag", True):
+            invalidate_rag_caches(current_user, media_id=media_id)
         return MediaDetailResponse(**details)
     except HTTPException:
         raise
-    except (ConflictError, InputError, DatabaseError) as exc:
+    except InputError as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail="Database error during update",
+            input_detail="Database error during update",
+            conflict_detail="Conflict detected during update",
+            log_context=f"update_media_item media_id={media_id}",
+            not_found_substrings=("not found or inactive/trashed",),
+            not_found_detail="Media item not found or is inactive/trashed",
+        ) from exc
+    except (ConflictError, DatabaseError) as exc:
         raise map_db_error_to_http(
             exc,
             input_status=status.HTTP_500_INTERNAL_SERVER_ERROR,

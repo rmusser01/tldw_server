@@ -205,6 +205,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_searc
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.synced_document_update_ops import (
     apply_synced_document_content_update,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops import (
+    apply_media_item_update,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_version_rollback_ops import (
     rollback_to_version,
 )
@@ -1900,6 +1903,7 @@ MediaDatabase.soft_delete_data_table = soft_delete_data_table
 MediaDatabase.persist_data_table_generation = persist_data_table_generation
 MediaDatabase.replace_data_table_contents = replace_data_table_contents
 MediaDatabase.search_by_safe_metadata = search_by_safe_metadata
+MediaDatabase.apply_media_item_update = apply_media_item_update
 MediaDatabase.apply_synced_document_content_update = (
     apply_synced_document_content_update
 )

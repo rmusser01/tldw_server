@@ -158,6 +158,7 @@ def map_db_error_to_http(
     conflict_status_code: int | None = None,
     database_status_code: int | None = None,
     not_found_substrings: tuple[str, ...] = (),
+    not_found_detail: str | None = None,
     payload_too_large_substrings: tuple[str, ...] = (),
 ) -> HTTPException:
     """Map a database-layer exception to a FastAPI HTTPException.
@@ -181,7 +182,9 @@ def map_db_error_to_http(
     preserve request identifiers such as `media_id` in server-side logs, while
     `log_error=False` lets callers avoid duplicate stack traces when they have
     already logged context. `data_integrity_detail` provides the safe client
-    message for 422 responses.
+    message for 422 responses. `not_found_detail` provides a sanitized client
+    message when `not_found_substrings` promotes an InputError-like exception
+    to 404.
     """
 
     def _log_db_mapping_error(label: str) -> None:
@@ -206,11 +209,17 @@ def map_db_error_to_http(
             if isinstance(attr_detail, str) and attr_detail.strip():
                 detail = attr_detail
 
-        if not_found_substrings and any(
-            substring.lower() in detail.lower()
-            for substring in not_found_substrings
-        ):
+        matched_not_found = bool(
+            not_found_substrings
+            and any(
+                substring.lower() in detail.lower()
+                for substring in not_found_substrings
+            )
+        )
+        if matched_not_found:
             status_code = status.HTTP_404_NOT_FOUND
+            if not_found_detail is not None:
+                detail = not_found_detail
         elif payload_too_large_substrings and any(
             substring.lower() in detail.lower()
             for substring in payload_too_large_substrings
@@ -227,7 +236,9 @@ def map_db_error_to_http(
                 )
             )
 
-        if input_detail is not None:
+        if input_detail is not None and not (
+            matched_not_found and not_found_detail is not None
+        ):
             detail = input_detail
         if status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
             _log_db_mapping_error("InputError from DB layer")

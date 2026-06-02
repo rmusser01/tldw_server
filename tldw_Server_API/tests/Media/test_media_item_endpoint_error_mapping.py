@@ -1,5 +1,3 @@
-import hashlib
-
 import pytest
 from fastapi import HTTPException, Response
 
@@ -97,60 +95,34 @@ def _assert_sanitized_debug_log(
         assert marker not in rendered_calls
 
 
-class _FakeMediaUpdateCursor:
-    def __init__(self, update_exc: Exception | None):
-        self._update_exc = update_exc
-        self._row = None
-
-    def execute(self, sql: str, params=()):
-        if "SELECT id, uuid, content_hash, version" in sql:
-            self._row = {
-                "id": int(params[0]),
-                "uuid": "media-uuid-1",
-                "content_hash": hashlib.sha256(b"existing content").hexdigest(),
-                "version": 3,
-            }
-            return
-        if sql.startswith("UPDATE Media SET"):
-            if self._update_exc is not None:
-                raise self._update_exc
-            return
-        raise AssertionError(f"Unexpected SQL in test double: {sql}")
-
-    def fetchone(self):
-        return self._row
-
-
-class _FakeMediaUpdateConnection:
-    def __init__(self, update_exc: Exception | None):
-        self._update_exc = update_exc
-
-    def cursor(self):
-        return _FakeMediaUpdateCursor(self._update_exc)
-
-
-class _FakeMediaUpdateTransaction:
-    def __init__(self, update_exc: Exception | None):
-        self._update_exc = update_exc
-
-    def __enter__(self):
-        return _FakeMediaUpdateConnection(self._update_exc)
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
 class _BrokenMediaUpdateDb:
-    client_id = "test-client"
-
     def __init__(self, update_exc: Exception | None):
         self._update_exc = update_exc
 
-    def transaction(self):
-        return _FakeMediaUpdateTransaction(self._update_exc)
+    def apply_media_item_update(self, **_kwargs):
+        if self._update_exc is not None:
+            raise self._update_exc
+        return {"invalidate_rag": True}
 
-    def _get_current_utc_timestamp_str(self):
-        return "2026-04-21T00:00:00Z"
+    def __getattr__(self, name: str):
+        if name == "transaction" or name.startswith("_"):
+            raise AssertionError(f"Endpoint should not access DB internals: {name}")
+        raise AttributeError(name)
+
+
+class _DelegatingMediaUpdateDb:
+    def __init__(self, *, effects: dict[str, object] | None = None):
+        self.calls: list[dict[str, object]] = []
+        self._effects = effects or {"invalidate_rag": True}
+
+    def apply_media_item_update(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._effects
+
+    def __getattr__(self, name: str):
+        if name == "transaction" or name.startswith("_"):
+            raise AssertionError(f"Endpoint should not access DB internals: {name}")
+        raise AttributeError(name)
 
 
 class _BrokenMediaDeleteDb:
@@ -183,6 +155,42 @@ class _BrokenMediaKeywordsDb:
             raise self._update_exc
 
 
+def _media_detail_payload(
+    *,
+    media_id: int = 42,
+    title: str = "Updated title",
+    text: str = "Updated content",
+) -> dict[str, object]:
+    return {
+        "media_id": media_id,
+        "source": {
+            "url": "https://example.test/media/42",
+            "title": title,
+            "duration": None,
+            "type": "document",
+        },
+        "processing": {
+            "prompt": None,
+            "analysis": None,
+            "safe_metadata": None,
+            "model": None,
+            "timestamp_option": False,
+            "chunking_status": "pending",
+            "vector_processing_status": 0,
+        },
+        "content": {
+            "metadata": {},
+            "text": text,
+            "word_count": len(text.split()),
+        },
+        "keywords": [],
+        "timestamps": [],
+        "versions": [],
+        "has_original_file": False,
+        "original_file_url": None,
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("raised_exc", "expected_status", "expected_detail"),
@@ -203,6 +211,77 @@ async def test_update_media_item_maps_db_errors(raised_exc, expected_status, exp
 
     assert exc_info.value.status_code == expected_status
     assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_update_media_item_maps_db_not_found_input_error_to_404():
+    with pytest.raises(HTTPException) as exc_info:
+        await update_media_item(
+            payload=MediaUpdateRequest(title="Updated title"),
+            media_id=42,
+            db=_BrokenMediaUpdateDb(
+                InputError("Media 42 not found or inactive/trashed.")
+            ),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Media item not found or is inactive/trashed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("invalidate_rag", "expected_invalidation_count"),
+    [(True, 1), (False, 0)],
+)
+async def test_update_media_item_delegates_fields_and_uses_returned_rag_effect(
+    monkeypatch,
+    invalidate_rag,
+    expected_invalidation_count,
+):
+    db = _DelegatingMediaUpdateDb(effects={"invalidate_rag": invalidate_rag})
+    invalidations: list[tuple[object, int]] = []
+
+    monkeypatch.setattr(
+        media_item_endpoint,
+        "get_full_media_details_rich",
+        lambda *_args, **_kwargs: _media_detail_payload(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        media_item_endpoint,
+        "invalidate_rag_caches",
+        lambda user, *, media_id: invalidations.append((user, media_id)),
+        raising=True,
+    )
+
+    current_user = User(id=1, username="tester", email=None, is_active=True)
+    response = await update_media_item(
+        payload=MediaUpdateRequest(
+            title="Updated title",
+            content="Updated content",
+            keywords=["ignored-by-put"],
+            prompt="version prompt",
+            analysis="version analysis",
+        ),
+        media_id=42,
+        db=db,
+        current_user=current_user,
+    )
+
+    assert response.source.title == "Updated title"
+    assert db.calls == [
+        {
+            "media_id": 42,
+            "fields": {
+                "title": "Updated title",
+                "content": "Updated content",
+            },
+            "prompt": "version prompt",
+            "analysis_content": "version analysis",
+        }
+    ]
+    assert invalidations == [(current_user, 42)] * expected_invalidation_count
 
 
 @pytest.mark.asyncio

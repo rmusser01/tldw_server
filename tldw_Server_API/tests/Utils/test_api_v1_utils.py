@@ -227,6 +227,17 @@ def test_http_error_mapping_can_promote_matching_input_errors_to_404():
     assert http_exc.detail == "Dictionary revision not found"
 
 
+def test_http_error_mapping_can_sanitize_promoted_404_input_detail():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("Dictionary revision not found at /private/tmp/db.sqlite"),
+        not_found_substrings=("not found",),
+        not_found_detail="Dictionary revision not found",
+    )
+
+    assert http_exc.status_code == 404
+    assert http_exc.detail == "Dictionary revision not found"
+
+
 def test_http_error_mapping_keeps_non_matching_not_found_input_errors_at_400():
     http_exc = http_errors.map_db_error_to_http(
         ChaChaInputError("Revision must be positive"),
