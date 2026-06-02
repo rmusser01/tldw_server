@@ -42,7 +42,7 @@ Task 6 completed at amended commit e0883ae87713ad106f2f485194f397aca7995c7f. Add
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 7 completed at commit 8f2b58596a. Added service-tail/runtime-monitor/optional/infra/auxiliary/maintenance/recurring scheduler WorkerSpec providers plus shared startup adapters for legacy task-returning services. Included tts_history_cleanup_task and connectors_jobs_task in startup_infra_services.py because that is their actual legacy owner, and included claims_alerts_task/claims_review_metrics_task because they remain service-tail runtime fields. Verification: red run failed as expected before providers with 12 missing-provider failures; final focused pytest passed 80 tests/6 warnings; Ruff touched-file check passed; Bandit on touched service modules wrote /tmp/bandit_task504_task7.json with 0 results/errors; git diff --check and git diff --cached --check passed. Reviews: local spec compliance and code quality review passed; no blocking findings. Subagent re-review was unavailable due the usage-limit error carried over from Task 6.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
