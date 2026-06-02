@@ -505,7 +505,7 @@ flowchart TB
     subgraph FileSTT["File transcription path"]
         FileReq["/audio/transcriptions upload"]
         ValidateAudio[Validate file and options]
-        STTBackend[Select STT backend: faster_whisper, NeMo, Qwen, local]
+        STTBackend["Select STT backend: faster_whisper, NeMo, Qwen, local"]
         Transcript[Transcript, segments, SRT/VTT/JSON]
         STTResponse[Return transcript response]
         UploadRetention[Uploaded audio retained only by STT policy]
