@@ -9,7 +9,12 @@ const registryLabels = vi.hoisted(() => ({
   degraded: "Registry Degraded"
 }))
 
-const connectionStoreState = {
+type MockConnectionStoreState = {
+  state: ConnectionState
+  checkOnce: ReturnType<typeof vi.fn>
+}
+
+const connectionStoreState: MockConnectionStoreState = {
   state: {
     phase: ConnectionPhase.CONNECTED,
     serverUrl: "http://127.0.0.1:8000",
