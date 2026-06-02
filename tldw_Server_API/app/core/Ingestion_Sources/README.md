@@ -46,6 +46,33 @@ Ingestion_Sources manages persistent sync sources that feed Media DB or Notes fr
 - Media DB, ChaChaNotes DB, Storage, Jobs, AuthNZ, feature flags, and GitHub remote access are adjacent dependencies.
 - API documentation lives in `Docs/API-related/Ingestion_Sources_API.md`.
 
+## Architecture Notes
+
+### Core Flow
+
+- Source creation and archive staging happen in the API/service layer. Sync execution is asynchronous: `jobs.py` enqueues an `ingestion_sources` job, the worker claims it, loads the current snapshot, diffs against the previous successful snapshot, applies sink changes, then records source state and job completion.
+- Local-directory, archive, and Git repository sources share the same diff and sink path after snapshot loading. Source-specific code should produce normalized relative paths and item metadata before reaching `diffing.py`.
+- Archive sources stage a snapshot and artifact first; `_process_sync_job` either promotes those staged records to success or marks them failed with sanitized metadata.
+- Scheduled syncs are APScheduler timers that enqueue Jobs work. They do not bypass the Jobs lifecycle or worker path.
+
+### State And Data
+
+- `service.py` owns tables for sources, snapshots, artifacts, source items, state, and events. `active_job_id`, `last_successful_snapshot_id`, and item sync status are the progress model.
+- Archive uploads are stored under the ingestion-source artifact path and referenced from artifact rows; workers reload the persisted bytes rather than trusting request-local state.
+- Source identity is intentionally immutable after the first successful sync so a source cannot silently point at a different root or repository.
+
+### Security And Operations
+
+- Local directory creation is gated by feature flags and access policy. Directory browsing and snapshot building must continue to respect allowed roots and suffix filtering.
+- Archive handling rejects traversal, symlink, encrypted ZIP, and unsafe member cases; keep extraction failures item-scoped where possible so syncs can degrade instead of losing all progress.
+- GitHub access tokens are resolved inside the worker and passed only to Git snapshot helpers. Avoid persisting provider tokens in source metadata or artifacts.
+
+### Extension Checklist
+
+- New source type: extend `models.py`, endpoint/schema validation, snapshot builder, worker dispatch, and source API/worker tests.
+- New sink: add a `sinks/` implementation, update source creation validation, worker sink dispatch, and sink-specific tests.
+- New sync status or event: update `service.py`, worker summaries, API response schemas if exposed, and item/state tests.
+
 ## Extension Points
 
 - Add a source type by extending `models.py`, adding a snapshot builder, updating endpoint validation, and teaching the worker to dispatch it.

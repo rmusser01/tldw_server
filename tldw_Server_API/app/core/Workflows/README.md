@@ -38,6 +38,33 @@ Related Endpoints (file:line)
 Related Schemas
 - tldw_Server_API/app/api/v1/schemas/workflows.py:1 (definitions, runs, events)
 
+## Architecture Notes
+
+### Core Flow
+
+- Endpoint handlers validate definitions or ad-hoc payloads, persist definitions/runs through `DB_Management/Workflows_DB.py`, then either return a queued run or drive the engine for synchronous execution.
+- `engine.py` is the run lifecycle owner: it loads a definition snapshot, executes registered adapters, records step runs/events/artifacts, handles pause/resume for human waits, and checks cancellation cooperatively.
+- Recurring schedules live in `services/workflows_scheduler.py` and `Workflows_Scheduler_DB.py`; they resolve a target and enqueue `workflow_run` or `watchlist_run` into the core Scheduler.
+- `adapters.py` is the integration boundary for Chat/LLM, RAG, media, MCP, TTS, webhook, notification, and knowledge operations. Endpoint code should not call those providers directly for workflow steps.
+
+### State And Data
+
+- Definitions, versions, runs, step runs, events, artifacts, idempotency keys, cancellation flags, and run metadata are workflow DB state.
+- Per-run secrets are held in memory by the engine and expire with the configured TTL; they are intentionally absent from persisted definition, run, and event rows.
+- Events are the audit trail for operators and clients. New adapters should record enough evidence to explain side effects without storing secrets or large provider payloads.
+
+### Security And Operations
+
+- RBAC and token-scope checks happen at the endpoint and scheduler routes, while per-user DB scoping comes from dependency construction.
+- Webhook and MCP steps cross external or tool boundaries; keep timeout, DLQ, retry, artifact, and governance behavior visible in adapter tests.
+- Idempotency keys matter at both saved-run and scheduled-run boundaries. Do not mutate definition snapshots in scheduler handlers.
+
+### Extension Checklist
+
+- New step type: update schema validation, `_validate_definition_payload`, adapter implementation, registry capability metadata, and Workflows tests for sync and async runs.
+- New schedule target: update `workflows_scheduler.py`, Scheduler handler registration, target resolver tests, and run metadata tests.
+- New persisted run field: update SQLite/Postgres workflow schemas, migration tests, API schemas, and event/export behavior if clients consume it.
+
 ## 2. Technical Details of Features
 
 - Engine & adapters

@@ -34,6 +34,33 @@ Related Services/DB
 - Per-user schedules DB: tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:1
 - Core Scheduler API (internal): tldw_Server_API/app/core/Scheduler/scheduler.py:1
 
+## Architecture Notes
+
+### Core Flow
+
+- Internal callers submit work through `Scheduler.submit()` or `submit_batch()`. The scheduler validates idempotency, dependency existence, payload shape, and auth context before adding tasks to the safe write buffer.
+- The write buffer persists tasks to the configured backend, then the worker pool leases ready tasks, invokes the registered handler from `base/registry.py`, updates status, and releases or reclaims leases.
+- APScheduler-backed services such as Workflows recurring schedules and Watchlists enqueue task handlers (`workflow_run`, `watchlist_run`) into this core Scheduler; they do not execute workflow business logic themselves.
+- `TaskAuthorizer` and `AuthContext` are part of the task metadata path and guard cancellation or administrative operations.
+
+### State And Data
+
+- Backend choice comes from `config.py` and `backends/`: SQLite and Postgres are durable, while memory backend support is for tests and local utilities.
+- Leases, task status, dependency edges, idempotency keys, payloads, and auth metadata are backend state, not worker-local state.
+- Leader election and the lease reaper coordinate cleanup and single-actor duties across processes.
+
+### Security And Operations
+
+- Scheduler is for internal orchestration with dependency handling. Use Jobs for new user-facing background work that needs admin controls, quotas, or queue visibility.
+- Handlers must be idempotent because retries, lease expiry, or process restarts can re-run work after partial progress.
+- Batch submission is the safer path when tasks reference each other because dependency and idempotency validation are evaluated before enqueueing the group.
+
+### Extension Checklist
+
+- New task handler: register it with `@task`, define payload validation, add handler tests, and add enqueueing tests in the owning module.
+- New backend behavior: update the base backend contract, SQLite/Postgres implementations, and backend-specific tests.
+- New scheduler consumer: document whether it should use Scheduler or Jobs, include idempotency keys, and test lease or retry behavior.
+
 ## 2. Technical Details of Features
 
 - Architecture & components

@@ -47,6 +47,33 @@ CodeGraph indexes trusted workspace source trees into a local code graph for MCP
 - `jobs.py` enqueues `codegraph_index` work in the `codegraph` Jobs domain; `jobs_worker.py` consumes it.
 - Optional tree-sitter packages determine whether JavaScript, TypeScript, Java, Kotlin, C#, C, and C++ extraction is available.
 
+## Architecture Notes
+
+### Core Flow
+
+- MCP tool execution starts in `MCP_unified/modules/implementations/codegraph_module.py`, resolves the active trusted workspace with `CodeGraphWorkspaceResolver`, and builds a per-workspace `CodeGraphRepository`.
+- Foreground `codegraph.index` and `codegraph.sync` calls run `CodeGraphIndexer` directly. Background mode enqueues a Jobs payload through `jobs.py`, and `jobs_worker.py` validates local worker paths before writing an index.
+- Read tools return `index_present: false` when the per-workspace index DB does not exist; they should not create indexes as a side effect.
+- `context.py` ranks indexed nodes and reads bounded workspace-relative source snippets for `codegraph.context`.
+
+### State And Data
+
+- The stable workspace key and `index_base_dir/<workspace_key>/codegraph.db` path come from `workspace.py`; the index database is intentionally outside the workspace root.
+- `DB_Management/codegraph/repository.py` stores files, nodes, edges, unresolved references, and index run records. File paths in graph records are workspace-relative.
+- Index settings in `config.py` bound file count, file size, total bytes, time, search result size, and context size.
+
+### Security And Operations
+
+- Workspace roots must come from MCP Hub trusted context. Do not add raw root path arguments to MCP tools or Jobs payloads without equivalent trust validation.
+- Jobs worker payloads validate `index_base_dir` and `index_db_path` against local configuration; keep those checks when changing background indexing.
+- Parser availability is optional. Contributor changes should preserve degraded language support reporting rather than treating absent tree-sitter packages as fatal.
+
+### Extension Checklist
+
+- New language support: update `language_registry.py`, add or extend an extractor under `extractors/`, and add extractor plus indexer tests.
+- New graph query: update `resolver.py`, repository read helpers, MCP tool schema/handler, and `tests/CodeGraph/`.
+- New background mode or payload field: update `jobs.py`, `jobs_worker.py`, CodeGraph job tests, and MCP module serialization.
+
 ## Extension Points
 
 - Add language support by updating `language_registry.py` and adding or extending an extractor under `extractors/`.
