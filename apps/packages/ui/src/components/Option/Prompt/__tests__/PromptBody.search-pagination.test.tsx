@@ -20,6 +20,13 @@ const FILTER_PRESET_HINT_DISMISSED_KEY =
   "tldw-prompt-hint-dismissed-filter-presets"
 const FILTER_PRESET_HINT_SHOWN_KEY = "tldw-prompt-hint-shown-filter-presets"
 
+type PromptSyncMockResult = {
+  success: boolean
+  syncStatus?: string
+  localId?: string
+  error?: string
+}
+
 const promptStudioStore = vi.hoisted(() => ({
   setActiveSubTab: vi.fn(),
   setSelectedProjectId: vi.fn(),
@@ -51,7 +58,7 @@ const mocks = vi.hoisted(() => ({
         error?: string
       }
   ),
-  pushToStudio: vi.fn(async () => ({ success: true })),
+  pushToStudio: vi.fn(async (): Promise<PromptSyncMockResult> => ({ success: true })),
   pullFromStudio: vi.fn(
     async (_id?: string | number) =>
       ({ success: true, localId: "local-1", syncStatus: "synced" }) as {
