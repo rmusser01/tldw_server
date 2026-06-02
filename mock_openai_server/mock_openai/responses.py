@@ -150,6 +150,7 @@ class ResponseManager:
             response_data = self.load_response_file(response_file)
         else:
             response_data = self.get_default_chat_response()
+            response_data["model"] = request_data.get("model", "gpt-4")
 
         # Update model from request if not specified in response
         if "model" not in response_data or not response_data["model"]:

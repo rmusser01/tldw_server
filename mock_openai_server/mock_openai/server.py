@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
-from .config import MockConfig, load_config, get_config
+from .config import MockConfig, ResponsePattern, load_config, get_config
 from .models import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -37,6 +37,8 @@ from .streaming import StreamingResponseGenerator
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_scenario_failure_counts: dict[tuple[int, str, int], int] = {}
 
 # Create FastAPI app
 app = FastAPI(
@@ -69,6 +71,39 @@ def get_streaming_generator(config: MockConfig = Depends(get_config_instance)) -
     )
 
 
+def reset_scenario_failure_counts() -> None:
+    """Reset deterministic scenario failure counters."""
+    _scenario_failure_counts.clear()
+
+
+def maybe_raise_scenario_failure(
+    endpoint: str,
+    request_data: dict[str, object],
+    config: MockConfig,
+) -> None:
+    """Raise a configured deterministic scenario failure for matching requests."""
+    for index, failure in enumerate(config.scenario_failures.get(endpoint, [])):
+        if not ResponsePattern(match=failure.match, response_file="").matches(request_data):
+            continue
+
+        key = (id(config), endpoint, index)
+        used = _scenario_failure_counts.get(key, 0)
+        if used >= max(0, failure.times):
+            continue
+
+        _scenario_failure_counts[key] = used + 1
+        raise HTTPException(
+            status_code=failure.status_code,
+            detail={
+                "error": {
+                    "message": failure.message,
+                    "type": failure.error_type,
+                    "code": failure.code,
+                }
+            },
+        )
+
+
 # Add CORS middleware right after app creation
 config = get_config_instance()
 app.add_middleware(
@@ -83,6 +118,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Initialize the server on startup."""
+    reset_scenario_failure_counts()
     config = get_config_instance()
 
     logger.info(f"Mock OpenAI server started on {config.server.host}:{config.server.port}")
@@ -185,6 +221,11 @@ async def chat_completions(
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
         )
 
+    # Convert request to dict for pattern matching
+    request_data = request.model_dump()
+
+    maybe_raise_scenario_failure("chat_completions", request_data, config)
+
     # Simulate errors if configured
     if should_simulate_error(config):
         error_response = response_manager.generate_error_response(
@@ -193,9 +234,6 @@ async def chat_completions(
             code="simulated_error"
         )
         raise HTTPException(status_code=500, detail=error_response.model_dump())
-
-    # Convert request to dict for pattern matching
-    request_data = request.model_dump()
 
     # Find matching response file
     response_file = None
@@ -243,6 +281,11 @@ async def embeddings(
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
         )
 
+    # Convert request to dict for pattern matching
+    request_data = request.model_dump()
+
+    maybe_raise_scenario_failure("embeddings", request_data, config)
+
     # Simulate errors if configured
     if should_simulate_error(config):
         error_response = response_manager.generate_error_response(
@@ -251,9 +294,6 @@ async def embeddings(
             code="simulated_error"
         )
         raise HTTPException(status_code=500, detail=error_response.model_dump())
-
-    # Convert request to dict for pattern matching
-    request_data = request.model_dump()
 
     # Find matching response file
     response_file = None

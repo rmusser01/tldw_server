@@ -10,7 +10,7 @@ from typing import Dict, Any
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 # Skip entire suite unless explicitly enabled
 _RUN_MOCK_OPENAI = os.getenv("RUN_MOCK_OPENAI", "").lower() in ("1", "true", "yes")
@@ -32,7 +32,8 @@ def client():
 @pytest.fixture
 async def async_client():
     """Create an async test client."""
-    async with AsyncClient(base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
@@ -166,6 +167,41 @@ class TestChatCompletions:
             assert len(chunks) > 0
             assert chunks[0]["object"] == "chat.completion.chunk"
 
+    def test_chat_fail_once_then_success(self, auth_headers):
+        """Test a configured chat scenario failure only applies once."""
+        from ..mock_openai.config import MockConfig, ServerConfig
+        from ..mock_openai.server import app, get_config_instance
+
+        cfg = MockConfig(
+            server=ServerConfig(log_requests=False),
+            scenario_failures={
+                "chat_completions": [
+                    {
+                        "match": {"model": "gpt-4.1-mini"},
+                        "status_code": 503,
+                        "message": "UAT transient chat failure",
+                        "type": "server_error",
+                        "code": "uat_fail_once",
+                        "times": 1,
+                    }
+                ]
+            },
+        )
+        app.dependency_overrides[get_config_instance] = lambda: cfg
+        try:
+            client = TestClient(app)
+            payload = {
+                "model": "gpt-4.1-mini",
+                "messages": [{"role": "user", "content": "hello"}],
+            }
+            first = client.post("/v1/chat/completions", headers=auth_headers, json=payload)
+            second = client.post("/v1/chat/completions", headers=auth_headers, json=payload)
+            assert first.status_code == 503
+            assert first.json()["detail"]["error"]["message"] == "UAT transient chat failure"
+            assert second.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
 
 class TestEmbeddings:
     """Test embeddings endpoint."""
@@ -212,6 +248,41 @@ class TestEmbeddings:
         for i, embedding_data in enumerate(data["data"]):
             assert embedding_data["index"] == i
             assert "embedding" in embedding_data
+
+    def test_embedding_fail_once_then_success(self, auth_headers):
+        """Test a configured embeddings scenario failure only applies once."""
+        from ..mock_openai.config import MockConfig, ServerConfig
+        from ..mock_openai.server import app, get_config_instance
+
+        cfg = MockConfig(
+            server=ServerConfig(log_requests=False),
+            scenario_failures={
+                "embeddings": [
+                    {
+                        "match": {"model": "text-embedding-3-small"},
+                        "status_code": 429,
+                        "message": "UAT transient embeddings failure",
+                        "error_type": "rate_limit_error",
+                        "code": "uat_embedding_fail_once",
+                        "times": 1,
+                    }
+                ]
+            },
+        )
+        app.dependency_overrides[get_config_instance] = lambda: cfg
+        try:
+            client = TestClient(app)
+            payload = {
+                "model": "text-embedding-3-small",
+                "input": "hello",
+            }
+            first = client.post("/v1/embeddings", headers=auth_headers, json=payload)
+            second = client.post("/v1/embeddings", headers=auth_headers, json=payload)
+            assert first.status_code == 429
+            assert first.json()["detail"]["error"]["type"] == "rate_limit_error"
+            assert second.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
 
 
 class TestCompletions:
@@ -304,6 +375,37 @@ class TestConfiguration:
         request_data["model"] = "gpt-4"
         request_data["messages"][0]["content"] = "Hello world"
         assert pattern.matches(request_data) is False
+
+    def test_scenario_failures_parse_type_aliases(self):
+        """Test scenario failures parse OpenAI-style type aliases."""
+        config = MockConfig.from_dict(
+            {
+                "scenario_failures": {
+                    "chat_completions": [
+                        {
+                            "match": {"model": "gpt-4.1-mini"},
+                            "status_code": 503,
+                            "message": "transient chat",
+                            "type": "server_error",
+                            "code": "chat_fail_once",
+                            "times": 1,
+                        },
+                        {
+                            "match": {"model": "gpt-4.1"},
+                            "status_code": 429,
+                            "message": "rate limited",
+                            "error_type": "rate_limit_error",
+                            "code": "chat_rate_limit",
+                            "times": 2,
+                        },
+                    ]
+                }
+            }
+        )
+
+        failures = config.scenario_failures["chat_completions"]
+        assert failures[0].error_type == "server_error"
+        assert failures[1].error_type == "rate_limit_error"
 
 
 class TestResponseManager:

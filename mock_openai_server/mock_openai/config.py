@@ -57,6 +57,32 @@ class ResponsePattern:
 
 
 @dataclass
+class ScenarioFailure:
+    """Deterministic failure configuration for a matching request."""
+    match: Dict[str, Any] = field(default_factory=dict)
+    status_code: int = 500
+    message: str = "Mock scenario failure"
+    error_type: str = "server_error"
+    code: str = "mock_scenario_failure"
+    times: int = 1
+
+
+def _parse_scenario_failure(data: Union[ScenarioFailure, Dict[str, Any]]) -> ScenarioFailure:
+    """Parse a scenario failure from config-file style data."""
+    if isinstance(data, ScenarioFailure):
+        return data
+
+    return ScenarioFailure(
+        match=data.get("match", {}),
+        status_code=data.get("status_code", 500),
+        message=data.get("message", "Mock scenario failure"),
+        error_type=data.get("error_type", data.get("type", "server_error")),
+        code=data.get("code", "mock_scenario_failure"),
+        times=data.get("times", 1),
+    )
+
+
+@dataclass
 class StreamingConfig:
     """Streaming configuration."""
     enabled: bool = True
@@ -99,7 +125,15 @@ class MockConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
     responses: Dict[str, ResponseConfig] = field(default_factory=dict)
+    scenario_failures: Dict[str, List[ScenarioFailure]] = field(default_factory=dict)
     models: List[Dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Normalize config-file style scenario failure dictionaries."""
+        self.scenario_failures = {
+            endpoint: [_parse_scenario_failure(failure) for failure in failures]
+            for endpoint, failures in self.scenario_failures.items()
+        }
 
     @classmethod
     def from_file(cls, config_path: Union[str, Path]) -> "MockConfig":
@@ -159,6 +193,13 @@ class MockConfig:
                     patterns=patterns,
                     default=resp_data.get("default")
                 )
+
+        # Parse deterministic scenario failures
+        if "scenario_failures" in data:
+            config.scenario_failures = {
+                endpoint: [_parse_scenario_failure(failure) for failure in failures]
+                for endpoint, failures in data["scenario_failures"].items()
+            }
 
         # Parse models list
         if "models" in data:
