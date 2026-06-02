@@ -90,7 +90,6 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />)
 
     expect(await screen.findByText("Unavailable")).toBeInTheDocument()
-    expect(await screen.findByText("Scheduled tasks are unavailable")).toBeInTheDocument()
     expect(
       await screen.findByRole("heading", {
         name: "Scheduled tasks are unavailable on this server"
@@ -213,7 +212,9 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByRole("heading", { level: 2, name: "Scheduled tasks" })).toBeInTheDocument()
     expect(
-      screen.getByText("Track reminders, Watchlist monitors, and recurring automation from one place.")
+      screen.getByText(
+        "Track reminders, Watchlist monitors, and recurring automation from one place. Use domain workspaces like Watchlists for deep source and output configuration."
+      )
     ).toBeInTheDocument()
     expect(await screen.findByText("2 scheduled tasks")).toBeInTheDocument()
     expect(screen.getByText("1 needs attention")).toBeInTheDocument()
