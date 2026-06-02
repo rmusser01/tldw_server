@@ -1596,10 +1596,13 @@ def _check_runner_binary() -> dict[str, Any]:
 
 _ACP_ENTRYPOINT_STRATEGIES = frozenset({
     "native_acp",
-    "adapter_acp",
+    "external_acp_adapter",
     "documented_candidate",
     "custom_template",
 })
+_LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
+    "adapter_acp": "external_acp_adapter",
+}
 _ACP_PROBE_STATES = frozenset({
     "ready_to_probe",
     "blocked",
@@ -1612,9 +1615,18 @@ _ACP_ENTRYPOINT_STEP_MAP = {
     "binary_missing": "Install the ACP entrypoint command and ensure it is on PATH.",
     "credentials_missing": "Set the required provider credential before live certification.",
     "entrypoint_strategy_missing": "Identify and configure a concrete ACP stdio entrypoint before live certification.",
+    "live_certification_required": "Run live ACP certification before marking this adapter ready.",
     "shell_builtin_collision": "Use an executable ACP command, not a shell builtin or alias.",
     "custom_template": "Create a named custom ACP profile with command, args, env, workspace policy, and evidence bundle.",
 }
+
+
+def _coerce_entrypoint_strategy(value: Any) -> str:
+    """Normalize legacy entrypoint strategy aliases before API output."""
+    normalized = _LEGACY_ENTRYPOINT_STRATEGY_ALIASES.get(str(value), value)
+    if normalized in _ACP_ENTRYPOINT_STRATEGIES:
+        return str(normalized)
+    return "documented_candidate"
 
 
 def _normalize_docs_url(value: Any) -> str | None:
@@ -1653,16 +1665,14 @@ def _entrypoint_status_from_dict(item: dict[str, Any]) -> dict[str, Any]:
         or ""
     )
 
-    strategy = str(
+    strategy = _coerce_entrypoint_strategy(
         source.get("entrypoint_strategy")
         or item.get("entrypoint_strategy")
         or "documented_candidate"
     )
-    if strategy not in _ACP_ENTRYPOINT_STRATEGIES:
-        strategy = "documented_candidate"
 
     default_probe_state = "custom_template" if strategy == "custom_template" else "documented_only"
-    if strategy in {"native_acp", "adapter_acp"}:
+    if strategy in {"native_acp", "external_acp_adapter"}:
         default_probe_state = "blocked"
     probe_state = str(source.get("probe_state") or item.get("probe_state") or default_probe_state)
     if probe_state not in _ACP_PROBE_STATES:
@@ -1709,6 +1719,10 @@ def _entrypoint_status_from_dict(item: dict[str, Any]) -> dict[str, Any]:
             or item.get("compatibility_docs_url")
             or ACP_COMPATIBILITY_DOCS_URL
         ),
+        "credential_state": source.get("credential_state") or item.get("credential_state"),
+        "adapter_source": source.get("adapter_source") or item.get("adapter_source"),
+        "adapter_version": source.get("adapter_version") or item.get("adapter_version"),
+        "runtime_backend": source.get("runtime_backend") or item.get("runtime_backend"),
     }
 
 
@@ -2005,21 +2019,29 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
         )
     )
 
-    openai_key = os.getenv("OPENAI_API_KEY", "")
     agents.append(
         ACPAgentInfo(
             type="codex",
             name="OpenAI Codex",
-            description="OpenAI's Codex agent for code generation and analysis",
-            is_configured=bool(openai_key),
-            requires_api_key="OPENAI_API_KEY" if not openai_key else None,
-            support_state="documented_unverified",
+            description="OpenAI's Codex agent through the Codex ACP adapter",
+            is_configured=False,
+            requires_api_key=None,
+            support_state="experimental",
             verification_level="documented_only",
-            compatibility_notes="Static fallback only; live Codex ACP compatibility has not been certified.",
+            compatibility_notes=(
+                "Static fallback only; Codex uses an external ACP adapter and remains "
+                "experimental until live certification passes."
+            ),
             entrypoint=_entrypoint_status_from_dict({
                 "type": "codex",
-                "entrypoint_strategy": "documented_candidate",
-                "certification_blocker": "adapter_required",
+                "entrypoint_strategy": "external_acp_adapter",
+                "acp_command": "codex-acp",
+                "credential_state": "delegated",
+                "primary_blocker": "live_certification_required",
+                "blockers": ["live_certification_required"],
+                "adapter_source": "zed-industries/codex-acp",
+                "adapter_version": "0.15.0",
+                "runtime_backend": "acp_downstream",
             }),
         )
     )

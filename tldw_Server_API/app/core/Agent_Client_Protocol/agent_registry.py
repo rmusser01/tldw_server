@@ -26,18 +26,22 @@ except ImportError:
 ACP_COMPATIBILITY_DOCS_URL = "/docs-static/Development/ACP_Compatibility_Matrix.md"
 AgentEntrypointStrategy = Literal[
     "native_acp",
-    "adapter_acp",
+    "external_acp_adapter",
     "documented_candidate",
     "custom_template",
 ]
 AgentProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+_LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
+    "adapter_acp": "external_acp_adapter",
+}
 _SHELL_BUILTIN_COMMANDS = frozenset({"alias", "cd", "export", "set", "source", "unset"})
 
 
 def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
     """Return a valid entrypoint strategy, defaulting unknown input conservatively."""
-    if value in {"native_acp", "adapter_acp", "documented_candidate", "custom_template"}:
-        return value
+    normalized = _LEGACY_ENTRYPOINT_STRATEGY_ALIASES.get(str(value), value)
+    if normalized in {"native_acp", "external_acp_adapter", "documented_candidate", "custom_template"}:
+        return normalized
     return "documented_candidate"
 
 
@@ -126,6 +130,9 @@ class AgentRegistryEntry:
     mcp_llm_model: str | None = None
     mcp_max_iterations: int = 20
     mcp_refresh_tools: bool = False
+
+    def __post_init__(self) -> None:
+        self.entrypoint_strategy = _coerce_entrypoint_strategy(self.entrypoint_strategy)
 
     def check_availability(self) -> dict[str, Any]:
         """Check runtime availability of this agent."""
@@ -251,7 +258,7 @@ def classify_agent_entrypoint(
         blockers.append("credentials_missing")
 
     if acp_command and not shell_builtin_collision and not command_resolver(acp_command):
-        blocker = "adapter_missing" if strategy == "adapter_acp" else "binary_missing"
+        blocker = "adapter_missing" if strategy == "external_acp_adapter" else "binary_missing"
         blockers.append(blocker)
 
     if blockers:

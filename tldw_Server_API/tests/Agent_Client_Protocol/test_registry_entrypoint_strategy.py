@@ -57,6 +57,28 @@ agents:
     assert entry.acp_args == ["acp"]
 
 
+def test_legacy_adapter_acp_input_is_imported_as_external_acp_adapter(tmp_path) -> None:
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(
+        """
+agents:
+  - type: legacy_codex
+    name: Legacy Codex
+    command: codex
+    entrypoint_strategy: adapter_acp
+    acp_command: codex-acp
+"""
+    )
+
+    registry = AgentRegistry(yaml_path=str(yaml_file))
+    registry.load()
+
+    entry = registry.get_entry("legacy_codex")
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert classify_agent_entrypoint(entry).entrypoint_strategy == "external_acp_adapter"
+
+
 def test_registry_loads_null_yaml_acp_command_as_missing_entrypoint(tmp_path) -> None:
     yaml_file = tmp_path / "agents.yaml"
     yaml_file.write_text(
@@ -98,7 +120,7 @@ def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> No
         certification_blocker="adapter_missing",
     )
 
-    assert entry.entrypoint_strategy == "adapter_acp"
+    assert entry.entrypoint_strategy == "external_acp_adapter"
     assert entry.acp_command == "agent-acp"
     assert entry.acp_args == ["--stdio"]
 
@@ -106,7 +128,7 @@ def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> No
     reloaded._load_api_entries()
     persisted = reloaded.get_entry("adapter_agent")
     assert persisted is not None
-    assert persisted.entrypoint_strategy == "adapter_acp"
+    assert persisted.entrypoint_strategy == "external_acp_adapter"
     assert persisted.acp_command == "agent-acp"
     assert persisted.acp_args == ["--stdio"]
     assert persisted.adapter_source == "example/agent-acp"
@@ -242,6 +264,28 @@ def test_classifier_ready_to_probe_native_entrypoint() -> None:
     assert result.blockers == ()
     assert result.as_dict()["acp_args"] == ["acp"]
     assert result.as_dict()["blockers"] == []
+
+
+def test_external_acp_adapter_is_canonical_strategy() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="codex-acp",
+        adapter_source="zed-industries/codex-acp",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+        env_getter=lambda _name: None,
+    )
+
+    assert result.entrypoint_strategy == "external_acp_adapter"
+    assert result.probe_state == "ready_to_probe"
+    assert result.acp_command == "codex-acp"
+    assert result.primary_blocker is None
 
 
 def test_classification_is_immutable_against_source_and_as_dict_mutation() -> None:

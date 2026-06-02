@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, ClassVar, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 
@@ -39,12 +39,20 @@ ACPVerificationLevel = Literal[
 ]
 ACPEntryPointStrategy = Literal[
     "native_acp",
-    "adapter_acp",
+    "external_acp_adapter",
     "documented_candidate",
     "custom_template",
 ]
 ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
 ACPSetupHealthStatus = Literal["unknown", "ready", "blocked", "not_configured", "partial"]
+_LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
+    "adapter_acp": "external_acp_adapter",
+}
+
+
+def _coerce_entrypoint_strategy(value: Any) -> Any:
+    """Import legacy ACP strategy aliases before public schema validation."""
+    return _LEGACY_ENTRYPOINT_STRATEGY_ALIASES.get(str(value), value)
 
 
 class ACPAgentEntrypointStatus(BaseModel):
@@ -58,6 +66,15 @@ class ACPAgentEntrypointStatus(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     status_message: str = Field(default="")
     docs_url: str | None = Field(default=ACP_COMPATIBILITY_DOCS_URL)
+    credential_state: str | None = Field(default=None)
+    adapter_source: str | None = Field(default=None)
+    adapter_version: str | None = Field(default=None)
+    runtime_backend: str | None = Field(default=None)
+
+    @field_validator("entrypoint_strategy", mode="before")
+    @classmethod
+    def import_legacy_entrypoint_strategy(cls, value: Any) -> Any:
+        return _coerce_entrypoint_strategy(value)
 
 
 class ACPAgentInfo(BaseModel):
@@ -185,6 +202,11 @@ class ACPAgentRegisterRequest(BaseModel):
         description="Refresh MCP tool inventory before each prompt",
     )
 
+    @field_validator("entrypoint_strategy", mode="before")
+    @classmethod
+    def import_legacy_entrypoint_strategy(cls, value: Any) -> Any:
+        return _coerce_entrypoint_strategy(value)
+
 
 class ACPAgentUpdateRequest(BaseModel):
     """Request to update an existing agent."""
@@ -222,6 +244,11 @@ class ACPAgentUpdateRequest(BaseModel):
     mcp_llm_model: str | None = None
     mcp_max_iterations: int | None = None
     mcp_refresh_tools: bool | None = None
+
+    @field_validator("entrypoint_strategy", mode="before")
+    @classmethod
+    def import_legacy_entrypoint_strategy(cls, value: Any) -> Any:
+        return _coerce_entrypoint_strategy(value)
 
     @model_validator(mode="before")
     @classmethod
