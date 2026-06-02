@@ -287,8 +287,9 @@ class GatewayCredentialGrantManager:
             grant = self._normalize_grant(grant)
             self._reject_secret_material(grant.metadata, grant_id=grant.id)
             self._reject_secret_material(grant.provenance, grant_id=grant.id)
+            now = datetime.now(timezone.utc)
             return grant.model_copy(
-                update={"updated_at": datetime.now(timezone.utc)},
+                update={"created_at": now, "updated_at": now},
                 deep=True,
             )
         except GatewayCredentialGrantManagementError:
@@ -558,11 +559,17 @@ class GatewayCredentialGrantManager:
                 "Invalid credential grant list field",
                 reason_code=reason_code,
             )
-        return [
-            item.strip()
-            for item in values
-            if isinstance(item, str) and item.strip()
-        ]
+        normalized: list[str] = []
+        for item in values:
+            if not isinstance(item, str):
+                raise self._error(
+                    "Invalid credential grant list field",
+                    reason_code=reason_code,
+                )
+            text = item.strip()
+            if text:
+                normalized.append(text)
+        return normalized
 
     @staticmethod
     def _dump_grant(grant: CredentialGrant) -> dict[str, Any]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -228,6 +229,36 @@ def test_gateway_credential_grant_manager_rejects_secret_looking_keys(
     asyncio.run(run())
 
 
+def test_gateway_credential_grant_manager_create_restamps_client_timestamps() -> None:
+    async def run() -> None:
+        manager = _manager()
+        client_timestamp = datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat()
+
+        created = await manager.create_grant(
+            _grant_payload(
+                created_at=client_timestamp,
+                updated_at=client_timestamp,
+            )
+        )
+
+        assert not created["grant"]["created_at"].startswith("2000-01-01")
+        assert not created["grant"]["updated_at"].startswith("2000-01-01")
+
+    asyncio.run(run())
+
+
+def test_gateway_credential_grant_manager_create_rejects_non_string_scope() -> None:
+    async def run() -> None:
+        manager = _manager()
+
+        with pytest.raises(GatewayCredentialGrantManagementError) as exc_info:
+            await manager.create_grant(_grant_payload(scopes=["repo:read", 123]))
+
+        assert exc_info.value.reason_code == "invalid_credential_grant_request"
+
+    asyncio.run(run())
+
+
 def test_gateway_credential_grant_manager_validates_profile_and_server_refs() -> None:
     async def run() -> None:
         manager = _manager(
@@ -281,6 +312,22 @@ def test_gateway_credential_grant_manager_patch_rejects_non_string_server_id() -
         assert (
             await manager.show_grant("grant-one")
         )["grant"]["external_server_id"] == "github-mcp"
+
+    asyncio.run(run())
+
+
+def test_gateway_credential_grant_manager_patch_rejects_non_string_scope() -> None:
+    async def run() -> None:
+        manager = _manager()
+        await manager.create_grant(_grant_payload())
+
+        with pytest.raises(GatewayCredentialGrantManagementError) as exc_info:
+            await manager.patch_grant("grant-one", {"scopes": ["repo:read", 123]})
+
+        assert exc_info.value.reason_code == "invalid_credential_grant_patch"
+        assert (await manager.show_grant("grant-one"))["grant"]["scopes"] == [
+            "repo:read"
+        ]
 
     asyncio.run(run())
 

@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from mcp_unified.gateway.admin_auth import GatewayAdminAuthConfig
 from mcp_unified.gateway.config import load_gateway_profile_bootstrap_config
-from mcp_unified.gateway.fastapi import create_gateway_app
+from mcp_unified.gateway.fastapi import create_gateway_app, create_gateway_router
 
 
 class _FakeGatewayRuntime:
@@ -93,6 +94,44 @@ def test_gateway_admin_auth_protects_management_routes() -> None:
     }
     assert allowed.status_code == 200
     assert allowed.json()["profiles"] == [{"id": "reviewer", "name": "Reviewer"}]
+
+
+def test_gateway_admin_auth_direct_router_mount_returns_json_errors() -> None:
+    """Direct router mounts should not need an app-level auth exception handler."""
+
+    app = FastAPI()
+    app.include_router(
+        create_gateway_router(
+            _FakeGatewayRuntime(),
+            profile_manager=_ProfileManagerDouble(),
+            admin_auth=GatewayAdminAuthConfig(
+                enabled=True,
+                header_name="X-Test-Gateway-Admin",
+                api_key="test-admin-key",
+            ),
+        ),
+        prefix="/mcp",
+    )
+
+    with TestClient(app) as client:
+        missing = client.get("/mcp/profiles")
+        invalid = client.get(
+            "/mcp/profiles",
+            headers={"X-Test-Gateway-Admin": "wrong-key"},
+        )
+
+    assert missing.status_code == 401
+    assert missing.json() == {
+        "ok": False,
+        "error": "Gateway admin authentication required",
+        "reason_code": "admin_auth_required",
+    }
+    assert invalid.status_code == 403
+    assert invalid.json() == {
+        "ok": False,
+        "error": "Gateway admin authentication failed",
+        "reason_code": "admin_auth_invalid",
+    }
 
 
 def test_gateway_admin_auth_does_not_gate_status_or_jsonrpc() -> None:

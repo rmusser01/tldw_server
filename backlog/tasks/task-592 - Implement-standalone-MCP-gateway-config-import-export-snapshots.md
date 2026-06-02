@@ -54,10 +54,6 @@ Implemented package-owned gateway config snapshots in mcp_unified/gateway/snapsh
 Added standalone gateway config import/export snapshots for profiles, the gateway default assignment, external servers, and credential grants. Snapshot export is deterministic and secret-safe; import supports dry-run planning, validates references before writes, applies non-destructive upserts in dependency order, reports partial write failures by action id, and is exposed through export-config/import-config CLI commands. Focused snapshot and CLI tests pass, Bandit has zero findings, and whitespace validation is clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

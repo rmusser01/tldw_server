@@ -302,10 +302,7 @@ class GatewayConfigSnapshotManager:
                     f"External server not found: {grant.external_server_id}",
                     reason_code="config_snapshot_invalid_reference",
                 )
-            if (
-                not server.credential_slots
-                or grant.credential_slot not in server.credential_slots
-            ):
+            if _credential_slot_missing(server, grant.credential_slot):
                 raise GatewayConfigSnapshotManagementError(
                     "Credential grant references a missing external server slot",
                     reason_code="config_snapshot_invalid_reference",
@@ -444,8 +441,28 @@ def _reject_secret_material(value: Any) -> None:
         raise ValueError(str(exc)) from exc
 
 
+def _credential_slot_missing(
+    server: ExternalServerDefinition,
+    credential_slot: str,
+) -> bool:
+    slots = server.credential_slots
+    if not isinstance(slots, list | tuple | set):
+        return True
+    return not slots or credential_slot not in slots
+
+
 def _reject_external_server_inline_secrets(server: ExternalServerDefinition) -> None:
-    for command_part in server.command or ():
+    command = server.command
+    if command is None:
+        command_parts: tuple[str, ...] | list[str] = ()
+    elif not isinstance(command, list | tuple):
+        raise ValueError("External server command must be a list of strings")
+    else:
+        command_parts = command
+
+    for command_part in command_parts:
+        if not isinstance(command_part, str):
+            raise ValueError("External server command must be a list of strings")
         if _command_part_contains_inline_secret(command_part):
             raise ValueError("External server command must not contain secret material")
     if server.url:

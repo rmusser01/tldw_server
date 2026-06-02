@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
@@ -360,6 +361,21 @@ class ExternalRuntimeOperationResponse(BaseModel):
     warnings: list[Any] | None = None
     error: str | None = None
     errors: dict[str, Any] | None = None
+
+
+class _GatewayAdminAuthHandlingRoute(APIRoute):
+    """Route wrapper that keeps router-only admin auth failures JSON-stable."""
+
+    def get_route_handler(self) -> Callable[[Request], Any]:
+        original_route_handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            try:
+                return await original_route_handler(request)
+            except GatewayAdminAuthError as exc:
+                return gateway_admin_auth_error_response(request, exc)
+
+        return route_handler
 
 
 async def _parse_json_body(request: Request) -> Any:
@@ -1288,7 +1304,7 @@ def create_gateway_router(
 ) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
-    router = APIRouter()
+    router = APIRouter(route_class=_GatewayAdminAuthHandlingRoute)
     resolved_admin_auth = _resolve_admin_auth_config(
         admin_auth=admin_auth,
         profile_bootstrap=profile_bootstrap,
