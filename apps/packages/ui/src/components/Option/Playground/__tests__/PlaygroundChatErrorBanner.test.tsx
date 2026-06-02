@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation } from "react-router-dom"
 
 import {
@@ -63,6 +63,47 @@ describe("PlaygroundChatErrorBanner", () => {
     expect(screen.getByRole("button", { name: "Dismiss error" })).toBeInTheDocument()
   })
 
+  it("renders inline first-chat recovery actions when supplied", () => {
+    const error = {
+      summary: "The selected model is not available.",
+      hint: "Choose a different model or refresh the model list, then try again.",
+      detail: "raw provider detail",
+      key: "assistant-error-1:model"
+    }
+    const onRetry = vi.fn()
+    const onEditProvider = vi.fn()
+    const onSwitchProvider = vi.fn()
+    const onDismiss = vi.fn()
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChatErrorBanner
+          error={error}
+          diagnosticsLabel="Health & diagnostics"
+          retryLabel="Retry chat"
+          editProviderLabel="Edit provider"
+          switchProviderLabel="Switch provider"
+          dismissLabel="Dismiss error"
+          onRetry={onRetry}
+          onEditProvider={onEditProvider}
+          onSwitchProvider={onSwitchProvider}
+          onDismiss={onDismiss}
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByTestId("playground-chat-error-retry"))
+    fireEvent.click(screen.getByTestId("playground-chat-error-edit-provider"))
+    fireEvent.click(screen.getByTestId("playground-chat-error-switch-provider"))
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }))
+
+    expect(onRetry).toHaveBeenCalledOnce()
+    expect(onEditProvider).toHaveBeenCalledOnce()
+    expect(onSwitchProvider).toHaveBeenCalledOnce()
+    expect(onDismiss).toHaveBeenCalledWith("assistant-error-1:model")
+    expect(screen.queryByTestId("playground-chat-error-skip")).toBeNull()
+  })
+
   it("resolves the newest encoded assistant error", () => {
     const latest = getLatestChatErrorBannerEntry([
       {
@@ -84,6 +125,19 @@ describe("PlaygroundChatErrorBanner", () => {
 
     expect(latest?.summary).toBe("Newer error")
     expect(latest?.hint).toBe("Open diagnostics")
+  })
+
+  it("resolves encoded assistant errors loaded from server content fields", () => {
+    const latest = getLatestChatErrorBannerEntry([
+      {
+        id: "server-loaded-error",
+        role: "assistant",
+        content: encodeError("Server-loaded error", "Retry from composer")
+      } as any
+    ])
+
+    expect(latest?.summary).toBe("Server-loaded error")
+    expect(latest?.hint).toBe("Retry from composer")
   })
 
   it("uses compact dismissal keys without embedding the encoded payload", () => {
@@ -209,5 +263,28 @@ describe("PlaygroundChatErrorBanner", () => {
     })
 
     expect(result.current.visibleError?.summary).toBe("Second error")
+  })
+
+  it("does not dismiss a newly surfaced error when submit captured no prior error", () => {
+    const { result } = renderHook(
+      ({ messages }) => usePlaygroundChatErrorBanner(messages),
+      {
+        initialProps: {
+          messages: [
+            {
+              id: "assistant-error-1",
+              isBot: true,
+              message: encodeError("Provider failed")
+            }
+          ]
+        }
+      }
+    )
+
+    act(() => {
+      result.current.dismissAfterSuccessfulSubmit(null)
+    })
+
+    expect(result.current.visibleError?.summary).toBe("Provider failed")
   })
 })

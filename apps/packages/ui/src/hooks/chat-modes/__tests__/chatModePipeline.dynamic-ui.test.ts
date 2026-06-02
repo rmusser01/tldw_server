@@ -41,6 +41,7 @@ vi.mock("@/store/option", () => ({
 }))
 
 import { runChatPipeline, type ChatModeDefinition } from "../chatModePipeline"
+import { TLDW_ERROR_BUBBLE_PREFIX } from "@/utils/chat-error-message"
 
 const mode: ChatModeDefinition<any> = {
   id: "normal",
@@ -170,5 +171,31 @@ describe("runChatPipeline dynamic UI request mode", () => {
     ).at(-1)?.[0] as { assistantMetadataExtra?: unknown } | undefined
     expect(payload).toBeDefined()
     expect(payload?.assistantMetadataExtra).toBeUndefined()
+  })
+
+  it("turns empty completed provider streams into recoverable assistant errors", async () => {
+    mocks.pageAssistModel.mockResolvedValue({
+      saveToDb: false,
+      stream: async function* () {}
+    })
+
+    const result = await runChatPipeline(
+      mode,
+      "Build a dashboard",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      buildParams()
+    )
+
+    expect(result).toMatchObject({ status: "failed" })
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        botMessage: expect.stringContaining(TLDW_ERROR_BUBBLE_PREFIX)
+      })
+    )
   })
 })

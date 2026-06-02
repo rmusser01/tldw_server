@@ -15,6 +15,7 @@ type ChatErrorMessageCandidate = {
   isBot?: boolean
   role?: string
   message?: unknown
+  content?: unknown
 }
 
 export type PlaygroundChatErrorBannerEntry = ChatErrorPayload & {
@@ -50,13 +51,20 @@ const hashString = (value: string) => {
   return (hash >>> 0).toString(36)
 }
 
+const getCandidateMessageText = (
+  entry: ChatErrorMessageCandidate | undefined
+) => {
+  if (typeof entry?.message === "string") return entry.message
+  if (typeof entry?.content === "string") return entry.content
+  return ""
+}
+
 export const getChatErrorBannerScanSignature = (
   messages: readonly ChatErrorMessageCandidate[]
 ) => {
   const lastIndex = messages.length - 1
   const lastEntry = lastIndex >= 0 ? messages[lastIndex] : undefined
-  const lastMessage =
-    typeof lastEntry?.message === "string" ? lastEntry.message : ""
+  const lastMessage = getCandidateMessageText(lastEntry)
   const lastEntryIsError =
     isAssistantLikeMessage(lastEntry) &&
     lastMessage.startsWith(TLDW_ERROR_BUBBLE_PREFIX)
@@ -74,16 +82,17 @@ export const getLatestChatErrorBannerEntry = (
 ): PlaygroundChatErrorBannerEntry | null => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const entry = messages[index]
-    if (!isAssistantLikeMessage(entry) || typeof entry?.message !== "string") {
+    const message = getCandidateMessageText(entry)
+    if (!isAssistantLikeMessage(entry) || !message) {
       continue
     }
-    const payload = decodeChatErrorPayload(entry.message)
+    const payload = decodeChatErrorPayload(message)
     if (!payload) {
       continue
     }
     return {
       ...payload,
-      key: `${getMessageIdentifier(entry, index)}:${hashString(entry.message)}`
+      key: `${getMessageIdentifier(entry, index)}:${hashString(message)}`
     }
   }
   return null
@@ -123,7 +132,8 @@ export const usePlaygroundChatErrorBanner = (
 
   const dismissAfterSuccessfulSubmit = React.useCallback(
     (key?: string | null) => {
-      const resolvedKey = key ?? latestErrorRef.current?.key ?? null
+      const resolvedKey =
+        key === null ? null : key ?? latestErrorRef.current?.key ?? null
       if (resolvedKey) {
         setDismissedErrorKey(resolvedKey)
       }
@@ -143,18 +153,38 @@ export const usePlaygroundChatErrorBanner = (
 type PlaygroundChatErrorBannerProps = {
   error: PlaygroundChatErrorBannerEntry | null
   diagnosticsLabel: string
+  retryLabel?: string
+  editProviderLabel?: string
+  switchProviderLabel?: string
   dismissLabel: string
+  onRetry?: () => void
+  onEditProvider?: () => void
+  onSwitchProvider?: () => void
   onDismiss: (key: string) => void
 }
 
 export const PlaygroundChatErrorBanner: React.FC<
   PlaygroundChatErrorBannerProps
-> = ({ error, diagnosticsLabel, dismissLabel, onDismiss }) => {
+> = ({
+  error,
+  diagnosticsLabel,
+  retryLabel = "Retry",
+  editProviderLabel = "Edit provider",
+  switchProviderLabel = "Switch provider",
+  dismissLabel,
+  onRetry,
+  onEditProvider,
+  onSwitchProvider,
+  onDismiss
+}) => {
   const navigate = useNavigate()
 
   if (!error) {
     return null
   }
+
+  const openDiagnostics = () => navigate("/settings/health")
+  const hasInlineRecovery = Boolean(onRetry)
 
   return (
     <RecoveryCallout
@@ -164,12 +194,43 @@ export const PlaygroundChatErrorBanner: React.FC<
       message={error.hint}
       role="alert"
       className="mb-2"
-      primaryAction={{
-        label: diagnosticsLabel,
-        ariaLabel: diagnosticsLabel,
-        onClick: () => navigate("/settings/health")
-      }}
+      primaryAction={
+        hasInlineRecovery
+          ? {
+              label: retryLabel,
+              ariaLabel: retryLabel,
+              onClick: onRetry,
+              "data-testid": "playground-chat-error-retry"
+            }
+          : {
+              label: diagnosticsLabel,
+              ariaLabel: diagnosticsLabel,
+              onClick: openDiagnostics
+            }
+      }
       secondaryActions={[
+        ...(hasInlineRecovery
+          ? [
+              {
+                label: editProviderLabel,
+                ariaLabel: editProviderLabel,
+                onClick: onEditProvider ?? openDiagnostics,
+                "data-testid": "playground-chat-error-edit-provider"
+              },
+              {
+                label: switchProviderLabel,
+                ariaLabel: switchProviderLabel,
+                onClick: onSwitchProvider ?? onEditProvider ?? openDiagnostics,
+                "data-testid": "playground-chat-error-switch-provider"
+              },
+              {
+                label: diagnosticsLabel,
+                ariaLabel: diagnosticsLabel,
+                onClick: openDiagnostics,
+                "data-testid": "playground-chat-error-diagnostics"
+              }
+            ]
+          : []),
         {
           label: dismissLabel,
           ariaLabel: dismissLabel,
