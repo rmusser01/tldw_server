@@ -1004,7 +1004,7 @@ git commit -m "feat: launch ACP adapters through explicit entrypoints"
 - Test: `apps/packages/ui/src/services/acp/__tests__/readiness.test.ts`
 - Test: `apps/packages/ui/src/components/Option/ACPPlayground/__tests__/ACPSessionCreateModal.modal-prop-guard.test.ts`
 
-- [ ] **Step 1: Write failing readiness normalization tests**
+- [x] **Step 1: Write failing readiness normalization tests**
 
 Extend `readiness.test.ts`:
 
@@ -1088,7 +1088,7 @@ Run: `bunx vitest run apps/packages/ui/src/services/acp/__tests__/readiness.test
 
 Expected: FAIL because these helper functions/types do not exist.
 
-- [ ] **Step 2: Add TypeScript entrypoint/readiness types**
+- [x] **Step 2: Add TypeScript entrypoint/readiness types**
 
 In `types.ts`, add:
 
@@ -1131,7 +1131,7 @@ export interface ACPAgentEntrypointStatus {
 
 Add `entrypoint: ACPAgentEntrypointStatus` to `ACPAgentInfo`.
 
-- [ ] **Step 3: Add frontend readiness helpers**
+- [x] **Step 3: Add frontend readiness helpers**
 
 In `readiness.ts`, implement:
 
@@ -1181,7 +1181,7 @@ export const buildACPAgentSetupSummary = (agent: ACPAgentInfo) => {
 
 Refine copy as needed, but keep stable blocker mapping rather than generic string matching. Structured `entrypoint.probe_state` is authoritative when present; `is_configured` is only a legacy fallback for payloads without entrypoint metadata.
 
-- [ ] **Step 4: Update `ACPSessionCreateModal`**
+- [x] **Step 4: Update `ACPSessionCreateModal`**
 
 Use the helper in `AgentCard`:
 
@@ -1207,11 +1207,18 @@ Replace the current `requiresApiKey`-only tooltip with strategy-aware copy:
 
 Do not add a new banner bar. Keep the information inside the existing agent card density.
 
-- [ ] **Step 5: Run focused frontend tests**
+- [x] **Step 5: Run focused frontend tests**
 
 Run: `bunx vitest run apps/packages/ui/src/services/acp/__tests__/readiness.test.ts apps/packages/ui/src/components/Option/ACPPlayground/__tests__/ACPSessionCreateModal.modal-prop-guard.test.ts`
 
 Expected: PASS.
+
+Actual verification:
+- Red run: `./node_modules/.bin/vitest run src/services/acp/__tests__/readiness.test.ts` failed on missing `buildACPAgentSetupSummary` and `isACPAgentReadyToStart`.
+- Review follow-up red run: `./node_modules/.bin/vitest run src/services/acp/__tests__/readiness.test.ts` failed on blocker precedence when `primary_blocker="mutable_adapter_invocation"` and secondary blockers included `adapter_missing`.
+- Green run: `./node_modules/.bin/vitest run src/services/acp/__tests__/readiness.test.ts src/components/Option/ACPPlayground/__tests__/ACPSessionCreateModal.modal-prop-guard.test.ts` passed with 2 files and 11 tests after blocker precedence, binary blocker alias, and cached-agent default-selection fixes.
+- `git diff --check` passed.
+- UI package typecheck with `NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc --noEmit --project tsconfig.json` failed on existing non-ACP errors in QuickIngest, Layout, Playground, Sidepanel, onboarding, option-index, and quick-ingest-open files; no errors were reported for the ACP files changed in this task.
 
 - [ ] **Step 6: Commit Task 6**
 

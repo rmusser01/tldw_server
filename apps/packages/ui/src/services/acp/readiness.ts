@@ -1,4 +1,5 @@
 import type {
+  ACPAgentInfo,
   ACPExecutionHealthAgentSummary,
   ACPExecutionHealthCompatibilitySummary,
   ACPExecutionHealthFailureBuckets,
@@ -22,6 +23,12 @@ export type ACPHealthStatus = {
 
 export type ACPSetupIssue = {
   code: string
+  title: string
+  description: string
+}
+
+export type ACPAgentSetupSummary = {
+  disabled: boolean
   title: string
   description: string
 }
@@ -86,6 +93,177 @@ const stringOrDefault = (value: unknown, fallback = ""): string =>
 
 const stringListOrDefault = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+
+const humanizeCommand = (agent: ACPAgentInfo): string => {
+  const entrypoint = agent.entrypoint
+  if (!entrypoint) {
+    return agent.name || agent.type
+  }
+
+  const displayCommand = entrypoint.display_command?.trim()
+  if (displayCommand) {
+    return displayCommand
+  }
+
+  const command = entrypoint.acp_command?.trim()
+  const args = Array.isArray(entrypoint.acp_args) ? entrypoint.acp_args : []
+  return [command, ...args].filter(Boolean).join(" ") || agent.name || agent.type
+}
+
+const adapterLabel = (agent: ACPAgentInfo): string => {
+  const entrypoint = agent.entrypoint
+  return entrypoint?.display_command?.trim() || entrypoint?.acp_command?.trim() || "ACP adapter"
+}
+
+const adapterPackageLabel = (agent: ACPAgentInfo): string | null => {
+  const adapterPackage = agent.entrypoint?.adapter_package?.trim()
+  return adapterPackage || null
+}
+
+const statusMessageOr = (agent: ACPAgentInfo, fallback: string): string => {
+  const statusMessage = agent.entrypoint?.status_message?.trim()
+  return statusMessage || fallback
+}
+
+export const isACPAgentReadyToStart = (agent: ACPAgentInfo): boolean => {
+  const probeState = agent.entrypoint?.probe_state
+  if (probeState) {
+    return probeState === "ready_to_probe"
+  }
+
+  return agent.is_configured
+}
+
+export const buildACPAgentSetupSummary = (agent: ACPAgentInfo): ACPAgentSetupSummary => {
+  const entrypoint = agent.entrypoint
+
+  if (!entrypoint) {
+    if (agent.is_configured) {
+      return {
+        disabled: false,
+        title: "Ready to start",
+        description: agent.description || `${agent.name} is configured.`
+      }
+    }
+
+    if (agent.requires_api_key) {
+      return {
+        disabled: true,
+        title: "Configure API key",
+        description: `Set ${agent.requires_api_key} in your shell or ACP runner environment before starting ${agent.name}.`
+      }
+    }
+
+    return {
+      disabled: true,
+      title: "Setup required",
+      description: `Configure ${agent.name} before starting an ACP session.`
+    }
+  }
+
+  if (entrypoint.probe_state === "ready_to_probe") {
+    return {
+      disabled: false,
+      title: "Ready to start",
+      description: statusMessageOr(agent, `${humanizeCommand(agent)} is ready to start.`)
+    }
+  }
+
+  const blockers = new Set(entrypoint.blockers ?? [])
+  const declaredPrimaryBlocker = entrypoint.primary_blocker?.trim() || null
+  const fallbackBlocker =
+    [
+      "adapter_missing",
+      "agent_binary_missing",
+      "binary_missing",
+      "mutable_adapter_invocation",
+      "custom_template"
+    ].find((blocker) => blockers.has(blocker)) ?? null
+  const primaryBlocker = declaredPrimaryBlocker ?? fallbackBlocker
+  const packageLabel = adapterPackageLabel(agent)
+
+  if (primaryBlocker === "adapter_missing") {
+    const label = adapterLabel(agent)
+    return {
+      disabled: true,
+      title: "Install adapter",
+      description: packageLabel
+        ? `Install ${label} (${packageLabel}) before starting ${agent.name} through ACP.`
+        : statusMessageOr(agent, `Install ${label} before starting ${agent.name} through ACP.`)
+    }
+  }
+
+  if (primaryBlocker === "agent_binary_missing" || primaryBlocker === "binary_missing") {
+    return {
+      disabled: true,
+      title: "Install agent binary",
+      description: statusMessageOr(
+        agent,
+        `Install ${humanizeCommand(agent)} before starting ${agent.name} through ACP.`
+      )
+    }
+  }
+
+  if (primaryBlocker === "mutable_adapter_invocation") {
+    return {
+      disabled: true,
+      title: "Pin adapter version",
+      description: statusMessageOr(
+        agent,
+        `Pin ${adapterLabel(agent)} to an explicit version before enabling this profile.`
+      )
+    }
+  }
+
+  if (entrypoint.credential_state === "missing") {
+    return {
+      disabled: true,
+      title: "Configure credentials",
+      description: agent.requires_api_key
+        ? `Set ${agent.requires_api_key} before starting ${agent.name}.`
+        : statusMessageOr(agent, `Configure credentials before starting ${agent.name}.`)
+    }
+  }
+
+  if (entrypoint.probe_state === "documented_only") {
+    return {
+      disabled: true,
+      title: "Documented only",
+      description: statusMessageOr(
+        agent,
+        `${agent.name} is documented but not enabled for live ACP sessions yet.`
+      )
+    }
+  }
+
+  if (entrypoint.probe_state === "custom_template") {
+    return {
+      disabled: true,
+      title: "Customize template",
+      description: statusMessageOr(
+        agent,
+        `${agent.name} needs a concrete command and validation before it can start.`
+      )
+    }
+  }
+
+  if (entrypoint.probe_state === "unsupported_backend") {
+    return {
+      disabled: true,
+      title: "Unsupported runtime",
+      description: statusMessageOr(
+        agent,
+        `${agent.name} requires a runtime backend that is not available in this environment.`
+      )
+    }
+  }
+
+  return {
+    disabled: true,
+    title: "Setup required",
+    description: statusMessageOr(agent, `${agent.name} is not ready to start.`)
+  }
+}
 
 const numberRecordOrDefault = (
   value: unknown,

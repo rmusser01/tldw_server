@@ -34,4 +34,24 @@ describe("ACPSessionCreateModal modal prop guard", () => {
     expect(antdImport).not.toMatch(/\bAlert\b/)
     expect(source).toContain("<Alert")
   })
+
+  it("gates agent selection with structured readiness instead of API-key-only checks", () => {
+    const source = readFileSync(sourcePath, "utf8")
+
+    expect(source).toContain("buildACPAgentSetupSummary")
+    expect(source).toContain("isACPAgentReadyToStart")
+    expect(source).toContain("setupSummary.disabled")
+    expect(source).not.toContain("requiresApiKey")
+  })
+
+  it("resets the form before applying the structured-ready default agent", () => {
+    const source = readFileSync(sourcePath, "utf8")
+    const resetIndex = source.indexOf("// Reset form when modal opens")
+    const defaultIndex = source.indexOf("// Set default agent type when loaded")
+
+    expect(resetIndex).toBeGreaterThan(-1)
+    expect(defaultIndex).toBeGreaterThan(resetIndex)
+    expect(source).toContain("currentAgent && isACPAgentReadyToStart(currentAgent)")
+    expect(source).toContain("agents.find(isACPAgentReadyToStart)")
+  })
 })
