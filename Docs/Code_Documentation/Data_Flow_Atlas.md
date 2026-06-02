@@ -750,7 +750,7 @@ flowchart LR
 
     subgraph Bridge["APScheduler bridges"]
         APS[APScheduler service]
-        Choose{Chosen backend}
+        Choose{"Chosen backend"}
     end
 
     UserAction --> JobCreate --> JobDB --> Admin
