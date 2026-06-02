@@ -32,6 +32,7 @@ import {
   QUICK_INGEST_MAX_FILE_SIZE,
 } from "./constants"
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
+import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -393,11 +394,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   }, [primaryPlaylistCandidateUrl])
 
   React.useEffect(() => {
-    if (
-      !playlistPreflightSeed ||
-      playlistPreflightSeed.action !== "playlist_preflight" ||
-      typeof playlistPreflightSeed.url !== "string"
-    ) {
+    if (!isQuickIngestPlaylistPreflightDetail(playlistPreflightSeed)) {
       return
     }
 

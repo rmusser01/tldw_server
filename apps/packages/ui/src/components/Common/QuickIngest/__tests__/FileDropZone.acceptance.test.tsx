@@ -32,7 +32,7 @@ describe("FileDropZone acceptance", () => {
     const { rerender } = render(
       <FileDropZone
         autoFocus
-        disabled
+        running
         onFilesAdded={vi.fn()}
         onFilesRejected={vi.fn()}
       />
@@ -41,7 +41,7 @@ describe("FileDropZone acceptance", () => {
     rerender(
       <FileDropZone
         autoFocus
-        disabled={false}
+        running={false}
         onFilesAdded={vi.fn()}
         onFilesRejected={vi.fn()}
       />
@@ -49,7 +49,7 @@ describe("FileDropZone acceptance", () => {
     rerender(
       <FileDropZone
         autoFocus
-        disabled
+        running
         onFilesAdded={vi.fn()}
         onFilesRejected={vi.fn()}
       />
@@ -57,7 +57,7 @@ describe("FileDropZone acceptance", () => {
     rerender(
       <FileDropZone
         autoFocus
-        disabled={false}
+        running={false}
         onFilesAdded={vi.fn()}
         onFilesRejected={vi.fn()}
       />
