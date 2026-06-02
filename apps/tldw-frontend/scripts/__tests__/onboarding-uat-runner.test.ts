@@ -319,6 +319,37 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("detects header-array secret leaks in JSON diagnostics", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-header-array-secret-leak-check",
+      preserve: false,
+    })
+
+    try {
+      writeFileSync(
+        artifacts.browserDiagnosticsPath,
+        JSON.stringify(
+          {
+            headers: [
+              { name: "accept", value: "application/json" },
+              { name: "x-api-key", value: "real-secret-value" },
+            ],
+          },
+          null,
+          2
+        ),
+        "utf8"
+      )
+
+      expect(() => assertNoSecretLeaks(artifacts.root)).toThrow(
+        /secret leak/i
+      )
+    } finally {
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
   it("creates an isolated runtime profile and backend env for the mock provider", () => {
     const profile = createRuntimeProfile({
       repoRoot,

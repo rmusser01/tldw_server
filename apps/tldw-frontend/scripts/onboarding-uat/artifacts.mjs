@@ -33,6 +33,8 @@ const genericSecretPatterns = [
   /\bAKIA[0-9A-Z]{12,}\b/,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
 ]
+const sensitiveJsonKeyPattern = /(?:api[_-]?key|token|secret|authorization|cookie)/i
+const sensitiveHeaderNamePattern = /^(?:authorization|x-api-key|api-key|cookie|set-cookie)$/i
 
 function createRunId() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-")
@@ -135,6 +137,44 @@ function collectScannableFiles(root, { maxFiles = defaultMaxScanFiles } = {}) {
   return files
 }
 
+function looksRedacted(value) {
+  return String(value ?? "").trim() === "[REDACTED]"
+}
+
+function hasJsonSecretLeak(value, parentKey = "") {
+  if (value === null || value === undefined) {
+    return false
+  }
+
+  if (typeof value === "string") {
+    if (
+      sensitiveJsonKeyPattern.test(parentKey) ||
+      sensitiveHeaderNamePattern.test(parentKey)
+    ) {
+      return value.length > 0 && !looksRedacted(value)
+    }
+    return genericSecretPatterns.some((pattern) => pattern.test(value))
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasJsonSecretLeak(item, parentKey))
+  }
+
+  if (typeof value === "object") {
+    const headerName =
+      typeof value.name === "string" && sensitiveHeaderNamePattern.test(value.name)
+        ? value.name
+        : ""
+    if (headerName && "value" in value) {
+      return hasJsonSecretLeak(value.value, headerName)
+    }
+
+    return Object.entries(value).some(([key, child]) => hasJsonSecretLeak(child, key))
+  }
+
+  return false
+}
+
 export function assertNoSecretLeaks(
   root,
   { additionalSecrets = [], maxFiles = defaultMaxScanFiles, maxBytes = defaultMaxScanBytes } = {}
@@ -155,6 +195,16 @@ export function assertNoSecretLeaks(
     }
     if (genericSecretPatterns.some((pattern) => pattern.test(content))) {
       leaks.push(file)
+      continue
+    }
+    if (path.extname(file) === ".json") {
+      try {
+        if (hasJsonSecretLeak(JSON.parse(content))) {
+          leaks.push(file)
+        }
+      } catch {
+        // Malformed JSON artifacts are still covered by text-pattern scanning.
+      }
     }
   }
 
