@@ -1,16 +1,30 @@
 ---
 id: TASK-591
 title: Implement standalone MCP gateway admin auth and credential grant management
-status: To Do
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-02 02:20'
+updated_date: 2026-06-02 02:20
 labels:
-  - mcp-unified
-  - standalone-gateway
-  - security
+- mcp-unified
+- standalone-gateway
+- security
 dependencies: []
 priority: medium
+modified_files:
+- mcp_unified/gateway/admin_auth.py
+- mcp_unified/gateway/credential_grants.py
+- mcp_unified/gateway/__init__.py
+- mcp_unified/gateway/bootstrap.py
+- mcp_unified/gateway/config.py
+- mcp_unified/gateway/fastapi.py
+- mcp_unified/gateway/cli.py
+- mcp_unified/interfaces/storage.py
+- mcp_unified/storage/sqlite.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_credential_grants.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
 ---
 
 ## Description
@@ -49,7 +63,7 @@ Docs/superpowers/plans/2026-06-02-mcp-gateway-admin-auth-credential-grants.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented standalone gateway admin auth and credential-grant management. Added optional package-owned admin auth for management routes with direct JSON 401/403 payloads, config support that resolves admin keys from env vars without persisting them, and bootstrap propagation. Added credential-grant manager validation, recursive secret-key rejection, atomic create semantics, FastAPI routes, CLI commands, and SQLite create_grant support. Verification: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_credential_grants.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -v` passed with 241 tests; `python -m bandit -r mcp_unified/gateway/admin_auth.py mcp_unified/gateway/credential_grants.py mcp_unified/gateway/config.py mcp_unified/gateway/bootstrap.py mcp_unified/gateway/fastapi.py mcp_unified/gateway/cli.py mcp_unified/storage/sqlite.py mcp_unified/interfaces/storage.py -f json -o /tmp/bandit_mcp_gateway_admin_config.json` passed; `git diff --check` passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

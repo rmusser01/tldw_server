@@ -35,6 +35,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 
 from mcp_unified.interfaces.storage import (
+    CredentialGrantAlreadyExistsError,
     ExternalRegistryStoreUnavailableError,
     ExternalServerAlreadyExistsError,
 )
@@ -206,6 +207,10 @@ class SQLiteMCPStore:
     async def upsert_grant(self, grant: CredentialGrant) -> CredentialGrant:
         """Store a credential grant and return the persisted model."""
         return await self._run_db(self._upsert_grant_sync, grant)
+
+    async def create_grant(self, grant: CredentialGrant) -> CredentialGrant:
+        """Create a credential grant only when its id is absent."""
+        return await self._run_db(self._create_grant_sync, grant)
 
     async def delete_grant(self, grant_id: str) -> bool:
         """Delete a credential grant by id and return whether it existed."""
@@ -525,6 +530,25 @@ class SQLiteMCPStore:
                 "payload",
             ),
         )
+        return self._load_model(payload, CredentialGrant)
+
+    def _create_grant_sync(self, grant: CredentialGrant) -> CredentialGrant:
+        payload = self._dump_model(grant)
+        table = self._table("mcp_credential_grants")
+        statement = sqlite_insert(table).values(
+            id=grant.id,
+            profile_id=grant.profile_id,
+            external_server_id=grant.external_server_id,
+            enabled=int(grant.enabled),
+            updated_at=grant.updated_at.isoformat(),
+            payload=payload,
+        )
+        with self._engine.begin() as connection:
+            result = connection.execute(
+                statement.on_conflict_do_nothing(index_elements=[table.c.id])
+            )
+        if not result.rowcount:
+            raise CredentialGrantAlreadyExistsError(grant.id)
         return self._load_model(payload, CredentialGrant)
 
     def _delete_grant_sync(self, grant_id: str) -> bool:

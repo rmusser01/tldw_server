@@ -14,6 +14,10 @@ import mcp_unified.gateway.jsonrpc as gateway_jsonrpc
 import pytest
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
+from mcp_unified.gateway.admin_auth import GatewayAdminAuthConfig
+from mcp_unified.gateway.credential_grants import (
+    GatewayCredentialGrantManagementError,
+)
 from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeError
 from mcp_unified.storage.models import ExternalServerDefinition
 
@@ -560,6 +564,135 @@ class _ExternalRegistryErrorManagerDouble(_ExternalRegistryManagerDouble):
     async def delete_server(self, server_id: str) -> dict[str, Any]:
         await self._raise_if_targeted("delete_server")
         return await super().delete_server(server_id)
+
+
+class _CredentialGrantManagerDouble:
+    """Small manager double for credential-grant management route tests."""
+
+    def __init__(self, marker: str = "grant-one") -> None:
+        self.marker = marker
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def list_grants(
+        self,
+        *,
+        profile_id: str | None = None,
+        external_server_id: str | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "list_grants",
+                (),
+                {
+                    "profile_id": profile_id,
+                    "external_server_id": external_server_id,
+                },
+            )
+        )
+        return {
+            "ok": True,
+            "grants": [
+                {
+                    "id": self.marker,
+                    "profile_id": "reviewer",
+                    "broker_id": "env-broker",
+                    "credential_slot": "github_token",
+                    "external_server_id": "github-mcp",
+                    "scopes": ["repo:read"],
+                    "metadata": {"label": "GitHub read token"},
+                    "provenance": {"source": "test"},
+                    "enabled": True,
+                }
+            ],
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def show_grant(self, grant_id: str) -> dict[str, Any]:
+        self.calls.append(("show_grant", (grant_id,), {}))
+        return {
+            "ok": True,
+            "grant": {
+                "id": grant_id,
+                "profile_id": "reviewer",
+                "broker_id": "env-broker",
+                "credential_slot": "github_token",
+                "external_server_id": "github-mcp",
+                "scopes": ["repo:read"],
+                "metadata": {"label": "GitHub read token"},
+                "provenance": {"source": "test"},
+                "enabled": True,
+            },
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def create_grant(self, grant_payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_grant", (grant_payload,), {}))
+        return {
+            "ok": True,
+            "grant": grant_payload,
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def patch_grant(
+        self,
+        grant_id: str,
+        patch_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(("patch_grant", (grant_id, patch_payload), {}))
+        return {
+            "ok": True,
+            "grant": {
+                "id": grant_id,
+                "profile_id": "reviewer",
+                "broker_id": "env-broker",
+                "credential_slot": "github_token",
+                "external_server_id": "github-mcp",
+                "scopes": ["repo:read"],
+                "metadata": patch_payload.get("metadata", {}),
+                "provenance": {"source": "test"},
+                "enabled": patch_payload.get("enabled", True),
+            },
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def delete_grant(self, grant_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_grant", (grant_id,), {}))
+        return {
+            "ok": True,
+            "grant_id": grant_id,
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+
+class _CredentialGrantErrorManagerDouble(_CredentialGrantManagerDouble):
+    def __init__(self, method: str, reason_code: str) -> None:
+        super().__init__()
+        self.method = method
+        self.reason_code = reason_code
+
+    async def _raise_if_targeted(self, method: str) -> None:
+        if method == self.method:
+            raise GatewayCredentialGrantManagementError(
+                f"domain failure: {self.reason_code}",
+                reason_code=self.reason_code,
+                grant_id="grant-one",
+            )
+
+    async def list_grants(
+        self,
+        *,
+        profile_id: str | None = None,
+        external_server_id: str | None = None,
+    ) -> dict[str, Any]:
+        await self._raise_if_targeted("list_grants")
+        return await super().list_grants(
+            profile_id=profile_id,
+            external_server_id=external_server_id,
+        )
+
+    async def create_grant(self, grant_payload: dict[str, Any]) -> dict[str, Any]:
+        await self._raise_if_targeted("create_grant")
+        return await super().create_grant(grant_payload)
 
 
 class _ExternalRuntimeManagerDouble:
@@ -1398,6 +1531,230 @@ def test_gateway_external_registry_management_routes_have_pydantic_response_mode
     assert schemas["ExternalServerListResponse"]["properties"]["servers"]["items"] == {
         "$ref": "#/components/schemas/ExternalServerDefinition"
     }
+
+
+def test_gateway_credential_grant_management_routes_are_not_mounted_by_default() -> None:
+    app = create_gateway_app(_FakeGatewayRuntime(), prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/credential-grants")
+
+    assert response.status_code == 404
+
+
+def test_gateway_credential_grant_management_enabled_without_manager_raises() -> None:
+    with pytest.raises(ValueError, match="credential grant management requires"):
+        gateway_fastapi.create_gateway_router(
+            _FakeGatewayRuntime(),
+            enable_credential_grant_management=True,
+        )
+
+    with pytest.raises(ValueError, match="credential grant management requires"):
+        create_gateway_app(
+            _FakeGatewayRuntime(),
+            prefix="/mcp",
+            enable_credential_grant_management=True,
+        )
+
+
+def test_gateway_credential_grant_management_success_envelopes() -> None:
+    manager = _CredentialGrantManagerDouble("grant-one")
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        credential_grant_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        listed = client.get(
+            "/mcp/credential-grants",
+            params={
+                "profile_id": "reviewer",
+                "external_server_id": "github-mcp",
+            },
+        )
+        shown = client.get("/mcp/credential-grants/grant-one")
+        created = client.post(
+            "/mcp/credential-grants",
+            json={
+                "id": "grant-one",
+                "profile_id": "reviewer",
+                "broker_id": "env-broker",
+                "credential_slot": "github_token",
+                "external_server_id": "github-mcp",
+                "scopes": ["repo:read"],
+                "metadata": {"label": "GitHub read token"},
+                "provenance": {"source": "test"},
+            },
+        )
+        patched = client.patch(
+            "/mcp/credential-grants/grant-one",
+            json={"metadata": {"label": "Updated"}, "enabled": False},
+        )
+        deleted = client.delete("/mcp/credential-grants/grant-one")
+
+    assert listed.status_code == 200
+    assert listed.json()["grants"][0]["id"] == "grant-one"
+    assert shown.status_code == 200
+    assert shown.json()["grant"]["credential_slot"] == "github_token"
+    assert created.status_code == 200
+    assert created.json()["grant"] == {
+        "id": "grant-one",
+        "profile_id": "reviewer",
+        "broker_id": "env-broker",
+        "credential_slot": "github_token",
+        "external_server_id": "github-mcp",
+        "scopes": ["repo:read"],
+        "metadata": {"label": "GitHub read token"},
+        "provenance": {"source": "test"},
+    }
+    assert patched.json()["grant"]["metadata"] == {"label": "Updated"}
+    assert patched.json()["grant"]["enabled"] is False
+    assert deleted.json() == {
+        "ok": True,
+        "grant_id": "grant-one",
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert manager.calls == [
+        (
+            "list_grants",
+            (),
+            {"profile_id": "reviewer", "external_server_id": "github-mcp"},
+        ),
+        ("show_grant", ("grant-one",), {}),
+        (
+            "create_grant",
+            (
+                {
+                    "id": "grant-one",
+                    "profile_id": "reviewer",
+                    "broker_id": "env-broker",
+                    "credential_slot": "github_token",
+                    "external_server_id": "github-mcp",
+                    "scopes": ["repo:read"],
+                    "metadata": {"label": "GitHub read token"},
+                    "provenance": {"source": "test"},
+                },
+            ),
+            {},
+        ),
+        (
+            "patch_grant",
+            (
+                "grant-one",
+                {"metadata": {"label": "Updated"}, "enabled": False},
+            ),
+            {},
+        ),
+        ("delete_grant", ("grant-one",), {}),
+    ]
+
+
+def test_gateway_credential_grant_management_routes_have_pydantic_response_models() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        credential_grant_manager=_CredentialGrantManagerDouble(),
+    )
+
+    paths = app.openapi()["paths"]
+    expected_refs = {
+        ("/mcp/credential-grants", "get"): "#/components/schemas/CredentialGrantListResponse",
+        ("/mcp/credential-grants", "post"): "#/components/schemas/CredentialGrantResponse",
+        (
+            "/mcp/credential-grants/{grant_id}",
+            "get",
+        ): "#/components/schemas/CredentialGrantResponse",
+        (
+            "/mcp/credential-grants/{grant_id}",
+            "patch",
+        ): "#/components/schemas/CredentialGrantResponse",
+        (
+            "/mcp/credential-grants/{grant_id}",
+            "delete",
+        ): "#/components/schemas/DeleteCredentialGrantResponse",
+    }
+
+    for (path, method), expected_ref in expected_refs.items():
+        schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": expected_ref}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
+    [
+        (
+            "POST",
+            "/mcp/credential-grants",
+            {
+                "id": "grant-one",
+                "profile_id": "reviewer",
+                "broker_id": "env-broker",
+                "credential_slot": "github_token",
+            },
+            "create_grant",
+            "credential_grant_already_exists",
+            409,
+        ),
+        (
+            "GET",
+            "/mcp/credential-grants",
+            None,
+            "list_grants",
+            "credential_grant_store_unavailable",
+            503,
+        ),
+    ],
+)
+def test_gateway_credential_grant_management_domain_errors(
+    method: str,
+    path: str,
+    json_body: dict[str, Any] | None,
+    manager_method: str,
+    reason_code: str,
+    status_code: int,
+) -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        credential_grant_manager=_CredentialGrantErrorManagerDouble(
+            manager_method,
+            reason_code,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.request(method, path, json=json_body)
+
+    assert response.status_code == status_code
+    assert response.json()["reason_code"] == reason_code
+    assert response.json()["grant_id"] == "grant-one"
+    assert "domain failure" not in response.json()["error"]
+
+
+def test_gateway_credential_grant_management_routes_use_admin_auth() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        credential_grant_manager=_CredentialGrantManagerDouble(),
+        admin_auth=GatewayAdminAuthConfig(
+            enabled=True,
+            header_name="X-Test-Gateway-Admin",
+            api_key="test-admin-key",
+        ),
+    )
+
+    with TestClient(app) as client:
+        missing = client.get("/mcp/credential-grants")
+        allowed = client.get(
+            "/mcp/credential-grants",
+            headers={"X-Test-Gateway-Admin": "test-admin-key"},
+        )
+
+    assert missing.status_code == 401
+    assert missing.json()["reason_code"] == "admin_auth_required"
+    assert allowed.status_code == 200
+    assert allowed.json()["grants"][0]["id"] == "grant-one"
 
 
 @pytest.mark.parametrize("server_id", ["runtime", "refresh", "reconcile"])

@@ -1271,6 +1271,225 @@ def test_gateway_cli_external_registry_runtime_failures_are_json(
     assert "Traceback" not in captured.err
 
 
+def test_gateway_cli_create_credential_grant_persists_to_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create a credential grant from JSON file input and persist to SQLite."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    grant_path = tmp_path / "grant.json"
+    grant_path.write_text(
+        json.dumps(_credential_grant_payload("grant-one")),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+
+    exit_code = gateway_cli.main(
+        [
+            "create-credential-grant",
+            "--grant-file",
+            str(grant_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["grant"]["id"] == "grant-one"
+    assert payload["grant"]["credential_slot"] == "api_key"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+    show_exit_code = gateway_cli.main(
+        ["show-credential-grant", "grant-one", "--config", str(config_path)]
+    )
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_exit_code == 0
+    assert show_payload["grant"]["id"] == "grant-one"
+
+
+def test_gateway_cli_list_credential_grants_filters_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List credential grants and honor the optional profile filter."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_profile(sqlite_path, "other", "Other")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one", profile_id="profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-two", profile_id="other")
+
+    exit_code = gateway_cli.main(
+        [
+            "list-credential-grants",
+            "--profile-id",
+            "profile",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert [grant["id"] for grant in payload["grants"]] == ["grant-one"]
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_patch_credential_grant_accepts_stdin_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch a credential grant from stdin JSON when --patch-file=-."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one")
+    monkeypatch.setattr(
+        gateway_cli.sys,
+        "stdin",
+        io.StringIO(json.dumps({"metadata": {"label": "Updated"}, "enabled": False})),
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-credential-grant",
+            "grant-one",
+            "--patch-file",
+            "-",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["grant"]["metadata"] == {"label": "Updated"}
+    assert payload["grant"]["enabled"] is False
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_delete_credential_grant_removes_sqlite_grant(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete one credential grant from a persistent gateway store."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one")
+
+    exit_code = gateway_cli.main(
+        ["delete-credential-grant", "grant-one", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "grant_id": "grant-one",
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+
+
+def test_gateway_cli_create_credential_grant_duplicate_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject duplicate credential grant creation with a stable reason code."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    grant_path = tmp_path / "grant.json"
+    grant_path.write_text(
+        json.dumps(_credential_grant_payload("grant-one")),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one")
+
+    exit_code = gateway_cli.main(
+        [
+            "create-credential-grant",
+            "--grant-file",
+            str(grant_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "credential_grant_already_exists"
+    assert payload["grant_id"] == "grant-one"
+
+
+def test_gateway_cli_credential_grant_json_argument_rejects_malformed_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject malformed credential grant JSON payload files with exit code 2."""
+
+    grant_path = tmp_path / "grant.json"
+    grant_path.write_text("{", encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-credential-grant",
+            "--grant-file",
+            str(grant_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert "Invalid grant JSON" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
 @pytest.mark.parametrize(
     ("argv", "label"),
     [
@@ -1578,6 +1797,20 @@ def _server_payload(server_id: str, name: str) -> dict[str, object]:
     }
 
 
+def _credential_grant_payload(
+    grant_id: str,
+    *,
+    profile_id: str = "profile",
+) -> dict[str, object]:
+    return {
+        "id": grant_id,
+        "profile_id": profile_id,
+        "broker_id": "broker",
+        "credential_slot": "api_key",
+        "metadata": {"label": grant_id},
+    }
+
+
 def _seed_sqlite_profile(sqlite_path: Path, profile_id: str, name: str) -> None:
     bundle = build_gateway_profile_storage(
         {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
@@ -1687,6 +1920,30 @@ def _seed_sqlite_external_server_grant(
                     credential_slot="api_key",
                     external_server_id=server_id,
                 )
+            )
+        finally:
+            await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_credential_grant(
+    sqlite_path: Path,
+    grant_id: str,
+    *,
+    profile_id: str = "profile",
+) -> None:
+    bundle = build_gateway_external_registry_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            grant_store = bundle.credential_grant_store
+            if grant_store is None:
+                raise RuntimeError("SQLite external registry bundle must expose grants")
+            await grant_store.upsert_grant(
+                CredentialGrant(**_credential_grant_payload(grant_id, profile_id=profile_id))
             )
         finally:
             await bundle.external_registry_store.aclose()

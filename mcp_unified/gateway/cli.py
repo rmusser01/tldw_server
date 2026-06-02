@@ -25,8 +25,13 @@ from .config import (
     GatewayProfileStorageBundle,
     build_gateway_external_registry_storage,
     build_gateway_profile_storage,
+    credential_grant_manager_from_storage,
     external_registry_manager_from_storage,
     load_gateway_profile_bootstrap_config,
+)
+from .credential_grants import (
+    GatewayCredentialGrantManagementError,
+    GatewayCredentialGrantManager,
 )
 from .external_registry import (
     GatewayExternalRegistryManagementError,
@@ -40,6 +45,10 @@ _ProfileOperation = Callable[
 ]
 _ExternalRegistryOperation = Callable[
     [GatewayExternalRegistryManager],
+    Coroutine[Any, Any, dict[str, Any]],
+]
+_CredentialGrantOperation = Callable[
+    [GatewayCredentialGrantManager],
     Coroutine[Any, Any, dict[str, Any]],
 ]
 
@@ -286,6 +295,73 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(delete_external_server)
     delete_external_server.set_defaults(handler=_handle_delete_external_server)
 
+    list_credential_grants = subparsers.add_parser(
+        "list-credential-grants",
+        help="List credential grants from a configured gateway store.",
+    )
+    list_credential_grants.add_argument(
+        "--profile-id",
+        help="Optional profile id filter.",
+    )
+    list_credential_grants.add_argument(
+        "--external-server-id",
+        help="Optional external server id filter.",
+    )
+    _add_profile_config_argument(list_credential_grants)
+    list_credential_grants.set_defaults(handler=_handle_list_credential_grants)
+
+    show_credential_grant = subparsers.add_parser(
+        "show-credential-grant",
+        help="Show one credential grant from a configured gateway store.",
+    )
+    show_credential_grant.add_argument(
+        "grant_id",
+        help="Credential grant id to inspect.",
+    )
+    _add_profile_config_argument(show_credential_grant)
+    show_credential_grant.set_defaults(handler=_handle_show_credential_grant)
+
+    create_credential_grant = subparsers.add_parser(
+        "create-credential-grant",
+        help="Create a credential grant in a persistent gateway store.",
+    )
+    create_credential_grant.add_argument(
+        "--grant-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON credential grant object, or '-' to read from stdin.",
+    )
+    _add_profile_config_argument(create_credential_grant)
+    create_credential_grant.set_defaults(handler=_handle_create_credential_grant)
+
+    patch_credential_grant = subparsers.add_parser(
+        "patch-credential-grant",
+        help="Patch a credential grant in a persistent gateway store.",
+    )
+    patch_credential_grant.add_argument(
+        "grant_id",
+        help="Credential grant id to patch.",
+    )
+    patch_credential_grant.add_argument(
+        "--patch-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON patch object, or '-' to read from stdin.",
+    )
+    _add_profile_config_argument(patch_credential_grant)
+    patch_credential_grant.set_defaults(handler=_handle_patch_credential_grant)
+
+    delete_credential_grant = subparsers.add_parser(
+        "delete-credential-grant",
+        help="Delete a credential grant from a persistent gateway store.",
+    )
+    delete_credential_grant.add_argument(
+        "grant_id",
+        help="Credential grant id to delete.",
+    )
+    _add_profile_config_argument(delete_credential_grant)
+    delete_credential_grant.set_defaults(handler=_handle_delete_credential_grant)
+
     get_default_profile = subparsers.add_parser(
         "get-default-profile",
         help="Show the active gateway default profile.",
@@ -476,6 +552,67 @@ def _handle_delete_external_server(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_list_credential_grants(args: argparse.Namespace) -> int:
+    """List credential grants from a configured gateway store."""
+
+    profile_id = _optional_cli_text(args.profile_id, field="profile_id")
+    external_server_id = _optional_cli_text(
+        args.external_server_id,
+        field="external_server_id",
+    )
+    return _handle_credential_grant_command(
+        args,
+        lambda manager: manager.list_grants(
+            profile_id=profile_id,
+            external_server_id=external_server_id,
+        ),
+    )
+
+
+def _handle_show_credential_grant(args: argparse.Namespace) -> int:
+    """Show one credential grant from a configured gateway store."""
+
+    grant_id = _require_cli_text(args.grant_id, field="grant_id")
+    return _handle_credential_grant_command(
+        args,
+        lambda manager: manager.show_grant(grant_id),
+    )
+
+
+def _handle_create_credential_grant(args: argparse.Namespace) -> int:
+    """Create one credential grant from a JSON file or stdin payload."""
+
+    return _handle_credential_grant_command(
+        args,
+        lambda manager: manager.create_grant(
+            _load_json_argument_file(args.grant_file, label="grant"),
+        ),
+    )
+
+
+def _handle_patch_credential_grant(args: argparse.Namespace) -> int:
+    """Patch one credential grant using a JSON file or stdin payload."""
+
+    grant_id = _require_cli_text(args.grant_id, field="grant_id")
+    return _handle_credential_grant_command(
+        args,
+        lambda manager: manager.patch_grant(
+            grant_id,
+            _load_json_argument_file(args.patch_file, label="patch"),
+        ),
+    )
+
+
+def _handle_delete_credential_grant(args: argparse.Namespace) -> int:
+    """Delete one credential grant from a persistent gateway store."""
+
+    grant_id = _require_cli_text(args.grant_id, field="grant_id")
+    return _handle_credential_grant_command(
+        args,
+        lambda manager: manager.delete_grant(grant_id),
+    )
+
+
 def _handle_get_default_profile(args: argparse.Namespace) -> int:
     """Show the active gateway default profile."""
 
@@ -615,6 +752,88 @@ def _handle_external_registry_command(
     finally:
         if bundle is not None:
             _run_async(_close_external_registry_bundle(bundle))
+
+
+def _handle_credential_grant_command(
+    args: argparse.Namespace,
+    operation: _CredentialGrantOperation,
+    *,
+    require_persistent: bool = True,
+) -> int:
+    """Run a credential-grant command against the configured gateway store."""
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    external_bundle: GatewayExternalRegistryStorageBundle | None = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            external_bundle = build_gateway_external_registry_storage(config.store)
+            if require_persistent and not external_bundle.metadata.persistent:
+                raise GatewayCredentialGrantManagementError(
+                    "Credential grant management requires a persistent gateway store",
+                    reason_code="credential_grant_store_unavailable",
+                )
+            manager = credential_grant_manager_from_storage(
+                external_bundle,
+                profile_storage=profile_bundle,
+            )
+        except _CliArgumentError:
+            raise
+        except GatewayCredentialGrantManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            unavailable_error = _credential_grant_storage_unavailable_error(exc)
+            if unavailable_error is not None:
+                _emit_json(unavailable_error.to_payload(), sys.stderr)
+                return 1
+            _emit_json(
+                {
+                    "error": str(exc),
+                    "ok": False,
+                    "path": str(config_path),
+                },
+                sys.stderr,
+            )
+            return 1
+
+        try:
+            payload = _run_async(operation(manager))
+        except _CliArgumentError:
+            raise
+        except GatewayCredentialGrantManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception:  # noqa: BLE001
+            unavailable_error = GatewayCredentialGrantManagementError(
+                "Credential grant store unavailable",
+                reason_code="credential_grant_store_unavailable",
+            )
+            _emit_json(unavailable_error.to_payload(), sys.stderr)
+            return 1
+
+        _emit_json(_cli_payload(payload), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        if external_bundle is not None:
+            _run_async(_close_external_registry_bundle(external_bundle))
+
+
+def _credential_grant_storage_unavailable_error(
+    exc: Exception,
+) -> GatewayCredentialGrantManagementError | None:
+    """Map expected unavailable credential-grant storage build failures."""
+
+    if not isinstance(exc, ExternalRegistryStorageConfigurationError):
+        return None
+    return GatewayCredentialGrantManagementError(
+        str(exc),
+        reason_code="credential_grant_store_unavailable",
+    )
 
 
 def _external_registry_storage_unavailable_error(

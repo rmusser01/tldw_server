@@ -6,14 +6,27 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from mcp_unified.storage.models import ExternalServerDefinition
+from mcp_unified.storage.models import CredentialGrant, ExternalServerDefinition
 
+from .admin_auth import (
+    GatewayAdminAuthConfig,
+    GatewayAdminAuthError,
+    gateway_admin_auth_dependencies,
+    gateway_admin_auth_error_response,
+    normalize_gateway_admin_auth_config,
+)
 from .bootstrap import GatewayProfileBootstrap
+from .credential_grants import (
+    CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_ERROR,
+    CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_REASON,
+    GatewayCredentialGrantManagementError,
+    GatewayCredentialGrantManager,
+)
 from .external_registry import (
     GatewayExternalRegistryManagementError,
     GatewayExternalRegistryManager,
@@ -95,6 +108,18 @@ _EXTERNAL_RUNTIME_STATUS_CODES = {
     "credential_broker_unavailable": 503,
     "invalid_external_runtime_request": 422,
 }
+_CREDENTIAL_GRANT_STATUS_CODES = {
+    "credential_grant_store_unavailable": 503,
+    "profile_store_unavailable": 503,
+    "external_registry_store_unavailable": 503,
+    "credential_grant_not_found": 404,
+    "profile_not_found": 404,
+    "external_server_not_found": 404,
+    "credential_grant_already_exists": 409,
+    "invalid_credential_grant_request": 422,
+    "invalid_credential_grant_patch": 422,
+    CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_REASON: 422,
+}
 _EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
 _PROFILE_MANAGEMENT_PUBLIC_ERRORS = {
     "profile_store_unavailable": "Profile store unavailable",
@@ -111,6 +136,14 @@ _EXTERNAL_RUNTIME_PUBLIC_ERRORS = {
     "external_server_transport_unavailable": "External server transport unavailable",
     "external_tool_call_failed": "External tool call failed",
     "credential_broker_unavailable": "Credential broker unavailable",
+}
+_CREDENTIAL_GRANT_PUBLIC_ERRORS = {
+    "credential_grant_store_unavailable": "Credential grant store unavailable",
+    "profile_store_unavailable": "Profile store unavailable",
+    "external_registry_store_unavailable": "External registry store unavailable",
+    CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_REASON: (
+        CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_ERROR
+    ),
 }
 
 
@@ -163,6 +196,24 @@ class PatchExternalServerRequest(BaseModel):
     provenance: dict[str, Any] | None = None
     enabled: bool | None = None
     auto_start: bool | None = None
+
+
+class CreateCredentialGrantRequest(CredentialGrant):
+    """Request body for creating stored credential broker grant metadata."""
+
+
+class PatchCredentialGrantRequest(BaseModel):
+    """Request body for patching stored credential broker grant metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    broker_id: str | None = None
+    credential_slot: str | None = None
+    external_server_id: str | None = None
+    scopes: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+    provenance: dict[str, Any] | None = None
+    enabled: bool | None = None
 
 
 class StoreMetadataResponse(BaseModel):
@@ -237,6 +288,30 @@ class DeleteExternalServerResponse(BaseModel):
 
     ok: bool
     server_id: str
+    store: StoreMetadataResponse
+
+
+class CredentialGrantListResponse(BaseModel):
+    """Response body for listing stored credential grants."""
+
+    ok: bool
+    grants: list[dict[str, Any]]
+    store: StoreMetadataResponse
+
+
+class CredentialGrantResponse(BaseModel):
+    """Response body for returning one stored credential grant."""
+
+    ok: bool
+    grant: dict[str, Any]
+    store: StoreMetadataResponse
+
+
+class DeleteCredentialGrantResponse(BaseModel):
+    """Response body for deleting one stored credential grant."""
+
+    ok: bool
+    grant_id: str
     store: StoreMetadataResponse
 
 
@@ -400,6 +475,17 @@ def _external_runtime_error_response(
     )
 
 
+def _credential_grant_error_response(
+    exc: GatewayCredentialGrantManagementError,
+) -> JSONResponse:
+    """Translate expected credential-grant errors into HTTP JSON responses."""
+
+    return JSONResponse(
+        status_code=_CREDENTIAL_GRANT_STATUS_CODES.get(exc.reason_code, 500),
+        content=_credential_grant_error_payload(exc),
+    )
+
+
 def _profile_management_error_payload(exc: GatewayProfileManagementError) -> dict[str, Any]:
     """Return a public profile-management error payload without raw exception text."""
 
@@ -449,6 +535,28 @@ def _external_runtime_error_payload(exc: GatewayExternalRuntimeError) -> dict[st
     }
     if exc.server_id is not None:
         payload["server_id"] = exc.server_id
+    return payload
+
+
+def _credential_grant_error_payload(
+    exc: GatewayCredentialGrantManagementError,
+) -> dict[str, Any]:
+    """Return a public credential-grant error payload without raw exception text."""
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": _CREDENTIAL_GRANT_PUBLIC_ERRORS.get(
+            exc.reason_code,
+            "Gateway credential grant request failed",
+        ),
+        "reason_code": exc.reason_code,
+    }
+    if exc.grant_id is not None:
+        payload["grant_id"] = exc.grant_id
+    if exc.profile_id is not None:
+        payload["profile_id"] = exc.profile_id
+    if exc.external_server_id is not None:
+        payload["external_server_id"] = exc.external_server_id
     return payload
 
 
@@ -556,6 +664,24 @@ def _resolve_external_runtime_manager(
     return resolved
 
 
+def _resolve_credential_grant_manager(
+    *,
+    credential_grant_manager: GatewayCredentialGrantManager | None,
+    profile_bootstrap: GatewayProfileBootstrap | None,
+    enable_credential_grant_management: bool,
+) -> GatewayCredentialGrantManager | None:
+    """Return the configured credential-grant manager or reject invalid gating."""
+
+    resolved = credential_grant_manager
+    if resolved is None and profile_bootstrap is not None:
+        resolved = getattr(profile_bootstrap, "credential_grant_manager", None)
+    if enable_credential_grant_management and resolved is None:
+        raise ValueError(
+            "credential grant management requires credential_grant_manager or profile_bootstrap"
+        )
+    return resolved
+
+
 def _resolve_external_runtime_lifecycle(
     *,
     external_runtime_lifecycle: (
@@ -575,6 +701,22 @@ def _resolve_external_runtime_lifecycle(
             "external runtime lifecycle requires external_runtime_manager or profile_bootstrap"
         )
     return resolved
+
+
+def _resolve_admin_auth_config(
+    *,
+    admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None,
+    profile_bootstrap: GatewayProfileBootstrap | None,
+) -> GatewayAdminAuthConfig:
+    """Return explicit or bootstrap-carried admin auth configuration."""
+
+    if admin_auth is not None:
+        return normalize_gateway_admin_auth_config(admin_auth)
+    if profile_bootstrap is not None:
+        bootstrap_admin_auth = getattr(profile_bootstrap, "admin_auth", None)
+        if bootstrap_admin_auth is not None:
+            return normalize_gateway_admin_auth_config(bootstrap_admin_auth)
+    return GatewayAdminAuthConfig()
 
 
 def _external_runtime_lifecycle_error_payload(
@@ -667,10 +809,18 @@ def _create_external_runtime_lifespan(
 def _mount_profile_management_routes(
     router: APIRouter,
     manager: GatewayProfileManager,
+    *,
+    admin_dependencies: list[Depends] | None = None,
 ) -> None:
     """Mount profile-management endpoints on the package gateway router."""
 
-    @router.get("/profiles", response_model=ProfileListResponse)
+    dependencies = admin_dependencies or []
+
+    @router.get(
+        "/profiles",
+        response_model=ProfileListResponse,
+        dependencies=dependencies,
+    )
     async def list_profiles() -> ProfileListResponse | JSONResponse:
         """Return editable MCP profiles from the configured profile manager."""
         try:
@@ -678,7 +828,11 @@ def _mount_profile_management_routes(
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.post("/profiles", response_model=ProfileResponse)
+    @router.post(
+        "/profiles",
+        response_model=ProfileResponse,
+        dependencies=dependencies,
+    )
     async def create_profile(
         request: CreateProfileRequest,
     ) -> ProfileResponse | JSONResponse:
@@ -688,7 +842,11 @@ def _mount_profile_management_routes(
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.patch("/profiles/{profile_id}", response_model=ProfileResponse)
+    @router.patch(
+        "/profiles/{profile_id}",
+        response_model=ProfileResponse,
+        dependencies=dependencies,
+    )
     async def patch_profile(
         profile_id: str,
         request: PatchProfileRequest,
@@ -702,7 +860,11 @@ def _mount_profile_management_routes(
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.delete("/profiles/{profile_id}", response_model=DeleteProfileResponse)
+    @router.delete(
+        "/profiles/{profile_id}",
+        response_model=DeleteProfileResponse,
+        dependencies=dependencies,
+    )
     async def delete_profile(profile_id: str) -> DeleteProfileResponse | JSONResponse:
         """Delete an unassigned, non-default editable MCP profile."""
         try:
@@ -710,7 +872,11 @@ def _mount_profile_management_routes(
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.post("/profiles/from-preset", response_model=DuplicatePresetResponse)
+    @router.post(
+        "/profiles/from-preset",
+        response_model=DuplicatePresetResponse,
+        dependencies=dependencies,
+    )
     async def duplicate_preset(
         request: DuplicatePresetRequest,
     ) -> DuplicatePresetResponse | JSONResponse:
@@ -725,7 +891,11 @@ def _mount_profile_management_routes(
             return _profile_management_error_response(exc)
         return _normalize_duplicate_preset_payload(payload)
 
-    @router.get("/profiles/default", response_model=DefaultProfileResponse)
+    @router.get(
+        "/profiles/default",
+        response_model=DefaultProfileResponse,
+        dependencies=dependencies,
+    )
     async def get_default_profile() -> DefaultProfileResponse | JSONResponse:
         """Return the currently effective default MCP profile."""
         try:
@@ -733,7 +903,11 @@ def _mount_profile_management_routes(
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.put("/profiles/default", response_model=DefaultProfileResponse)
+    @router.put(
+        "/profiles/default",
+        response_model=DefaultProfileResponse,
+        dependencies=dependencies,
+    )
     async def set_default_profile(
         request: SetDefaultProfileRequest,
     ) -> DefaultProfileResponse | JSONResponse:
@@ -743,7 +917,11 @@ def _mount_profile_management_routes(
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.get("/profiles/{profile_id}", response_model=ProfileResponse)
+    @router.get(
+        "/profiles/{profile_id}",
+        response_model=ProfileResponse,
+        dependencies=dependencies,
+    )
     async def show_profile(profile_id: str) -> ProfileResponse | JSONResponse:
         """Return a single editable MCP profile by id."""
         try:
@@ -755,10 +933,18 @@ def _mount_profile_management_routes(
 def _mount_external_registry_routes(
     router: APIRouter,
     manager: GatewayExternalRegistryManager,
+    *,
+    admin_dependencies: list[Depends] | None = None,
 ) -> None:
     """Mount external-registry management endpoints on the package gateway router."""
 
-    @router.get("/external-servers", response_model=ExternalServerListResponse)
+    dependencies = admin_dependencies or []
+
+    @router.get(
+        "/external-servers",
+        response_model=ExternalServerListResponse,
+        dependencies=dependencies,
+    )
     async def list_external_servers(
         enabled: bool | None = None,
     ) -> ExternalServerListResponse | JSONResponse:
@@ -770,7 +956,11 @@ def _mount_external_registry_routes(
         except Exception:  # noqa: BLE001
             return _external_registry_store_unavailable_response()
 
-    @router.get("/external-servers/{server_id}", response_model=ExternalServerResponse)
+    @router.get(
+        "/external-servers/{server_id}",
+        response_model=ExternalServerResponse,
+        dependencies=dependencies,
+    )
     async def show_external_server(
         server_id: str,
     ) -> ExternalServerResponse | JSONResponse:
@@ -784,7 +974,11 @@ def _mount_external_registry_routes(
         except Exception:  # noqa: BLE001
             return _external_registry_store_unavailable_response(server_id=server_id)
 
-    @router.post("/external-servers", response_model=ExternalServerResponse)
+    @router.post(
+        "/external-servers",
+        response_model=ExternalServerResponse,
+        dependencies=dependencies,
+    )
     async def create_external_server(
         request: CreateExternalServerRequest,
     ) -> ExternalServerResponse | JSONResponse:
@@ -800,7 +994,11 @@ def _mount_external_registry_routes(
         except Exception:  # noqa: BLE001
             return _external_registry_store_unavailable_response(server_id=request.id)
 
-    @router.patch("/external-servers/{server_id}", response_model=ExternalServerResponse)
+    @router.patch(
+        "/external-servers/{server_id}",
+        response_model=ExternalServerResponse,
+        dependencies=dependencies,
+    )
     async def patch_external_server(
         server_id: str,
         request: PatchExternalServerRequest,
@@ -821,6 +1019,7 @@ def _mount_external_registry_routes(
     @router.delete(
         "/external-servers/{server_id}",
         response_model=DeleteExternalServerResponse,
+        dependencies=dependencies,
     )
     async def delete_external_server(
         server_id: str,
@@ -839,13 +1038,18 @@ def _mount_external_registry_routes(
 def _mount_external_runtime_routes(
     router: APIRouter,
     manager: GatewayExternalRuntimeManager,
+    *,
+    admin_dependencies: list[Depends] | None = None,
 ) -> None:
     """Mount external runtime lifecycle endpoints on the package gateway router."""
+
+    dependencies = admin_dependencies or []
 
     @router.get(
         "/external-servers/runtime",
         response_model=ExternalRuntimeServerListResponse,
         response_model_exclude_none=True,
+        dependencies=dependencies,
     )
     async def list_external_runtime_servers() -> ExternalRuntimeServerListResponse | JSONResponse:
         """Return external server runtime status rows."""
@@ -857,6 +1061,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/start",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def start_external_runtime_server(
         server_id: str,
@@ -870,6 +1075,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/stop",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def stop_external_runtime_server(
         server_id: str,
@@ -883,6 +1089,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/restart",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def restart_external_runtime_server(
         server_id: str,
@@ -896,6 +1103,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/refresh",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def refresh_external_runtime_servers() -> ExternalRuntimeOperationResponse | JSONResponse:
         """Refresh discovery for all active external MCP server runtimes."""
@@ -907,6 +1115,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/refresh",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def refresh_external_runtime_server(
         server_id: str,
@@ -920,6 +1129,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/reconcile",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def reconcile_external_runtime_servers() -> ExternalRuntimeOperationResponse | JSONResponse:
         """Reconcile all configured external MCP server runtimes."""
@@ -931,6 +1141,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/reconcile",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def reconcile_external_runtime_server(
         server_id: str,
@@ -944,6 +1155,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/install",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def install_external_runtime_server(
         server_id: str,
@@ -957,6 +1169,7 @@ def _mount_external_runtime_routes(
     @router.post(
         "/external-servers/{server_id}/update",
         response_model=ExternalRuntimeOperationResponse,
+        dependencies=dependencies,
     )
     async def update_external_runtime_server(
         server_id: str,
@@ -966,6 +1179,97 @@ def _mount_external_runtime_routes(
             return await manager.update_server(server_id)
         except GatewayExternalRuntimeError as exc:
             return _external_runtime_error_response(exc)
+
+
+def _mount_credential_grant_routes(
+    router: APIRouter,
+    manager: GatewayCredentialGrantManager,
+    *,
+    admin_dependencies: list[Depends] | None = None,
+) -> None:
+    """Mount credential-grant management endpoints on the package gateway router."""
+
+    dependencies = admin_dependencies or []
+
+    @router.get(
+        "/credential-grants",
+        response_model=CredentialGrantListResponse,
+        dependencies=dependencies,
+    )
+    async def list_credential_grants(
+        profile_id: str | None = None,
+        external_server_id: str | None = None,
+    ) -> CredentialGrantListResponse | JSONResponse:
+        """Return stored credential grant metadata from the configured manager."""
+        try:
+            return await manager.list_grants(
+                profile_id=profile_id,
+                external_server_id=external_server_id,
+            )
+        except GatewayCredentialGrantManagementError as exc:
+            return _credential_grant_error_response(exc)
+
+    @router.post(
+        "/credential-grants",
+        response_model=CredentialGrantResponse,
+        dependencies=dependencies,
+    )
+    async def create_credential_grant(
+        request: CreateCredentialGrantRequest,
+    ) -> CredentialGrantResponse | JSONResponse:
+        """Create stored credential grant metadata."""
+        try:
+            return await manager.create_grant(
+                request.model_dump(mode="json", exclude_unset=True)
+            )
+        except GatewayCredentialGrantManagementError as exc:
+            return _credential_grant_error_response(exc)
+
+    @router.get(
+        "/credential-grants/{grant_id}",
+        response_model=CredentialGrantResponse,
+        dependencies=dependencies,
+    )
+    async def show_credential_grant(
+        grant_id: str,
+    ) -> CredentialGrantResponse | JSONResponse:
+        """Return a single credential grant by id."""
+        try:
+            return await manager.show_grant(grant_id)
+        except GatewayCredentialGrantManagementError as exc:
+            return _credential_grant_error_response(exc)
+
+    @router.patch(
+        "/credential-grants/{grant_id}",
+        response_model=CredentialGrantResponse,
+        dependencies=dependencies,
+    )
+    async def patch_credential_grant(
+        grant_id: str,
+        request: PatchCredentialGrantRequest,
+    ) -> CredentialGrantResponse | JSONResponse:
+        """Apply an allowed patch to stored credential grant metadata."""
+        try:
+            return await manager.patch_grant(
+                grant_id,
+                request.model_dump(mode="json", exclude_unset=True),
+            )
+        except GatewayCredentialGrantManagementError as exc:
+            return _credential_grant_error_response(exc)
+
+    @router.delete(
+        "/credential-grants/{grant_id}",
+        response_model=DeleteCredentialGrantResponse,
+        dependencies=dependencies,
+    )
+    async def delete_credential_grant(
+        grant_id: str,
+    ) -> DeleteCredentialGrantResponse | JSONResponse:
+        """Delete stored credential grant metadata."""
+        try:
+            return await manager.delete_grant(grant_id)
+        except GatewayCredentialGrantManagementError as exc:
+            return _credential_grant_error_response(exc)
 
 
 def create_gateway_router(
@@ -978,31 +1282,62 @@ def create_gateway_router(
     enable_external_registry_management: bool = False,
     external_runtime_manager: GatewayExternalRuntimeManager | None = None,
     enable_external_runtime_management: bool = False,
+    admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None = None,
+    credential_grant_manager: GatewayCredentialGrantManager | None = None,
+    enable_credential_grant_management: bool = False,
 ) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
     router = APIRouter()
+    resolved_admin_auth = _resolve_admin_auth_config(
+        admin_auth=admin_auth,
+        profile_bootstrap=profile_bootstrap,
+    )
+    admin_dependencies = gateway_admin_auth_dependencies(resolved_admin_auth)
     resolved_profile_manager = _resolve_profile_manager(
         profile_manager=profile_manager,
         profile_bootstrap=profile_bootstrap,
         enable_profile_management=enable_profile_management,
     )
     if resolved_profile_manager is not None:
-        _mount_profile_management_routes(router, resolved_profile_manager)
+        _mount_profile_management_routes(
+            router,
+            resolved_profile_manager,
+            admin_dependencies=admin_dependencies,
+        )
     resolved_external_runtime_manager = _resolve_external_runtime_manager(
         external_runtime_manager=external_runtime_manager,
         profile_bootstrap=profile_bootstrap,
         enable_external_runtime_management=enable_external_runtime_management,
     )
     if resolved_external_runtime_manager is not None:
-        _mount_external_runtime_routes(router, resolved_external_runtime_manager)
+        _mount_external_runtime_routes(
+            router,
+            resolved_external_runtime_manager,
+            admin_dependencies=admin_dependencies,
+        )
     resolved_external_registry_manager = _resolve_external_registry_manager(
         external_registry_manager=external_registry_manager,
         profile_bootstrap=profile_bootstrap,
         enable_external_registry_management=enable_external_registry_management,
     )
     if resolved_external_registry_manager is not None:
-        _mount_external_registry_routes(router, resolved_external_registry_manager)
+        _mount_external_registry_routes(
+            router,
+            resolved_external_registry_manager,
+            admin_dependencies=admin_dependencies,
+        )
+    resolved_credential_grant_manager = _resolve_credential_grant_manager(
+        credential_grant_manager=credential_grant_manager,
+        profile_bootstrap=profile_bootstrap,
+        enable_credential_grant_management=enable_credential_grant_management,
+    )
+    if resolved_credential_grant_manager is not None:
+        _mount_credential_grant_routes(
+            router,
+            resolved_credential_grant_manager,
+            admin_dependencies=admin_dependencies,
+        )
 
     @router.get("/status")
     async def gateway_status() -> dict[str, str]:
@@ -1079,6 +1414,9 @@ def create_gateway_app(
     external_runtime_lifecycle: (
         GatewayExternalRuntimeLifecycleConfig | Mapping[str, Any] | None
     ) = None,
+    admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None = None,
+    credential_grant_manager: GatewayCredentialGrantManager | None = None,
+    enable_credential_grant_management: bool = False,
 ) -> FastAPI:
     """Create a minimal FastAPI app exposing the standalone MCP gateway router."""
 
@@ -1105,6 +1443,10 @@ def create_gateway_app(
         version=_runtime_version(runtime),
         lifespan=lifespan,
     )
+    app.add_exception_handler(
+        GatewayAdminAuthError,
+        gateway_admin_auth_error_response,
+    )
     app.include_router(
         create_gateway_router(
             runtime,
@@ -1115,6 +1457,9 @@ def create_gateway_app(
             enable_external_registry_management=enable_external_registry_management,
             external_runtime_manager=resolved_external_runtime_manager,
             enable_external_runtime_management=enable_external_runtime_management,
+            admin_auth=admin_auth,
+            credential_grant_manager=credential_grant_manager,
+            enable_credential_grant_management=enable_credential_grant_management,
         ),
         prefix=prefix,
     )
