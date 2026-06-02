@@ -38,7 +38,7 @@ Docs/superpowers/plans/2026-06-01-review-duplication-normalization-image-policy-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Acceptance criteria completed: shared model normalizer used by both getModels paths; shared image utility policy used by composer and unsupported-types; regression tests added. Verification recorded in Final Summary. Bandit skipped because no Python code changed.
+Acceptance criteria completed: shared model normalizer used by both getModels paths; shared image utility policy used by composer and unsupported-types; regression tests added. Verification recorded in Final Summary. Bandit skipped because no Python code changed. PR: https://github.com/rmusser01/tldw_server/pull/2218
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
