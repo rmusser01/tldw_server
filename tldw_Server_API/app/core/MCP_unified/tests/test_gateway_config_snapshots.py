@@ -238,6 +238,39 @@ def test_snapshot_validation_rejects_non_gateway_default_assignment_id() -> None
 
 
 @pytest.mark.asyncio
+async def test_import_snapshot_rejects_constructed_non_gateway_default_assignment_id() -> None:
+    """Manager validation catches model instances with non-gateway default ids."""
+
+    profile_store = InMemoryProfileStore()
+    assignment_store = InMemoryProfileAssignmentStore()
+    external_store = _InMemoryExternalRegistryStore()
+    grant_store = _InMemoryCredentialGrantStore()
+    manager = GatewayConfigSnapshotManager(
+        profile_store=profile_store,
+        assignment_store=assignment_store,
+        external_registry_store=external_store,
+        credential_grant_store=grant_store,
+    )
+    snapshot = GatewayConfigSnapshot.model_construct(
+        profiles=[MCPProfile(id="reviewer", name="Reviewer")],
+        default_assignment=ProfileAssignment(
+            id="workspace-assignment",
+            profile_id="reviewer",
+            is_default=True,
+        ),
+        external_servers=[],
+        credential_grants=[],
+    )
+
+    with pytest.raises(GatewayConfigSnapshotManagementError) as exc_info:
+        await manager.import_snapshot(snapshot)
+
+    assert exc_info.value.reason_code == "invalid_config_snapshot"
+    assert await profile_store.list_profiles() == []
+    assert await assignment_store.list_assignments() == []
+
+
+@pytest.mark.asyncio
 async def test_import_snapshot_validates_before_first_write() -> None:
     """Reference validation fails without writing earlier valid snapshot sections."""
 

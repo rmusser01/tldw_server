@@ -280,6 +280,7 @@ class GatewayConfigSnapshotManager:
         }
 
         if snapshot.default_assignment is not None:
+            self._require_gateway_default_assignment_id(snapshot.default_assignment.id)
             self._require_profile_reference(
                 snapshot.default_assignment.profile_id,
                 incoming_profile_ids=incoming_profile_ids,
@@ -323,6 +324,15 @@ class GatewayConfigSnapshotManager:
         )
 
     @staticmethod
+    def _require_gateway_default_assignment_id(assignment_id: str) -> None:
+        if assignment_id == GATEWAY_DEFAULT_ASSIGNMENT_ID:
+            return
+        raise GatewayConfigSnapshotManagementError(
+            "Gateway config snapshot default assignment id is invalid",
+            reason_code="invalid_config_snapshot",
+        )
+
+    @staticmethod
     def _build_plan(snapshot: GatewayConfigSnapshot) -> dict[str, Any]:
         actions = [action.to_payload() for action, _mutation in _planned_actions(snapshot)]
         return {
@@ -351,10 +361,16 @@ class GatewayConfigSnapshotManager:
                 )
             )
         if snapshot.default_assignment is not None:
-            assignment = snapshot.default_assignment.model_copy(deep=True)
+            assignment = snapshot.default_assignment.model_copy(
+                update={"id": GATEWAY_DEFAULT_ASSIGNMENT_ID},
+                deep=True,
+            )
             actions.append(
                 (
-                    _SnapshotAction("set_default_assignment", assignment.id),
+                    _SnapshotAction(
+                        "set_default_assignment",
+                        GATEWAY_DEFAULT_ASSIGNMENT_ID,
+                    ),
                     lambda assignment=assignment: self.assignment_store.upsert_assignment(
                         assignment
                     ),
@@ -418,7 +434,7 @@ def _planned_actions(
             (
                 _SnapshotAction(
                     "set_default_assignment",
-                    snapshot.default_assignment.id,
+                    GATEWAY_DEFAULT_ASSIGNMENT_ID,
                 ),
                 None,
             )
