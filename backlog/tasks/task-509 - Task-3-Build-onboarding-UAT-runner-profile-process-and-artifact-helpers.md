@@ -23,11 +23,11 @@ Build the onboarding UAT helper layer for port reservation, process management, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ports.mjs reserves distinct loopback ports with a named map helper
-- [ ] #2 artifacts.mjs creates run artifact paths, redacts synthetic secrets, scans artifacts for leaks, and supports cleanup
-- [ ] #3 profile.mjs creates an isolated temp runtime profile from repo config and builds backend env without referencing developer .env
-- [ ] #4 processes.mjs starts logged child processes, waits for HTTP readiness, and stops process trees with redacted logs
-- [ ] #5 Focused Vitest tests cover redaction, artifact setup/cleanup, profile/env generation, port reservation, and command/process helper behavior
+- [x] #1 ports.mjs reserves distinct loopback ports with a named map helper
+- [x] #2 artifacts.mjs creates run artifact paths, redacts synthetic secrets, scans artifacts for leaks, and supports cleanup
+- [x] #3 profile.mjs creates an isolated temp runtime profile from repo config and builds backend env without referencing developer .env
+- [x] #4 processes.mjs starts logged child processes, waits for HTTP readiness, and stops process trees with redacted logs
+- [x] #5 Focused Vitest tests cover redaction, artifact setup/cleanup, profile/env generation, port reservation, and command/process helper behavior
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -44,10 +44,10 @@ Implemented onboarding UAT runner helper modules and extended the focused Vitest
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
