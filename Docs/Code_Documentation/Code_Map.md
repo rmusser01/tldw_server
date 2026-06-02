@@ -29,6 +29,8 @@ flowchart LR
     Client -->|HTTP/WebSocket| API --> CORE --> DATA
 ```
 
+For a deeper Mermaid atlas of request lifecycle, router groups, storage ownership, and subsystem data flows, see `Docs/Code_Documentation/Data_Flow_Atlas.md`.
+
 ## Top-Level Layout
 
 - Server entry: `tldw_Server_API/app/main.py`
@@ -43,8 +45,8 @@ flowchart LR
 ## API Surface (Selected)
 
 - Auth & Users: `auth.py`, `users.py`
-- Media: `media.py`, `media_embeddings.py`
-- Audio: `audio.py` (OpenAI-compatible STT + WebSocket streaming)
+- Media: `media/` endpoint package, `media_embeddings.py`
+- Audio: `audio/` endpoint package (OpenAI-compatible STT + WebSocket streaming)
 - Chunking: `chunking.py`, `chunking_templates.py`
 - Embeddings: `embeddings_v5_production_enhanced.py`, `vector_stores_openai.py`
 - RAG: `rag_unified.py`, `rag_health.py`, `workflows.py`
@@ -84,9 +86,8 @@ Routers are mounted in `main.py` with prefix `/api/v1`.
   - Root-level path `Databases/Media_DB_v2.db` is deprecated
   - Backends layer wired for PostgreSQL but SQLite is default
 - AuthNZ (Users):
-  - `DATABASE_URL` (env) - default in single-user mode resolves to `sqlite:///<USER_DB_BASE_DIR>/<SINGLE_USER_FIXED_ID>/tldw.db`
-  - PostgreSQL recommended for multi-user mode
-- Evaluations DB: `Databases/evaluations.db` (unified schema + audit; DI can map per-user audit paths)
+  - `DATABASE_URL` (env) - default resolves to centralized `sqlite:///./Databases/users.db` for AuthNZ unless configured otherwise; PostgreSQL recommended for multi-user mode.
+- Evaluations DB: `<USER_DB_BASE_DIR>/<user_id>/evaluations/evaluations.db` (per-user unified schema + audit; root `Databases/evaluations.db` is legacy/fallback)
 - Per-user notes/chats: `<USER_DB_BASE_DIR>/<user_id>/ChaChaNotes.db`
 - Per-user prompts: `<USER_DB_BASE_DIR>/<user_id>/prompts_user_dbs/user_prompts_v2.sqlite`
 - Prompt Studio DB: `<USER_DB_BASE_DIR>/<user_id>/prompt_studio_dbs/prompt_studio.db`

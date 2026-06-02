@@ -156,6 +156,7 @@ type Props = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
   onHeightChange?: (height: number) => void
   draftKey?: string
+  onOpenChatInWebUi?: () => Promise<void> | void
 }
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -172,7 +173,8 @@ export const SidepanelForm = ({
   dropedFile,
   inputRef,
   onHeightChange,
-  draftKey
+  draftKey,
+  onOpenChatInWebUi
 }: Props) => {
   const formContainerRef = React.useRef<HTMLDivElement>(null)
   const localTextareaRef = React.useRef<HTMLTextAreaElement>(null)
@@ -3074,6 +3076,7 @@ export const SidepanelForm = ({
                               getVisiblePageContextForHandoff={
                                 getVisiblePageContextForHandoff
                               }
+                              onOpenChatInWebUi={onOpenChatInWebUi}
                             />
                           )}
                           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">

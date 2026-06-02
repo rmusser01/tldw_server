@@ -16,6 +16,7 @@ import {
   Gauge,
   GitCompare,
   Headphones,
+  House,
   Kanban,
   Layers,
   LayoutGrid,
@@ -74,6 +75,22 @@ export type HeaderShortcutGroup = {
 }
 
 const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
+  {
+    id: "start",
+    titleKey: "option:header.groupStart",
+    titleDefault: "Start",
+    items: [
+      {
+        id: "companion-home",
+        to: "/",
+        icon: House,
+        labelKey: "option:header.companionHome",
+        labelDefault: "Companion Home",
+        descriptionKey: "option:header.companionHomeDesc",
+        descriptionDefault: "Open the main Companion Home workspace"
+      }
+    ]
+  },
   {
     id: "chat-persona",
     titleKey: "option:header.groupChatPersona",
@@ -529,6 +546,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
 ]
 
 const HOSTED_VISIBLE_SHORTCUT_PATHS = new Set([
+  "/",
   "/chat",
   CHAT_WORKSPACE_PATH,
   "/knowledge",
@@ -622,6 +640,7 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
   HeaderShortcutId[]
 > = {
   family: [
+    "companion-home",
     "chat",
     "media",
     "family-guardrails",
@@ -631,6 +650,7 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
     "settings"
   ],
   researcher: [
+    "companion-home",
     "chat",
     "prompts",
     "deep-research",

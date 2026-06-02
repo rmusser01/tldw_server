@@ -59,6 +59,7 @@ export type SetupProviderSaveResponse = {
   provider_key: string
   status: "saved" | "failed"
   masked_api_key?: string | null
+  credential_configured?: boolean
   base_url?: string | null
   model?: string | null
   make_default?: boolean
@@ -73,6 +74,8 @@ export type SetupProviderValidationResponse = {
   failure_category?: string | null
   message?: string | null
   models: string[]
+  validation_level?: string | null
+  can_gate_first_chat?: boolean
 }
 
 export type FirstRunMetadata = {

@@ -285,44 +285,56 @@ vi.mock("@/components/Common/QuickIngest/useIngestSSE", () => ({
 vi.mock(
   "@/components/Common/QuickIngest/QueueTab/FileDropZone",
   () => ({
-    FileDropZone: ({ onFilesAdded }: any) => (
-      <div data-testid="file-drop-zone">
-        FileDropZone
-        <button
-          type="button"
-          onClick={() =>
-            onFilesAdded?.([
-              {
-                name: "large-audio.mp3",
-                size: 45 * 1024 * 1024,
-                type: "audio/mpeg",
-              },
-            ])
-          }
-        >
-          Add large audio file
-        </button>
-      </div>
-    ),
-    default: ({ onFilesAdded }: any) => (
-      <div data-testid="file-drop-zone">
-        FileDropZone
-        <button
-          type="button"
-          onClick={() =>
-            onFilesAdded?.([
-              {
-                name: "large-audio.mp3",
-                size: 45 * 1024 * 1024,
-                type: "audio/mpeg",
-              },
-            ])
-          }
-        >
-          Add large audio file
-        </button>
-      </div>
-    ),
+    FileDropZone: ({ onFilesAdded, autoFocus }: any) => {
+      const ref = React.useRef<HTMLDivElement>(null)
+      React.useEffect(() => {
+        if (autoFocus) ref.current?.focus()
+      }, [autoFocus])
+      return (
+        <div data-testid="file-drop-zone" ref={ref} tabIndex={0}>
+          FileDropZone
+          <button
+            type="button"
+            onClick={() =>
+              onFilesAdded?.([
+                {
+                  name: "large-audio.mp3",
+                  size: 45 * 1024 * 1024,
+                  type: "audio/mpeg",
+                },
+              ])
+            }
+          >
+            Add large audio file
+          </button>
+        </div>
+      )
+    },
+    default: ({ onFilesAdded, autoFocus }: any) => {
+      const ref = React.useRef<HTMLDivElement>(null)
+      React.useEffect(() => {
+        if (autoFocus) ref.current?.focus()
+      }, [autoFocus])
+      return (
+        <div data-testid="file-drop-zone" ref={ref} tabIndex={0}>
+          FileDropZone
+          <button
+            type="button"
+            onClick={() =>
+              onFilesAdded?.([
+                {
+                  name: "large-audio.mp3",
+                  size: 45 * 1024 * 1024,
+                  type: "audio/mpeg",
+                },
+              ])
+            }
+          >
+            Add large audio file
+          </button>
+        </div>
+      )
+    },
   })
 )
 
@@ -580,6 +592,59 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByText(/Add URLs or files/i)).toBeInTheDocument()
     expect(screen.getByText(/Media/i)).toBeInTheDocument()
     expect(screen.getByText(/Knowledge/i)).toBeInTheDocument()
+  })
+
+  it("Step 1 — focuses file upload when first-source file choice opens quick ingest", async () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ firstSourceAddMode: "file_upload" }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId("file-drop-zone")).toHaveFocus()
+    })
+  })
+
+  it("Step 1 — focuses pasted text input when first-source paste choice opens quick ingest", async () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ firstSourceAddMode: "paste_text" }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("textbox", { name: /pasted text input/i })
+      ).toHaveFocus()
+    })
+  })
+
+  it("Step 1 — queues pasted first-source text as a text file", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ firstSourceAddMode: "paste_text" }}
+      />
+    )
+
+    const pastedTextInput = await screen.findByRole("textbox", {
+      name: /pasted text input/i
+    })
+    const pastedText = "  These are first-source notes.\nKeep spacing.  "
+    await user.type(pastedTextInput, pastedText)
+    await user.click(
+      screen.getByRole("button", { name: /add pasted text to queue/i })
+    )
+
+    expect(await screen.findByText("pasted-text.txt")).toBeInTheDocument()
+    await expect(ctxRef?.state.queueItems[0]?.file?.text()).resolves.toBe(
+      pastedText
+    )
+    expect(pastedTextInput).toHaveValue("")
   })
 
   it("Step 1 — renders at step 1 and allows adding a URL", async () => {

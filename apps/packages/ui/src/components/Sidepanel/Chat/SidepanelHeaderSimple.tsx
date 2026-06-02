@@ -17,6 +17,7 @@ type SidepanelHeaderSimpleProps = {
   setSidebarOpen?: (open: boolean) => void
   activeTitle?: string
   onRenameTitle?: (nextTitle: string) => void
+  onOpenChatInWebUi?: () => Promise<void> | void
 }
 
 /**
@@ -32,7 +33,8 @@ export const SidepanelHeaderSimple = ({
   sidebarOpen: propSidebarOpen,
   setSidebarOpen: propSetSidebarOpen,
   activeTitle,
-  onRenameTitle
+  onRenameTitle,
+  onOpenChatInWebUi
 }: SidepanelHeaderSimpleProps = {}) => {
   const { temporaryChat } = useMessage()
   const { t } = useTranslation(["sidepanel", "common", "option"])
@@ -104,7 +106,6 @@ export const SidepanelHeaderSimple = ({
   }, [activeTitle, draftTitle, onRenameTitle])
 
   const openFullScreen = React.useCallback(() => {
-    const url = browser.runtime.getURL(`/options.html#${CHAT_PATH}`)
     const showFailure = () => {
       notification.error({
         message: t(
@@ -113,6 +114,14 @@ export const SidepanelHeaderSimple = ({
         )
       })
     }
+    if (onOpenChatInWebUi) {
+      Promise.resolve(onOpenChatInWebUi()).catch((error) => {
+        console.error("Failed to open WebUI chat handoff:", error)
+        showFailure()
+      })
+      return
+    }
+    const url = browser.runtime.getURL(`/options.html#${CHAT_PATH}`)
     const openFallback = () => {
       const opened = window.open(url, "_blank")
       if (!opened) {
@@ -127,7 +136,7 @@ export const SidepanelHeaderSimple = ({
       return
     }
     openFallback()
-  }, [notification, t])
+  }, [notification, onOpenChatInWebUi, t])
 
   const openDashboard = React.useCallback(() => {
     const url = browser.runtime.getURL("/options.html#/flashcards")

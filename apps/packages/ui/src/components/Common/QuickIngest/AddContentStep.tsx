@@ -248,9 +248,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setConferenceBatchMetadata,
     goNext,
   } = useIngestWizard()
-  const { queueItems, conferenceBatchMetadata, playlistPreflightSeed } = state
+  const {
+    queueItems,
+    conferenceBatchMetadata,
+    playlistPreflightSeed,
+    firstSourceAddMode,
+  } = state
 
   const [urlInput, setUrlInput] = useState("")
+  const [pastedTextInput, setPastedTextInput] = useState("")
   const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
   const [playlistPreflight, setPlaylistPreflight] = useState<PlaylistPreflightResult | null>(null)
   const [duplicatePolicy, setDuplicatePolicy] = useState<ConferenceDuplicatePolicy>("skip")
@@ -258,6 +264,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
   const { capabilities } = useServerCapabilities()
   const seededPlaylistUrlRef = React.useRef<string | null>(null)
+  const shouldShowPastedTextInput = firstSourceAddMode === "paste_text"
+  const shouldFocusUrlInput = firstSourceAddMode === "web_url"
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -322,6 +330,28 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setDuplicatePolicy("skip")
     setPlaylistPreflightError(null)
   }, [urlInput, queueItems, setQueueItems])
+
+  const handleAddPastedText = useCallback(() => {
+    if (!pastedTextInput.trim()) return
+
+    const file = new File([pastedTextInput], "pasted-text.txt", {
+      type: "text/plain"
+    })
+    const detectedType = detectTypeFromFile(file)
+    const item: WizardQueueItem = {
+      id: crypto.randomUUID(),
+      fileName: file.name,
+      file,
+      detectedType,
+      icon: ICON_NAME_MAP[detectedType],
+      fileSize: file.size,
+      mimeType: file.type || undefined,
+      validation: { valid: true },
+    }
+    item.validation = validateQueueItem(item, queueItems)
+    setQueueItems([...queueItems, item])
+    setPastedTextInput("")
+  }, [pastedTextInput, queueItems, setQueueItems])
 
   const playlistCandidateUrls = useMemo(
     () =>
@@ -554,6 +584,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <FileDropZone
           onFilesAdded={handleFilesAdded}
           isOnlineForIngest={isOnlineForIngest}
+          autoFocus={firstSourceAddMode === "file_upload"}
         />
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
@@ -568,6 +599,38 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             "Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge."
           )}
         </Typography.Text>
+
+        {shouldShowPastedTextInput && (
+          <div>
+            <Typography.Text className="text-xs text-text-muted">
+              {qi("pasteTextTitle", "Paste text:")}
+            </Typography.Text>
+            <div className="mt-1 flex gap-2">
+              <Input.TextArea
+                value={pastedTextInput}
+                onChange={(e) => setPastedTextInput(e.target.value)}
+                placeholder={qi(
+                  "pasteTextPlaceholder",
+                  "Paste article text, notes, or a short document..."
+                )}
+                autoSize={{ minRows: 3, maxRows: 6 }}
+                autoFocus
+                aria-label={qi("pasteTextInputAria", "Pasted text input")}
+                className="flex-1"
+              />
+              <Button
+                type="primary"
+                onClick={handleAddPastedText}
+                disabled={!pastedTextInput.trim()}
+                aria-label={qi("addPastedTextAria", "Add pasted text to queue")}
+                className="self-end"
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                {qi("addPastedText", "Add text")}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {hasLargeFiles && (
           <DesignSystemAlert
@@ -597,6 +660,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                 "https://example.com/article\nhttps://youtube.com/watch?v=..."
               )}
               autoSize={{ minRows: 2, maxRows: 4 }}
+              autoFocus={shouldFocusUrlInput}
               aria-label={qi("urlsInputAria", "URL input area")}
               className="flex-1"
             />

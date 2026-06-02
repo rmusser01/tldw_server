@@ -281,6 +281,8 @@ export const ArtifactsPanel = () => {
           <Tooltip title={t("artifactsClose", "Close")}>
             <button
               type="button"
+              data-testid="artifacts-panel-close"
+              aria-label={t("artifactsClose", "Close") as string}
               onClick={() => {
                 closeArtifact()
                 window.setTimeout(() => {

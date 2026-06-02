@@ -9,16 +9,17 @@ import path from "path"
 const EXT_PATH = path.resolve("build/chrome-mv3")
 
 test.describe("Sidepanel / Options page handoff", () => {
-  test("Open full view from sidepanel navigates to options page", async () => {
+  test("Open full view from sidepanel opens WebUI chat with handoff context", async () => {
     test.setTimeout(90_000)
 
-    const { context, page, openSidepanel, extensionId } =
+    const { context, openSidepanel } =
       await launchWithExtensionOrSkip(test, EXT_PATH, {
         seedConfig: {
           __tldw_first_run_complete: true,
           __tldw_allow_offline: true,
           tldwConfig: {
             serverUrl: "http://127.0.0.1:8000",
+            webUiUrl: "http://127.0.0.1:8080",
             authMode: "single-user",
             apiKey: "test-key"
           }
@@ -34,53 +35,39 @@ test.describe("Sidepanel / Options page handoff", () => {
         "handoff:sp-connected"
       )
 
-      // Look for a button/link that opens the full options page from sidepanel.
-      // Common patterns: "Open full view", "Full page", settings icon, expand icon
-      const fullViewButton = sidepanel.getByRole("button", {
-        name: /Open full view|Full page|Expand|Open in tab/i
-      })
-      const settingsLink = sidepanel.getByRole("link", {
-        name: /Settings|Options|Full view/i
-      })
-      const settingsButton = sidepanel.getByRole("button", {
-        name: /Settings|Open settings/i
-      })
+      const draft = `handoff draft ${Date.now()}`
+      await sidepanel.getByTestId("chat-input").fill(draft)
 
-      let targetButton = null
-      for (const candidate of [fullViewButton, settingsLink, settingsButton]) {
-        if ((await candidate.count()) > 0) {
-          targetButton = candidate.first()
-          break
-        }
-      }
-
-      if (!targetButton) {
-        // If no explicit full-view button exists, verify the sidepanel at
-        // least renders its primary UI and the options page is accessible
-        // separately.
-        const optionsUrl = `chrome-extension://${extensionId}/options.html`
-        const optionsPage = await context.newPage()
-        await optionsPage.goto(optionsUrl, { waitUntil: "domcontentloaded" })
-        await expect(optionsPage.locator("#root")).toBeAttached({
-          timeout: 10_000
-        })
-
-        // Sidepanel should have rendered its root
-        await expect(sidepanel.locator("#root")).toBeAttached({
-          timeout: 10_000
-        })
-
-        await context.close()
-        return
-      }
-
-      // Click the full-view button and verify a new tab opens with options URL
       const [newPage] = await Promise.all([
         context.waitForEvent("page"),
-        targetButton.click()
+        sidepanel.getByTestId("chat-open-full-screen").click()
       ])
-      await newPage.waitForLoadState("domcontentloaded")
-      await expect(newPage).toHaveURL(/options\.html/i)
+      await expect
+        .poll(() => newPage.url(), { timeout: 10_000 })
+        .toContain("http://127.0.0.1:8080/chat")
+
+      const openedUrl = new URL(newPage.url())
+      expect(openedUrl.pathname).toBe("/chat")
+      expect(openedUrl.href).not.toContain("/options.html")
+      expect(openedUrl.searchParams.has("handoff")).toBe(false)
+
+      const encodedHandoff = new URLSearchParams(
+        openedUrl.hash.slice(1)
+      ).get("handoff")
+      expect(encodedHandoff).toBeTruthy()
+      const decodedHandoff = JSON.parse(
+        Buffer.from(
+          encodedHandoff!.replace(/-/g, "+").replace(/_/g, "/"),
+          "base64"
+        ).toString("utf8")
+      )
+      expect(decodedHandoff).toMatchObject({
+        source: "sidepanel-chat",
+        draft,
+        chatMode: "normal",
+        webSearch: false,
+        toolChoice: "none"
+      })
 
       await context.close()
     } catch (error) {

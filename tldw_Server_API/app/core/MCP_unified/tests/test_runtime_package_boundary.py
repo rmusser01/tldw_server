@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import importlib
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -124,11 +126,16 @@ def test_gateway_external_runtime_exports_are_package_owned() -> None:
     """Gateway runtime exports must resolve without host package imports."""
     package_gateway = importlib.import_module("mcp_unified.gateway")
     package_config = importlib.import_module("mcp_unified.gateway.config")
+    package_adapter = importlib.import_module("mcp_unified.gateway.external_runtime_adapter")
     package_lifecycle = importlib.import_module("mcp_unified.gateway.lifecycle")
     package_runtime = importlib.import_module("mcp_unified.gateway.external_runtime")
 
     assert package_gateway.GatewayExternalRuntimeManager is package_runtime.GatewayExternalRuntimeManager
     assert package_gateway.GatewayExternalRuntimeError is package_runtime.GatewayExternalRuntimeError
+    assert (
+        package_gateway.ExternalRuntimeGatewayRuntime
+        is package_adapter.ExternalRuntimeGatewayRuntime
+    )
     assert (
         package_gateway.GatewayExternalRuntimeBootstrapConfig
         is package_config.GatewayExternalRuntimeBootstrapConfig
@@ -137,6 +144,27 @@ def test_gateway_external_runtime_exports_are_package_owned() -> None:
         package_gateway.GatewayExternalRuntimeLifecycleConfig
         is package_lifecycle.GatewayExternalRuntimeLifecycleConfig
     )
+
+
+def test_gateway_external_runtime_adapter_import_does_not_import_fastapi_transport() -> None:
+    """Importing the external runtime adapter must not require FastAPI helpers."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "import mcp_unified.gateway.external_runtime_adapter; "
+                "print('mcp_unified.gateway.fastapi' in sys.modules)"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
 
 
 def test_federation_installer_contracts_are_public_exports() -> None:

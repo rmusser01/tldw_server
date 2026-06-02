@@ -83,6 +83,7 @@ interface ControlRowProps {
   onToggleRag: () => void
   // Connection state
   isConnected: boolean
+  onOpenChatInWebUi?: () => Promise<void> | void
 }
 
 const ControlRowBase: React.FC<ControlRowProps> = ({
@@ -109,7 +110,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   getVisiblePageContextForHandoff,
   onImageUpload,
   onToggleRag,
-  isConnected
+  isConnected,
+  onOpenChatInWebUi
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
@@ -469,6 +471,17 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   }, [])
 
   const openFullApp = () => {
+    if (onOpenChatInWebUi) {
+      Promise.resolve(onOpenChatInWebUi())
+        .catch((error) => {
+          console.error("Failed to open WebUI chat handoff:", error)
+        })
+        .finally(() => {
+          setMoreOpen(false)
+          requestAnimationFrame(() => moreBtnRef.current?.focus())
+        })
+      return
+    }
     void openFullAppPath(fullAppChatPath)
   }
 

@@ -221,6 +221,18 @@ async function installUnifiedFirstRunApi(
       return;
     }
 
+    if (path === '/api/v1/setup/first-run/providers/validate' && method === 'POST') {
+      const body = requestJson(route);
+      await json(route, {
+        provider_key: body.provider_key,
+        status: 'accepted',
+        validation_level: 'local_syntax',
+        can_gate_first_chat: true,
+        models: [],
+      });
+      return;
+    }
+
     if (path === '/api/v1/setup/first-run/ingest-defaults' && method === 'POST') {
       const body = requestJson(route);
       setupMutations.push({ path, body });
@@ -408,6 +420,8 @@ test.describe('unified first-run onboarding', () => {
     await page.getByLabel(/select openai/i).check();
     await page.getByLabel(/openai api key/i).fill('sk-test-onboarding');
     await page.getByLabel(/default model/i).fill('gpt-4.1-mini');
+    await page.getByRole('button', { name: /validate openai/i }).click();
+    await expect(page.getByText(/first chat verifies this provider/i)).toBeVisible();
     await page.getByRole('button', { name: /save provider/i }).click();
     await expect(page.getByText(/saved as sk-\.\.\.test/i)).toBeVisible();
     await page.getByRole('button', { name: /^continue$/i }).click();
@@ -427,6 +441,16 @@ test.describe('unified first-run onboarding', () => {
     await page.getByRole('button', { name: /send test chat/i }).click();
 
     await expect(page.getByRole('heading', { name: /add your first source/i })).toBeVisible();
+    await expect(page.getByRole('radio', { name: /web url/i })).toBeChecked();
+    await page.getByRole('button', { name: /add source/i }).click();
+    const firstSourceDetail = await page.evaluate(
+      () => (window as any).__tldwPendingQuickIngestOpen?.detail
+    );
+    expect(firstSourceDetail).toMatchObject({
+      source: 'first_source_milestone',
+      firstSource: true,
+      firstSourceKind: 'web_url',
+    });
     expect(mock.firstChatRequests).toHaveLength(1);
     expect(mock.firstChatRequests[0]).toMatchObject({
       provider: 'openai',

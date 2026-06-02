@@ -1135,7 +1135,9 @@ def test_gateway_profile_management_error_status_mapping(
     body = response.json()
     assert body["ok"] is False
     assert body["reason_code"] == reason_code
-    assert body["error"] == f"domain failure: {reason_code}"
+    assert isinstance(body["error"], str)
+    assert body["error"]
+    assert "domain failure" not in body["error"]
 
 
 def test_gateway_profile_management_malformed_or_missing_bodies_return_422() -> None:
@@ -1552,7 +1554,9 @@ def test_gateway_external_registry_management_error_status_mapping(
     body = response.json()
     assert body["ok"] is False
     assert body["reason_code"] == reason_code
-    assert body["error"] == f"domain failure: {reason_code}"
+    assert isinstance(body["error"], str)
+    assert body["error"]
+    assert "domain failure" not in body["error"]
     assert body["server_id"] == "external-search"
 
 
@@ -1969,7 +1973,9 @@ def test_gateway_external_runtime_management_error_status_mapping(
     assert body["ok"] is False
     assert body["reason_code"] == reason_code
     assert body["server_id"] == "research"
-    assert body["error"] == f"runtime failure: {reason_code}"
+    assert isinstance(body["error"], str)
+    assert body["error"]
+    assert "runtime failure" not in body["error"]
 
 
 def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:

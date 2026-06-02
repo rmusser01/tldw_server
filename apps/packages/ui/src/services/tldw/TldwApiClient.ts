@@ -35,6 +35,7 @@ import {
 } from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { toTrimmedStringArray } from "@/services/tldw/client-utils"
+import { getNormalizedTldwModels } from "@/services/tldw/model-normalization"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
 import {
   DEFAULT_CHARACTER_PROFILE_PREFERENCE_KEY,
@@ -46,11 +47,6 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 import {
-  buildProviderAvailabilityMap,
-  normalizeProviderAvailabilityKey,
-  shouldFetchProviderAvailability,
-  toNonEmptyProviderString,
-  toOptionalProviderBoolean,
   type TldwProvidersResponse
 } from "@/services/tldw/model-provider-availability"
 import {
@@ -2021,126 +2017,7 @@ export class TldwApiClientBase {
   async getModels(options?: {
     refreshOpenRouter?: boolean
   }): Promise<TldwModel[]> {
-    const meta = await this.getModelsMetadata(options)
-    const list =
-      Array.isArray(meta) && meta.length > 0
-        ? meta
-        : meta && typeof meta === "object" && Array.isArray((meta as any).models)
-          ? (meta as any).models
-          : []
-
-    const toNonEmptyString = (value: unknown): string | null => {
-      if (typeof value !== "string") return null
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : null
-    }
-    const isLikelyModelId = (value: string): boolean => {
-      if (/\s/.test(value)) return false
-      return /[/:._-]/.test(value)
-    }
-    const providerAvailability = shouldFetchProviderAvailability(list)
-      ? await buildProviderAvailabilityMap(() => this.getProviders())
-      : new Map()
-
-    return list.map((m: any) => {
-      const rawModel =
-        toNonEmptyString(m.model) || toNonEmptyString(m.model_id)
-      const rawName = toNonEmptyString(m.name)
-      const rawId = toNonEmptyString(m.id)
-      const canonicalModelId =
-        rawModel ||
-        (rawName && isLikelyModelId(rawName) ? rawName : null) ||
-        rawId ||
-        rawName ||
-        "unknown-model"
-      const displayName =
-        rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
-          ? `${rawName} (${canonicalModelId})`
-          : canonicalModelId
-      const provider = toNonEmptyString(m.provider) || "default"
-      const inheritedAvailability = providerAvailability.get(
-        normalizeProviderAvailabilityKey(provider) || ""
-      )
-
-      return {
-        ...m,
-        id: canonicalModelId,
-        name: displayName,
-        provider,
-        description: m.description,
-        capabilities: Array.isArray(m.capabilities)
-          ? m.capabilities
-          : Array.isArray(m.features)
-            ? m.features
-            : typeof m.capabilities === "object"
-              ? m.capabilities
-              : undefined,
-        context_length:
-          typeof m.context_length === "number"
-            ? m.context_length
-            : typeof m.context_window === "number"
-              ? m.context_window
-              : typeof m.contextLength === "number"
-                ? m.contextLength
-                : undefined,
-        vision: Boolean(
-          (m.capabilities && m.capabilities.vision) ?? m.vision
-        ),
-        function_calling: Boolean(
-          (m.capabilities &&
-            (m.capabilities.function_calling || m.capabilities.tool_use)) ??
-            m.function_calling
-        ),
-        json_output: Boolean(
-          (m.capabilities && m.capabilities.json_mode) ?? m.json_output
-        ),
-        type: typeof m.type === "string" ? m.type : undefined,
-        is_configured:
-          toOptionalProviderBoolean(m.is_configured) ??
-          toOptionalProviderBoolean(m.provider_configured) ??
-          toOptionalProviderBoolean(m.configured) ??
-          inheritedAvailability?.is_configured,
-        provider_is_configured:
-          toOptionalProviderBoolean(m.provider_is_configured) ??
-          toOptionalProviderBoolean(m.provider_configured) ??
-          toOptionalProviderBoolean(m.configured) ??
-          inheritedAvailability?.is_configured,
-        provider_enabled:
-          toOptionalProviderBoolean(m.provider_enabled) ??
-          toOptionalProviderBoolean(m.enabled) ??
-          inheritedAvailability?.provider_enabled,
-        availability:
-          toNonEmptyProviderString(m.availability) ??
-          inheritedAvailability?.availability,
-        catalog_only: toOptionalProviderBoolean(m.catalog_only),
-        modalities:
-          m.modalities && typeof m.modalities === "object"
-            ? {
-                input: Array.isArray(m.modalities.input)
-                  ? m.modalities.input.map((v: any) => String(v))
-                  : undefined,
-                output: Array.isArray(m.modalities.output)
-                  ? m.modalities.output.map((v: any) => String(v))
-                  : undefined
-              }
-            : {
-                input: Array.isArray(m.input_modality)
-                  ? m.input_modality.map((v: any) => String(v))
-                  : Array.isArray(m.input_modalities)
-                    ? m.input_modalities.map((v: any) => String(v))
-                    : typeof m.input_modality === "string"
-                      ? [String(m.input_modality)]
-                      : undefined,
-                output: Array.isArray(m.output_modality)
-                  ? m.output_modality.map((v: any) => String(v))
-                  : Array.isArray(m.output_modalities)
-                    ? m.output_modalities.map((v: any) => String(v))
-                    : typeof m.output_modality === "string"
-                      ? [String(m.output_modality)]
-                      : undefined
-              }
-      }
-    })
+    return await getNormalizedTldwModels(this, options)
   }
 
   async getProviders(): Promise<TldwProvidersResponse> {

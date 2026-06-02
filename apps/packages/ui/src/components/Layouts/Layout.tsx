@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useContext, useState } from "react"
 
 import { Drawer, Tooltip } from "antd"
-import { EraserIcon, XIcon } from "lucide-react"
+import { EraserIcon, PanelLeftOpen, XIcon } from "lucide-react"
 import { IconButton } from "../Common/IconButton"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -32,7 +32,7 @@ import { useServerOnline } from "@/hooks/useServerOnline"
 import { ChatSidebar } from "@/components/Common/ChatSidebar"
 import { EventOnlyHosts } from "@/components/Common/EventHosts"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
-import { useMobile } from "@/hooks/useMediaQuery"
+import { useDesktop, useMobile } from "@/hooks/useMediaQuery"
 import { setSettingsReturnTo } from "@/utils/settings-return"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { VIEWPORT_CONSTRAINED_PATHS } from "@/routes/route-paths"
@@ -131,6 +131,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const setChatSidebarCollapsed = useLayoutUiStore(
     (state) => state.setChatSidebarCollapsed
   )
+  const leftEdgeExpandRef = React.useRef<HTMLButtonElement>(null)
   const { t } = useTranslation(["option", "common", "settings"])
   const navigate = useNavigate()
   const [openModelSettings, setOpenModelSettings] = useState(false)
@@ -138,11 +139,20 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const { demoEnabled } = useDemoMode()
   const [showChatSidebar] = useChatSidebar()
   const isMobile = useMobile()
+  const isDesktop = useDesktop()
   useServerOnline()
   const location = useLocation()
   const mobileSidebarPathRef = React.useRef(location.pathname)
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const isChatScreen = location.pathname === "/chat"
+  const useChatEdgeCollapse =
+    isChatScreen && isDesktop && showChatSidebar && !hideHeader && !hideSidebar
+  const shouldRenderChatSidebar =
+    showChatSidebar &&
+    !hideHeader &&
+    !hideSidebar &&
+    !isMobile &&
+    (!useChatEdgeCollapse || !chatSidebarCollapsed)
   const isViewportConstrainedRoute = (
     VIEWPORT_CONSTRAINED_PATHS as readonly string[]
   ).includes(location.pathname)
@@ -373,16 +383,56 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         style={chatScreenBackgroundStyle}
       >
         {/* Persistent ChatSidebar when feature flag enabled */}
-        {showChatSidebar && !hideHeader && !hideSidebar && !isMobile && (
+        {shouldRenderChatSidebar && (
           <ChatSidebar
             collapsed={chatSidebarCollapsed}
             openResetKey={chatSidebarOpenResetKey}
             onToggleCollapse={() => {
               if (chatSidebarCollapsed) signalChatSidebarOpen()
+              const collapsingFromDesktopChat =
+                useChatEdgeCollapse && !chatSidebarCollapsed
               setChatSidebarCollapsed((prev) => !prev)
+              if (collapsingFromDesktopChat) {
+                window.requestAnimationFrame(() => {
+                  leftEdgeExpandRef.current?.focus()
+                })
+              }
             }}
             className="sticky top-0 shrink-0 border-r border-border"
           />
+        )}
+        {useChatEdgeCollapse && chatSidebarCollapsed && (
+          <button
+            ref={leftEdgeExpandRef}
+            type="button"
+            data-testid="chat-sidebar-edge-expand"
+            aria-label={
+              t("common:chatSidebar.expandRail", "Expand chat rail") as string
+            }
+            title={
+              t("common:chatSidebar.expandRail", "Expand chat rail") as string
+            }
+            onClick={() => {
+              signalChatSidebarOpen()
+              setChatSidebarCollapsed(false)
+              window.requestAnimationFrame(() => {
+                document
+                  .querySelector<HTMLButtonElement>(
+                    '[data-testid="chat-sidebar-toggle"]'
+                  )
+                  ?.focus()
+              })
+            }}
+            className="absolute left-0 top-1/2 z-40 inline-flex h-28 w-10 -translate-y-1/2 flex-col items-center justify-center gap-2 rounded-r-lg border border-l-0 border-border bg-surface/95 text-text-muted shadow-lg backdrop-blur transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          >
+            <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+            <span
+              aria-hidden="true"
+              className="rotate-180 text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]"
+            >
+              {t("common:chatSidebar.title", "Chats") as string}
+            </span>
+          </button>
         )}
         <main
           className={classNames(

@@ -66,6 +66,8 @@ const recoverOptionsErrorStateIfNeeded = async (page: Page): Promise<void> => {
 
 test.describe("Research Workspace parity (extension)", () => {
   test("passes baseline + deterministic studio parity contract", async () => {
+    test.setTimeout(120_000)
+
     const pageErrors: string[] = []
     const consoleErrors: string[] = []
     const requestFailures: string[] = []

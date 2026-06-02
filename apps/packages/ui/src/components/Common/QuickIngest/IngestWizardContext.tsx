@@ -22,7 +22,10 @@ import {
   mergePresetConfig,
   configMatchesPreset,
 } from "./presets"
-import type { QuickIngestOpenDetail } from "@/utils/quick-ingest-open"
+import type {
+  FirstSourceQuickIngestKind,
+  QuickIngestOpenDetail,
+} from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -38,6 +41,7 @@ export type IngestWizardState = {
   presetConfig: PresetConfig
   customOptions: Partial<PresetConfig>
   playlistPreflightSeed: QuickIngestOpenDetail | null
+  firstSourceAddMode: FirstSourceQuickIngestKind | null
   conferenceBatchMetadata: ConferenceBatchMetadata | null
   processingState: WizardProcessingState
   results: WizardResultItem[]
@@ -166,6 +170,7 @@ const createInitialState = (): IngestWizardState => ({
   presetConfig: DEFAULT_PRESETS[DEFAULT_PRESET],
   customOptions: {},
   playlistPreflightSeed: null,
+  firstSourceAddMode: null,
   conferenceBatchMetadata: null,
   processingState: { ...INITIAL_PROCESSING_STATE },
   results: [],
@@ -188,6 +193,7 @@ const createInitialStateFromSeed = (
     customOptions: seed.customOptions ?? base.customOptions,
     playlistPreflightSeed:
       seed.playlistPreflightSeed ?? base.playlistPreflightSeed,
+    firstSourceAddMode: seed.firstSourceAddMode ?? base.firstSourceAddMode,
     conferenceBatchMetadata:
       seed.conferenceBatchMetadata ?? base.conferenceBatchMetadata,
     processingState: seed.processingState

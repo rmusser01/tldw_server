@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import http from "node:http"
 import { AddressInfo } from "node:net"
@@ -179,36 +179,6 @@ const ensureChatInput = async (page: Page) => {
   return input
 }
 
-const waitForOpenedExtensionRoute = async (
-  context: BrowserContext,
-  expectedUrl: string,
-  trigger: () => Promise<void>
-) => {
-  const popupPromise = context
-    .waitForEvent("page", { timeout: 10000 })
-    .catch(() => null)
-
-  await trigger()
-
-  const popup = await popupPromise
-  if (popup) {
-    await popup.waitForLoadState("domcontentloaded").catch(() => {})
-  }
-
-  await expect
-    .poll(
-      () => context.pages().some((page) => page.url() === expectedUrl),
-      { timeout: 10000 }
-    )
-    .toBe(true)
-
-  const openedPage = context
-    .pages()
-    .find((page) => page.url() === expectedUrl)
-  expect(openedPage, `Expected ${expectedUrl} to open`).toBeTruthy()
-  return openedPage as Page
-}
-
 test.describe("Sidepanel chat smoke", () => {
   test("keeps the 390px sidepanel chat layout inside the viewport", async () => {
     test.setTimeout(90000)
@@ -341,15 +311,18 @@ test.describe("Sidepanel chat smoke", () => {
         fullPage: true
       })
 
-      const expectedFullChatUrl = `chrome-extension://${extensionId}/options.html#/chat`
-      const openedFullChatPage = await waitForOpenedExtensionRoute(
-        context,
-        expectedFullChatUrl,
-        () => headerFullScreen.click()
-      )
-      await expect(openedFullChatPage.locator("body")).not.toContainText(
-        "CharacterControlRail"
-      )
+      const [openedFullChatPage] = await Promise.all([
+        context.waitForEvent("page"),
+        headerFullScreen.click()
+      ])
+      await expect
+        .poll(() => openedFullChatPage.url(), { timeout: 10_000 })
+        .toContain(`${new URL(baseUrl).origin}/chat`)
+
+      const openedUrl = new URL(openedFullChatPage.url())
+      expect(openedUrl.href).not.toContain("/options.html")
+      expect(openedUrl.searchParams.has("handoff")).toBe(false)
+      expect(new URLSearchParams(openedUrl.hash.slice(1)).get("handoff")).toBeTruthy()
     } finally {
       await context.close()
       await stopChatMockServer(server)

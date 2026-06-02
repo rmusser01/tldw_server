@@ -29,6 +29,7 @@ import type { ServerChatMessage as ApiServerChatMessage } from "@/services/tldw/
 import { createSafeStorage } from "@/utils/safe-storage"
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStorage } from "@plasmohq/storage/hook"
+import { browser } from "wxt/browser"
 import { ChevronDown } from "lucide-react"
 import React, { lazy, Suspense } from "react"
 import { useTranslation } from "react-i18next"
@@ -62,6 +63,11 @@ import {
   type OpenHistoryDetail,
   type TimelineActionDetail
 } from "@/utils/timeline-actions"
+import {
+  buildSidepanelChatWebUiHandoffUrl,
+  SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+  type SidepanelChatWebUiConfig
+} from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
@@ -1710,6 +1716,82 @@ const SidepanelChat = () => {
     return t("sidepanel:tabs.newChat", "New chat")
   }, [activeTabId, tabs, t])
 
+  const readWebUiHandoffConfig = React.useCallback(async () => {
+    const storage = storageRef.current
+    const readStorageValue = async <T,>(key: string): Promise<T | null> => {
+      try {
+        const value = await storage.get<T>(key)
+        return value ?? null
+      } catch {
+        return null
+      }
+    }
+    const storedConfig = await readStorageValue<Record<string, unknown>>(
+      "tldwConfig"
+    )
+    const legacyWebUiUrl =
+      (await readStorageValue<string>("webUiUrl")) ??
+      (await readStorageValue<string>("webuiUrl"))
+
+    const config: SidepanelChatWebUiConfig = {
+      serverUrl:
+        typeof storedConfig?.serverUrl === "string"
+          ? storedConfig.serverUrl
+          : null,
+      webUiUrl:
+        typeof storedConfig?.webUiUrl === "string"
+          ? storedConfig.webUiUrl
+          : typeof storedConfig?.webuiUrl === "string"
+            ? storedConfig.webuiUrl
+            : legacyWebUiUrl
+    }
+
+    return config
+  }, [])
+
+  const openChatInWebUi = React.useCallback(async () => {
+    const snapshot = buildSnapshot()
+    const draft = textareaRef.current?.value ?? ""
+    const config = await readWebUiHandoffConfig()
+    const url = buildSidepanelChatWebUiHandoffUrl({
+      config,
+      payload: {
+        source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+        createdAt: Date.now(),
+        draft,
+        historyId: snapshot.historyId ?? null,
+        serverChatId: snapshot.serverChatId ?? null,
+        chatMode: snapshot.chatMode ?? "normal",
+        webSearch: snapshot.webSearch ?? false,
+        toolChoice: snapshot.toolChoice ?? "none",
+        selectedModel: snapshot.selectedModel ?? null,
+        selectedSystemPrompt: snapshot.selectedSystemPrompt ?? null,
+        selectedQuickPrompt: snapshot.selectedQuickPrompt ?? null,
+        temporaryChat: snapshot.temporaryChat ?? false,
+        useOCR: snapshot.useOCR ?? false,
+        title: activeTabLabel
+      }
+    })
+
+    const openFallback = () => {
+      const opened = window.open(url, "_blank")
+      if (!opened) {
+        throw new Error("Window popup was blocked")
+      }
+    }
+
+    try {
+      if (browser.tabs?.create) {
+        await browser.tabs.create({ url })
+        return
+      }
+    } catch (error) {
+      console.error("Failed to open WebUI chat tab:", error)
+    }
+
+    openFallback()
+  }, [activeTabLabel, buildSnapshot, readWebUiHandoffConfig])
+
   const commandPaletteChats = React.useMemo(
     () =>
       [...tabs]
@@ -1761,6 +1843,7 @@ const SidepanelChat = () => {
             setSidebarOpen={setSidebarOpen}
             activeTitle={activeTabLabel}
             onRenameTitle={handleRenameActiveTab}
+            onOpenChatInWebUi={openChatInWebUi}
           />
           <ConnectionBanner className="pt-12" />
         </div>
@@ -1867,6 +1950,7 @@ const SidepanelChat = () => {
                   inputRef={textareaRef}
                   onHeightChange={setComposerHeight}
                   draftKey={draftKey}
+                  onOpenChatInWebUi={openChatInWebUi}
                 />
               </div>
             )}
@@ -1898,6 +1982,7 @@ const SidepanelChat = () => {
                 inputRef={textareaRef}
                 onHeightChange={setComposerHeight}
                 draftKey={draftKey}
+                onOpenChatInWebUi={openChatInWebUi}
               />
             </div>
           )}

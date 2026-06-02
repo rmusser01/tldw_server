@@ -25,6 +25,48 @@ vi.mock("react-i18next", () => ({
 import { FileDropZone } from "../QueueTab/FileDropZone"
 
 describe("FileDropZone acceptance", () => {
+  it("only autofocuses once when disabled state clears", () => {
+    const focusSpy = vi
+      .spyOn(HTMLElement.prototype, "focus")
+      .mockImplementation(() => undefined)
+    const { rerender } = render(
+      <FileDropZone
+        autoFocus
+        disabled
+        onFilesAdded={vi.fn()}
+        onFilesRejected={vi.fn()}
+      />
+    )
+
+    rerender(
+      <FileDropZone
+        autoFocus
+        disabled={false}
+        onFilesAdded={vi.fn()}
+        onFilesRejected={vi.fn()}
+      />
+    )
+    rerender(
+      <FileDropZone
+        autoFocus
+        disabled
+        onFilesAdded={vi.fn()}
+        onFilesRejected={vi.fn()}
+      />
+    )
+    rerender(
+      <FileDropZone
+        autoFocus
+        disabled={false}
+        onFilesAdded={vi.fn()}
+        onFilesRejected={vi.fn()}
+      />
+    )
+
+    expect(focusSpy).toHaveBeenCalledTimes(1)
+    focusSpy.mockRestore()
+  })
+
   it("accepts mkv uploads even when the browser does not provide a MIME type", async () => {
     const user = userEvent.setup()
     const onFilesAdded = vi.fn()
