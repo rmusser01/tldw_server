@@ -124,10 +124,8 @@ vi.mock("antd", async () => {
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    initialize: (requireAuth?: boolean) =>
-      (mocks.initialize as (requireAuth?: boolean) => unknown)(requireAuth),
-    listPersonaProfiles: (options?: unknown) =>
-      (mocks.listPersonaProfiles as (options?: unknown) => unknown)(options)
+    initialize: () => mocks.initialize(),
+    listPersonaProfiles: () => mocks.listPersonaProfiles()
   }
 }))
 
