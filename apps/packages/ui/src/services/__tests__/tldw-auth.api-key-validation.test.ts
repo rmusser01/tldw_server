@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TldwAuthService } from "../tldw/TldwAuth"
 
@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
   bgRequest: vi.fn(),
+  fetch: vi.fn(),
   emitSplashAfterLoginSuccess: vi.fn()
 }))
 
@@ -29,37 +30,46 @@ describe("TldwAuthService.testApiKey", () => {
     mocks.getConfig.mockReset()
     mocks.updateConfig.mockReset()
     mocks.bgRequest.mockReset()
+    mocks.fetch.mockReset()
     mocks.emitSplashAfterLoginSuccess.mockReset()
+    vi.stubGlobal("fetch", mocks.fetch)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
   })
 
-  it("uses a relative profile path so absolute URL policy does not block API key validation", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("uses the candidate setup server URL for API key validation", async () => {
     const auth = new TldwAuthService()
 
-    mocks.bgRequest.mockImplementation(async ({ path, method, headers, noAuth }) => {
-      if (typeof path === "string" && /^https?:/i.test(path)) {
-        throw new Error(
-          "Absolute URL requests are blocked unless the request origin is explicitly allowlisted."
-        )
-      }
-
-      expect(path).toBe("/api/v1/users/me/profile")
-      expect(method).toBe("GET")
-      expect(noAuth).toBe(true)
-      expect(headers).toMatchObject({ "X-API-KEY": "real-api-key" })
-      return { id: 1 }
+    mocks.fetch.mockImplementation(async (url, init) => {
+      expect(url).toBe("https://example.com/api/v1/users/me/profile")
+      expect(init).toMatchObject({
+        method: "GET",
+        headers: { "X-API-KEY": "real-api-key" }
+      })
+      return new Response(JSON.stringify({ id: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
     })
 
     const ok = await auth.testApiKey("https://example.com", "real-api-key")
 
     expect(ok).toBe(true)
-    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
   })
 
   it("returns false for invalid API key responses", async () => {
     const auth = new TldwAuthService()
-    const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
 
-    mocks.bgRequest.mockRejectedValueOnce(unauthorized)
+    mocks.fetch.mockResolvedValueOnce(
+      new Response("Unauthorized", {
+        status: 401,
+        statusText: "Unauthorized"
+      })
+    )
 
     const ok = await auth.testApiKey("https://example.com", "bad-api-key")
 
@@ -73,7 +83,7 @@ describe("TldwAuthService.testApiKey", () => {
       name: "AbortError"
     })
 
-    mocks.bgRequest.mockRejectedValueOnce(aborted)
+    mocks.fetch.mockRejectedValueOnce(aborted)
 
     await expect(
       auth.testApiKey("https://example.com", "real-api-key")

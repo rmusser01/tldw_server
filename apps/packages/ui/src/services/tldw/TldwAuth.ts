@@ -31,6 +31,17 @@ export interface UserInfo {
   is_active: boolean
 }
 
+const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
+const API_KEY_VALIDATION_TIMEOUT_MS = 30000
+
+const buildApiKeyValidationUrl = (serverUrl: string): string => {
+  const trimmed = String(serverUrl || "").trim()
+  if (!trimmed) {
+    throw new Error("tldw server not configured")
+  }
+  return new URL(API_KEY_PROFILE_PATH, `${trimmed.replace(/\/+$/, "")}/`).toString()
+}
+
 export class TldwAuthService {
   private refreshTimer: NodeJS.Timeout | null = null
 
@@ -304,20 +315,37 @@ export class TldwAuthService {
   /**
    * Test API key for single-user mode
    */
-  async testApiKey(_serverUrl: string, apiKey: string): Promise<boolean> {
-    // Validate against a protected endpoint that requires auth.
-    // Keep this as a relative path so request-core does not apply
-    // absolute URL allowlist policy during onboarding validation.
+  async testApiKey(serverUrl: string, apiKey: string): Promise<boolean> {
+    // Validate against the candidate setup endpoint, not the currently
+    // persisted config. First-run setup may be correcting a bad saved URL.
+    const validationUrl = buildApiKeyValidationUrl(serverUrl)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      API_KEY_VALIDATION_TIMEOUT_MS
+    )
     try {
-      // Use /api/v1/users/me/profile which requires valid authentication
-      await bgRequest<any>({
-        path: '/api/v1/users/me/profile' as any,
-        method: 'GET' as any,
+      const response = await fetch(validationUrl, {
+        method: 'GET',
         headers: { 'X-API-KEY': apiKey },
-        noAuth: true,
-        timeoutMs: 30000
+        signal: controller.signal
       })
-      return true
+
+      if (response.ok) {
+        return true
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return false
+      }
+
+      const message =
+        (await response.text().catch(() => "")) ||
+        response.statusText ||
+        `HTTP ${response.status}`
+      const responseError = new Error(message) as Error & { status?: number }
+      responseError.status = response.status
+      throw responseError
     } catch (error: any) {
       const status = Number(
         error?.status ?? error?.statusCode ?? error?.response?.status ?? 0
@@ -344,6 +372,8 @@ export class TldwAuthService {
       }
 
       throw error
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
