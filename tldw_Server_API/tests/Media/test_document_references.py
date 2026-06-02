@@ -81,12 +81,60 @@ class _FailingReferenceCacheDb:
         raise RuntimeError("references cache failed at /private/references-cache.db")
 
 
+class _ReferenceCacheRepositoryStub:
+    def __init__(
+        self,
+        *,
+        cached_result: tuple[list[str], int] | None = None,
+        load_exc: Exception | None = None,
+        save_exc: Exception | None = None,
+    ) -> None:
+        self.cached_result = cached_result
+        self.load_exc = load_exc
+        self.save_exc = save_exc
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def get_parsed_references_cache(self, *args: Any, **kwargs: Any) -> tuple[list[str], int] | None:
+        self.calls.append(("get_parsed_references_cache", args, kwargs))
+        if self.load_exc is not None:
+            raise self.load_exc
+        return self.cached_result
+
+    def upsert_parsed_references_cache(self, *args: Any, **kwargs: Any) -> None:
+        self.calls.append(("upsert_parsed_references_cache", args, kwargs))
+        if self.save_exc is not None:
+            raise self.save_exc
+
+
+def _patch_reference_repository(monkeypatch: pytest.MonkeyPatch, repo: _ReferenceCacheRepositoryStub) -> None:
+    class RepositoryFactory:
+        @staticmethod
+        def from_media_db(db: Any) -> _ReferenceCacheRepositoryStub:
+            repo.calls.append(("from_media_db", (db,), {}))
+            return repo
+
+    monkeypatch.setattr(refs_mod, "DocumentWorkspaceRepository", RepositoryFactory, raising=False)
+
+
 def _assert_log_sanitized(
     calls: list[tuple[tuple[Any, ...], dict[str, Any]]],
     expected_message: str,
 ) -> None:
     assert calls
     assert [args[0] for args, _kwargs in calls if args] == [expected_message]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in calls)
+    rendered_calls = repr(calls)
+    assert "references cache failed" not in rendered_calls
+    assert "/private/references-cache.db" not in rendered_calls
+
+
+def _assert_log_contains_sanitized(
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]],
+    expected_message: str,
+) -> None:
+    assert calls
+    messages = [args[0] for args, _kwargs in calls if args]
+    assert expected_message in messages
     assert all(not kwargs.get("exc_info") for _args, kwargs in calls)
     rendered_calls = repr(calls)
     assert "references cache failed" not in rendered_calls
@@ -248,25 +296,25 @@ async def test_references_endpoint_parse_cap_limits_available_refs(mock_user, mo
 
 
 @pytest.mark.asyncio
-async def test_references_endpoint_uses_parsed_reference_db_cache(mock_user, mock_db):
+async def test_references_endpoint_uses_parsed_reference_db_cache(mock_user, mock_db, monkeypatch):
     content = "Intro text\\n" "References\\n" "[1] This content should not be parsed when cache is present.\\n"
     mock_db.get_media_by_id = MagicMock(return_value={"id": 1, "content": content})
+    repo = _ReferenceCacheRepositoryStub(
+        cached_result=(
+            [
+                "[1] Cached Author. 2020. Cached Example One.",
+                "[2] Cached Author. 2021. Cached Example Two.",
+            ],
+            2,
+        )
+    )
+    _patch_reference_repository(monkeypatch, repo)
 
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    cached_refs = [
-        "[1] Cached Author. 2020. Cached Example One.",
-        "[2] Cached Author. 2021. Cached Example Two.",
-    ]
-
     with (
         patch.object(refs_mod, "get_cached_response", return_value=None),
-        patch.object(
-            refs_mod,
-            "_load_parsed_references_cache",
-            return_value=(cached_refs, 2),
-        ),
         patch.object(
             refs_mod,
             "_split_references_with_meta",
@@ -282,6 +330,7 @@ async def test_references_endpoint_uses_parsed_reference_db_cache(mock_user, moc
     assert data["total_available"] == 2
     assert len(data["references"]) == 2
     assert "Cached Example One" in data["references"][0]["raw_text"]
+    assert [call[0] for call in repo.calls] == ["from_media_db", "get_parsed_references_cache"]
 
     app.dependency_overrides.clear()
 
@@ -349,53 +398,88 @@ async def test_references_endpoint_sanitizes_db_fetch_error_log(
         app.dependency_overrides.clear()
 
 
-def test_parsed_reference_cache_table_warning_is_sanitized(monkeypatch):
+@pytest.mark.asyncio
+async def test_references_endpoint_sanitizes_parsed_cache_load_error(
+    mock_user,
+    mock_db,
+    monkeypatch,
+):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
-
-    refs_mod._ensure_parsed_references_cache_table(_FailingReferenceCacheDb())
-
-    _assert_log_sanitized(
-        logger_stub.warning_calls,
-        "Could not ensure parsed references cache table",
+    repo = _ReferenceCacheRepositoryStub(
+        load_exc=RuntimeError("references cache failed at /private/references-cache.db")
+    )
+    _patch_reference_repository(monkeypatch, repo)
+    mock_db.get_media_by_id = MagicMock(
+        return_value={
+            "id": 1,
+            "content": "Intro text\nReferences\n[1] Parsed Author. 2020. Parsed Example.\n",
+        }
     )
 
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    try:
+        with (
+            patch.object(refs_mod, "get_cached_response", return_value=None),
+            patch.object(
+                refs_mod,
+                "_split_references_with_meta",
+                return_value=(["[1] Parsed Author. 2020. Parsed Example."], 1, False),
+            ),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/api/v1/media/1/references?enrich=false")
 
-def test_parsed_reference_cache_load_debug_is_sanitized(monkeypatch):
+        assert response.status_code == 200
+        _assert_log_contains_sanitized(
+            logger_stub.debug_calls,
+            "Failed loading parsed references cache",
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_references_endpoint_sanitizes_parsed_cache_save_error(
+    mock_user,
+    mock_db,
+    monkeypatch,
+):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
-
-    result = refs_mod._load_parsed_references_cache(
-        _FailingReferenceCacheDb(),
-        media_id=1,
-        user_id="1",
-        content_hash="abc",
+    repo = _ReferenceCacheRepositoryStub(
+        save_exc=RuntimeError("references cache failed at /private/references-cache.db")
+    )
+    _patch_reference_repository(monkeypatch, repo)
+    mock_db.get_media_by_id = MagicMock(
+        return_value={
+            "id": 1,
+            "content": "Intro text\nReferences\n[1] Parsed Author. 2020. Parsed Example.\n",
+        }
     )
 
-    assert result is None
-    _assert_log_sanitized(
-        logger_stub.debug_calls,
-        "Failed loading parsed references cache",
-    )
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    try:
+        with (
+            patch.object(refs_mod, "get_cached_response", return_value=None),
+            patch.object(
+                refs_mod,
+                "_split_references_with_meta",
+                return_value=(["[1] Parsed Author. 2020. Parsed Example."], 1, False),
+            ),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/api/v1/media/1/references?enrich=false")
 
-
-def test_parsed_reference_cache_save_debug_is_sanitized(monkeypatch):
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
-
-    refs_mod._save_parsed_references_cache(
-        _FailingReferenceCacheDb(),
-        media_id=1,
-        user_id="1",
-        content_hash="abc",
-        references=["[1] Example"],
-        total_detected=1,
-    )
-
-    _assert_log_sanitized(
-        logger_stub.debug_calls,
-        "Failed saving parsed references cache",
-    )
+        assert response.status_code == 200
+        _assert_log_contains_sanitized(
+            logger_stub.debug_calls,
+            "Failed saving parsed references cache",
+        )
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_apply_crossref_data_sets_fields():

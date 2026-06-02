@@ -20,55 +20,11 @@ from tldw_Server_API.app.api.v1.schemas.document_annotations import (
     AnnotationUpdate,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
+    DocumentWorkspaceRepository,
+)
 
 router = APIRouter(tags=["Document Workspace"])
-
-
-# Table name for document annotations
-ANNOTATIONS_TABLE = "document_annotations"
-
-
-def _ensure_annotations_table(db: Any) -> None:
-    """
-    Ensure the document_annotations table exists in the database.
-    Creates the table if it doesn't exist, and applies migrations for new columns.
-    """
-    create_sql = f"""
-    CREATE TABLE IF NOT EXISTS {ANNOTATIONS_TABLE} (
-        id TEXT PRIMARY KEY,
-        media_id INTEGER NOT NULL,
-        user_id TEXT NOT NULL,
-        location TEXT NOT NULL,
-        text TEXT NOT NULL,
-        color TEXT NOT NULL DEFAULT 'yellow',
-        note TEXT,
-        annotation_type TEXT NOT NULL DEFAULT 'highlight',
-        chapter_title TEXT,
-        percentage REAL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        deleted INTEGER NOT NULL DEFAULT 0
-    )
-    """
-    index_sql = f"""
-    CREATE INDEX IF NOT EXISTS idx_annotations_media_user
-    ON {ANNOTATIONS_TABLE}(media_id, user_id, deleted)
-    """
-    try:
-        with db.transaction() as conn:
-            conn.execute(create_sql)
-            conn.execute(index_sql)
-            # Migration: add chapter_title column if missing
-            cursor = conn.execute(f"PRAGMA table_info({ANNOTATIONS_TABLE})")
-            columns = {row["name"] for row in cursor.fetchall()}
-            if "chapter_title" not in columns:
-                conn.execute(f"ALTER TABLE {ANNOTATIONS_TABLE} ADD COLUMN chapter_title TEXT")
-                logger.info("Added chapter_title column to annotations table")
-            if "percentage" not in columns:
-                conn.execute(f"ALTER TABLE {ANNOTATIONS_TABLE} ADD COLUMN percentage REAL")
-                logger.info("Added percentage column to annotations table")
-    except Exception:
-        logger.warning("Could not create annotations table")
 
 
 def _generate_annotation_id() -> str:
@@ -151,20 +107,9 @@ async def list_annotations(
             detail="Media not found",
         )
 
-    # Ensure table exists
-    _ensure_annotations_table(db)
-
-    # Fetch annotations
-    query = """
-    SELECT id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at
-    FROM document_annotations
-    WHERE media_id = ? AND user_id = ? AND deleted = 0
-    ORDER BY created_at DESC
-    """
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as conn:
-            cursor = conn.execute(query, (media_id, user_id))
-            rows = cursor.fetchall()
+        rows = repo.list_annotations(media_id=media_id, user_id=user_id)
     except Exception as e:
         logger.error("Error fetching annotations")
         raise HTTPException(
@@ -219,37 +164,25 @@ async def create_annotation(
             detail="Media not found",
         )
 
-    # Ensure table exists
-    _ensure_annotations_table(db)
-
-    # Create annotation
     annotation_id = _generate_annotation_id()
     now = _now_iso()
 
-    insert_sql = """
-    INSERT INTO document_annotations
-    (id, media_id, user_id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as conn:
-            conn.execute(
-                insert_sql,
-                (
-                    annotation_id,
-                    media_id,
-                    user_id,
-                    body.location,
-                    body.text,
-                    body.color.value,
-                    body.note,
-                    body.annotation_type.value,
-                    body.chapter_title,
-                    body.percentage,
-                    now,
-                    now,
-                ),
-            )
+        row = repo.create_annotation(
+            annotation_id=annotation_id,
+            media_id=media_id,
+            user_id=user_id,
+            location=body.location,
+            text=body.text,
+            color=body.color.value,
+            note=body.note,
+            annotation_type=body.annotation_type.value,
+            chapter_title=body.chapter_title,
+            percentage=body.percentage,
+            created_at=now,
+            updated_at=now,
+        )
     except Exception as e:
         logger.error("Error creating annotation")
         raise HTTPException(
@@ -257,19 +190,7 @@ async def create_annotation(
             detail="Failed to create annotation",
         ) from e
 
-    return AnnotationResponse(
-        id=annotation_id,
-        media_id=media_id,
-        location=body.location,
-        text=body.text,
-        color=body.color,
-        note=body.note,
-        annotation_type=body.annotation_type,
-        chapter_title=body.chapter_title,
-        percentage=body.percentage,
-        created_at=datetime.fromisoformat(now),
-        updated_at=datetime.fromisoformat(now),
-    )
+    return _row_to_response(row, media_id)
 
 
 @router.put(
@@ -302,19 +223,9 @@ async def update_annotation(
         user_id,
     )
 
-    # Ensure table exists
-    _ensure_annotations_table(db)
-
-    # Fetch existing annotation
-    select_sql = """
-    SELECT id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at
-    FROM document_annotations
-    WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = 0
-    """
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as conn:
-            cursor = conn.execute(select_sql, (annotation_id, media_id, user_id))
-            row = cursor.fetchone()
+        row = repo.get_annotation(annotation_id=annotation_id, media_id=media_id, user_id=user_id)
     except Exception as e:
         logger.error("Error fetching annotation")
         raise HTTPException(
@@ -329,44 +240,20 @@ async def update_annotation(
         )
 
     row_dict = dict(row)
-
-    # Build update fields
-    updates = []
-    params = []
-    if body.text is not None:
-        updates.append("text = ?")
-        params.append(body.text)
-        row_dict["text"] = body.text
-    if body.color is not None:
-        updates.append("color = ?")
-        params.append(body.color.value)
-        row_dict["color"] = body.color.value
-    if body.note is not None:
-        updates.append("note = ?")
-        params.append(body.note)
-        row_dict["note"] = body.note
-
-    if not updates:
-        # Nothing to update, return existing
+    if body.text is None and body.color is None and body.note is None:
         return _row_to_response(row_dict, media_id)
 
     now = _now_iso()
-    updates.append("updated_at = ?")
-    params.append(now)
-    row_dict["updated_at"] = now
-
-    params.extend([annotation_id, media_id, user_id])
-
-    set_clause_sql = ", ".join(updates)
-    update_sql_template = """
-    UPDATE document_annotations
-    SET {set_clause_sql}
-    WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = 0
-    """
-    update_sql = update_sql_template.format_map(locals())  # nosec B608
     try:
-        with db.transaction() as conn:
-            conn.execute(update_sql, tuple(params))
+        updated = repo.update_annotation(
+            annotation_id=annotation_id,
+            media_id=media_id,
+            user_id=user_id,
+            text=body.text,
+            color=body.color.value if body.color is not None else None,
+            note=body.note,
+            updated_at=now,
+        )
     except Exception as e:
         logger.error("Error updating annotation")
         raise HTTPException(
@@ -374,7 +261,13 @@ async def update_annotation(
             detail="Failed to update annotation",
         ) from e
 
-    return _row_to_response(row_dict, media_id)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Annotation not found",
+        )
+
+    return _row_to_response(updated, media_id)
 
 
 @router.delete(
@@ -406,32 +299,26 @@ async def delete_annotation(
         user_id,
     )
 
-    # Ensure table exists
-    _ensure_annotations_table(db)
-
-    # Soft delete
     now = _now_iso()
-    delete_sql = """
-    UPDATE document_annotations
-    SET deleted = 1, updated_at = ?
-    WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = 0
-    """
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as conn:
-            cursor = conn.execute(delete_sql, (now, annotation_id, media_id, user_id))
-            if cursor.rowcount == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Annotation not found",
-                )
-    except HTTPException:
-        raise
+        deleted = repo.soft_delete_annotation(
+            annotation_id=annotation_id,
+            media_id=media_id,
+            user_id=user_id,
+            updated_at=now,
+        )
     except Exception as e:
         logger.error("Error deleting annotation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete annotation",
         ) from e
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Annotation not found",
+        )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -478,60 +365,36 @@ async def sync_annotations(
             detail="Media not found",
         )
 
-    # Ensure table exists
-    _ensure_annotations_table(db)
-
-    synced_annotations: list[AnnotationResponse] = []
+    annotation_rows: list[dict[str, Any]] = []
     id_mapping: dict = {}
 
-    insert_sql = """
-    INSERT INTO document_annotations
-    (id, media_id, user_id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
-
     try:
-        with db.transaction() as conn:
-            for i, annotation in enumerate(body.annotations):
-                annotation_id = _generate_annotation_id()
-                now = _now_iso()
+        for i, annotation in enumerate(body.annotations):
+            annotation_id = _generate_annotation_id()
+            now = _now_iso()
+            annotation_rows.append(
+                {
+                    "id": annotation_id,
+                    "location": annotation.location,
+                    "text": annotation.text,
+                    "color": annotation.color.value,
+                    "note": annotation.note,
+                    "annotation_type": annotation.annotation_type.value,
+                    "chapter_title": annotation.chapter_title,
+                    "percentage": annotation.percentage,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+            if body.client_ids and i < len(body.client_ids):
+                id_mapping[body.client_ids[i]] = annotation_id
 
-                conn.execute(
-                    insert_sql,
-                    (
-                        annotation_id,
-                        media_id,
-                        user_id,
-                        annotation.location,
-                        annotation.text,
-                        annotation.color.value,
-                        annotation.note,
-                        annotation.annotation_type.value,
-                        annotation.chapter_title,
-                        annotation.percentage,
-                        now,
-                        now,
-                    ),
-                )
-
-                response = AnnotationResponse(
-                    id=annotation_id,
-                    media_id=media_id,
-                    location=annotation.location,
-                    text=annotation.text,
-                    color=annotation.color,
-                    note=annotation.note,
-                    annotation_type=annotation.annotation_type,
-                    chapter_title=annotation.chapter_title,
-                    percentage=annotation.percentage,
-                    created_at=datetime.fromisoformat(now),
-                    updated_at=datetime.fromisoformat(now),
-                )
-                synced_annotations.append(response)
-
-                # Map client ID to server ID if provided
-                if body.client_ids and i < len(body.client_ids):
-                    id_mapping[body.client_ids[i]] = annotation_id
+        repo = DocumentWorkspaceRepository.from_media_db(db)
+        synced_rows = repo.sync_annotations(
+            media_id=media_id,
+            user_id=user_id,
+            annotation_rows=annotation_rows,
+        )
 
     except Exception as e:
         logger.error("Error syncing annotations")
@@ -539,6 +402,8 @@ async def sync_annotations(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to sync annotations",
         ) from e
+
+    synced_annotations = [_row_to_response(dict(row), media_id) for row in synced_rows]
 
     return AnnotationSyncResponse(
         media_id=media_id,

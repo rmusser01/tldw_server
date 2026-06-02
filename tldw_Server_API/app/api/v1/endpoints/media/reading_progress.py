@@ -17,47 +17,11 @@ from tldw_Server_API.app.api.v1.schemas.reading_progress import (
     ViewMode,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
+    DocumentWorkspaceRepository,
+)
 
 router = APIRouter(tags=["Document Workspace"])
-
-
-# Table name for reading progress
-PROGRESS_TABLE = "document_reading_progress"
-
-
-def _ensure_progress_table(db: Any) -> None:
-    """
-    Ensure the document_reading_progress table exists in the database.
-    Creates the table if it doesn't exist, and applies migrations for new columns.
-    """
-    create_sql = f"""
-    CREATE TABLE IF NOT EXISTS {PROGRESS_TABLE} (
-        media_id INTEGER NOT NULL,
-        user_id TEXT NOT NULL,
-        current_page INTEGER NOT NULL DEFAULT 1,
-        total_pages INTEGER NOT NULL DEFAULT 1,
-        zoom_level INTEGER NOT NULL DEFAULT 100,
-        view_mode TEXT NOT NULL DEFAULT 'single',
-        cfi TEXT,
-        percentage REAL,
-        last_read_at TEXT NOT NULL,
-        PRIMARY KEY (media_id, user_id)
-    )
-    """
-    try:
-        with db.transaction() as conn:
-            conn.execute(create_sql)
-            # Migration: add cfi column if missing
-            cursor = conn.execute(f"PRAGMA table_info({PROGRESS_TABLE})")
-            columns = {row["name"] for row in cursor.fetchall()}
-            if "cfi" not in columns:
-                conn.execute(f"ALTER TABLE {PROGRESS_TABLE} ADD COLUMN cfi TEXT")
-                logger.info("Added cfi column to reading progress table")
-            if "percentage" not in columns:
-                conn.execute(f"ALTER TABLE {PROGRESS_TABLE} ADD COLUMN percentage REAL")
-                logger.info("Added percentage column to reading progress table")
-    except Exception:
-        logger.warning("Could not create reading progress table")
 
 
 def _now_iso() -> str:
@@ -118,20 +82,9 @@ async def get_reading_progress(
             detail="Media not found",
         )
 
-    # Ensure table exists
-    _ensure_progress_table(db)
-
-    # Fetch progress
-    query_template = """
-    SELECT current_page, total_pages, zoom_level, view_mode, cfi, percentage, last_read_at
-    FROM {PROGRESS_TABLE}
-    WHERE media_id = ? AND user_id = ?
-    """
-    query = query_template.format(PROGRESS_TABLE=PROGRESS_TABLE)  # nosec B608
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as conn:
-            cursor = conn.execute(query, (media_id, user_id))
-            row = cursor.fetchone()
+        row = repo.get_reading_progress(media_id=media_id, user_id=user_id)
     except Exception as e:
         logger.error("Error fetching reading progress")
         raise HTTPException(
@@ -209,33 +162,21 @@ async def update_reading_progress(
             detail="Media not found",
         )
 
-    # Ensure table exists
-    _ensure_progress_table(db)
-
     now = _now_iso()
 
-    # Upsert progress (INSERT OR REPLACE for SQLite)
-    upsert_sql = f"""
-    INSERT OR REPLACE INTO {PROGRESS_TABLE}
-    (media_id, user_id, current_page, total_pages, zoom_level, view_mode, cfi, percentage, last_read_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as conn:
-            conn.execute(
-                upsert_sql,
-                (
-                    media_id,
-                    user_id,
-                    body.current_page,
-                    body.total_pages,
-                    body.zoom_level,
-                    body.view_mode.value,
-                    body.cfi,
-                    body.percentage,
-                    now,
-                ),
-            )
+        repo.upsert_reading_progress(
+            media_id=media_id,
+            user_id=user_id,
+            current_page=body.current_page,
+            total_pages=body.total_pages,
+            zoom_level=body.zoom_level,
+            view_mode=body.view_mode.value,
+            cfi=body.cfi,
+            percentage=body.percentage,
+            last_read_at=now,
+        )
     except Exception as e:
         logger.error("Error updating reading progress")
         raise HTTPException(
@@ -298,17 +239,9 @@ async def delete_reading_progress(
             detail="Media not found",
         )
 
-    # Ensure table exists
-    _ensure_progress_table(db)
-
-    delete_sql_template = """
-    DELETE FROM {PROGRESS_TABLE}
-    WHERE media_id = ? AND user_id = ?
-    """
-    delete_sql = delete_sql_template.format(PROGRESS_TABLE=PROGRESS_TABLE)  # nosec B608
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     try:
-        with db.transaction() as cursor:
-            cursor.execute(delete_sql, (media_id, user_id))
+        repo.delete_reading_progress(media_id=media_id, user_id=user_id)
     except Exception as e:
         logger.error("Error deleting reading progress")
         raise HTTPException(
