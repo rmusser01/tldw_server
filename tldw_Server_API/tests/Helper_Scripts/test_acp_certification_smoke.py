@@ -396,6 +396,66 @@ def test_agent_profile_cli_uses_registry_classification_path(monkeypatch, capsys
     assert manifest["commands"][0]["argv"] == ["opencode", "acp"]
 
 
+def test_agent_profile_manifest_preserves_registry_support_and_adapter_metadata(monkeypatch, capsys) -> None:
+    module = _load_module()
+    from tldw_Server_API.app.core.Agent_Client_Protocol import agent_registry
+
+    entry = SimpleNamespace(
+        type="codex",
+        name="OpenAI Codex CLI",
+        support_state="experimental",
+        verification_level="documented_only",
+        adapter_source="zed-industries/codex-acp",
+        adapter_docs_url="https://github.com/zed-industries/codex-acp",
+        adapter_package="@zed-industries/codex-acp",
+        adapter_version="0.15.0",
+        adapter_version_policy="exact_pin_required",
+        adapter_install_source="github_release_preferred",
+        credential_policy="delegated_to_adapter",
+        runtime_backend="acp_downstream",
+    )
+
+    class _Registry:
+        def get_entry(self, profile):
+            assert profile == "codex"
+            return entry
+
+    class _Classification:
+        def as_dict(self):
+            return {
+                "entrypoint_strategy": "external_acp_adapter",
+                "acp_command": "codex-acp",
+                "acp_args": [],
+                "probe_state": "blocked",
+                "primary_blocker": "adapter_missing",
+                "blockers": ["adapter_missing"],
+                "status_message": "Configured ACP adapter command is not available on PATH.",
+                "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+            }
+
+    monkeypatch.setattr(agent_registry, "get_agent_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        agent_registry,
+        "classify_agent_entrypoint",
+        lambda received_entry: _Classification(),
+    )
+
+    rc = module.main(["--agent-profile", "codex", "--format", "json"])
+    captured = capsys.readouterr()
+    manifest = json.loads(captured.out)
+
+    assert rc == 0
+    assert manifest["support_state"] == "experimental"
+    assert manifest["verification_level"] == "documented_only"
+    assert manifest["entrypoint"]["adapter_source"] == "zed-industries/codex-acp"
+    assert manifest["entrypoint"]["adapter_package"] == "@zed-industries/codex-acp"
+    assert manifest["entrypoint"]["adapter_version"] == "0.15.0"
+    assert manifest["entrypoint"]["adapter_version_policy"] == "exact_pin_required"
+    assert manifest["entrypoint"]["adapter_install_source"] == "github_release_preferred"
+    assert manifest["entrypoint"]["credential_policy"] == "delegated_to_adapter"
+    assert manifest["entrypoint"]["runtime_backend"] == "acp_downstream"
+
+
 def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
     module = _load_module()
     sequences = []
@@ -437,6 +497,25 @@ def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
         "session/prompt",
     ]
     assert command["timeout_seconds"] == 10
+
+
+def test_run_profile_manifest_refuses_blocked_agent_without_false_green(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+
+    rc = module.run_manifest_dict({
+        "profile": "codex",
+        "requires_live_agent": True,
+        "required_environment": [],
+        "blockers": ["adapter_missing"],
+        "commands": [],
+    })
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "Refusing to run ACP certification for blocked manifest" in captured.err
+    assert "adapter_missing" in captured.err
 
 
 def test_normalized_server_url_allows_scheme_less_loopback(

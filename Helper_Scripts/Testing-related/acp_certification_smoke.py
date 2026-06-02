@@ -194,8 +194,8 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "profile": profile,
         "name": entrypoint.get("name") or profile,
-        "support_state": "documented_unverified",
-        "verification_level": "documented_only",
+        "support_state": entrypoint.get("support_state") or "documented_unverified",
+        "verification_level": entrypoint.get("verification_level") or "documented_only",
         "requires_live_agent": True,
         "required_environment": [],
         "entrypoint": {
@@ -206,6 +206,14 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
             "primary_blocker": primary_blocker,
             "status_message": entrypoint.get("status_message") or "",
             "docs_url": entrypoint.get("docs_url"),
+            "adapter_source": entrypoint.get("adapter_source"),
+            "adapter_docs_url": entrypoint.get("adapter_docs_url"),
+            "adapter_package": entrypoint.get("adapter_package"),
+            "adapter_version": entrypoint.get("adapter_version"),
+            "adapter_version_policy": entrypoint.get("adapter_version_policy"),
+            "adapter_install_source": entrypoint.get("adapter_install_source"),
+            "credential_policy": entrypoint.get("credential_policy"),
+            "runtime_backend": entrypoint.get("runtime_backend"),
         },
         "blockers": blockers,
         "notes": [
@@ -1047,6 +1055,14 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
 def run_manifest_dict(manifest: dict[str, Any]) -> int:
     """Run safe-by-default commands from a certification manifest dictionary."""
     if manifest["requires_live_agent"]:
+        blockers = [str(blocker) for blocker in manifest.get("blockers", []) if blocker]
+        if blockers:
+            print(
+                "Refusing to run ACP certification for blocked manifest: "
+                + ", ".join(blockers),
+                file=sys.stderr,
+            )
+            return 2
         missing = [
             name for name in manifest["required_environment"]
             if not os.environ.get(name)
@@ -1055,6 +1071,12 @@ def run_manifest_dict(manifest: dict[str, Any]) -> int:
             print(
                 "Refusing to run live ACP certification without required environment: "
                 + ", ".join(missing),
+                file=sys.stderr,
+            )
+            return 2
+        if not manifest["commands"]:
+            print(
+                "Refusing to run ACP certification: manifest has no runnable commands.",
                 file=sys.stderr,
             )
             return 2
@@ -1114,8 +1136,22 @@ def _build_registry_agent_manifest(agent_profile: str) -> dict[str, Any]:
     if entry is None:
         raise ValueError(f"Unknown ACP agent profile: {agent_profile}")
     classification = classify_agent_entrypoint(entry)
+    entry_metadata = {
+        "support_state": getattr(entry, "support_state", None),
+        "verification_level": getattr(entry, "verification_level", None),
+        "adapter_source": getattr(entry, "adapter_source", None),
+        "adapter_docs_url": getattr(entry, "adapter_docs_url", None),
+        "adapter_package": getattr(entry, "adapter_package", None),
+        "adapter_version": getattr(entry, "adapter_version", None),
+        "adapter_version_policy": getattr(entry, "adapter_version_policy", None),
+        "adapter_install_source": getattr(entry, "adapter_install_source", None),
+        "credential_policy": getattr(entry, "credential_policy", None),
+        "runtime_backend": getattr(entry, "runtime_backend", None),
+    }
     return build_agent_profile_manifest(
-        classification.as_dict() | {"type": entry.type, "name": entry.name}
+        classification.as_dict()
+        | {key: value for key, value in entry_metadata.items() if value is not None}
+        | {"type": entry.type, "name": entry.name}
     )
 
 
