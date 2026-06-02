@@ -8,6 +8,26 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultFrontendRoot = path.resolve(moduleDir, "../..")
 const syntheticApiKey = "THIS-IS-A-SECURE-KEY-123-UAT"
 const syntheticOpenAiKey = "sk-uat-mock-openai"
+const safeBaseEnvKeys = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "PYTHONPATH",
+  "VIRTUAL_ENV",
+  "SSL_CERT_FILE",
+  "REQUESTS_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+  "SYSTEMROOT",
+  "WINDIR",
+])
 
 function createRunId() {
   return new Date().toISOString().replace(/[:.]/g, "-")
@@ -56,7 +76,7 @@ function patchIniValue(text, sectionName, key, value, { addIfSectionExists = tru
   return text
 }
 
-function writeEnvFile(envPath, profileRoot, mockPort) {
+function writeEnvFile(envPath, profileRoot, mockPort, fixtureRoot) {
   const databaseDir = path.join(profileRoot, "Databases")
   const usersDbPath = path.join(databaseDir, "users.db")
   const mockBaseUrl = `http://127.0.0.1:${mockPort}/v1`
@@ -69,10 +89,22 @@ function writeEnvFile(envPath, profileRoot, mockPort) {
     `DATABASE_URL=sqlite:///${usersDbPath}`,
     `USER_DB_BASE_DIR_ALLOWED_ROOTS=${databaseDir}`,
     `TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS=${databaseDir}`,
+    `INGESTION_SOURCE_ALLOWED_ROOTS=${fixtureRoot}`,
+    `TLDW_INGESTION_SOURCE_ALLOWED_ROOTS=${fixtureRoot}`,
     "TLDW_SETUP_ALLOW_REMOTE=false",
     "",
   ]
   writeFileSync(envPath, lines.join("\n"), "utf8")
+}
+
+function safeBaseEnv(baseEnv) {
+  const env = {}
+  for (const key of safeBaseEnvKeys) {
+    if (baseEnv[key] !== undefined) {
+      env[key] = baseEnv[key]
+    }
+  }
+  return env
 }
 
 export function createRuntimeProfile({
@@ -135,11 +167,10 @@ export function createRuntimeProfile({
     configText,
     "Files",
     "ingestion_source_allowed_roots",
-    fixtureRoot,
-    { addIfSectionExists: false }
+    fixtureRoot
   )
   writeFileSync(configPath, configText, "utf8")
-  writeEnvFile(envPath, root, mockPort)
+  writeEnvFile(envPath, root, mockPort, fixtureRoot)
 
   return {
     runId: resolvedRunId,
@@ -152,6 +183,7 @@ export function createRuntimeProfile({
     userDatabasesDir,
     uploadsDir,
     logsDir,
+    fixtureRoot,
   }
 }
 
@@ -160,8 +192,10 @@ export function buildBackendEnv({ profile, mockPort, baseEnv = process.env }) {
     throw new Error("buildBackendEnv requires profile")
   }
   const mockBaseUrl = `http://127.0.0.1:${mockPort}/v1`
+  const fixtureRoot =
+    profile.fixtureRoot ?? path.join(defaultFrontendRoot, "e2e/fixtures/media")
   return {
-    ...baseEnv,
+    ...safeBaseEnv(baseEnv),
     TLDW_CONFIG_FILE: profile.configPath,
     TLDW_ENV_FILE: profile.envPath,
     DATABASE_URL: `sqlite:///${profile.usersDbPath}`,
@@ -172,6 +206,8 @@ export function buildBackendEnv({ profile, mockPort, baseEnv = process.env }) {
     OPENAI_API_BASE_URL: mockBaseUrl,
     USER_DB_BASE_DIR_ALLOWED_ROOTS: profile.databaseDir,
     TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS: profile.databaseDir,
+    INGESTION_SOURCE_ALLOWED_ROOTS: fixtureRoot,
+    TLDW_INGESTION_SOURCE_ALLOWED_ROOTS: fixtureRoot,
     TLDW_SETUP_ALLOW_REMOTE: "false",
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { EventEmitter } from "node:events"
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
@@ -242,6 +243,15 @@ describe("onboarding UAT runner helpers", () => {
     expect(existsSync(artifacts.root)).toBe(false)
   })
 
+  it("refuses to clean artifact paths outside the onboarding UAT result root", () => {
+    expect(() =>
+      cleanupRunArtifacts({
+        preserve: false,
+        root: path.join(tmpdir(), "unsafe-onboarding-cleanup-target"),
+      })
+    ).toThrow(/refusing to remove/i)
+  })
+
   it("detects unredacted synthetic secret leaks in artifact files", () => {
     const artifacts = createRunArtifacts({
       frontendRoot,
@@ -253,7 +263,25 @@ describe("onboarding UAT runner helpers", () => {
       writeFileSync(artifacts.logs.runner, "leaked sk-uat-mock-openai", "utf8")
 
       expect(() => assertNoSecretLeaks(artifacts.root)).toThrow(
-        /synthetic secret leak/i
+        /secret leak/i
+      )
+    } finally {
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
+  it("detects common unredacted secret-like artifact content", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-real-secret-leak-check",
+      preserve: false,
+    })
+
+    try {
+      writeFileSync(artifacts.logs.runner, "ANTHROPIC_API_KEY=real-secret", "utf8")
+
+      expect(() => assertNoSecretLeaks(artifacts.root)).toThrow(
+        /secret leak/i
       )
     } finally {
       cleanupRunArtifacts(artifacts)
@@ -283,7 +311,9 @@ describe("onboarding UAT runner helpers", () => {
       expect(config).toContain(
         `USER_DB_BASE_DIR = ${path.join(profile.root, "Databases/user_databases")}`
       )
-      expect(config).not.toContain("ingestion_source_allowed_roots =")
+      expect(config).toContain(
+        `ingestion_source_allowed_roots = ${path.join(frontendRoot, "e2e/fixtures/media")}`
+      )
 
       expect(envText).toContain("AUTH_MODE=single_user")
       expect(envText).toContain("SINGLE_USER_API_KEY=THIS-IS-A-SECURE-KEY-123-UAT")
@@ -296,10 +326,17 @@ describe("onboarding UAT runner helpers", () => {
       const backendEnv = buildBackendEnv({
         profile,
         mockPort: 43210,
-        baseEnv: { PATH: "/test/bin", OPENAI_API_KEY: "real-key" },
+        baseEnv: {
+          PATH: "/test/bin",
+          HOME: "/test/home",
+          OPENAI_API_KEY: "real-key",
+          ANTHROPIC_API_KEY: "anthropic-real-key",
+          GITHUB_TOKEN: "github-real-token",
+        },
       })
 
       expect(backendEnv.PATH).toBe("/test/bin")
+      expect(backendEnv.HOME).toBe("/test/home")
       expect(backendEnv.TLDW_CONFIG_FILE).toBe(profile.configPath)
       expect(backendEnv.TLDW_ENV_FILE).toBe(profile.envPath)
       expect(backendEnv.DATABASE_URL).toBe(`sqlite:///${profile.usersDbPath}`)
@@ -308,6 +345,11 @@ describe("onboarding UAT runner helpers", () => {
       expect(backendEnv.DEFAULT_LLM_PROVIDER).toBe("openai")
       expect(backendEnv.OPENAI_API_KEY).toBe("sk-uat-mock-openai")
       expect(backendEnv.OPENAI_API_BASE_URL).toBe("http://127.0.0.1:43210/v1")
+      expect(backendEnv.ANTHROPIC_API_KEY).toBeUndefined()
+      expect(backendEnv.GITHUB_TOKEN).toBeUndefined()
+      expect(backendEnv.INGESTION_SOURCE_ALLOWED_ROOTS).toBe(
+        path.join(frontendRoot, "e2e/fixtures/media")
+      )
     } finally {
       rmSync(profile.root, { recursive: true, force: true })
     }
@@ -384,5 +426,60 @@ describe("onboarding UAT runner helpers", () => {
       await stopProcessTree(record, { timeoutMs: 50 })
       cleanupRunArtifacts(artifacts)
     }
+  })
+
+  it("waits for process exit after SIGKILL escalation", async () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-process-kill",
+      preserve: false,
+    })
+
+    const record = spawnLoggedProcess({
+      name: "unit-stubborn-child",
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)",
+      ],
+      cwd: frontendRoot,
+      env: process.env,
+      logPath: artifacts.logs.runner,
+    })
+
+    try {
+      await stopProcessTree(record, { timeoutMs: 0 })
+      expect(record.child.exitCode ?? record.child.signalCode).not.toBeNull()
+    } finally {
+      await stopProcessTree(record, { timeoutMs: 50 })
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
+  it("does not resolve stopProcessTree until SIGKILL exit is observed", async () => {
+    class FakeChild extends EventEmitter {
+      pid = 123456
+      exitCode: number | null = null
+      signalCode: string | null = null
+      killed = false
+      signals: string[] = []
+
+      kill(signal: string) {
+        this.signals.push(signal)
+        if (signal === "SIGKILL") {
+          setTimeout(() => {
+            this.signalCode = signal
+            this.emit("exit", null, signal)
+          }, 20)
+        }
+        return true
+      }
+    }
+
+    const child = new FakeChild()
+    await stopProcessTree(child, { timeoutMs: 0 })
+
+    expect(child.signals).toEqual(["SIGTERM", "SIGKILL"])
+    expect(child.signalCode).toBe("SIGKILL")
   })
 })

@@ -12,10 +12,19 @@ import { fileURLToPath } from "node:url"
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultFrontendRoot = path.resolve(moduleDir, "../..")
 const scanExtensions = new Set([".json", ".log", ".txt", ".md", ".html"])
+const artifactMarkerFile = ".onboarding-uat-artifacts"
+const defaultMaxScanFiles = 5_000
+const defaultMaxScanBytes = 5 * 1024 * 1024
 
 export const SYNTHETIC_SECRETS = [
   "sk-uat-mock-openai",
   "THIS-IS-A-SECURE-KEY-123-UAT",
+]
+
+const genericSecretPatterns = [
+  /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET)\s*=\s*(?!\[REDACTED\]\b)[^\s]+/i,
+  /Bearer\s+sk-[A-Za-z0-9._-]+/i,
+  /x-api-key:\s*(?!\[REDACTED\]\b)[A-Za-z0-9._-]+/i,
 ]
 
 function createRunId() {
@@ -38,12 +47,17 @@ export function redactText(value) {
   }
   out = out.replace(/Bearer\s+sk-[A-Za-z0-9._-]+/g, "Bearer [REDACTED]")
   out = out.replace(/x-api-key:\s*[A-Za-z0-9._-]+/gi, "x-api-key: [REDACTED]")
+  out = out.replace(
+    /\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET))\s*=\s*[^\s]+/gi,
+    "$1=[REDACTED]"
+  )
   return out
 }
 
 export function createRunArtifacts({ frontendRoot = defaultFrontendRoot, runId, preserve = false } = {}) {
   const resolvedRunId = runId ?? createRunId()
   const root = path.join(frontendRoot, "test-results/onboarding-uat", resolvedRunId)
+  const artifactBaseRoot = path.join(frontendRoot, "test-results/onboarding-uat")
   const logsDir = path.join(root, "logs")
   const browserDir = path.join(root, "browser")
   const screenshotsDir = path.join(root, "screenshots")
@@ -52,8 +66,10 @@ export function createRunArtifacts({ frontendRoot = defaultFrontendRoot, runId, 
   const artifacts = {
     runId: resolvedRunId,
     preserve,
+    artifactBaseRoot,
     root,
     summaryPath: path.join(root, "summary.json"),
+    markerPath: path.join(root, artifactMarkerFile),
     logs: {
       backend: path.join(logsDir, "backend.log"),
       frontend: path.join(logsDir, "frontend.log"),
@@ -66,6 +82,7 @@ export function createRunArtifacts({ frontendRoot = defaultFrontendRoot, runId, 
   }
 
   mkdirSync(screenshotsDir, { recursive: true })
+  ensureFile(artifacts.markerPath, "onboarding-uat-artifacts\n")
   ensureFile(artifacts.summaryPath, "{}\n")
   ensureFile(artifacts.logs.backend)
   ensureFile(artifacts.logs.frontend)
@@ -77,7 +94,7 @@ export function createRunArtifacts({ frontendRoot = defaultFrontendRoot, runId, 
   return artifacts
 }
 
-function collectScannableFiles(root) {
+function collectScannableFiles(root, { maxFiles = defaultMaxScanFiles } = {}) {
   if (!existsSync(root)) {
     return []
   }
@@ -87,33 +104,66 @@ function collectScannableFiles(root) {
   for (const entry of entries) {
     const fullPath = path.join(root, entry.name)
     if (entry.isDirectory()) {
-      files.push(...collectScannableFiles(fullPath))
+      files.push(...collectScannableFiles(fullPath, { maxFiles }))
     } else if (entry.isFile() && scanExtensions.has(path.extname(entry.name))) {
       files.push(fullPath)
+    }
+    if (files.length > maxFiles) {
+      throw new Error(`Artifact leak scan exceeded ${maxFiles} files under ${root}`)
     }
   }
   return files
 }
 
-export function assertNoSecretLeaks(root) {
+export function assertNoSecretLeaks(
+  root,
+  { additionalSecrets = [], maxFiles = defaultMaxScanFiles, maxBytes = defaultMaxScanBytes } = {}
+) {
   const leaks = []
-  for (const file of collectScannableFiles(root)) {
-    const content = readFileSync(file, "utf8")
-    for (const secret of SYNTHETIC_SECRETS) {
+  const exactSecrets = [...SYNTHETIC_SECRETS, ...additionalSecrets].filter(Boolean)
+  for (const file of collectScannableFiles(root, { maxFiles })) {
+    const stat = existsSync(file) ? readFileSync(file) : null
+    if (stat && stat.byteLength > maxBytes) {
+      throw new Error(`Artifact leak scan exceeded ${maxBytes} bytes for ${file}`)
+    }
+    const content = stat ? stat.toString("utf8") : ""
+    for (const secret of exactSecrets) {
       if (content.includes(secret)) {
         leaks.push(file)
         break
       }
     }
+    if (genericSecretPatterns.some((pattern) => pattern.test(content))) {
+      leaks.push(file)
+    }
   }
 
   if (leaks.length > 0) {
-    throw new Error(`Synthetic secret leak detected in artifacts: ${leaks.join(", ")}`)
+    throw new Error(`Secret leak detected in artifacts: ${[...new Set(leaks)].join(", ")}`)
+  }
+}
+
+function assertSafeArtifactRoot(artifacts) {
+  const root = path.resolve(artifacts.root)
+  const baseRoot = path.resolve(
+    artifacts.artifactBaseRoot ?? path.join(defaultFrontendRoot, "test-results/onboarding-uat")
+  )
+  const markerPath = path.resolve(artifacts.markerPath ?? path.join(root, artifactMarkerFile))
+
+  if (!root.startsWith(`${baseRoot}${path.sep}`)) {
+    throw new Error(`Refusing to remove artifact root outside onboarding UAT results: ${root}`)
+  }
+  if (path.basename(root) !== artifacts.runId) {
+    throw new Error(`Refusing to remove artifact root without matching run id: ${root}`)
+  }
+  if (markerPath !== path.join(root, artifactMarkerFile) || !existsSync(markerPath)) {
+    throw new Error(`Refusing to remove artifact root without marker file: ${root}`)
   }
 }
 
 export function cleanupRunArtifacts(artifacts) {
   if (!artifacts?.preserve && artifacts?.root) {
+    assertSafeArtifactRoot(artifacts)
     rmSync(artifacts.root, { recursive: true, force: true })
   }
 }

@@ -66,8 +66,12 @@ function childFromRecord(childOrRecord) {
   return childOrRecord?.child ?? childOrRecord
 }
 
+function childHasExited(child) {
+  return child?.exitCode !== null || child?.signalCode !== null
+}
+
 function signalChild(child, signal) {
-  if (!child?.pid || child.exitCode !== null || child.killed) {
+  if (!child?.pid || childHasExited(child)) {
     return
   }
 
@@ -86,15 +90,23 @@ function signalChild(child, signal) {
 
 export async function stopProcessTree(childOrRecord, { timeoutMs = 5_000 } = {}) {
   const child = childFromRecord(childOrRecord)
-  if (!child?.pid || child.exitCode !== null || child.killed) {
+  if (!child?.pid || childHasExited(child)) {
     return
   }
 
   await new Promise((resolve) => {
     let settled = false
+    let termTimer
+    let killFallbackTimer
     const finish = () => {
       if (!settled) {
         settled = true
+        if (termTimer) {
+          clearTimeout(termTimer)
+        }
+        if (killFallbackTimer) {
+          clearTimeout(killFallbackTimer)
+        }
         resolve()
       }
     }
@@ -102,11 +114,13 @@ export async function stopProcessTree(childOrRecord, { timeoutMs = 5_000 } = {})
     child.once("exit", finish)
     signalChild(child, "SIGTERM")
 
-    setTimeout(() => {
-      if (!settled && child.exitCode === null) {
+    termTimer = setTimeout(() => {
+      if (!settled && !childHasExited(child)) {
         signalChild(child, "SIGKILL")
+        killFallbackTimer = setTimeout(finish, Math.max(1000, timeoutMs))
+        killFallbackTimer.unref?.()
       }
-      finish()
     }, timeoutMs).unref()
+    termTimer.unref?.()
   })
 }
