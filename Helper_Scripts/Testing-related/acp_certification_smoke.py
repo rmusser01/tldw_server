@@ -13,6 +13,7 @@ import json
 import os
 import queue
 import shlex
+import signal
 # subprocess is intentionally used to run static manifest argv with shell=False.
 import subprocess  # nosec B404
 import sys
@@ -36,6 +37,7 @@ _ERROR_MESSAGE_LIMIT = 240
 _STDOUT_LINE_LIMIT = 64 * 1024
 _STDOUT_QUEUE_MAXSIZE = 32
 _SESSION_ID_PLACEHOLDER = "${session_id}"
+_FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -708,6 +710,37 @@ def _wait_for_process(process: subprocess.Popen[str], timeout: float) -> bool:
         return True
 
 
+def _signal_process_group(process: subprocess.Popen[str], sig: int) -> bool:
+    """Signal the process group owned by a stdio probe subprocess."""
+    if os.name != "posix" or not hasattr(os, "killpg"):
+        return False
+    pid = getattr(process, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.killpg(pid, sig)
+        return True
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+
+
+def _stop_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) -> None:
+    """Terminate a stdio probe subprocess and any children it spawned."""
+    if force_kill:
+        if not _signal_process_group(process, _FORCE_KILL_SIGNAL):
+            process.kill()
+        return
+
+    if _signal_process_group(process, signal.SIGTERM):
+        return
+    if hasattr(process, "terminate"):
+        process.terminate()
+        return
+    process.kill()
+
+
 def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) -> None:
     """Close stdio, stop the subprocess, and wait so failure paths do not leak."""
     is_running = True
@@ -725,12 +758,7 @@ def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) 
 
     if is_running:
         try:
-            if force_kill:
-                process.kill()
-            elif hasattr(process, "terminate"):
-                process.terminate()
-            else:
-                process.kill()
+            _stop_stdio_process(process, force_kill=force_kill)
         except OSError:
             pass
 
@@ -738,7 +766,7 @@ def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) 
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:
         try:
-            process.kill()
+            _stop_stdio_process(process, force_kill=True)
         except OSError:
             pass
         try:
@@ -925,6 +953,7 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             env=_command_env(command),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            start_new_session=os.name == "posix",
             text=True,
         )
     except FileNotFoundError as exc:
@@ -1101,6 +1130,7 @@ def run_manifest_dict(manifest: dict[str, Any]) -> int:
             result_code = _run_stdio_jsonrpc_sequence(command, cwd)
             if result_code != 0:
                 return int(result_code)
+            print(f"PASS {command['id']}")
             continue
         try:
             result = subprocess.run(  # nosec B603

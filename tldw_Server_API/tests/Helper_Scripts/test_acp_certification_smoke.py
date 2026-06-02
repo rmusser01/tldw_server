@@ -456,7 +456,7 @@ def test_agent_profile_manifest_preserves_registry_support_and_adapter_metadata(
     assert manifest["entrypoint"]["runtime_backend"] == "acp_downstream"
 
 
-def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
+def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch, capsys) -> None:
     module = _load_module()
     sequences = []
 
@@ -489,6 +489,8 @@ def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
     })
 
     assert rc == 0
+    captured = capsys.readouterr()
+    assert "PASS acp_initialize_probe" in captured.out
     assert sequences
     command, _cwd = sequences[0]
     assert [frame["method"] for frame in command["stdin_jsonl"]] == [
@@ -1124,6 +1126,93 @@ def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypat
     assert process.stdin.closed is True
     assert process.stdout.closed is True
     assert len(written) == 1
+
+
+def test_stdio_sequence_runner_kills_process_group_on_timeout(monkeypatch) -> None:
+    module = _load_module()
+    if module.os.name != "posix":
+        pytest.skip("POSIX process-group cleanup is not available on this platform")
+    popen_kwargs = {}
+    killed_groups = []
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def __init__(self):
+            super().__init__()
+            self.closed_event = threading.Event()
+
+        def close(self):
+            super().close()
+            self.closed_event.set()
+
+        def readline(self, _limit=-1):
+            self.closed_event.wait()
+            return ""
+
+    class _Process:
+        def __init__(self):
+            self.pid = 4321
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.group_killed = False
+            self.direct_killed = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            if self.group_killed:
+                return 0
+            raise module.subprocess.TimeoutExpired("codex-acp", timeout)
+
+        def kill(self):
+            self.direct_killed = True
+
+    process = _Process()
+
+    def _fake_popen(*_args, **kwargs):
+        popen_kwargs.update(kwargs)
+        return process
+
+    def _fake_killpg(pid, sig):
+        killed_groups.append((pid, sig))
+        process.group_killed = True
+
+    monkeypatch.setattr(module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(module.os, "killpg", _fake_killpg, raising=False)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["codex-acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 0.01,
+    }, module.ROOT)
+
+    assert rc == 124
+    assert popen_kwargs["start_new_session"] is True
+    assert killed_groups == [(4321, module._FORCE_KILL_SIGNAL)]
+    assert process.direct_killed is False
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
 
 
 def test_stdio_sequence_runner_sanitizes_error_output_and_cleans_up(
