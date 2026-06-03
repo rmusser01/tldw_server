@@ -38,12 +38,13 @@ Resolve PR #1982 review comments, inspect checks, and address merge conflicts fo
 - 2026-06-03: After pushing the merge/review fix commit, newly started frontend jobs failed at `bun install --frozen-lockfile`; regenerated `apps/bun.lock` and verified the frozen install passes locally.
 - 2026-06-03: Reproduced the post-lockfile `Playground Device/A11y/Composer Gates` failure in `PlaygroundForm.signals.guard.test.ts`; updated the guard for the current submit result normalization path and verified `bun run test:playground:composer` passes locally.
 - 2026-06-03: Reproduced the next `Playground Device/A11y/Composer Gates` failure in `test:playground:device-matrix`; `ResearchWorkspaceBody` had discarded status state values needed by `WorkspaceTrustPanel`. Restored the state reads and verified both `env CI=true bun run test:playground:device-matrix` and `env CI=true bun run test:playground:a11y`.
+- 2026-06-03: Reproduced the remote `e2e-smoke` failure from both Ubuntu and macOS logs; app import failed because the merge left duplicate workspace route registrations for `/sources/status` and `/capabilities`. Removed the stale main-side duplicate route pair while keeping the dev-side service-capability implementation. Verified `duplicate_count 0`, `test_workspace_service_capabilities.py` (`9 passed`), and the full CI-shaped critical e2e smoke command (`15 passed, 276 skipped`).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved PR #1982 merge conflicts and review feedback. `dev` was kept for overlapping conflict hunks, non-conflicting `main` changes were retained, review-targeted workflow/docs/design/compose fixes were applied, MCP catalog connection validation was corrected, the frontend workspace lockfile was refreshed after the merge, playground gate regressions were fixed, and validation passed locally.
+Resolved PR #1982 merge conflicts and review feedback. `dev` was kept for overlapping conflict hunks, non-conflicting `main` changes were retained, review-targeted workflow/docs/design/compose fixes were applied, MCP catalog connection validation was corrected, the frontend workspace lockfile was refreshed after the merge, playground gate regressions were fixed, the duplicate workspace route registrations from the merge were removed, and validation passed locally.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
