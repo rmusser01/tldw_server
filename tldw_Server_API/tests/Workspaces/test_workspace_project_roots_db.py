@@ -98,7 +98,8 @@ def test_upsert_primary_root_enforces_expected_workspace_version(db):
         )
 
 
-def test_upsert_primary_root_rejects_malformed_expected_workspace_version(db):
+@pytest.mark.parametrize("expected_workspace_version", ["not-an-int", True, 1.9])
+def test_upsert_primary_root_rejects_malformed_expected_workspace_version(db, expected_workspace_version):
     db.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(InputError):
@@ -107,9 +108,24 @@ def test_upsert_primary_root_rejects_malformed_expected_workspace_version(db):
             {
                 "root_id": "primary",
                 "backend": "host_local",
-                "expected_workspace_version": "not-an-int",
+                "expected_workspace_version": expected_workspace_version,
             },
         )
+
+
+def test_upsert_primary_root_accepts_integer_string_expected_workspace_version(db):
+    workspace = db.upsert_workspace("ws-1", "Workspace")
+
+    root = db.upsert_workspace_primary_root(
+        "ws-1",
+        {
+            "root_id": "primary",
+            "backend": "host_local",
+            "expected_workspace_version": str(workspace["version"]),
+        },
+    )
+
+    assert root["root_id"] == "primary"
 
 
 def test_upsert_primary_root_replaces_same_root_id_when_replace_existing_true(db):

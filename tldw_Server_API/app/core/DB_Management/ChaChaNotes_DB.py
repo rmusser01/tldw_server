@@ -15539,10 +15539,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         expected_workspace_version_raw = data.get("expected_workspace_version")
         expected_workspace_version: int | None = None
         if expected_workspace_version_raw is not None:
-            try:
-                expected_workspace_version = int(expected_workspace_version_raw)
-            except (TypeError, ValueError) as exc:
-                raise InputError("expected_workspace_version must be an integer when provided.") from exc  # noqa: TRY003
+            if isinstance(expected_workspace_version_raw, bool):
+                raise InputError("expected_workspace_version must be an integer when provided.")  # noqa: TRY003
+            if isinstance(expected_workspace_version_raw, int):
+                expected_workspace_version = expected_workspace_version_raw
+            elif isinstance(expected_workspace_version_raw, str):
+                normalized_expected_version = expected_workspace_version_raw.strip()
+                if not normalized_expected_version or not normalized_expected_version.isdecimal():
+                    raise InputError("expected_workspace_version must be an integer when provided.")  # noqa: TRY003
+                expected_workspace_version = int(normalized_expected_version)
+            else:
+                raise InputError("expected_workspace_version must be an integer when provided.")  # noqa: TRY003
         replace_existing = bool(data.get("replace_existing", False))
         metadata_json = (
             self._serialize_workspace_project_root_metadata(data.get("metadata_json"))
