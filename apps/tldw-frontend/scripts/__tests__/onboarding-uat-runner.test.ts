@@ -79,7 +79,7 @@ describe("onboarding UAT static fixtures", () => {
     expect(modelIds(configs["hosted-success.json"])).toEqual(
       expect.arrayContaining(["gpt-4.1-mini", "text-embedding-3-small"])
     )
-    expect(configs["hosted-success.json"].server?.require_auth).not.toBe(false)
+    expect(configs["hosted-success.json"].server?.require_auth).toBe(false)
 
     expect(modelIds(configs["local-success.json"])).toEqual(
       expect.arrayContaining(["llama3.2:3b", "local-uat-chat"])

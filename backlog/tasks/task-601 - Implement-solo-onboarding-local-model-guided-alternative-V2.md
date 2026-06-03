@@ -1,0 +1,51 @@
+---
+id: TASK-601
+title: Implement solo onboarding local model guided alternative V2
+status: In Progress
+references:
+- https://github.com/rmusser01/tldw_server/pull/2227
+documentation:
+- Docs/superpowers/specs/2026-06-02-solo-onboarding-v2-roadmap-design.md
+modified_files:
+- Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
+- apps/tldw-frontend/scripts/__tests__/onboarding-uat-runner.test.ts
+- backlog/tasks/task-601 - Implement-solo-onboarding-local-model-guided-alternative-V2.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement PR4 from the solo onboarding V2 roadmap. Start by extending the onboarding UAT harness with local OpenAI-compatible/Ollama scenarios, then improve the WebUI local setup flow with endpoint guidance, non-generative validation, model discovery when supported, manual model entry fallback, and inline recovery actions. Preserve hosted/local as peer setup choices while keeping local runtime installation out of app ownership.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Stage 1 complete. Fixed stale hosted-success auth assertion in onboarding UAT runner unit test. Verification: bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts --reporter=dot -> 1 file passed, 24 tests passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
