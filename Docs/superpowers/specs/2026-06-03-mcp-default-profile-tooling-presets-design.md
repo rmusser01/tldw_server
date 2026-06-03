@@ -1,8 +1,8 @@
 # MCP Default Profile Tooling Presets Design
 
 Date: 2026-06-03
-Status: Spec review approved; awaiting user approval for implementation planning
-Backlog: TASK-2232
+Status: Spec review approved; draft PR placeholder pending active-work reconciliation
+Backlog: TASK-2232, TASK-2233
 
 ## Summary
 
@@ -24,6 +24,28 @@ The design also adds progressive disclosure as a first-class profile contract.
 Small, high-frequency tools are exposed directly. Large native, external, or
 plugin catalogs are hidden behind profile-scoped category/search/describe/call
 bridge tools so frontends and agents do not receive an unbounded tool list.
+
+## Placeholder PR Scope
+
+This spec is ready to serve as a draft PR anchor, but it is intentionally not
+the final implementation contract yet. Active MCP/ACP gateway work may still
+change runtime names, admin surfaces, permission-routing details, or external
+server lifecycle APIs. The draft PR should keep this design visible for review
+while those dependencies settle.
+
+Before implementation planning begins, the owner should do a reconciliation
+pass and update this spec if any of these inputs changed:
+
+- Profile preset model fields or validation rules.
+- Gateway tool catalog, discovery, or progressive-disclosure APIs.
+- External server registry, install/update, runtime lifecycle, or credential
+  grant surfaces.
+- ACP workspace binding, approval callback, or permission-routing contracts.
+- Browser inspection, safe test runner, git inspection, or LSP native tool
+  implementation choices.
+- Supported risk classes, approval policy semantics, or audit-event schema.
+- Concrete external MCP install targets that graduate from category
+  placeholders to exact package targets.
 
 ## Context
 
@@ -155,6 +177,39 @@ Sources:
    browsing only expose tools visible to the active profile/session.
 7. **Workspace binding is required for scoped writes and test execution.**
 8. **Audit covers denies, approval requests, approval decisions, and execution.**
+
+## Decision Status
+
+The following decisions are settled enough for the placeholder PR:
+
+- Use hybrid profile metadata: abstract capabilities for policy plus
+  vendor-neutral concrete binding recommendations for setup guidance.
+- Keep packaged defaults conservative. Writes, browser interaction, process
+  execution, credential use, deployment mutation, memory writes, and git
+  mutation require explicit enablement and approval.
+- Treat recommended tools and servers as non-authoritative display/setup
+  metadata until an operator installs, grants, and enables them.
+- Use progressive disclosure through profile-scoped category, search, describe,
+  and bridge-call tools.
+- Prefer native/default-included tools for mature tldw_server workspace
+  primitives and external bindings for vendor-specific systems.
+- Keep web search/fetch recommended unavailable in packaged defaults until a
+  configured provider or external binding supplies grants and provenance.
+- Represent issue/story output through native Kanban/cards and markdown first,
+  with Jira/Linear/GitHub/GitLab as optional external bindings.
+
+The following decisions remain provisional and must be rechecked before code
+implementation:
+
+- Exact public schemas and names for discovery, category, and bridge-call
+  tools.
+- Native browser-inspection backend choice: Playwright, CDP, or host adapter.
+- Safe test runner command-definition source and workspace trust boundary.
+- Whether recommendation catalog metadata is immutable built-in data or
+  operator-patchable configuration.
+- Ranking implementation for profile-scoped tool search.
+- Which external MCP options are stable exact install targets instead of
+  category placeholders.
 
 ## Default Tool Substrate
 
@@ -577,6 +632,11 @@ The implementation plan should include these test groups:
   `exact_target` rather than `category_placeholder`?
 
 ## Recommended Next Plan
+
+Before writing the implementation plan, reconcile this placeholder spec against
+the active MCP/ACP work listed in "Placeholder PR Scope". If the active work
+changes a settled assumption above, update the spec and keep the PR in draft
+until the mismatch is resolved.
 
 The next implementation plan should split this work into small reviewable
 slices:
