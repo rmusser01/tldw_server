@@ -56,13 +56,28 @@ Request schema:
 ```json
 {
   "backend": "host_local",
-  "root_id": "optional-stable-id",
+  "root_id": "primary",
   "absolute_root": "/allowed/project/path",
   "display_name": "Project",
   "replace_existing": false,
   "expected_workspace_version": 3
 }
 ```
+
+Shared request rules:
+
+- `root_id` is optional. When omitted, the service resolves to the current
+  primary root id for same-binding retries, otherwise to the stable default
+  `primary`. This keeps retry behavior deterministic without forcing
+  first-time clients to invent ids.
+- If supplied, `root_id` must be log-safe ASCII using letters, digits,
+  underscore, dash, dot, or colon; 1-128 characters.
+- `display_name` is optional, trimmed, and capped at 120 characters. If omitted,
+  derive a conservative display name from the directory basename or Sandbox
+  volume binding display name.
+- `expected_workspace_version` is optional, but when supplied it is a strict
+  optimistic-lock token that must be checked in the DB transaction that writes
+  the root binding.
 
 For `host_local`:
 
@@ -78,7 +93,7 @@ For `sandbox_volume`:
 ```json
 {
   "backend": "sandbox_volume",
-  "root_id": "optional-stable-id",
+  "root_id": "primary",
   "sandbox_volume_id": "volume-123",
   "display_name": "Website build",
   "replace_existing": false,
@@ -108,15 +123,25 @@ Response:
 ## Replacement And Idempotency Rules
 
 - If no primary root exists, attach the requested root.
-- If the current primary root matches the requested root id and backend, replay
-  as idempotent and update mutable binding metadata only when provided.
+- If the current primary root matches the requested backend and resolved binding
+  target, replay as idempotent even when `root_id` was omitted. Same-binding
+  comparison uses backend plus resolved `absolute_root` for `host_local`, or
+  backend plus `sandbox_volume_id` for `sandbox_volume`; it does not rely on
+  `root_id` alone.
+- Same-binding replay may update mutable binding metadata when provided and
+  should repair operational state from the latest validation result. For
+  example, a previously unavailable Sandbox binding can move from
+  `sandbox_mount_state: unavailable` to `ready` when the resolver later confirms
+  it.
 - If a different primary root exists and `replace_existing` is false, return
   `409 Conflict` with `code: workspace_primary_root_exists`.
 - If a different primary root exists and `replace_existing` is true, replace it
   through the existing one-primary-root DB semantics.
 - If `expected_workspace_version` is provided and does not match the current
-  workspace version at validation time, return `409 Conflict`.
-- The DB layer remains responsible for final uniqueness/race handling.
+  workspace version inside the write transaction, return `409 Conflict`.
+- The DB layer remains responsible for final uniqueness/race handling. A
+  service-only precheck is useful for diagnostics, but not sufficient for the
+  optimistic-lock guarantee.
 
 This avoids accidental root replacement while keeping the API usable for
 retries and migration flows.
@@ -140,6 +165,11 @@ agentic project work. Ingestion allowed roots are intentionally excluded because
 permission to ingest from a directory is not the same as permission to treat it
 as a writable project workspace.
 
+The implementation must add matching config examples and operator-facing docs
+for the new `[WORKSPACES].project_root_allowed_base_paths` key and both env var
+names. Tests should cover precedence, de-duplication, compatibility fallback,
+and the no-configured-roots failure path.
+
 ## Service Boundary
 
 Create a Workspace Core service, tentatively:
@@ -155,7 +185,10 @@ Responsibilities:
 - Validate host-local root containment and symlink constraints.
 - Validate sandbox volume id shape and call a resolver interface.
 - Enforce explicit replacement intent before calling the DB method.
-- Call `CharactersRAGDB.upsert_workspace_primary_root`.
+- Call a DB method that performs root binding persistence and optional
+  `expected_workspace_version` comparison in the same transaction. This can be
+  an extended `CharactersRAGDB.upsert_workspace_primary_root` or a narrowly
+  named wrapper that delegates to it after the version check.
 - Return the persisted root row plus enough metadata for the endpoint to render
   `WorkspaceRootsResponse`.
 
@@ -220,16 +253,24 @@ class SandboxVolumeResolver(Protocol):
 - `reason_code`
 
 The default resolver can be conservative and syntax-only until a persistent
-Sandbox volume registry exists. Tests should inject a fake resolver so the
-service boundary is real from the beginning.
+Sandbox volume registry exists, but it must not claim ownership or readiness.
+In this first slice, an unconfigured resolver may either reject strict attach
+requests with `503`, or persist a fail-closed binding with
+`sandbox_mount_state: not_configured` and all Sandbox/MCP/ACP/action capability
+flags disabled until a real resolver validates ownership. Tests should inject a
+fake resolver so the service boundary is real from the beginning.
 
 Persisted root defaults for a successful sandbox attach:
 
 - `backend: sandbox_volume`
-- `root_state: attached`
+- `root_state: attached` to represent the Workspace binding, not proof that the
+  volume is mounted or action-ready
 - `sandbox_mount_state`: resolver state, or `not_configured`
 - `absolute_root`: omitted
 - `sandbox_volume_id`: requested volume id
+
+When `sandbox_mount_state` is not `ready`, response capabilities must remain
+fail-closed for write, preview, indexing, MCP, ACP, and agent launch actions.
 
 ## Error Mapping
 
@@ -264,13 +305,23 @@ include local absolute paths except in server logs.
 Unit tests:
 
 - Allowed-root parsing and de-duplication.
+- `root_id` omission resolves to a deterministic `primary` binding and remains
+  idempotent on retry.
+- Supplied `root_id` and `display_name` bounds are enforced.
 - Host-local happy path.
 - Host-local rejects non-absolute, nonexistent, file, symlink root, traversal,
   and outside-allowlist candidates.
 - Sandbox volume happy path with injected fake resolver.
 - Sandbox volume rejects missing/unsafe ids.
+- Unconfigured/default Sandbox resolver behavior is fail-closed and does not
+  expose action-ready capabilities.
 - Existing root without `replace_existing` returns conflict.
 - Same-root replay is idempotent.
+- Same-root replay repairs operational state from the latest validation result.
+- `expected_workspace_version` mismatch is enforced by the DB write transaction,
+  not only by service precheck.
+- Workspace project-root config precedence, fallback, docs examples, and
+  no-configured-roots handling.
 
 API tests:
 
