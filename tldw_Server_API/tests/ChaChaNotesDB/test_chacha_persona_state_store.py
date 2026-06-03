@@ -340,6 +340,116 @@ def test_persona_session_and_memory_roundtrip(store):
     assert deleted_entry["deleted"] is True
 
 
+def test_persona_memory_filter_builder_normalizes_shared_filters(store: PersonaStateStore) -> None:
+    """Verify shared persona memory filters strip caller-supplied string values."""
+    where_sql, params = store._build_persona_memory_where_clause(
+        entry_id="  entry-1  ",
+        user_id="  user-1  ",
+        persona_id="  persona-1  ",
+        memory_type="  fact  ",
+        scope_snapshot_id="  scope-a  ",
+        session_id="  session-a  ",
+        include_archived=False,
+        include_deleted=False,
+    )
+
+    assert where_sql == (
+        "id = ? AND user_id = ? AND persona_id = ? AND memory_type = ? "
+        "AND scope_snapshot_id = ? AND session_id = ? AND archived = 0 AND deleted = 0"
+    )
+    assert params == ["entry-1", "user-1", "persona-1", "fact", "scope-a", "session-a"]
+
+
+@pytest.mark.parametrize(
+    ("filter_kwargs", "message"),
+    [
+        (
+            {"scope_snapshot_id": "scope-a", "require_missing_scope_snapshot_id": True},
+            "scope_snapshot_id",
+        ),
+        (
+            {"session_id": "session-a", "require_missing_session_id": True},
+            "session_id",
+        ),
+    ],
+)
+def test_persona_memory_filter_builder_rejects_conflicting_scope_filters(
+    store: PersonaStateStore,
+    filter_kwargs: dict[str, object],
+    message: str,
+) -> None:
+    """Verify exact scope/session filters cannot be combined with missing filters."""
+    with pytest.raises(ValueError, match=message):
+        store._build_persona_memory_where_clause(user_id="user-1", **filter_kwargs)
+
+
+def test_persona_memory_facade_preserves_filter_lifecycle(db: CharactersRAGDB) -> None:
+    """Verify public persona memory facade methods share normalized filter behavior."""
+    persona_id = db.create_persona_profile({"user_id": "user-1", "name": "Facade Memory Persona"})
+    matching_entry_id = db.add_persona_memory_entry(
+        {
+            "persona_id": persona_id,
+            "user_id": "user-1",
+            "memory_type": " fact ",
+            "content": "User prefers concise research notes.",
+            "scope_snapshot_id": " scope-a ",
+            "session_id": " session-a ",
+        }
+    )
+    db.add_persona_memory_entry(
+        {
+            "persona_id": persona_id,
+            "user_id": "user-1",
+            "memory_type": "preference",
+            "content": "User prefers examples.",
+            "scope_snapshot_id": "scope-b",
+            "session_id": "session-b",
+        }
+    )
+
+    listed_entries = db.list_persona_memory_entries(
+        user_id="  user-1  ",
+        persona_id=f"  {persona_id}  ",
+        memory_type=" fact ",
+        scope_snapshot_id=" scope-a ",
+        session_id=" session-a ",
+    )
+    assert [item["id"] for item in listed_entries] == [matching_entry_id]
+    assert db.count_persona_memory_entries(
+        user_id="  user-1  ",
+        persona_id=f"  {persona_id}  ",
+        memory_type=" fact ",
+    ) == 1
+
+    assert db.set_persona_memory_archived(
+        entry_id=f"  {matching_entry_id}  ",
+        user_id="  user-1  ",
+        persona_id=f"  {persona_id}  ",
+        archived=True,
+    )
+    assert db.list_persona_memory_entries(user_id="user-1", persona_id=persona_id, memory_type="fact") == []
+    assert db.count_persona_memory_entries(
+        user_id="user-1",
+        persona_id=persona_id,
+        memory_type="fact",
+        include_archived=True,
+    ) == 1
+
+    assert db.soft_delete_persona_memory_entry(
+        entry_id=f"  {matching_entry_id}  ",
+        user_id="  user-1  ",
+        persona_id=f"  {persona_id}  ",
+    )
+    deleted_entry = db.get_persona_memory_entry_by_id(
+        entry_id=f"  {matching_entry_id}  ",
+        user_id="  user-1  ",
+        persona_id=f"  {persona_id}  ",
+        include_deleted=True,
+    )
+    assert deleted_entry is not None
+    assert deleted_entry["deleted"] is True
+
+
 def test_persona_buddy_roundtrip(store):
     persona_id = store.create_persona_profile({"user_id": "user-1", "name": "Buddy Persona"})
 
@@ -468,7 +578,8 @@ def test_persona_exemplar_facade_normalizes_without_monolith_helper_fallback(db,
     assert exemplar["source_type"] == "manual"
 
 
-def test_persona_setup_and_live_voice_analytics_roundtrip(store):
+def test_persona_setup_and_live_voice_analytics_roundtrip(store: PersonaStateStore) -> None:
+    """Verify setup events and live voice summaries produce deterministic analytics."""
     first_event = store.record_persona_setup_event(
         user_id=7,
         persona_id="persona-analytics",
@@ -528,7 +639,7 @@ def test_persona_setup_and_live_voice_analytics_roundtrip(store):
     listed_summaries = store.list_persona_live_voice_session_summaries(
         user_id=7,
         persona_id="persona-analytics",
-        days=30,
+        days=36500,
     )
 
     assert session_summary is not None
