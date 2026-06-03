@@ -22,6 +22,10 @@ Inspect the current release-readiness metadata with:
 mcp-unified-gateway package-info
 ```
 
+The dependency groups in that payload intentionally use a `names-only` policy.
+They identify the minimal standalone-package surface without duplicating version
+floors from `pyproject.toml` or future package build metadata.
+
 ## Local Store Commands vs Remote Runtime Commands
 
 The `mcp-unified-gateway` CLI has two different operating modes:

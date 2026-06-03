@@ -11,28 +11,29 @@ PACKAGE_STATUS: Final = "internal-experimental"
 PUBLISHING_STATUS: Final = "not-published"
 LICENSE_EXPRESSION: Final = "GPL-3.0-only"
 SOURCE_DISTRIBUTION: Final = "tldw-server"
+DEPENDENCY_VERSION_POLICY: Final = "names-only"
 
 CORE_DEPENDENCIES: Final = (
-    "pydantic>=2.0.0",
-    "loguru>=0.7.0",
-    "PyYAML>=6.0.0",
+    "pydantic",
+    "loguru",
+    "pyyaml",
 )
 FASTAPI_DEPENDENCIES: Final = (
-    "fastapi>=0.104.0",
-    "starlette>=0.27.0",
+    "fastapi",
+    "starlette",
 )
-SQLITE_DEPENDENCIES: Final = ("SQLAlchemy>=2.0.29",)
+SQLITE_DEPENDENCIES: Final = ("sqlalchemy",)
 FEDERATION_DEPENDENCIES: Final = CORE_DEPENDENCIES
 GATEWAY_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
     *FASTAPI_DEPENDENCIES,
     *SQLITE_DEPENDENCIES,
-    "uvicorn>=0.24.0",
+    "uvicorn",
 )
 DEV_DEPENDENCIES: Final = (
-    "pytest>=8.0.0",
-    "pytest-asyncio>=1.0.0",
-    "bandit>=1.7.0",
+    "pytest",
+    "pytest-asyncio",
+    "bandit",
 )
 
 OPTIONAL_EXTRAS: Final = MappingProxyType(
@@ -58,6 +59,7 @@ def package_metadata_summary() -> dict[str, object]:
         "publishing_status": PUBLISHING_STATUS,
         "license_expression": LICENSE_EXPRESSION,
         "source_distribution": SOURCE_DISTRIBUTION,
+        "dependency_version_policy": DEPENDENCY_VERSION_POLICY,
         "optional_extras": {
             extra: list(dependencies)
             for extra, dependencies in OPTIONAL_EXTRAS.items()

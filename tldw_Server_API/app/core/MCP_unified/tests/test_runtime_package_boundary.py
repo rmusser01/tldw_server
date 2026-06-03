@@ -15,6 +15,15 @@ from pydantic import ValidationError
 PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
 
 
+def _dependency_package_name(dependency: str) -> str:
+    """Return a normalized package name from a dependency declaration."""
+
+    name = dependency.strip()
+    for separator in ("[", "<", ">", "=", "!", "~", ";"):
+        name = name.split(separator, 1)[0]
+    return name.strip().lower().replace("_", "-")
+
+
 def _tldw_imports_for(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: list[str] = []
@@ -51,10 +60,26 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
 
     extras = metadata.OPTIONAL_EXTRAS
-    assert set(extras) == {"core", "fastapi", "sqlite", "federation", "gateway", "dev"}
-    assert all(isinstance(dependency, str) for values in extras.values() for dependency in values)
+    assert set(extras) == {
+        "core",
+        "fastapi",
+        "sqlite",
+        "federation",
+        "gateway",
+        "dev",
+    }
+    assert all(
+        isinstance(dependency, str)
+        for values in extras.values()
+        for dependency in values
+    )
+    assert all(
+        dependency == _dependency_package_name(dependency)
+        for values in extras.values()
+        for dependency in values
+    )
 
-    forbidden_dependency_terms = {
+    forbidden_dependency_names = {
         "chromadb",
         "faster-whisper",
         "torch",
@@ -64,13 +89,21 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
         "tts",
         "stt",
     }
-    flattened = "\n".join(dependency.lower() for values in extras.values() for dependency in values)
-    assert not any(term in flattened for term in forbidden_dependency_terms)
+    dependency_names = {
+        _dependency_package_name(dependency)
+        for values in extras.values()
+        for dependency in values
+    }
+    assert forbidden_dependency_names.isdisjoint(dependency_names)
 
     summary = metadata.package_metadata_summary()
     assert summary["ok"] is True
     assert summary["package_name"] == metadata.PACKAGE_NAME
-    assert summary["optional_extras"] == {key: list(value) for key, value in extras.items()}
+    assert summary["dependency_version_policy"] == metadata.DEPENDENCY_VERSION_POLICY
+    assert summary["optional_extras"] == {
+        key: list(value)
+        for key, value in extras.items()
+    }
 
 
 def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
