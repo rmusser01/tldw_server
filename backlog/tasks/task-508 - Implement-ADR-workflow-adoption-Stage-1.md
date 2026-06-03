@@ -1,11 +1,16 @@
 ---
 id: TASK-508
 title: Implement ADR workflow adoption Stage 1
-status: To Do
+status: Done
 labels:
 - docs
 - process
 - adr
+modified_files:
+- backlog/tasks/task-508 - Implement-ADR-workflow-adoption-Stage-1.md
+- backlog/tasks/task-509 - Audit-docs-for-ADR-decision-inventory.md
+- backlog/tasks/task-510 - Backfill-authoritative-ADRs-from-decision-inventory.md
+- backlog/tasks/task-511 - Evaluate-global-Superpowers-ADR-workflow-updates.md
 ---
 
 ## Description
@@ -23,6 +28,12 @@ Implement Stage 1 of the ADR workflow adoption: create Docs/ADR framework, add r
 - [ ] #5 Verification commands pass, including git diff --check; Bandit is recorded as not applicable for docs-only changes unless code is touched.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Executing Docs/superpowers/plans/2026-06-02-adr-workflow-adoption-stage-1-implementation-plan.md in isolated worktree .worktrees/adr-workflow-stage-1 on branch codex/adr-workflow-stage-1. Baseline: git status --short clean; git diff --check clean; .venv absent, so no Python baseline tests run for this docs-only stage.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -32,7 +43,7 @@ Implement Stage 1 of the ADR workflow adoption: create Docs/ADR framework, add r
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Final summary: Created Docs/ADR framework, seed ADRs, root AGENTS.md policy, and follow-up Backlog tasks for inventory/backfill and global Superpowers review. Follow-up tasks: TASK-509, TASK-510, TASK-511. Verification: final documentation checks passed; git diff --check passed; Bandit not applicable for docs-only changes. Draft PR: https://github.com/rmusser01/tldw_server/pull/2230
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

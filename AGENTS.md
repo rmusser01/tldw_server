@@ -428,6 +428,18 @@ If MCP is unavailable but the CLI works, use CLI fallback commands such as `back
 
 If neither MCP nor CLI is available, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
 
+### 0.1 Architecture Decision Records (ADRs)
+
+This repository uses Architecture Decision Records in `Docs/ADR/` for significant, durable architecture decisions. ADRs explain why an architecture rule exists; design docs, module docs, and plans describe how work is shaped or implemented.
+
+Every substantial Superpowers spec, implementation plan, or PR must make an explicit `ADR needed?` call. Use the trigger list in `Docs/ADR/README.md`: module boundaries, public API shape, persistence, security, worker ownership, provider integration, WebUI/extension conventions, major dependencies, and repository workflow gates usually require ADR consideration.
+
+If an ADR is required, create or supersede it in the same reviewable unit of work and link it from the Backlog task, spec, plan, or PR. If no ADR is required, record a brief rationale in the task, spec, plan, or PR notes.
+
+Accepted ADRs are immutable except for metadata needed to mark supersession. If a decision changes, create a new ADR and mark the old one `Superseded by ADR-{N}`. Backfilled still-governing ADRs use `Status: Accepted` plus `Backfilled from: <source>`; do not pretend they were written at original decision time.
+
+For workflow details, numbering, template, and the current ADR index, start with `Docs/ADR/README.md`.
+
 ### 1. Planning & Staging
 
 Break complex work into 3-5 stages. Document in a uniquely named plan file for the specific task (avoid generic names like `IMPLEMENTATION.md` or `IMPLEMENTATION_PLAN.md`), for example `IMPLEMENTATION_PLAN_<short_task_slug>.md` (e.g., `IMPLEMENTATION_PLAN_feedback_system.md`, `IMPLEMENTATION_PLAN_auth_refactor.md`):
