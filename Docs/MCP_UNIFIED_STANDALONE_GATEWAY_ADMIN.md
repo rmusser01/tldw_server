@@ -13,8 +13,9 @@ being hardened.
 
 The current package metadata uses the canonical repository license expression
 `GPL-3.0-only`. Downstream projects should treat the boundary as an in-repo
-integration surface until a later packaging pass adds a clean minimal install,
-independent extras verification, and release CI for the standalone package.
+integration surface until release CI publishes a separate artifact. The
+package-local descriptor lives at `mcp_unified/pyproject.toml` and is checked
+by the package-boundary tests before publishing is considered.
 
 Inspect the current release-readiness metadata with:
 
@@ -23,8 +24,21 @@ mcp-unified-gateway package-info
 ```
 
 The dependency groups in that payload intentionally use a `names-only` policy.
-They identify the minimal standalone-package surface without duplicating version
-floors from `pyproject.toml` or future package build metadata.
+They identify the minimal standalone-package surface without duplicating the
+version floors carried by `mcp_unified/pyproject.toml`.
+
+Run the local standalone install smoke before changing release metadata or
+package dependencies:
+
+```bash
+python -m pytest \
+  tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_package_installs_without_root_dependencies \
+  -q
+```
+
+That smoke builds the package-local wheel with `--no-deps`, installs it into an
+isolated target directory with `--no-index`, and imports `mcp_unified` from a
+`python -S` subprocess outside the repository checkout.
 
 ## Local Store Commands vs Remote Runtime Commands
 

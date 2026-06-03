@@ -3,16 +3,25 @@ from __future__ import annotations
 import ast
 import importlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 
 import mcp_unified
 import pytest
 from pydantic import ValidationError
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
+    import tomli as tomllib
+
 PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
+STANDALONE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 
 
 def _dependency_package_name(dependency: str) -> str:
@@ -22,6 +31,126 @@ def _dependency_package_name(dependency: str) -> str:
     for separator in ("[", "<", ">", "=", "!", "~", ";"):
         name = name.split(separator, 1)[0]
     return name.strip().lower().replace("_", "-")
+
+
+def _load_standalone_pyproject() -> dict[str, object]:
+    """Load the package-local MCP Unified pyproject document."""
+
+    assert STANDALONE_PYPROJECT.is_file()
+    with STANDALONE_PYPROJECT.open("rb") as pyproject_file:
+        return tomllib.load(pyproject_file)
+
+
+def _dependency_names(dependencies: list[str] | tuple[str, ...]) -> set[str]:
+    """Return normalized package names from dependency declarations."""
+
+    return {
+        _dependency_package_name(dependency)
+        for dependency in dependencies
+    }
+
+
+def _version_release_parts(version: str) -> tuple[int, ...] | None:
+    """Return leading numeric release parts from a version string."""
+
+    parts: list[int] = []
+    for part in version.split("+", 1)[0].split("-", 1)[0].split("."):
+        if not part.isdigit():
+            break
+        parts.append(int(part))
+    if not parts:
+        return None
+    return tuple(parts)
+
+
+def _minimum_version(requirement: str) -> tuple[int, ...] | None:
+    """Return a simple >= minimum version tuple from a requirement string."""
+
+    if ">=" not in requirement:
+        return None
+    minimum = requirement.split(">=", 1)[1].split(",", 1)[0].strip()
+    return _version_release_parts(minimum)
+
+
+def _version_satisfies_minimum(
+    installed_version: str,
+    minimum_version: tuple[int, ...] | None,
+) -> bool:
+    """Return whether an installed version satisfies a simple minimum tuple."""
+
+    if minimum_version is None:
+        return True
+    installed_parts = _version_release_parts(installed_version)
+    if installed_parts is None:
+        return False
+    width = max(len(installed_parts), len(minimum_version))
+    return installed_parts + (0,) * (width - len(installed_parts)) >= (
+        minimum_version + (0,) * (width - len(minimum_version))
+    )
+
+
+def _require_offline_build_tools() -> None:
+    """Skip the offline build smoke when local build tools are unavailable."""
+
+    pyproject = _load_standalone_pyproject()
+    build_requires = pyproject["build-system"]["requires"]
+    missing: list[str] = []
+    incompatible: list[str] = []
+    for requirement in build_requires:
+        package_name = _dependency_package_name(requirement)
+        try:
+            installed_version = importlib_metadata.version(package_name)
+        except importlib_metadata.PackageNotFoundError:
+            missing.append(requirement)
+            continue
+        minimum = _minimum_version(requirement)
+        if not _version_satisfies_minimum(installed_version, minimum):
+            incompatible.append(f"{requirement} (found {installed_version})")
+
+    if missing or incompatible:
+        details = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if incompatible:
+            details.append(f"incompatible: {', '.join(incompatible)}")
+        pytest.skip(
+            "Offline standalone package smoke requires preinstalled build-system "
+            "requirements because it uses PIP_NO_INDEX=1 and "
+            f"--no-build-isolation; {'; '.join(details)}."
+        )
+
+
+def _assert_subprocess_succeeded(
+    result: subprocess.CompletedProcess[str],
+    command_label: str,
+) -> None:
+    """Assert a captured subprocess succeeded while preserving diagnostics."""
+
+    if result.returncode != 0:
+        raise AssertionError(
+            f"{command_label} failed with exit code {result.returncode}:\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+
+
+def test_subprocess_failure_assertion_includes_captured_output() -> None:
+    """Subprocess smoke failures should expose captured stdout and stderr."""
+
+    result = subprocess.CompletedProcess(
+        args=["python", "-m", "pip", "wheel"],
+        returncode=2,
+        stdout="build stdout",
+        stderr="build stderr",
+    )
+
+    with pytest.raises(AssertionError) as exc_info:
+        _assert_subprocess_succeeded(result, "pip wheel")
+
+    message = str(exc_info.value)
+    assert "pip wheel failed with exit code 2" in message
+    assert "STDOUT:\nbuild stdout" in message
+    assert "STDERR:\nbuild stderr" in message
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -106,6 +235,160 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     }
 
 
+def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
+    """Standalone package metadata must stay aligned with release gate metadata."""
+
+    metadata = importlib.import_module("mcp_unified.package_metadata")
+    pyproject = _load_standalone_pyproject()
+    project = pyproject["project"]
+
+    assert pyproject["build-system"]["requires"] == ["setuptools>=61.0"]
+    assert project["name"] == metadata.PACKAGE_NAME
+    assert project["version"] == mcp_unified.__version__
+    assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
+    assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
+
+    assert _dependency_names(project["dependencies"]) == set(metadata.CORE_DEPENDENCIES)
+
+    optional_dependencies = project["optional-dependencies"]
+    assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)
+    assert {
+        extra: _dependency_names(dependencies)
+        for extra, dependencies in optional_dependencies.items()
+    } == {
+        extra: set(dependencies)
+        for extra, dependencies in metadata.OPTIONAL_EXTRAS.items()
+    }
+
+    forbidden_dependency_names = {
+        "chromadb",
+        "docling",
+        "faster-whisper",
+        "gradio",
+        "llama-cpp-python",
+        "nemo-toolkit",
+        "next",
+        "qwen",
+        "torch",
+        "tts",
+        "yt-dlp",
+    }
+    standalone_dependency_names = _dependency_names(project["dependencies"])
+    for dependencies in optional_dependencies.values():
+        standalone_dependency_names.update(_dependency_names(dependencies))
+
+    assert forbidden_dependency_names.isdisjoint(standalone_dependency_names)
+
+
+@pytest.mark.smoke
+def test_mcp_unified_standalone_package_installs_without_root_dependencies(
+    tmp_path: Path,
+) -> None:
+    """Install the standalone package into an isolated target without root deps."""
+
+    _load_standalone_pyproject()
+    _require_offline_build_tools()
+    package_source = tmp_path / "mcp_unified_source"
+    shutil.copytree(
+        PACKAGE_ROOT,
+        package_source,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "build",
+            "*.egg-info",
+        ),
+    )
+    wheel_dir = tmp_path / "dist"
+    wheel_dir.mkdir()
+    build_env = {
+        **os.environ,
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PIP_NO_INDEX": "1",
+    }
+    build_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            str(wheel_dir),
+            str(package_source),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=build_env,
+    )
+    _assert_subprocess_succeeded(build_result, "pip wheel")
+
+    wheels = sorted(wheel_dir.glob("mcp_unified-*.whl"))
+    assert wheels, "No mcp_unified wheel found after pip wheel completed."
+
+    install_dir = tmp_path / "install"
+
+    install_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-index",
+            "--target",
+            str(install_dir),
+            str(wheels[-1]),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=build_env,
+    )
+    _assert_subprocess_succeeded(install_result, "pip install")
+    import_result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            (
+                "import json, sys; "
+                f"sys.path.insert(0, {str(install_dir)!r}); "
+                "import mcp_unified; "
+                "import mcp_unified.package_metadata as metadata; "
+                "blocked = ["
+                "name for name in ("
+                "'tldw_Server_API', 'chromadb', 'torch', 'faster_whisper', "
+                "'yt_dlp', 'fastapi', 'sqlalchemy'"
+                ") if name in sys.modules"
+                "]; "
+                "print(json.dumps({"
+                "'version': mcp_unified.__version__, "
+                "'package': metadata.PACKAGE_NAME, "
+                "'blocked': blocked"
+                "}))"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONPATH": "",
+        },
+    )
+    _assert_subprocess_succeeded(import_result, "standalone package import")
+
+    assert json.loads(import_result.stdout) == {
+        "version": mcp_unified.__version__,
+        "package": "mcp-unified",
+        "blocked": [],
+    }
+
+
 def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
     """Importing the package metadata must not pull in host or heavy stacks."""
 
@@ -123,6 +406,38 @@ def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
                 "'yt_dlp', 'next'"
                 ") if name in sys.modules"
                 "]; "
+                "print(json.dumps(blocked))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == []
+
+
+@pytest.mark.parametrize(
+    ("module_name", "blocked_modules"),
+    [
+        ("mcp_unified.storage", ("mcp_unified.storage.sqlite", "sqlalchemy")),
+        ("mcp_unified.federation", ("mcp_unified.storage.sqlite", "sqlalchemy")),
+    ],
+)
+def test_package_imports_do_not_eagerly_load_sqlite_backend(
+    module_name: str,
+    blocked_modules: tuple[str, ...],
+) -> None:
+    """Core and federation imports must not require SQLite storage dependencies."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib, json, sys; "
+                f"importlib.import_module({module_name!r}); "
+                f"blocked = [name for name in {blocked_modules!r} if name in sys.modules]; "
                 "print(json.dumps(blocked))"
             ),
         ],
