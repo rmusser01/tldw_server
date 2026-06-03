@@ -1,7 +1,7 @@
 ---
 id: TASK-509
 title: Audit docs for ADR decision inventory
-status: To Do
+status: In Progress
 labels:
 - docs
 - process
@@ -25,6 +25,7 @@ Audit existing decision sources and produce Docs/ADR/inventory/YYYY-MM-DD-decisi
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan created: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md. Execution order starts here; complete TASK-509 before TASK-510/TASK-511.
+Started execution in worktree .worktrees/adr-follow-up-plan on branch codex/adr-follow-up-plan. Verified .worktrees is ignored and task records are visible.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
