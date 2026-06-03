@@ -345,6 +345,7 @@ def test_workspace_capabilities_include_attached_primary_root(
             "sandbox_volume_id": "volume-1",
             "root_state": "attached",
             "indexing_state": "ready",
+            "sandbox_mount_state": "mounted",
             "mcp_trust_state": "trusted",
         },
     )
@@ -381,6 +382,7 @@ def test_workspace_capabilities_include_attached_primary_root(
     assert payload["project_root"]["state"] == "attached"
     assert payload["project_root"]["backend"] == "sandbox_volume"
     assert payload["project_root"]["path_hint"] == "volume-1"
+    assert payload["project_root"]["sandbox_mount_state"] == "mounted"
     assert payload["allowed_actions"]["write_files"]["allowed"] is True
     assert payload["allowed_actions"]["run_sandbox"]["allowed"] is True
 
