@@ -26,6 +26,7 @@ Audit existing decision sources and produce Docs/ADR/inventory/YYYY-MM-DD-decisi
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan created: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md. Execution order starts here; complete TASK-509 before TASK-510/TASK-511.
 Started execution in worktree .worktrees/adr-follow-up-plan on branch codex/adr-follow-up-plan. Verified .worktrees is ignored and task records are visible.
+Draft inventory created at Docs/ADR/inventory/2026-06-03-decision-inventory.md. Verification: enumerated 1,646 reviewable Markdown/RST files; broad decision-language search found 1,464 candidate files across required scopes; coverage matrix records scope counts, reviewed files, skipped-file rationale, and coverage result. Ran inventory checks for coverage matrix rows, decision table rows, and classification vocabulary. Bandit skipped: documentation-only task; no Python/code paths touched. Status remains In Progress pending owner review of candidate rows.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
