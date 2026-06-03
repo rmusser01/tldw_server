@@ -92,6 +92,37 @@ def test_live_e2e_python_command_uses_current_interpreter() -> None:
     assert backend_command["argv"][0] == sys.executable
 
 
+def test_workspace_live_e2e_manifest_declares_workspace_capabilities() -> None:
+    module = _load_module()
+
+    manifest = module.build_manifest("workspace-live-e2e")
+
+    assert manifest["verification_level"] == "live_e2e_tested"
+    assert manifest["requires_live_agent"] is True
+    assert manifest["required_environment"] == [
+        "TLDW_E2E_SERVER_URL",
+        "TLDW_E2E_API_KEY",
+        "ACP_AGENT_PROFILE",
+    ]
+    assert "ACP_E2E_WORKSPACE_ID" in manifest["optional_environment"]
+    backend_command = next(
+        command for command in manifest["commands"]
+        if command["id"] == "workspace_live_backend_acp_e2e"
+    )
+    assert backend_command["cwd"] == "."
+    assert backend_command["argv"][-1] == "--backend-workspace-live-e2e"
+    assert backend_command["safe_to_run_by_default"] is False
+    assert {
+        "workspace_env",
+        "mcp_injection",
+        "artifacts",
+        "review_loop",
+        "sandbox",
+        "diagnostics",
+        "redacted_support_view",
+    }.issubset(set(backend_command["capabilities"]))
+
+
 def test_manifest_json_output_is_stable_and_machine_readable() -> None:
     module = _load_module()
 
@@ -658,6 +689,215 @@ def test_backend_live_e2e_runs_backend_session_sequence(
         ("POST", "/api/v1/acp/sessions/cancel", {"session_id": "sess-hermes-1"}),
         ("POST", "/api/v1/acp/sessions/close", {"session_id": "sess-hermes-1"}),
     ]
+
+
+def test_backend_workspace_live_e2e_runs_workspace_evidence_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    calls: list[tuple[str, str, object]] = []
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "codex")
+    monkeypatch.setenv("ACP_E2E_WORKSPACE_ID", "workspace-alpha")
+    monkeypatch.setenv("ACP_E2E_MCP_SERVER_NAME", "workspace-context")
+
+    workspace_context = {
+        "workspace_id": "workspace-alpha",
+        "mcp_server_count": 1,
+        "mcp_server_names": ["workspace-context"],
+        "sandbox_session_id": "sandbox-session-1",
+        "sandbox_run_id": "sandbox-run-1",
+    }
+
+    def _fake_http(
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        del timeout_seconds
+        calls.append((method, path, body))
+        if path.startswith("/api/v1/acp/health"):
+            return 200, {"runner": {"status": "ok"}, "agents": []}
+        if path.startswith("/api/v1/acp/setup-guide"):
+            return 200, {"runner": {"status": "ok"}, "guides": []}
+        if path == "/api/v1/acp/sessions/new":
+            return 200, {
+                "session_id": "sess-codex-workspace-1",
+                "agent_type": "codex",
+                "workspace_id": "workspace-alpha",
+                "sandbox_session_id": "sandbox-session-1",
+                "sandbox_run_id": "sandbox-run-1",
+            }
+        if path == "/api/v1/acp/sessions/prompt":
+            return 200, {
+                "stop_reason": "end_turn",
+                "raw_result": {"stopReason": "end_turn"},
+            }
+        if path.startswith("/api/v1/acp/sessions/sess-codex-workspace-1/detail"):
+            return 200, {
+                "session_id": "sess-codex-workspace-1",
+                "messages": [],
+                "workspace_context": workspace_context,
+            }
+        if path.startswith("/api/v1/acp/sessions/sess-codex-workspace-1/events"):
+            return 200, {
+                "session_id": "sess-codex-workspace-1",
+                "total": 2,
+                "events": [{"index": 0}, {"index": 1}],
+            }
+        if path.startswith("/api/v1/acp/sessions/sess-codex-workspace-1/artifacts"):
+            return 200, {
+                "session_id": "sess-codex-workspace-1",
+                "total": 1,
+                "artifacts": [{"id": "artifact-1", "title": "Workspace brief"}],
+            }
+        if path == "/api/v1/acp/sessions/sess-codex-workspace-1/diagnostics":
+            return 200, {
+                "session_id": "sess-codex-workspace-1",
+                "total": 1,
+                "diagnostics": [{"reason_code": "workspace_certification"}],
+                "workspace_context": workspace_context,
+            }
+        if path.startswith("/api/v1/acp/sessions?workspace_id=workspace-alpha"):
+            return 200, {
+                "total": 1,
+                "sessions": [
+                    {
+                        "session_id": "sess-codex-workspace-1",
+                        "workspace_context": workspace_context,
+                    }
+                ],
+            }
+        if path == "/api/v1/acp/sessions/cancel":
+            return 200, {"status": "ok"}
+        if path == "/api/v1/acp/sessions/close":
+            return 200, {"status": "ok"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_http_json_request", _fake_http)
+
+    rc = module._run_backend_workspace_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "PASS workspace_live_backend_acp_e2e" in captured.out
+    evidence = json.loads(captured.out.split(": ", 1)[1])
+    assert evidence["agent_profile"] == "codex"
+    assert evidence["workspace_id"] == "workspace-alpha"
+    assert evidence["session_id"] == "sess-codex-workspace-1"
+    assert evidence["capabilities"]["workspace_env"] == "pass"
+    assert evidence["capabilities"]["mcp_injection"] == "pass"
+    assert evidence["capabilities"]["artifacts"] == "pass"
+    assert evidence["capabilities"]["sandbox"] == "pass"
+    assert evidence["capabilities"]["review_loop"] == "skip"
+    new_call = calls[2]
+    assert new_call[0:2] == ("POST", "/api/v1/acp/sessions/new")
+    new_body = new_call[2]
+    assert isinstance(new_body, dict)
+    assert new_body["workspace_id"] == "workspace-alpha"
+    assert new_body["agent_type"] == "codex"
+    assert new_body["mcp_servers"][0]["name"] == "workspace-context"
+    assert new_body["mcp_servers"][0]["type"] == "stdio"
+    assert calls == [
+        ("GET", "/api/v1/acp/health", None),
+        ("GET", "/api/v1/acp/setup-guide?agent_type=codex", None),
+        ("POST", "/api/v1/acp/sessions/new", new_body),
+        ("POST", "/api/v1/acp/sessions/prompt", {
+            "session_id": "sess-codex-workspace-1",
+            "prompt": [
+                {
+                    "type": "text",
+                    "text": module._WORKSPACE_LIVE_E2E_PROMPT,
+                }
+            ],
+        }),
+        ("GET", "/api/v1/acp/sessions/sess-codex-workspace-1/detail?redacted=true", None),
+        ("GET", "/api/v1/acp/sessions/sess-codex-workspace-1/events?redacted=true", None),
+        ("GET", "/api/v1/acp/sessions/sess-codex-workspace-1/artifacts?redacted=true", None),
+        ("GET", "/api/v1/acp/sessions/sess-codex-workspace-1/diagnostics", None),
+        ("GET", "/api/v1/acp/sessions?workspace_id=workspace-alpha&limit=20", None),
+        ("POST", "/api/v1/acp/sessions/cancel", {"session_id": "sess-codex-workspace-1"}),
+        ("POST", "/api/v1/acp/sessions/close", {"session_id": "sess-codex-workspace-1"}),
+    ]
+
+
+def test_backend_workspace_live_e2e_strict_artifact_expectation_fails_once_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    close_calls = 0
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "codex")
+    monkeypatch.setenv("ACP_E2E_WORKSPACE_ID", "workspace-alpha")
+    monkeypatch.setenv("ACP_E2E_EXPECT_ARTIFACTS", "1")
+
+    workspace_context = {
+        "workspace_id": "workspace-alpha",
+        "mcp_server_count": 1,
+        "mcp_server_names": ["tldw-workspace-certification"],
+    }
+
+    def _fake_http(
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        nonlocal close_calls
+        del timeout_seconds
+        if path.startswith("/api/v1/acp/health"):
+            return 200, {"runner": {"status": "ok"}, "agents": []}
+        if path.startswith("/api/v1/acp/setup-guide"):
+            return 200, {"runner": {"status": "ok"}, "guides": []}
+        if path == "/api/v1/acp/sessions/new":
+            return 200, {
+                "session_id": "sess-codex-workspace-1",
+                "agent_type": "codex",
+                "workspace_id": "workspace-alpha",
+            }
+        if path == "/api/v1/acp/sessions/prompt":
+            return 200, {"stop_reason": "end_turn"}
+        if path.startswith("/api/v1/acp/sessions/sess-codex-workspace-1/detail"):
+            return 200, {"session_id": "sess-codex-workspace-1", "workspace_context": workspace_context}
+        if path.startswith("/api/v1/acp/sessions/sess-codex-workspace-1/events"):
+            return 200, {"session_id": "sess-codex-workspace-1", "total": 1, "events": []}
+        if path.startswith("/api/v1/acp/sessions/sess-codex-workspace-1/artifacts"):
+            return 200, {"session_id": "sess-codex-workspace-1", "total": 0, "artifacts": []}
+        if path == "/api/v1/acp/sessions/sess-codex-workspace-1/diagnostics":
+            return 200, {"session_id": "sess-codex-workspace-1", "total": 0, "diagnostics": [], "workspace_context": workspace_context}
+        if path.startswith("/api/v1/acp/sessions?workspace_id=workspace-alpha"):
+            return 200, {
+                "total": 1,
+                "sessions": [
+                    {
+                        "session_id": "sess-codex-workspace-1",
+                        "workspace_context": workspace_context,
+                    }
+                ],
+            }
+        if path == "/api/v1/acp/sessions/cancel":
+            return 200, {"status": "ok"}
+        if path == "/api/v1/acp/sessions/close":
+            close_calls += 1
+            return 200, {"status": "ok"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_http_json_request", _fake_http)
+
+    rc = module._run_backend_workspace_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "FAIL live_backend_acp_e2e: workspace evidence" in captured.err
+    assert "artifacts" in captured.err
+    assert close_calls == 1
 
 
 def test_backend_live_e2e_closes_session_after_prompt_failure(

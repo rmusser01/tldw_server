@@ -38,6 +38,10 @@ _STDOUT_LINE_LIMIT = 64 * 1024
 _STDOUT_QUEUE_MAXSIZE = 32
 _SESSION_ID_PLACEHOLDER = "${session_id}"
 _FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+_WORKSPACE_LIVE_E2E_PROMPT = (
+    "Create a concise markdown workspace certification artifact with a title, "
+    "one evidence bullet, and the literal marker TLDW_WORKSPACE_ACP_CERTIFIED."
+)
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -166,6 +170,64 @@ _MANIFESTS: dict[str, dict[str, Any]] = {
                 "cwd": "tools/tldw-agent",
                 "argv": ["./scripts/verify-local-build.sh"],
                 "capabilities": ["init", "session_new", "prompt", "cancel_close"],
+                "safe_to_run_by_default": False,
+            },
+        ],
+    },
+    "workspace-live-e2e": {
+        "profile": "workspace-live-e2e",
+        "support_state": "supported_with_caveats",
+        "verification_level": "live_e2e_tested",
+        "requires_live_agent": True,
+        "required_environment": [
+            "TLDW_E2E_SERVER_URL",
+            "TLDW_E2E_API_KEY",
+            "ACP_AGENT_PROFILE",
+        ],
+        "optional_environment": [
+            "ACP_E2E_WORKSPACE_CWD",
+            "ACP_E2E_WORKSPACE_ID",
+            "ACP_E2E_MCP_SERVER_NAME",
+            "ACP_E2E_MCP_SERVER_COMMAND",
+            "ACP_E2E_MCP_SERVER_ARGS_JSON",
+            "ACP_E2E_EXPECT_SANDBOX",
+            "ACP_E2E_EXPECT_ARTIFACTS",
+            "ACP_E2E_EXPECT_REVIEWER_LOOP",
+        ],
+        "notes": [
+            "Requires a running backend, API key, configured ACP runner profile, installed downstream agent binary, provider credentials, and a workspace id to certify.",
+            "Extends live-e2e with Research Workspace session context, non-empty MCP server injection, artifacts, diagnostics, reviewer-loop, and sandbox evidence checks.",
+            "Unavailable optional capabilities are reported as skipped unless the matching ACP_E2E_EXPECT_* flag requires them.",
+        ],
+        "commands": [
+            {
+                "id": "workspace_live_backend_acp_e2e",
+                "description": "Live Research Workspace ACP REST flow against a configured downstream agent profile.",
+                "cwd": ".",
+                "argv": [
+                    sys.executable,
+                    "Helper_Scripts/Testing-related/acp_certification_smoke.py",
+                    "--backend-workspace-live-e2e",
+                ],
+                "env": {
+                    "TLDW_E2E_SERVER_URL": "${TLDW_E2E_SERVER_URL}",
+                    "TLDW_E2E_API_KEY": "${TLDW_E2E_API_KEY}",
+                    "ACP_AGENT_PROFILE": "${ACP_AGENT_PROFILE}",
+                },
+                "capabilities": [
+                    "init",
+                    "session_new",
+                    "prompt",
+                    "structured_completion",
+                    "artifacts",
+                    "diagnostics",
+                    "cancel_close",
+                    "review_loop",
+                    "workspace_env",
+                    "mcp_injection",
+                    "sandbox",
+                    "redacted_support_view",
+                ],
                 "safe_to_run_by_default": False,
             },
         ],
@@ -657,6 +719,404 @@ def _run_backend_live_e2e_from_env() -> int:
                     f"WARN live_backend_acp_e2e: failed to close session {session_id}: {exc}",
                     file=sys.stderr,
                 )
+
+
+def _env_flag_enabled(name: str) -> bool:
+    """Return True when an environment flag requests strict live evidence."""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _workspace_live_e2e_workspace_id(profile: str) -> str:
+    """Return the workspace id to bind to the live workspace certification run."""
+    configured = os.environ.get("ACP_E2E_WORKSPACE_ID", "").strip()
+    if configured:
+        return configured
+    normalized = "".join(
+        char.lower() if char.isalnum() else "-"
+        for char in str(profile or "agent")
+    ).strip("-")
+    return f"acp-cert-{normalized or 'agent'}"
+
+
+def _workspace_live_e2e_mcp_servers() -> list[dict[str, Any]]:
+    """Return a non-empty MCP server config for workspace certification."""
+    name = os.environ.get("ACP_E2E_MCP_SERVER_NAME", "").strip() or "tldw-workspace-certification"
+    command = os.environ.get("ACP_E2E_MCP_SERVER_COMMAND", "").strip() or sys.executable
+    raw_args = os.environ.get("ACP_E2E_MCP_SERVER_ARGS_JSON", "").strip()
+    if raw_args:
+        try:
+            args_payload = json.loads(raw_args)
+        except json.JSONDecodeError as exc:
+            raise ValueError("ACP_E2E_MCP_SERVER_ARGS_JSON must be valid JSON") from exc
+        if not isinstance(args_payload, list) or not all(isinstance(arg, str) for arg in args_payload):
+            raise ValueError("ACP_E2E_MCP_SERVER_ARGS_JSON must be a JSON array of strings")
+        args = args_payload
+    else:
+        args = [str(Path(__file__).resolve()), "--mcp-certification-server"]
+    return [
+        {
+            "name": name,
+            "type": "stdio",
+            "command": command,
+            "args": args,
+            "env": {},
+        }
+    ]
+
+
+def _payload_workspace_context(payload: Any) -> dict[str, Any]:
+    """Return a payload's workspace_context dict when present."""
+    if not isinstance(payload, dict):
+        return {}
+    context = payload.get("workspace_context")
+    return dict(context) if isinstance(context, dict) else {}
+
+
+def _workspace_context_value(payloads: list[dict[str, Any]], key: str) -> Any:
+    """Return the first non-empty workspace_context value for a key."""
+    for payload in payloads:
+        context = _payload_workspace_context(payload)
+        value = context.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _filtered_sessions_include(
+    payload: dict[str, Any],
+    *,
+    session_id: str,
+    workspace_id: str,
+) -> bool:
+    """Return whether a workspace-filtered session list contains the session."""
+    sessions = payload.get("sessions")
+    if not isinstance(sessions, list):
+        return False
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        if str(session.get("session_id") or "") != session_id:
+            continue
+        context = _payload_workspace_context(session)
+        listed_workspace_id = session.get("workspace_id") or context.get("workspace_id")
+        if str(listed_workspace_id or "") == workspace_id:
+            return True
+    return False
+
+
+def _payload_contains_review_evidence(payload: Any) -> bool:
+    """Return True when a bounded support payload appears to include review-loop evidence."""
+    try:
+        rendered = json.dumps(payload or {}, sort_keys=True, default=str).lower()
+    except TypeError:
+        rendered = str(payload or "").lower()
+    return any(marker in rendered for marker in ("review_loop", "reviewer", "review_decision"))
+
+
+def _required_workspace_live_failures(capabilities: dict[str, str]) -> list[str]:
+    """Return capability ids that must pass for workspace live certification."""
+    required = (
+        "init",
+        "session_new",
+        "prompt",
+        "structured_completion",
+        "diagnostics",
+        "cancel_close",
+        "workspace_env",
+        "mcp_injection",
+        "redacted_support_view",
+    )
+    return [capability for capability in required if capabilities.get(capability) != "pass"]
+
+
+def _optional_expectation_failures(capabilities: dict[str, str]) -> list[str]:
+    """Return optional capabilities that were requested but did not pass."""
+    expected = {
+        "artifacts": "ACP_E2E_EXPECT_ARTIFACTS",
+        "sandbox": "ACP_E2E_EXPECT_SANDBOX",
+        "review_loop": "ACP_E2E_EXPECT_REVIEWER_LOOP",
+    }
+    return [
+        capability
+        for capability, env_name in expected.items()
+        if _env_flag_enabled(env_name) and capabilities.get(capability) != "pass"
+    ]
+
+
+def _run_backend_workspace_live_e2e_from_env() -> int:
+    """Run the backend ACP REST lifecycle with workspace evidence checks."""
+    required_env = {
+        name: os.environ.get(name, "").strip()
+        for name in ("TLDW_E2E_SERVER_URL", "TLDW_E2E_API_KEY", "ACP_AGENT_PROFILE")
+    }
+    missing = [
+        name for name, value in required_env.items()
+        if not value
+    ]
+    if missing:
+        print(
+            "Refusing to run backend workspace live ACP certification without required environment: "
+            + ", ".join(missing),
+            file=sys.stderr,
+        )
+        return 2
+
+    profile = required_env["ACP_AGENT_PROFILE"]
+    workspace_id = _workspace_live_e2e_workspace_id(profile)
+    workspace_cwd = os.environ.get("ACP_E2E_WORKSPACE_CWD", "").strip() or str(ROOT)
+    mcp_servers = _workspace_live_e2e_mcp_servers()
+    session_id: str | None = None
+    timeout_seconds: float | None = None
+
+    def request(method: str, path: str, body: Any = None) -> tuple[int, dict[str, Any]]:
+        return _http_json_request(
+            method,
+            path,
+            body,
+            timeout_seconds=timeout_seconds,
+        )
+
+    try:
+        timeout_seconds = _backend_e2e_timeout_seconds()
+        for step, method, path, body in (
+            ("health", "GET", "/api/v1/acp/health", None),
+            (
+                "setup-guide",
+                "GET",
+                "/api/v1/acp/setup-guide?"
+                + urllib.parse.urlencode({"agent_type": profile}),
+                None,
+            ),
+        ):
+            status, payload = request(method, path, body)
+            failed = _check_backend_response(step, status, payload)
+            if failed is not None:
+                return failed
+
+        new_body = {
+            "cwd": workspace_cwd,
+            "agent_type": profile,
+            "name": f"ACP workspace live E2E {profile}",
+            "workspace_id": workspace_id,
+            "mcp_servers": mcp_servers,
+        }
+        status, new_payload = request("POST", "/api/v1/acp/sessions/new", new_body)
+        failed = _check_backend_response("sessions/new", status, new_payload)
+        if failed is not None:
+            return failed
+        session_id = str(new_payload.get("session_id") or "")
+        if not session_id:
+            return _fail_backend_live_e2e("sessions/new", status, {"detail": "missing session_id"})
+
+        prompt_body = {
+            "session_id": session_id,
+            "prompt": [
+                {
+                    "type": "text",
+                    "text": _WORKSPACE_LIVE_E2E_PROMPT,
+                }
+            ],
+        }
+        status, prompt_payload = request("POST", "/api/v1/acp/sessions/prompt", prompt_body)
+        failed = _check_backend_response("sessions/prompt", status, prompt_payload)
+        if failed is not None:
+            return failed
+
+        stop_reason = (
+            prompt_payload.get("stop_reason")
+            or (prompt_payload.get("raw_result") or {}).get("stopReason")
+        )
+        redacted_paths = [
+            ("detail", f"/api/v1/acp/sessions/{session_id}/detail?redacted=true"),
+            ("events", f"/api/v1/acp/sessions/{session_id}/events?redacted=true"),
+            ("artifacts", f"/api/v1/acp/sessions/{session_id}/artifacts?redacted=true"),
+            ("diagnostics", f"/api/v1/acp/sessions/{session_id}/diagnostics"),
+        ]
+        support_payloads: dict[str, dict[str, Any]] = {}
+        evidence: dict[str, Any] = {
+            "agent_profile": profile,
+            "workspace_id": workspace_id,
+            "session_id": session_id,
+            "stop_reason": stop_reason,
+        }
+        for step, path in redacted_paths:
+            status, payload = request("GET", path, None)
+            failed = _check_backend_response(step, status, payload)
+            if failed is not None:
+                return failed
+            support_payloads[step] = payload
+            if "total" in payload:
+                evidence[f"{step}_total"] = payload.get("total")
+
+        filtered_path = (
+            "/api/v1/acp/sessions?"
+            + urllib.parse.urlencode({"workspace_id": workspace_id, "limit": 20})
+        )
+        status, session_list_payload = request("GET", filtered_path, None)
+        failed = _check_backend_response("sessions?workspace_id", status, session_list_payload)
+        if failed is not None:
+            return failed
+
+        status, payload = request(
+            "POST",
+            "/api/v1/acp/sessions/cancel",
+            {"session_id": session_id},
+        )
+        failed = _check_backend_response("sessions/cancel", status, payload)
+        if failed is not None:
+            return failed
+
+        status, payload = request(
+            "POST",
+            "/api/v1/acp/sessions/close",
+            {"session_id": session_id},
+        )
+        failed = _check_backend_response("sessions/close", status, payload)
+        if failed is not None:
+            return failed
+        closed_session_id = session_id
+        session_id = None
+
+        context_payloads = [
+            new_payload,
+            support_payloads.get("detail", {}),
+            support_payloads.get("diagnostics", {}),
+        ]
+        workspace_from_new = str(new_payload.get("workspace_id") or "")
+        workspace_from_context = str(_workspace_context_value(context_payloads, "workspace_id") or "")
+        workspace_env_passed = (
+            workspace_from_new == workspace_id
+            or workspace_from_context == workspace_id
+            or _filtered_sessions_include(
+                session_list_payload,
+                session_id=closed_session_id,
+                workspace_id=workspace_id,
+            )
+        )
+        mcp_count = _workspace_context_value(context_payloads, "mcp_server_count")
+        try:
+            mcp_count_int = int(mcp_count or 0)
+        except (TypeError, ValueError):
+            mcp_count_int = 0
+        sandbox_session_id = (
+            new_payload.get("sandbox_session_id")
+            or _workspace_context_value(context_payloads, "sandbox_session_id")
+        )
+        sandbox_run_id = (
+            new_payload.get("sandbox_run_id")
+            or _workspace_context_value(context_payloads, "sandbox_run_id")
+        )
+        artifacts_total = int(support_payloads.get("artifacts", {}).get("total") or 0)
+        review_loop_passed = (
+            _payload_contains_review_evidence(support_payloads.get("diagnostics"))
+            or _payload_contains_review_evidence(support_payloads.get("artifacts"))
+            or _payload_contains_review_evidence(prompt_payload)
+        )
+        capabilities = {
+            "init": "pass",
+            "session_new": "pass",
+            "prompt": "pass",
+            "structured_completion": "pass" if stop_reason else "fail",
+            "diagnostics": "pass",
+            "cancel_close": "pass",
+            "workspace_env": "pass" if workspace_env_passed else "fail",
+            "mcp_injection": "pass" if mcp_count_int > 0 else "fail",
+            "redacted_support_view": "pass",
+            "artifacts": "pass" if artifacts_total > 0 else "skip",
+            "sandbox": "pass" if sandbox_session_id and sandbox_run_id else "skip",
+            "review_loop": "pass" if review_loop_passed else "skip",
+        }
+        evidence["capabilities"] = capabilities
+        evidence["mcp_server_count"] = mcp_count_int
+        if sandbox_session_id:
+            evidence["sandbox_session_id"] = sandbox_session_id
+        if sandbox_run_id:
+            evidence["sandbox_run_id"] = sandbox_run_id
+
+        failures = _required_workspace_live_failures(capabilities)
+        failures.extend(_optional_expectation_failures(capabilities))
+        if failures:
+            return _fail_backend_live_e2e(
+                "workspace evidence",
+                200,
+                {"failed_capabilities": failures, "evidence": evidence},
+            )
+
+        print("PASS workspace_live_backend_acp_e2e: " + json.dumps(evidence, sort_keys=True))
+        return 0
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        print(f"FAIL workspace_live_backend_acp_e2e: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if session_id:
+            try:
+                request(
+                    "POST",
+                    "/api/v1/acp/sessions/close",
+                    {"session_id": session_id},
+                )
+            except (OSError, ValueError, urllib.error.URLError) as exc:
+                print(
+                    f"WARN workspace_live_backend_acp_e2e: failed to close session {session_id}: {exc}",
+                    file=sys.stderr,
+                )
+
+
+def _run_mcp_certification_server() -> int:
+    """Run a minimal stdio MCP server for workspace certification injection."""
+    for raw_line in sys.stdin:
+        try:
+            request = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(request, dict):
+            continue
+        request_id = request.get("id")
+        method = str(request.get("method") or "")
+        if request_id is None:
+            continue
+        if method == "initialize":
+            result: dict[str, Any] = {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
+                    "name": "tldw-workspace-certification",
+                    "version": "0.1.0",
+                },
+                "capabilities": {"tools": {}},
+            }
+        elif method == "tools/list":
+            result = {
+                "tools": [
+                    {
+                        "name": "workspace.certification.echo",
+                        "description": "Return a static workspace certification marker.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": False,
+                        },
+                    }
+                ]
+            }
+        elif method == "tools/call":
+            result = {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "TLDW_WORKSPACE_MCP_CERTIFICATION_OK",
+                    }
+                ]
+            }
+        else:
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": f"Unsupported method: {method}"},
+            }
+            print(json.dumps(response), flush=True)
+            continue
+        print(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}), flush=True)
+    return 0
 
 
 def _missing_executable_reason(command: dict[str, Any], cwd: Path) -> str | None:
@@ -1213,10 +1673,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run the backend REST live-E2E certification flow from environment.",
     )
+    parser.add_argument(
+        "--backend-workspace-live-e2e",
+        action="store_true",
+        help="Run the backend REST workspace live-E2E certification flow from environment.",
+    )
+    parser.add_argument(
+        "--mcp-certification-server",
+        action="store_true",
+        help="Run a minimal stdio MCP server for workspace live certification.",
+    )
     args = parser.parse_args(argv)
+
+    if args.mcp_certification_server:
+        return _run_mcp_certification_server()
 
     if args.backend_live_e2e:
         return _run_backend_live_e2e_from_env()
+
+    if args.backend_workspace_live_e2e:
+        return _run_backend_workspace_live_e2e_from_env()
 
     if args.agent_profile:
         manifest = _build_registry_agent_manifest(args.agent_profile)
