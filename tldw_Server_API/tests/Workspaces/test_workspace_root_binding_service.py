@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
+    InputError,
 )
 from tldw_Server_API.app.core.Workspaces.root_binding_service import (
     SandboxVolumeBinding,
@@ -287,6 +288,34 @@ class _StaticSandboxResolver:
         )
 
 
+@dataclass(frozen=True)
+class _InvalidStateSandboxResolver:
+    def validate_workspace_volume(self, *, workspace_id, user_id, sandbox_volume_id):
+        return SandboxVolumeBinding(
+            sandbox_volume_id=sandbox_volume_id,
+            state="mounted",  # type: ignore[arg-type]
+        )
+
+
+def test_sandbox_resolver_invalid_state_is_rejected(db):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+            sandbox_resolver=_InvalidStateSandboxResolver(),
+        )
+
+    assert exc_info.value.code == "workspace_sandbox_volume_state_invalid"
+    assert db.get_workspace_primary_root("ws-1") is None
+
+
 def test_ready_sandbox_resolver_repairs_prior_unavailable_retry(db):
     db.upsert_workspace("ws-1", "Workspace")
     first = attach_primary_workspace_root(
@@ -325,6 +354,22 @@ class _VersionConflictDB:
         raise ConflictError("Workspace 'ws-1' version mismatch.")
 
 
+class _LoadConflictDB:
+    def get_workspace_primary_root(self, workspace_id):
+        raise ConflictError("Workspace 'ws-1' version mismatch.")
+
+    def upsert_workspace_primary_root(self, workspace_id, payload):
+        pytest.fail("upsert should not run when current-root load fails")
+
+
+class _LoadInputErrorDB:
+    def get_workspace_primary_root(self, workspace_id):
+        raise InputError("workspace_id is invalid.")
+
+    def upsert_workspace_primary_root(self, workspace_id, payload):
+        pytest.fail("upsert should not run when current-root load fails")
+
+
 def test_db_conflict_with_version_text_is_wrapped_as_version_mismatch():
     with pytest.raises(WorkspaceRootConflictError) as exc_info:
         attach_primary_workspace_root(
@@ -338,3 +383,33 @@ def test_db_conflict_with_version_text_is_wrapped_as_version_mismatch():
         )
 
     assert exc_info.value.code == "workspace_version_mismatch"
+
+
+def test_db_conflict_from_current_root_load_is_wrapped_as_version_mismatch():
+    with pytest.raises(WorkspaceRootConflictError) as exc_info:
+        attach_primary_workspace_root(
+            db=_LoadConflictDB(),
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+        )
+
+    assert exc_info.value.code == "workspace_version_mismatch"
+
+
+def test_db_input_error_from_current_root_load_is_wrapped_as_invalid_request():
+    with pytest.raises(WorkspaceRootInputError) as exc_info:
+        attach_primary_workspace_root(
+            db=_LoadInputErrorDB(),
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+        )
+
+    assert exc_info.value.code == "workspace_root_invalid_request"

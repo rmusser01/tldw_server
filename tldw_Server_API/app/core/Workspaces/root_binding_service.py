@@ -17,6 +17,7 @@ _DEFAULT_ROOT_ID = "primary"
 _ROOT_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SANDBOX_VOLUME_ID_RE = _ROOT_ID_RE
 _DISPLAY_NAME_MAX_LENGTH = 120
+_SANDBOX_VOLUME_STATES = frozenset({"ready", "not_configured", "unavailable", "failed"})
 
 
 class WorkspaceRootServiceError(Exception):
@@ -128,7 +129,7 @@ def attach_primary_workspace_root(
 ) -> dict[str, Any]:
     """Validate and persist a Workspace primary project-root binding."""
 
-    current_primary = db.get_workspace_primary_root(workspace_id)
+    current_primary = _load_current_primary_root(db, workspace_id)
     normalized = _normalize_request(
         workspace_id=workspace_id,
         user_id=user_id,
@@ -161,17 +162,32 @@ def attach_primary_workspace_root(
     try:
         return db.upsert_workspace_primary_root(workspace_id, payload)
     except ConflictError as exc:
-        message = str(exc)
-        code = (
-            "workspace_version_mismatch"
-            if "version" in message.lower()
-            else "workspace_primary_root_write_conflict"
-        )
-        raise WorkspaceRootConflictError(message, code=code) from exc
+        raise _wrap_db_conflict(exc) from exc
     except InputError as exc:
         raise WorkspaceRootInputError(str(exc), code="workspace_root_invalid_request") from exc
     except CharactersRAGDBError:
         raise
+
+
+def _load_current_primary_root(db: Any, workspace_id: str) -> dict[str, Any] | None:
+    try:
+        return db.get_workspace_primary_root(workspace_id)
+    except ConflictError as exc:
+        raise _wrap_db_conflict(exc) from exc
+    except InputError as exc:
+        raise WorkspaceRootInputError(str(exc), code="workspace_root_invalid_request") from exc
+    except CharactersRAGDBError:
+        raise
+
+
+def _wrap_db_conflict(exc: ConflictError) -> WorkspaceRootConflictError:
+    message = str(exc)
+    code = (
+        "workspace_version_mismatch"
+        if "version" in message.lower()
+        else "workspace_primary_root_write_conflict"
+    )
+    return WorkspaceRootConflictError(message, code=code)
 
 
 def _normalize_request(
@@ -297,6 +313,11 @@ def _normalize_sandbox_volume_request(
         user_id=user_id,
         sandbox_volume_id=sandbox_volume_id,
     )
+    if binding.state not in _SANDBOX_VOLUME_STATES:
+        raise WorkspaceRootConfigurationError(
+            "Workspace sandbox volume resolver returned an invalid state.",
+            code="workspace_sandbox_volume_state_invalid",
+        )
     if request.strict_sandbox_validation and binding.state != "ready":
         raise WorkspaceRootConfigurationError(
             "Workspace sandbox volume resolver is unavailable.",
