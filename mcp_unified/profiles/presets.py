@@ -39,11 +39,19 @@ _DESTRUCTIVE_FILESYSTEM_CAPABILITIES = {
 _EXTERNAL_NETWORK_CAPABILITIES = {
     "external.network",
 }
+_APPROVAL_REQUIRED_RISK_CLASSES = {
+    "browser_mutation",
+    "deployment_mutation",
+    "git_mutation",
+    "memory_mutation",
+    "test_execution",
+}
 _HIGH_RISK_RISK_CLASSES = {
     "credential_use",
     "destructive_filesystem",
     "external_network",
     "process_execution",
+    *_APPROVAL_REQUIRED_RISK_CLASSES,
 }
 
 
@@ -775,6 +783,12 @@ def validate_preset_safety(preset: ProfilePreset) -> list[str]:
         if not _has_high_risk_provenance(profile, "external_network"):
             violations.append("high_risk_capability_requires_provenance")
 
+    for risk_class in sorted(risk_classes & _APPROVAL_REQUIRED_RISK_CLASSES):
+        if not _approval_required_for(profile, risk_class):
+            violations.append(f"{risk_class}_requires_approval")
+        if not _has_high_risk_provenance(profile, risk_class):
+            violations.append("high_risk_capability_requires_provenance")
+
     unknown_high_risk = risk_classes - _HIGH_RISK_RISK_CLASSES - {"mutating"}
     if unknown_high_risk:
         violations.append("unknown_high_risk_requires_review")
@@ -798,8 +812,8 @@ def _approval_required_for(profile: MCPProfile, risk_class: str) -> bool:
     else:
         required_for = []
 
-    if risk_class == "process_execution":
-        return "process_execution" in required_for
+    if risk_class == "process_execution" or risk_class in _APPROVAL_REQUIRED_RISK_CLASSES:
+        return risk_class in required_for
 
     return risk_class in required_for or "mutating" in required_for or "write" in required_for
 

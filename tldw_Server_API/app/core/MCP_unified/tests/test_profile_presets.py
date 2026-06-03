@@ -299,6 +299,97 @@ def test_safety_validation_rejects_unsafe_unapproved_process_capability() -> Non
     assert "high_risk_capability_requires_provenance" in violations
 
 
+def test_safety_validation_accepts_reviewed_high_risk_classes_with_approval_and_provenance() -> None:
+    profile = MCPProfile(
+        id="safe-reviewed-risk",
+        name="Safe Reviewed Risk",
+        policy_document={
+            "risk_classes": [
+                "browser_mutation",
+                "git_mutation",
+                "deployment_mutation",
+                "memory_mutation",
+                "test_execution",
+            ],
+        },
+        approval_policy={
+            "required_for": [
+                "browser_mutation",
+                "git_mutation",
+                "deployment_mutation",
+                "memory_mutation",
+                "test_execution",
+            ],
+        },
+        provenance={
+            "high_risk": {
+                "browser_mutation": "reviewed",
+                "git_mutation": "reviewed",
+                "deployment_mutation": "reviewed",
+                "memory_mutation": "reviewed",
+                "test_execution": "reviewed",
+            },
+        },
+    )
+    preset = presets.ProfilePreset(
+        id="safe-reviewed-risk",
+        version="test",
+        profile=profile,
+    )
+
+    assert presets.validate_preset_safety(preset) == []
+
+
+def test_safety_validation_rejects_reviewed_high_risk_class_without_approval() -> None:
+    profile = MCPProfile(
+        id="unsafe-browser",
+        name="Unsafe Browser",
+        policy_document={"risk_classes": ["browser_mutation"]},
+        provenance={"high_risk": {"browser_mutation": "reviewed"}},
+    )
+    preset = presets.ProfilePreset(
+        id="unsafe-browser",
+        version="test",
+        profile=profile,
+    )
+
+    assert "browser_mutation_requires_approval" in presets.validate_preset_safety(preset)
+
+
+def test_safety_validation_requires_explicit_reviewed_high_risk_approval() -> None:
+    profile = MCPProfile(
+        id="unsafe-generic-browser",
+        name="Unsafe Generic Browser",
+        policy_document={"risk_classes": ["browser_mutation"]},
+        approval_policy={"required_for": ["mutating", "write"]},
+        provenance={"high_risk": {"browser_mutation": "reviewed"}},
+    )
+    preset = presets.ProfilePreset(
+        id="unsafe-generic-browser",
+        version="test",
+        profile=profile,
+    )
+
+    assert "browser_mutation_requires_approval" in presets.validate_preset_safety(preset)
+
+
+def test_safety_validation_rejects_unknown_future_risk_classes() -> None:
+    profile = MCPProfile(
+        id="unsafe-future-risk",
+        name="Unsafe Future Risk",
+        policy_document={"risk_classes": ["future_mutation"]},
+        approval_policy={"required_for": ["future_mutation"]},
+        provenance={"high_risk": {"future_mutation": "reviewed"}},
+    )
+    preset = presets.ProfilePreset(
+        id="unsafe-future-risk",
+        version="test",
+        profile=profile,
+    )
+
+    assert "unknown_high_risk_requires_review" in presets.validate_preset_safety(preset)
+
+
 def test_safety_validation_requires_explicit_process_execution_approval() -> None:
     unsafe_profile = MCPProfile(
         id="unsafe-process",
