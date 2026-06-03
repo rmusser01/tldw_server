@@ -1,7 +1,7 @@
 ---
 id: TASK-510
 title: Backfill authoritative ADRs from decision inventory
-status: To Do
+status: In Progress
 labels:
 - docs
 - process
@@ -30,6 +30,8 @@ Plan and coordinate bounded module/domain ADR backfill child tasks from the owne
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan created: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md. Depends on owner-reviewed output from TASK-509 before bounded backfill slices are created.
+Started TASK-510 after TASK-509 owner-review defaults were approved. Pilot slice: Workspace/WebUI from inventory rows INV-017, INV-018, INV-020, with INV-019 as context. Plan: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md.
+Created child task TASK-514 for the Workspace/WebUI pilot slice covering INV-017, INV-018, and INV-020, with INV-019 as context. TASK-514 is the planned TASK-511 evidence-gate pilot.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
