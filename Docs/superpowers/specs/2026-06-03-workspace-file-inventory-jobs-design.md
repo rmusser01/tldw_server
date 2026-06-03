@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft for TASK-2240.
+Draft for TASK-2240. Review hardening tracked in TASK-2241.
 
 ## Purpose
 
@@ -98,17 +98,26 @@ validation failures produce `failed`.
 
 ## State Model
 
-Inventory state values:
+Durable scan row state values:
 
-- `not_started`: no scan has been requested for the root.
 - `queued`: a scan record exists and a Jobs row was enqueued.
 - `scanning`: a worker acquired the job and started traversal.
 - `current`: scan completed without diagnostics that affect coverage.
 - `partial`: scan completed with bounded diagnostics or scan limits.
-- `stale`: root binding version or policy fingerprint changed after the latest
-  completed scan.
 - `failed`: scan could not run or root validation failed.
 - `disabled`: inventory scanning is intentionally unavailable.
+
+Projected inventory status may additionally return:
+
+- `not_started`: no scan has been requested for the root.
+- `stale`: the latest completed scan's `root_version` or
+  `ignore_policy_fingerprint` no longer matches the current root/policy.
+
+`stale` is read-computed, not a terminal scan-row state. If a worker acquires a
+job and discovers that the requested root version no longer matches, that scan
+attempt completes as `failed` with diagnostic code `root_version_mismatch`. The
+previous latest completed scan remains available and is projected as
+`stale: true` until a new scan completes.
 
 Root state and inventory state are related but separate. A root can be
 `attached` while inventory is `failed` or `stale`.
@@ -122,8 +131,8 @@ Add Workspace-owned tables in `CharactersRAGDB`.
 One row per scan attempt:
 
 - `scan_id TEXT PRIMARY KEY`
-- `workspace_id TEXT NOT NULL`
-- `root_id TEXT NOT NULL`
+- `workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE`
+- `root_id TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE`
 - `root_version INTEGER NOT NULL`
 - `job_id INTEGER`
 - `job_uuid TEXT`
@@ -152,7 +161,7 @@ Current item projection keyed by root-relative path:
 - `workspace_id TEXT NOT NULL`
 - `root_id TEXT NOT NULL`
 - `relative_path TEXT NOT NULL`
-- `scan_id TEXT NOT NULL`
+- `scan_id TEXT NOT NULL REFERENCES workspace_file_inventory_scans(scan_id) ON DELETE CASCADE`
 - `entry_kind TEXT NOT NULL`
 - `size_bytes INTEGER`
 - `mtime_ns INTEGER`
@@ -163,14 +172,28 @@ Current item projection keyed by root-relative path:
 - `ignored BOOLEAN NOT NULL DEFAULT 0`
 - `ignore_reason TEXT`
 - `indexing_candidate BOOLEAN NOT NULL DEFAULT 0`
+- `coverage_state TEXT NOT NULL DEFAULT 'current'`
 - `last_seen_at DATETIME NOT NULL`
 - `deleted BOOLEAN NOT NULL DEFAULT 0`
 - `metadata_json TEXT NOT NULL DEFAULT '{}'`
 - primary key `(workspace_id, root_id, relative_path)`
 
+`coverage_state` starts as `current`. When a full-coverage scan completes,
+previous rows unseen by the scan are marked `deleted`. When a partial scan
+completes, newly seen rows are upserted, but previously unseen rows are
+preserved with `coverage_state: previous` and `deleted: false` because the
+scanner cannot prove absence.
+
 The first slice should not persist content hashes. A metadata fingerprint can be
 derived from relative path, entry kind, size, mtime, and mode if needed for
 change detection, but it must not require opening ordinary files.
+
+Hard delete behavior:
+
+- deleting a workspace must delete file inventory scan and item rows
+- deleting/replacing a project root must delete inventory scan and item rows for
+  the old root
+- DB tests must cover both SQLite initialization and explicit hard-delete paths
 
 ### Root Projection
 
@@ -184,9 +207,14 @@ read model computes `stale` when the latest scan `root_version` or
 Add focused DB methods rather than ad hoc SQL in endpoints or workers:
 
 - `begin_workspace_file_inventory_scan(workspace_id, root_id, root_version, policy_fingerprint, requested_by)`
-  - returns an existing active scan for the same root when queued/scanning
+  - returns an existing active scan for the same root when queued/scanning and
+    a Jobs id exists
   - otherwise creates a new scan with state `queued`
   - updates the root `file_inventory_state` to `queued`
+- `mark_workspace_file_inventory_enqueue_failed(scan_id, diagnostics)`
+  - transitions the scan and root state from `queued` to `failed` when Jobs
+    enqueue fails after scan-row creation
+  - ensures future scan requests do not reuse a dead queued row without a job id
 - `attach_workspace_file_inventory_job(scan_id, job_row)`
   - stores Jobs id/uuid idempotently
 - `mark_workspace_file_inventory_scanning(scan_id)`
@@ -195,8 +223,12 @@ Add focused DB methods rather than ad hoc SQL in endpoints or workers:
   - accepts only `current`, `partial`, or `failed`
   - updates root `file_inventory_state`
   - stores bounded JSON
-- `replace_workspace_file_inventory_items(workspace_id, root_id, scan_id, items)`
-  - batch-upserts current rows and marks unseen previous rows deleted
+- `replace_workspace_file_inventory_items(workspace_id, root_id, scan_id, items, scan_coverage_complete)`
+  - batch-upserts current rows
+  - marks unseen previous rows deleted only when `scan_coverage_complete` is
+    true
+  - preserves unseen previous rows with `coverage_state: previous` when
+    `scan_coverage_complete` is false
 - `get_workspace_file_inventory_status(workspace_id)`
 - `list_workspace_file_inventory_items(workspace_id, prefix, cursor, limit, include_ignored)`
 
@@ -225,9 +257,11 @@ Enqueue helper:
 - Stores the Jobs id/uuid back on the scan row.
 - Returns a response-ready scan status object.
 
-The helper must not swallow enqueue failures silently. If Jobs is unavailable,
-the API should return a clear `503` and keep the scan row in a recoverable
-`failed` or unqueued state with bounded diagnostics.
+The helper must not swallow enqueue failures silently. If Jobs is unavailable
+or `create_job(...)` fails after scan-row creation, the helper must mark that
+scan `failed` with diagnostic code `job_enqueue_failed`, leave `job_id` empty,
+and return a clear `503`. Active scan reuse must ignore queued scan rows that
+have no `job_id`.
 
 ## Worker Contract
 
@@ -242,7 +276,8 @@ The worker:
 1. Validates `job_type`.
 2. Coerces and validates payload.
 3. Loads the workspace primary root by `workspace_id` and `root_id`.
-4. Verifies `root_version` still matches, or marks scan `stale`/`failed`.
+4. Verifies `root_version` still matches, or completes the scan as `failed`
+   with diagnostic code `root_version_mismatch`.
 5. Resolves a local scan path through Workspace root binding validation.
 6. Fails closed for missing roots, symlink root escapes, unconfigured allowed
    roots, or unready sandbox volumes.
@@ -264,6 +299,23 @@ heartbeats. Durable scan state remains in Workspace tables.
 - reject the root itself when it is a symlink
 - require containment inside configured Workspace project-root allowed bases
 - never traverse symlinked directories
+
+Expose this as a named, side-effect-free helper, tentatively:
+
+```python
+def resolve_workspace_root_for_inventory_scan(
+    *,
+    root: Mapping[str, Any],
+    allowed_roots: Sequence[Path | str] | None = None,
+    sandbox_mount_resolver: SandboxMountResolver | None = None,
+) -> ResolvedWorkspaceInventoryRoot:
+    ...
+```
+
+The helper must return either a local path plus backend metadata or a typed
+failure code. It must not mutate the root row, enqueue jobs, or start sandbox
+sessions. Tests should cover allowed-root containment, missing paths, symlink
+root rejection, and sandbox mount unavailability.
 
 `sandbox_volume` resolution is first-class but fail-closed in this slice:
 
@@ -449,6 +501,15 @@ Query parameters:
 - `include_ignored` default false
 - `entry_kind`
 
+Ordering and cursor rules:
+
+- filter by `workspace_id`, `root_id`, `deleted = false`, `include_ignored`,
+  `entry_kind`, and `prefix` first
+- sort by `relative_path ASC`
+- cursor is opaque to clients and encodes the last returned `relative_path`
+- applying a cursor returns rows with `relative_path > cursor_relative_path`
+- invalid cursors return `422`
+
 Items expose:
 
 - `relative_path`
@@ -513,6 +574,8 @@ and unready sandbox mounts.
 
 - No file content reads except bounded ignore-policy files.
 - No absolute paths in public API responses, diagnostics, or job payloads.
+- No symlink target paths in public API responses, diagnostics, item metadata,
+  or job payloads.
 - Symlink traversal disabled.
 - Secret-like files are ignored by default.
 - Scan limits prevent accidental unbounded traversal.

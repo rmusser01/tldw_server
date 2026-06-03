@@ -46,7 +46,7 @@ Out of scope:
 - Create `tldw_Server_API/app/services/workspace_file_inventory_jobs_worker.py`
   - WorkerSDK entrypoint and job handler.
 - Modify `tldw_Server_API/app/core/Workspaces/root_binding_service.py`
-  - Expose a reusable host-local root resolution helper or add a small resolver wrapper consumed by the worker.
+  - Expose a reusable side-effect-free `resolve_workspace_root_for_inventory_scan(...)` helper consumed by the worker.
 - Modify `tldw_Server_API/app/core/Workspaces/context.py`
   - Project inventory status into root/capability context.
 - Modify `tldw_Server_API/app/core/Workspaces/models.py`
@@ -60,7 +60,7 @@ Out of scope:
 - Modify `tldw_Server_API/app/api/v1/endpoints/workspaces.py`
   - Add scan/status/items endpoints and context integration.
 - Modify `tldw_Server_API/app/services/startup_primary_jobs_pollers.py`
-  - Register Workspace file inventory Jobs worker behind `WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED`.
+  - Register Workspace file inventory Jobs worker behind `WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED`, including handle fields and declarative/legacy startup paths.
 - Test `tldw_Server_API/tests/Workspaces/test_workspace_file_inventory_db.py`
 - Test `tldw_Server_API/tests/Workspaces/test_workspace_file_inventory_ignore.py`
 - Test `tldw_Server_API/tests/Workspaces/test_workspace_file_inventory_scanner.py`
@@ -81,6 +81,9 @@ Can run in parallel after Task 1:
 
 - Task 2 DB scan/item persistence.
 - Task 3 ignore policy.
+
+Must run after Task 3:
+
 - Task 4 scanner traversal.
 
 Must integrate after Tasks 2-4:
@@ -109,11 +112,13 @@ Avoid parallel edits to `ChaChaNotes_DB.py`, `workspace_schemas.py`, and
 
 Create tests covering:
 
-- valid states: `not_started`, `queued`, `scanning`, `current`, `partial`, `stale`, `failed`, `disabled`
+- durable scan states: `queued`, `scanning`, `current`, `partial`, `failed`, `disabled`
+- projected inventory states additionally include `not_started` and read-computed `stale`
 - unknown state normalizes to `failed`
 - diagnostic redaction strips absolute paths to relative hints
 - diagnostic list is capped at 50
 - counts default missing keys to zero
+- item cursor helpers sort by relative path and reject invalid cursors
 
 Run:
 
@@ -134,6 +139,8 @@ Add:
 - `normalize_inventory_counts(value)`
 - `bounded_inventory_diagnostics(value, root_relative_only=True)`
 - `redact_inventory_path_hint(value)`
+- `encode_inventory_cursor(relative_path)`
+- `decode_inventory_cursor(cursor)`
 
 Keep helpers free of FastAPI, DB, and filesystem side effects.
 
@@ -168,9 +175,13 @@ Cover:
 - `begin_workspace_file_inventory_scan` creates queued scan and updates root `file_inventory_state`
 - active queued/scanning scan is reused
 - completed scan stores counts and bounded diagnostics
-- replacing item projection marks missing previous items as deleted
+- full-coverage scan marks missing previous items deleted
+- partial scan preserves unseen previous rows as `coverage_state: previous`
 - status computes `stale` when current root version differs from scan root version
 - item list returns relative paths only and respects `include_ignored`
+- item list sorts by `relative_path ASC` and applies cursor after filters
+- hard-deleting a workspace/root removes inventory scans and items
+- queued scan rows without `job_id` are not reused as active scans
 - SQLite uniqueness races map to `ConflictError`/idempotent return
 
 Run:
@@ -197,6 +208,7 @@ Implement:
 
 - `begin_workspace_file_inventory_scan(...)`
 - `attach_workspace_file_inventory_job(...)`
+- `mark_workspace_file_inventory_enqueue_failed(...)`
 - `mark_workspace_file_inventory_scanning(...)`
 - `complete_workspace_file_inventory_scan(...)`
 - `replace_workspace_file_inventory_items(...)`
@@ -237,6 +249,7 @@ Cover:
 - secret-like files are skipped
 - simple `.gitignore` patterns skip files
 - malformed or oversized ignore files produce diagnostics but do not crash
+- unsupported negation or advanced gitignore constructs are documented and tested as conservative behavior
 - fingerprint changes when rules change
 - fingerprint is stable for equivalent rule ordering
 
@@ -349,7 +362,7 @@ Cover:
 - scan DB row is created before job enqueue
 - idempotency key uses `scan_id`
 - Jobs unavailable maps to explicit failure/exception, not silent success
-- active queued scan is reused
+- active queued scan is reused only when a job id exists
 
 - [ ] **Step 2: Write failing worker tests**
 
@@ -357,9 +370,11 @@ Cover:
 
 - unsupported job type fails non-retryably
 - malformed payload fails non-retryably
-- root version mismatch marks scan stale/failed
+- root version mismatch completes the active scan as failed with `root_version_mismatch`
 - host-local scan completes and writes items
 - sandbox root without mounted resolver fails closed
+- root resolution helper rejects missing paths and symlink roots without mutating DB state
+- enqueue failure marks the scan failed with `job_enqueue_failed` and no active-scan reuse
 - worker result includes counts and diagnostics
 
 Run:
@@ -379,7 +394,9 @@ Add:
 - `workspace_file_inventory_jobs_queue()`
 - `enqueue_workspace_file_inventory_scan_job(...)`
 
-Ensure helper returns the scan status and job row.
+Ensure helper returns the scan status and job row. If `create_job(...)` fails
+after scan-row creation, mark that scan failed and do not leave a reusable
+queued row without a `job_id`.
 
 - [ ] **Step 4: Implement worker**
 
@@ -420,6 +437,10 @@ Cover:
 - no root returns 409
 - root version mismatch returns 409
 - Jobs unavailable returns 503
+- `force=false` returns current status without enqueuing when latest scan is current
+- `force=true` creates a new scan when no scan is active
+- active queued/scanning scan is reused only when it has a job id
+- item cursor returns stable `relative_path ASC` pages and invalid cursor returns 422
 - item responses contain relative paths only
 - failed scan diagnostics are bounded and redacted
 
@@ -491,6 +512,8 @@ Cover:
   persisted Workspace state
 - `view_file_inventory` allowed for failed scans so diagnostics can be seen
 - `index_file_content` remains disabled
+- startup exposes `workspace_file_inventory_jobs_stop_event` and
+  `workspace_file_inventory_jobs_task` handles
 - startup registers worker when `WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED=true`
 - startup skips worker when disabled
 
@@ -513,8 +536,15 @@ Extend the root projection to include:
 
 - [ ] **Step 3: Register startup worker**
 
-Add the worker to `provide_primary_jobs_worker_specs` and legacy startup helper
-paths behind `WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED`.
+Add:
+
+- `workspace_file_inventory_jobs_stop_event` and
+  `workspace_file_inventory_jobs_task` to `PrimaryJobsPollerHandles`
+- a declarative `stop_event_worker_spec(...)` entry in
+  `provide_primary_jobs_worker_specs`
+- `_start_workspace_file_inventory_jobs_worker(...)` for the legacy startup path
+- `_run_workspace_file_inventory_jobs_worker_service(...)` as the import wrapper
+- tests for enabled and disabled startup behavior
 
 - [ ] **Step 4: Update README**
 
@@ -604,11 +634,14 @@ git commit -m "chore: finalize workspace file inventory worker"
 
 - Job payload contains no absolute root path.
 - Public responses contain no absolute root path.
+- Public responses contain no symlink target path.
 - Scanner does not read ordinary file contents.
 - Symlink traversal is disabled.
 - `.gitignore` support is documented as conservative.
 - Bounds produce `partial`, not unhandled exceptions.
 - Root replacement or policy change makes old scans stale.
+- Partial scans do not mark unseen previous rows deleted.
+- Enqueue failures do not leave reusable queued scans without Jobs rows.
 - `index_file_content` remains disabled until explicit indexing exists.
 - `sandbox_volume` roots fail closed without a mounted-path resolver.
 - SQLite and PostgreSQL/backend abstraction errors map through existing DB error types.
