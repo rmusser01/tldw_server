@@ -15575,6 +15575,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
+                def update_workspace_for_root_attach() -> None:
+                    if expected_workspace_version is None:
+                        conn.execute(
+                            """
+                            UPDATE workspaces
+                               SET workspace_profile = 'project',
+                                   last_modified = ?,
+                                   version = version + 1
+                             WHERE id = ? AND deleted = ?
+                            """,
+                            (now, workspace_id, deleted_value),
+                        )
+                        return
+
+                    cursor = conn.execute(
+                        """
+                        UPDATE workspaces
+                           SET workspace_profile = 'project',
+                               last_modified = ?,
+                               version = version + 1
+                         WHERE id = ? AND deleted = ? AND version = ?
+                        """,
+                        (now, workspace_id, deleted_value, expected_workspace_version),
+                    )
+                    if cursor.rowcount == 0:
+                        raise ConflictError(
+                            f"Workspace '{workspace_id}' concurrent root attach detected.",
+                            entity="workspaces",
+                            entity_id=workspace_id,
+                        )
+
                 workspace_row = conn.execute(
                     "SELECT id, workspace_profile, version FROM workspaces WHERE id = ? AND deleted = ?",
                     (workspace_id, deleted_value),
@@ -15668,16 +15699,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 f"Failed to reload workspace project root '{root_id}'."
                             )
                         if root_binding_changed or workspace.get("workspace_profile") != "project":
-                            conn.execute(
-                                """
-                                UPDATE workspaces
-                                   SET workspace_profile = 'project',
-                                       last_modified = ?,
-                                       version = version + 1
-                                 WHERE id = ? AND deleted = ?
-                                """,
-                                (now, workspace_id, deleted_value),
-                            )
+                            update_workspace_for_root_attach()
                         return root
                 if existing_primary is None or existing_primary.get("root_id") != root_id or replace_existing:
                     conn.execute(
@@ -15713,16 +15735,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         ),
                     )
                 if root_binding_changed or workspace.get("workspace_profile") != "project":
-                    conn.execute(
-                        """
-                        UPDATE workspaces
-                           SET workspace_profile = 'project',
-                               last_modified = ?,
-                               version = version + 1
-                         WHERE id = ? AND deleted = ?
-                        """,
-                        (now, workspace_id, deleted_value),
-                    )
+                    update_workspace_for_root_attach()
                 root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
                 if root is None:
                     raise CharactersRAGDBError(  # noqa: TRY003

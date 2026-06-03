@@ -134,6 +134,74 @@ def test_upsert_primary_root_replaces_same_root_id_when_replace_existing_true(db
     assert root["absolute_root"] is None
 
 
+def test_upsert_primary_root_expected_workspace_version_gates_replacement(db):
+    workspace = db.upsert_workspace("ws-1", "Workspace")
+    root = db.upsert_workspace_primary_root(
+        "ws-1",
+        {
+            "root_id": "primary",
+            "backend": "host_local",
+            "absolute_root": "/old",
+            "expected_workspace_version": workspace["version"],
+        },
+    )
+    updated_workspace = db.get_workspace("ws-1")
+    assert updated_workspace["version"] == workspace["version"] + 1
+
+    with pytest.raises(ConflictError):
+        db.upsert_workspace_primary_root(
+            "ws-1",
+            {
+                "root_id": "replacement",
+                "backend": "sandbox_volume",
+                "sandbox_volume_id": "volume-1",
+                "expected_workspace_version": workspace["version"],
+                "replace_existing": True,
+            },
+        )
+
+    assert db.get_workspace_primary_root("ws-1")["root_id"] == root["root_id"]
+    assert db.get_workspace_primary_root("ws-1")["backend"] == "host_local"
+
+
+def test_upsert_primary_root_expected_workspace_version_rolls_back_mid_transaction_change(db):
+    db.upsert_workspace("ws-1", "Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-1",
+        {"root_id": "primary", "backend": "host_local", "absolute_root": "/old"},
+    )
+    workspace = db.get_workspace("ws-1")
+    db.execute_query(
+        """
+        CREATE TRIGGER simulate_concurrent_workspace_root_attach
+        BEFORE DELETE ON workspace_project_roots
+        BEGIN
+            UPDATE workspaces
+               SET version = version + 1
+             WHERE id = OLD.workspace_id;
+        END
+        """,
+        commit=True,
+    )
+
+    with pytest.raises(ConflictError):
+        db.upsert_workspace_primary_root(
+            "ws-1",
+            {
+                "root_id": "replacement",
+                "backend": "sandbox_volume",
+                "sandbox_volume_id": "volume-1",
+                "expected_workspace_version": workspace["version"],
+                "replace_existing": True,
+            },
+        )
+
+    root = db.get_workspace_primary_root("ws-1")
+    assert root["root_id"] == "primary"
+    assert root["backend"] == "host_local"
+    assert db.get_workspace("ws-1")["version"] == workspace["version"]
+
+
 def test_invalid_root_backend_raises_input_error(db):
     db.upsert_workspace("ws-1", "Workspace")
     with pytest.raises(InputError):
