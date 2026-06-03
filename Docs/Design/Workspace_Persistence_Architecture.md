@@ -1,5 +1,7 @@
 # Workspace Persistence Architecture
 
+**Covered by:** `Docs/ADR/008-workspace-split-key-persistence-and-indexeddb-offload.md`
+
 ## Purpose
 
 The Research Workspace persistence path moved from a single monolithic `localStorage` blob to a split-key model with optional IndexedDB offload for heavy payloads. This document defines the storage model, gating/rollout controls, migration behavior, and diagnostics.
