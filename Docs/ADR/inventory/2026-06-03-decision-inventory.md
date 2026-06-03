@@ -89,7 +89,7 @@ This section is the actionable owner-review handoff. The default is to proceed w
 | Disposition | Inventory IDs | Default next action |
 | --- | --- | --- |
 | Already covered; no backfill task needed | INV-001 through INV-008, INV-033 | Keep the canonical ADRs and module docs as-is. Do not create duplicate ADRs. |
-| Pilot backfill slice | INV-017, INV-018, INV-020, with INV-019 as context | Create the first `TASK-510` child task for Workspace/WebUI ADR backfill. This is the best pilot slice because it has recent explicit decision records and bounded source docs. |
+| Completed pilot backfill slice | INV-017, INV-018, INV-020, with INV-019 as context | TASK-514 created ADR-007, ADR-008, and ADR-009 for the Workspace/WebUI pilot slice. |
 | Secondary backfill slice | INV-016 | Create a Sandbox/vz runtime ADR backfill child task after confirming Apple containerization posture still governs. |
 | Secondary backfill slice | INV-021 | Create an Audio API ADR backfill child task for implemented auth/routing/error/download-link semantics. Keep INV-022 separate because storage ownership is explicitly unresolved. |
 | Needs implementation/code confirmation before child task | INV-009 through INV-015, INV-023 through INV-032 | Do not convert yet. Create child tasks only after a focused domain review confirms current behavior and owner intent. |
@@ -99,6 +99,6 @@ This section is the actionable owner-review handoff. The default is to proceed w
 
 Default: `TASK-510` should complete at least one owner-reviewed backfill child slice before `TASK-511` evaluates global Superpowers changes.
 
-Recommended pilot: Workspace/WebUI (`INV-017`, `INV-018`, `INV-020`) because the source set is recent, explicit, and bounded. After that child task produces one or more accepted backfilled ADRs, the repo-local workflow has real evidence for `TASK-511`.
+Gate result: TASK-514 completed the Workspace/WebUI pilot (`INV-017`, `INV-018`, `INV-020`) and produced ADR-007, ADR-008, and ADR-009. This satisfies the default evidence gate for `TASK-511`.
 
 Owner override: if speed matters more than process evidence, the owner can explicitly approve using this reviewed inventory plus bounded slice plan as sufficient evidence for `TASK-511`. Without that override, do the pilot backfill first.

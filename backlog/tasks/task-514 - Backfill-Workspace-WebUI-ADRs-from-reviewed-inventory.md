@@ -1,14 +1,14 @@
 ---
 id: TASK-514
 title: Backfill Workspace/WebUI ADRs from reviewed inventory
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-03 04:08'
+updated_date: 2026-06-03 04:08
 labels:
-  - docs
-  - process
-  - adr
+- docs
+- process
+- adr
 dependencies: []
 ---
 
@@ -46,37 +46,32 @@ Source-doc link policy:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Create accepted backfilled ADRs for INV-017, INV-018, and INV-020 using Docs/ADR/000-template.md metadata rules.
-- [ ] #2 Update Docs/ADR/README.md index with the new ADRs and statuses.
-- [ ] #3 Update high-value source docs for INV-017, INV-018, and INV-020 to link to the covering ADRs where practical.
-- [ ] #4 Update Docs/ADR/inventory/2026-06-03-decision-inventory.md to record the backfilled ADR links and TASK-514 output.
-- [ ] #5 Record verification and Bandit docs-only skip; do not backfill unresolved or duplicate rows.
+- [x] #1 Create accepted backfilled ADRs for INV-017, INV-018, and INV-020 using Docs/ADR/000-template.md metadata rules.
+- [x] #2 Update Docs/ADR/README.md index with the new ADRs and statuses.
+- [x] #3 Update high-value source docs for INV-017, INV-018, and INV-020 to link to the covering ADRs where practical.
+- [x] #4 Update Docs/ADR/inventory/2026-06-03-decision-inventory.md to record the backfilled ADR links and TASK-514 output.
+- [x] #5 Record verification and Bandit docs-only skip; do not backfill unresolved or duplicate rows.
 <!-- AC:END -->
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Workspace/WebUI pilot backfill after TASK-509 owner-review defaults were approved. This child task is the TASK-511 evidence-gate pilot slice.
+Verification: confirmed ADR-007/008/009 have Status: Accepted, Backfilled from metadata, and Related task: TASK-514; confirmed ADR README index entries; confirmed source docs link to covering ADRs; confirmed inventory rows INV-017/018/020 record backfilled ADR links and INV-019 remains duplicate context. git diff --check passed. Bandit skipped: documentation-only task; no Python/code paths touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Backfilled the Workspace/WebUI pilot slice from reviewed inventory rows INV-017, INV-018, and INV-020. Created ADR-007 for the canonical ResearchWorkspace first-slice shell, ADR-008 for workspace split-key persistence and IndexedDB offload, and ADR-009 for Quick Chat helper modes. Updated the ADR index, source docs, and inventory mappings. Bandit skipped because no Python/code paths were touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
