@@ -33,7 +33,7 @@ Execute Task 1 from the MCP default profile tooling implementation plan: add pre
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Task 1 preset tooling metadata slice. Added package-local tooling metadata helpers, wired tooling metadata into the eleven requested built-in role presets, and added preset tests for required metadata shape, Product Owner web-search recommendation-only behavior, Frontend Engineer Chrome DevTools exact target metadata, and recommendation patching not granting executable authority. Verification: RED run failed as expected with missing metadata/helper module; final focused pytest passed 15 tests; git diff --check passed. Bandit runtime scan for touched mcp_unified profile modules had 0 findings; full touched-scope Bandit reported only B101 pytest assert warnings in the test file.
+Review follow-up completed: Product Owner web search now appears only as a non-required recommended server category. Strengthened the Product Owner preset test to assert web search is absent from executable allowed tools, enabled tools, enabled capabilities, recommended tools, and progressive disclosure categories while still present in recommended_servers with required False. Verification: RED run failed on web_search in deferred_categories; final focused pytest passed 15 tests; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

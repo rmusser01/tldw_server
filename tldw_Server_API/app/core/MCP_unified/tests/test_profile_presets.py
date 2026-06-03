@@ -135,12 +135,26 @@ def test_web_search_is_recommended_unavailable_not_enabled() -> None:
     assert product_owner is not None
 
     tooling = product_owner.profile.metadata["tooling"]
+    progressive_disclosure = tooling["progressive_disclosure"]
+    web_search_markers = {"web.search", "web_search"}
+    web_search_recommendations = [
+        item
+        for item in tooling["recommended_servers"]
+        if item["category"] == "web_search"
+    ]
 
     assert "web.search" not in product_owner.profile.policy_document.allowed_tools
-    assert any(
-        item["category"] == "web_search" and item["required"] is False
-        for item in tooling["recommended_servers"]
+    assert web_search_markers.isdisjoint(tooling["enabled_tools"])
+    assert web_search_markers.isdisjoint(tooling["enabled_capabilities"])
+    assert all(
+        item.get("id") not in web_search_markers
+        and item.get("category") not in web_search_markers
+        for item in tooling["recommended_tools"]
     )
+    assert "web_search" not in progressive_disclosure["direct_categories"]
+    assert "web_search" not in progressive_disclosure["deferred_categories"]
+    assert web_search_recommendations
+    assert all(item["required"] is False for item in web_search_recommendations)
 
 
 def test_cdp_browser_exact_target_is_documented() -> None:

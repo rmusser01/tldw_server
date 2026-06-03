@@ -223,7 +223,6 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             direct_categories=["files", "tool_discovery", "issues", "memory"],
             deferred_categories=[
                 "issue_tracker",
-                "web_search",
                 "docs_search",
                 "browser",
             ],
