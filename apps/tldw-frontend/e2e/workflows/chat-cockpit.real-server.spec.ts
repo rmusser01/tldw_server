@@ -1162,14 +1162,26 @@ const readPlaygroundSessionSnapshot = async (
     if (!raw) return null;
 
     try {
-      const parsed = JSON.parse(raw) as
-        | { state?: { historyId?: string | null; serverChatId?: string | null } | null }
-        | { historyId?: string | null; serverChatId?: string | null }
-        | null;
-      if (parsed && typeof parsed === 'object' && 'state' in parsed) {
-        return parsed.state ?? null;
-      }
-      return parsed && typeof parsed === 'object' ? parsed : null;
+      const toRecord = (value: unknown): Record<string, unknown> | null =>
+        value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+      const toNullableString = (value: unknown): string | null =>
+        typeof value === 'string' ? value : null;
+      const toSnapshot = (
+        value: unknown
+      ): { historyId: string | null; serverChatId: string | null } | null => {
+        const record = toRecord(value);
+        if (!record) return null;
+        return {
+          historyId: toNullableString(record.historyId),
+          serverChatId: toNullableString(record.serverChatId),
+        };
+      };
+
+      const parsed = JSON.parse(raw) as unknown;
+      const parsedRecord = toRecord(parsed);
+      if (!parsedRecord) return null;
+
+      return 'state' in parsedRecord ? toSnapshot(parsedRecord.state) : toSnapshot(parsedRecord);
     } catch {
       return null;
     }
