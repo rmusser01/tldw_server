@@ -8,6 +8,7 @@ on:
     paths:
       - pyproject.toml
       - README.md
+      - mcp_unified/**
       - tldw_Server_API/**
       - .github/workflows/pypi-package.yml
   push:
@@ -16,6 +17,7 @@ on:
     paths:
       - pyproject.toml
       - README.md
+      - mcp_unified/**
       - tldw_Server_API/**
       - .github/workflows/pypi-package.yml
   workflow_dispatch:
@@ -46,6 +48,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build twine setuptools wheel
+          pip install -e "mcp_unified[dev]"
+
+      - name: Validate MCP Unified standalone artifacts
+        run: |
+          python -m pytest \
+            tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
+            tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
+            -q
 
       - name: Build and check package
         run: make pypi-check

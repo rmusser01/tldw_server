@@ -13,7 +13,7 @@ being hardened.
 
 The current package metadata uses the canonical repository license expression
 `GPL-3.0-only`. Downstream projects should treat the boundary as an in-repo
-integration surface until release CI publishes a separate artifact. The
+integration surface until a publishing workflow is explicitly enabled. The
 package-local descriptor lives at `mcp_unified/pyproject.toml` and is checked
 by the package-boundary tests before publishing is considered.
 
@@ -27,8 +27,25 @@ The dependency groups in that payload intentionally use a `names-only` policy.
 They identify the minimal standalone-package surface without duplicating the
 version floors carried by `mcp_unified/pyproject.toml`.
 
-Run the local standalone install smoke before changing release metadata or
+Run the local standalone artifact gate before changing release metadata or
 package dependencies:
+
+```bash
+python -m pytest \
+  tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
+  tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
+  -q
+```
+
+That gate builds the package-local wheel and sdist with `python -m build
+--no-isolation`, then checks the wheel metadata, console script entry point,
+optional extras, dependency boundary, and sdist contents. The `PyPI Package
+Check` GitHub Actions workflow runs the same focused gate for
+`mcp_unified/**` changes before it builds the root `tldw-server` distribution.
+It validates artifacts but does not publish `mcp-unified`.
+
+Run the local standalone install smoke when changing import behavior or the
+minimal package boundary:
 
 ```bash
 python -m pytest \
