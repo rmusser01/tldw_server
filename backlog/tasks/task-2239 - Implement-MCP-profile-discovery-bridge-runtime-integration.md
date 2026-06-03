@@ -38,6 +38,7 @@ Execute Task 4 from the MCP default profile tooling implementation plan: expose 
 - Added strict runtime validation for `tool_call` arguments with `invalid_tool_call_arguments` denials for missing fields, unknown fields, non-string `tool_id`, and non-object delegated arguments.
 - Updated profile runtime tests to account for synthetic discovery helpers while preserving ordinary backend profile filtering assertions.
 - Review fix: backend tools whose names collide with bridge-reserved names now win when profile policy allows them; mixed-type unknown argument keys no longer crash validation; profile-runtime list assertions now check exact visible tool-name sets.
+- Re-review fix: when backend discovery fails for bridge-reserved names, malformed synthetic bridge arguments are validated before surfacing the backend discovery exception.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -54,6 +55,12 @@ Verification:
 Review follow-up verification:
 - RED: source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -q failed with 2 expected failures: bridge-name collision returned the synthetic descriptor, and mixed-type unknown keys raised TypeError.
 - Focused: source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -q passed: 176 passed, 6 warnings.
+- git diff --check passed.
+- Bandit: source .venv/bin/activate && python -m bandit -r mcp_unified/gateway/profile_runtime.py -f json -o /tmp/bandit_mcp_profile_runtime_bridge.json passed with 0 findings.
+
+Re-review follow-up verification:
+- RED: source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -q failed with the new regression raising the backend RuntimeBackendError before invalid bridge argument validation.
+- Focused: source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -q passed: 177 passed, 6 warnings.
 - git diff --check passed.
 - Bandit: source .venv/bin/activate && python -m bandit -r mcp_unified/gateway/profile_runtime.py -f json -o /tmp/bandit_mcp_profile_runtime_bridge.json passed with 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->

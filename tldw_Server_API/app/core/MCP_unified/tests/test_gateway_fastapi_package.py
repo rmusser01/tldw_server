@@ -2938,6 +2938,36 @@ def test_profile_runtime_tool_call_rejects_invalid_arguments(
     assert backend.call_requests == []
 
 
+def test_profile_runtime_tool_call_validates_invalid_arguments_before_backend_failure() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayPolicyDenied, GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomExplodingGatewayRuntime()
+    profile = _profile_with_tooling_metadata(
+        "researcher",
+        capabilities=["code_search"],
+        deferred_categories=["test"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+
+    with pytest.raises(GatewayPolicyDenied) as exc_info:
+        asyncio.run(
+            runtime.call_tool(
+                "tool_call",
+                {"extra": True, 1: True},
+                GatewayRequestContext(request_id="bridge-call-invalid-before-backend"),
+            )
+        )
+
+    assert exc_info.value.reason_code == "invalid_tool_call_arguments"
+    assert backend.call_requests == []
+
+
 def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> None:
     from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
     from mcp_unified.gateway.profiles import GatewayProfileManager

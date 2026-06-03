@@ -215,7 +215,11 @@ class ProfileAwareGatewayRuntime:
 
         profile = await self._require_profile(context)
         if _is_bridge_tool_name(name):
-            backend_tools = await self._safe_backend_tools(context)
+            try:
+                backend_tools = await self._safe_backend_tools(context)
+            except Exception:
+                _validate_synthetic_bridge_arguments(name, arguments)
+                raise
             collision_tool = _allowed_backend_tool_by_name(profile, backend_tools, name)
             if collision_tool is not None:
                 return await self._call_backend_tool_through_policy(
@@ -459,6 +463,36 @@ class ProfileAwareGatewayRuntime:
             arguments,
             _context_with_effective_policy(context, policy_result.policy),
         )
+
+
+def _validate_synthetic_bridge_arguments(name: str, arguments: Any) -> None:
+    """Validate bridge arguments without requiring backend discovery."""
+
+    if name == _TOOL_CATEGORIES_LIST:
+        _validate_bridge_argument_keys(
+            name,
+            arguments,
+            _EMPTY_ARGUMENT_KEYS,
+            reason_code="invalid_tool_categories_arguments",
+        )
+        return
+    if name == _PROFILE_TOOLS_LIST:
+        _validate_bridge_argument_keys(
+            name,
+            arguments,
+            _EMPTY_ARGUMENT_KEYS,
+            reason_code="invalid_profile_tools_list_arguments",
+        )
+        return
+    if name == _TOOL_SEARCH:
+        _validated_tool_search_arguments(arguments)
+        return
+    if name == _TOOL_DESCRIBE:
+        _validated_tool_describe_arguments(arguments)
+        return
+    if name == _TOOL_CALL:
+        _validated_tool_call_arguments(arguments)
+        return
 
 
 def _is_bridge_tool_name(name: str) -> bool:
