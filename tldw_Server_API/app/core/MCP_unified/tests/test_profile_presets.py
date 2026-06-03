@@ -39,6 +39,20 @@ WORKSPACE_BOUND_PRESET_IDS = {
     "memory-keeper",
 }
 
+TOOLING_PRESET_IDS = {
+    "product-owner",
+    "architect",
+    "merge-conflict-resolver",
+    "documentation-writer",
+    "project-researcher",
+    "code-reviewer",
+    "devops-engineer",
+    "backend-engineer",
+    "frontend-engineer",
+    "qa-engineer",
+    "sdet",
+}
+
 
 def _tldw_imports_for(path: Path) -> list[str]:
     """Return imports from a Python file that cross into the host package."""
@@ -100,6 +114,76 @@ def test_write_capable_presets_advertise_workspace_binding_requirement() -> None
 
     assert workspace_bound == WORKSPACE_BOUND_PRESET_IDS
     assert assignment_bound == WORKSPACE_BOUND_PRESET_IDS
+
+
+def test_role_presets_include_tooling_metadata() -> None:
+    bundled_by_id = {preset.id: preset for preset in presets.list_builtin_presets()}
+
+    for preset_id in TOOLING_PRESET_IDS:
+        tooling = bundled_by_id[preset_id].profile.metadata["tooling"]
+
+        assert tooling["enabled_tools"]
+        assert tooling["enabled_capabilities"]
+        assert "recommended_tools" in tooling
+        assert "recommended_servers" in tooling
+        assert tooling["recommendation_catalog_patchable"] is True
+        assert tooling["progressive_disclosure"]["max_direct_tools"] <= 24
+
+
+def test_web_search_is_recommended_unavailable_not_enabled() -> None:
+    product_owner = presets.get_builtin_preset("product-owner")
+    assert product_owner is not None
+
+    tooling = product_owner.profile.metadata["tooling"]
+
+    assert "web.search" not in product_owner.profile.policy_document.allowed_tools
+    assert any(
+        item["category"] == "web_search" and item["required"] is False
+        for item in tooling["recommended_servers"]
+    )
+
+
+def test_cdp_browser_exact_target_is_documented() -> None:
+    frontend = presets.get_builtin_preset("frontend-engineer")
+    assert frontend is not None
+
+    browser_servers = [
+        server
+        for server in frontend.profile.metadata["tooling"]["recommended_servers"]
+        if server["category"] == "browser"
+    ]
+
+    assert browser_servers
+    assert any(
+        option["id"] == "chrome-devtools-mcp"
+        and option["install_target"] == "ChromeDevTools/chrome-devtools-mcp"
+        and option["maturity"] == "exact_target"
+        for server in browser_servers
+        for option in server["binding_options"]
+    )
+
+
+def test_recommendation_catalog_patch_does_not_grant_authority() -> None:
+    from mcp_unified.profiles.tooling import merge_tooling_recommendations
+
+    product_owner = presets.get_builtin_preset("product-owner")
+    assert product_owner is not None
+
+    patched_tooling = merge_tooling_recommendations(
+        product_owner.profile.metadata["tooling"],
+        {
+            "recommended_tools": [
+                {
+                    "id": "shell.run",
+                    "category": "shell",
+                    "activation": "requires_operator_enablement",
+                }
+            ]
+        },
+    )
+
+    assert any(item["id"] == "shell.run" for item in patched_tooling["recommended_tools"])
+    assert "shell.run" not in product_owner.profile.policy_document.allowed_tools
 
 
 def test_get_builtin_preset_returns_stable_profile_template() -> None:
