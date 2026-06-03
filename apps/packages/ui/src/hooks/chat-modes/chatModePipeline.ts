@@ -599,7 +599,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       count++
     }
 
-    if (!signal.aborted && count === 0 && fullText.trim().length === 0) {
+    if (
+      !signal.aborted &&
+      count === 0 &&
+      fullText.trim().length === 0 &&
+      !isImageGenerationTurn
+    ) {
       throw new Error(
         streamTransportInterruptionReason ||
           "The provider did not return a response."

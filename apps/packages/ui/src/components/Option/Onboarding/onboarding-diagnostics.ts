@@ -5,8 +5,10 @@ export type OnboardingDiagnosticSeverity = "blocking" | "recoverable" | "warning
 
 export type OnboardingDiagnosticActionId =
   | "edit_api_key"
+  | "edit_credentials"
   | "edit_server_url"
   | "retry"
+  | "send_magic_link"
   | "open_setup"
   | "open_audio_setup"
   | "open_rag_settings"
@@ -41,6 +43,12 @@ export type OnboardingReadinessDiagnosticOptions = {
   selectedOptionalLane?: boolean
 }
 
+export type OnboardingSetupAuthMode = "api_key" | "multi_user" | "magic_link"
+
+export type OnboardingSetupDiagnosticOptions = {
+  authMode?: OnboardingSetupAuthMode
+}
+
 const action = (
   id: OnboardingDiagnosticActionId,
   label: string
@@ -48,10 +56,77 @@ const action = (
 
 export function buildSetupDiagnostic(
   errorKind: ConnectionErrorKind,
-  t: TFunction
+  t: TFunction,
+  options: OnboardingSetupDiagnosticOptions = {}
 ): OnboardingDiagnostic | null {
+  const authMode = options.authMode ?? "api_key"
+
   switch (errorKind) {
     case "auth_invalid":
+      if (authMode === "multi_user") {
+        return {
+          title: t(
+            "settings:onboarding.diagnostics.auth.credentialsTitle",
+            "Credentials were not accepted"
+          ),
+          cause: t(
+            "settings:onboarding.diagnostics.auth.credentialsCause",
+            "The backend rejected the username or password during authentication."
+          ),
+          whyItMatters: t(
+            "settings:onboarding.diagnostics.auth.credentialsWhy",
+            "Valid credentials are required before the first chat can run."
+          ),
+          severity: "blocking",
+          primaryAction: action(
+            "edit_credentials",
+            t(
+              "settings:onboarding.diagnostics.actions.editCredentials",
+              "Edit credentials"
+            )
+          ),
+          secondaryActions: [
+            action("retry", t("common:retry", "Retry")),
+            action(
+              "edit_server_url",
+              t("settings:onboarding.diagnostics.actions.editServerUrl", "Edit server URL")
+            ),
+          ],
+        }
+      }
+
+      if (authMode === "magic_link") {
+        return {
+          title: t(
+            "settings:onboarding.diagnostics.auth.magicTitle",
+            "Magic link was not accepted"
+          ),
+          cause: t(
+            "settings:onboarding.diagnostics.auth.magicCause",
+            "The backend rejected the magic link token during authentication."
+          ),
+          whyItMatters: t(
+            "settings:onboarding.diagnostics.auth.magicWhy",
+            "A valid sign-in token is required before the first chat can run."
+          ),
+          severity: "blocking",
+          primaryAction: action(
+            "send_magic_link",
+            t(
+              "settings:onboarding.diagnostics.actions.sendMagicLink",
+              "Send magic link"
+            )
+          ),
+          secondaryActions: [
+            action("retry", t("common:retry", "Retry")),
+            action(
+              "edit_server_url",
+              t("settings:onboarding.diagnostics.actions.editServerUrl", "Edit server URL")
+            ),
+          ],
+        }
+      }
+
       return {
         title: t(
           "settings:onboarding.diagnostics.auth.title",

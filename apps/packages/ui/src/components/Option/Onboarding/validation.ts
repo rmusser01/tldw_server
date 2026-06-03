@@ -18,7 +18,7 @@ export type ValidationResult = {
   errorKind?: ConnectionErrorKind
 }
 
-const isConnectivityErrorKind = (
+export const isConnectivityErrorKind = (
   kind: ConnectionErrorKind
 ): kind is Exclude<ConnectionErrorKind, "auth_invalid" | "server_error" | null> => {
   return (

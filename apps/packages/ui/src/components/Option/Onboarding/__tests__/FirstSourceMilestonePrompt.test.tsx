@@ -237,6 +237,9 @@ describe("FirstSourceMilestonePrompt", () => {
     )
 
     expect(screen.getByText(/starter questions/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /ask a question about this source/i })
+    ).not.toBeInTheDocument()
     fireEvent.click(
       screen.getByRole("button", { name: /summarize this source/i })
     )

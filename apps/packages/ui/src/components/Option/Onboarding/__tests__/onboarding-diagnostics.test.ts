@@ -23,6 +23,40 @@ describe("buildSetupDiagnostic", () => {
     ])
   })
 
+  it("maps invalid multi-user credentials to credentials recovery copy", () => {
+    const diagnostic = buildSetupDiagnostic("auth_invalid", t, {
+      authMode: "multi_user",
+    })
+
+    expect(diagnostic).toMatchObject({
+      title: "Credentials were not accepted",
+      severity: "blocking",
+      primaryAction: { id: "edit_credentials", label: "Edit credentials" },
+    })
+    expect(diagnostic?.cause).toMatch(/username or password/i)
+    expect(diagnostic?.secondaryActions.map((item) => item.id)).toEqual([
+      "retry",
+      "edit_server_url",
+    ])
+  })
+
+  it("maps invalid magic link tokens to magic-link recovery copy", () => {
+    const diagnostic = buildSetupDiagnostic("auth_invalid", t, {
+      authMode: "magic_link",
+    })
+
+    expect(diagnostic).toMatchObject({
+      title: "Magic link was not accepted",
+      severity: "blocking",
+      primaryAction: { id: "send_magic_link", label: "Send magic link" },
+    })
+    expect(diagnostic?.cause).toMatch(/magic link token/i)
+    expect(diagnostic?.secondaryActions.map((item) => item.id)).toEqual([
+      "retry",
+      "edit_server_url",
+    ])
+  })
+
   it("maps network categories to safe setup recovery actions", () => {
     expect(buildSetupDiagnostic("refused", t)?.primaryAction.id).toBe(
       "edit_server_url"

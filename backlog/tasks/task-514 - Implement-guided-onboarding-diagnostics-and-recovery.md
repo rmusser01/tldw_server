@@ -59,6 +59,12 @@ Implement PR2 of the solo onboarding V2 roadmap: add real UAT failure/recovery s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] UAT recovery scenarios run successfully for setup endpoint recovery, transient provider retry, and model-unavailable recovery.
+- [x] Setup diagnostics map auth, network, CORS, server, and model/readiness errors to safe recovery actions.
+- [x] First-chat failures surface inline retry, edit provider, and switch provider recovery actions.
+- [x] Empty provider streams are detected and surfaced as recoverable chat errors.
+- [x] Connection validation tests the candidate server URL without stale-state success races.
+- [x] Verification includes focused unit coverage, real onboarding UAT runs, and Bandit scanning for touched Python code.
 <!-- AC:END -->
 
 ## Implementation Plan

@@ -478,7 +478,6 @@ export function UnifiedSetupWizard({
             verifyFirstChat={verifyFirstChat}
             complete={completeAndPublish}
             onComplete={() => {
-              void refreshParentState();
               onComplete?.();
             }}
             onBack={() => setStep("provider_setup")}

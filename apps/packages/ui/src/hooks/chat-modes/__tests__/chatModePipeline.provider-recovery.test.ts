@@ -40,10 +40,18 @@ vi.mock("@/store/option", () => ({
   }
 }))
 
-import { runChatPipeline, type ChatModeDefinition } from "../chatModePipeline"
+import {
+  runChatPipeline,
+  type ChatModeDefinition,
+  type ChatModeParamsBase,
+} from "../chatModePipeline"
 import { TLDW_ERROR_BUBBLE_PREFIX } from "@/utils/chat-error-message"
+import {
+  IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+  IMAGE_GENERATION_USER_MESSAGE_TYPE,
+} from "@/utils/image-generation-chat"
 
-const mode: ChatModeDefinition<any> = {
+const mode: ChatModeDefinition<ChatModeParamsBase> = {
   id: "normal",
   buildUserMessage: (ctx) => ({
     isBot: false,
@@ -118,5 +126,36 @@ describe("runChatPipeline provider recovery", () => {
         botMessage: expect.stringContaining(TLDW_ERROR_BUBBLE_PREFIX)
       })
     )
+  })
+
+  it("allows empty provider streams for image generation turns", async () => {
+    mocks.pageAssistModel.mockResolvedValue({
+      saveToDb: false,
+      stream: async function* () {}
+    })
+
+    const result = await runChatPipeline(
+      mode,
+      "Create a product mockup",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      buildParams({
+        userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+        assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+      })
+    )
+
+    expect(result).toMatchObject({ status: "submitted" })
+    expect(mocks.saveMessageOnSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: "",
+        userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+        assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+      })
+    )
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
   })
 })

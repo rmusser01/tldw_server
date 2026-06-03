@@ -69,6 +69,7 @@ import {
   validateMultiUserAuth,
   validateMagicLinkAuth,
   categorizeConnectionError,
+  isConnectivityErrorKind,
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
@@ -82,7 +83,7 @@ import { ProgressItem, type ProgressStatus } from "./ProgressItem"
 type AuthMode = "single-user" | "multi-user"
 type LoginMethod = "magic-link" | "password"
 
-type ConnectionProgress = {
+export type ConnectionProgress = {
   serverReachable: ProgressStatus
   authentication: ProgressStatus
   knowledgeIndex: ProgressStatus
@@ -129,6 +130,19 @@ export const initialConnectionUiState: ConnectionUiState = {
   errorMessage: null,
   showSuccess: false,
   hasRunConnectionTest: false,
+}
+
+export function buildAuthValidationFailureProgress(
+  previous: ConnectionProgress,
+  errorKind: ConnectionErrorKind
+): ConnectionProgress {
+  return {
+    ...previous,
+    serverReachable: isConnectivityErrorKind(errorKind)
+      ? "error"
+      : previous.serverReachable,
+    authentication: "error",
+  }
 }
 
 export function connectionUiReducer(
@@ -421,6 +435,8 @@ export function OnboardingConnectForm({
 
   const urlInputRef = useRef<InputRef | null>(null)
   const apiKeyInputRef = useRef<InputRef | null>(null)
+  const usernameInputRef = useRef<InputRef | null>(null)
+  const magicEmailInputRef = useRef<InputRef | null>(null)
   const hasLoadedInitialConfigRef = useRef(false)
 
   // Load initial config
@@ -627,10 +643,11 @@ export function OnboardingConnectForm({
       if (authResult && !authResult.success) {
         dispatchUi({
           type: "UPDATE_PROGRESS",
-          updater: (p) => ({
-            ...p,
-            authentication: "error",
-          }),
+          updater: (p) =>
+            buildAuthValidationFailureProgress(
+              p,
+              authResult.errorKind ?? null
+            ),
         })
         if (authResult.errorKind || authResult.error) {
           dispatchUi({
@@ -732,14 +749,32 @@ export function OnboardingConnectForm({
   ])
 
   const setupDiagnostic = useMemo(
-    () => buildSetupDiagnostic(errorKind, t),
-    [errorKind, t]
+    () =>
+      buildSetupDiagnostic(errorKind, t, {
+        authMode:
+          authMode === "single-user" ||
+          (authMode === "multi-user" && isExtensionRuntime())
+            ? "api_key"
+            : loginMethod === "magic-link"
+              ? "magic_link"
+              : "multi_user",
+      }),
+    [authMode, errorKind, loginMethod, t]
   )
 
   const handleDiagnosticAction = useCallback(
     (actionId: OnboardingDiagnosticActionId) => {
       if (actionId === "edit_api_key") {
         apiKeyInputRef.current?.focus()
+        return
+      }
+      if (actionId === "edit_credentials") {
+        usernameInputRef.current?.focus()
+        return
+      }
+      if (actionId === "send_magic_link") {
+        magicEmailInputRef.current?.focus()
+        void handleSendMagicLink()
         return
       }
       if (actionId === "edit_server_url") {
@@ -754,7 +789,7 @@ export function OnboardingConnectForm({
         navigate("/setup")
       }
     },
-    [handleConnect, navigate]
+    [handleConnect, handleSendMagicLink, navigate]
   )
 
   // React to connection test results using hook state
@@ -1774,6 +1809,7 @@ export function OnboardingConnectForm({
                     {t("settings:onboarding.magicLink.email.label", "Email")}
                   </label>
                   <Input
+                    ref={magicEmailInputRef}
                     placeholder={t(
                       "settings:onboarding.magicLink.email.placeholder",
                       "you@company.com"
@@ -1872,6 +1908,7 @@ export function OnboardingConnectForm({
                     {t("settings:onboarding.username.label", "Username")}
                   </label>
                   <Input
+                    ref={usernameInputRef}
                     placeholder={t(
                       "settings:onboarding.username.placeholder",
                       "Enter username"

@@ -6,7 +6,8 @@
     "cors_origins": ["*"],
     "log_requests": true,
     "simulate_errors": false,
-    "error_rate": 0
+    "error_rate": 0,
+    "require_auth": false
   },
   "streaming": {
     "enabled": true,

@@ -61,7 +61,11 @@ def get_response_manager(
     config: MockConfig = Depends(get_config_instance),
 ) -> ResponseManager:
     """Get the response manager instance."""
-    responses_dir = Path(config.response_base_dir) if config.response_base_dir else None
+    responses_dir = (
+        Path(config.response_base_dir)
+        if config.response_base_dir
+        else None
+    )
     return ResponseManager(responses_dir=responses_dir)
 
 
@@ -307,6 +311,13 @@ async def embeddings(
 
     # Convert request to dict for pattern matching
     request_data = request.model_dump()
+    scenario_failure = scenario_failure_response(
+        "embeddings",
+        request_data,
+        config,
+    )
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Find matching response file
     response_file = None
@@ -344,6 +355,13 @@ async def completions(
 
     # Convert request to dict for pattern matching
     request_data = request.model_dump()
+    scenario_failure = scenario_failure_response(
+        "completions",
+        request_data,
+        config,
+    )
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Find matching response file
     response_file = None
@@ -367,6 +385,10 @@ async def list_models(
             status_code=401,
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
         )
+
+    scenario_failure = scenario_failure_response("models", {}, config)
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Return configured models or defaults
     models = config.models if config.models else [
@@ -448,7 +470,9 @@ def main():
     port = args.port or config.server.port
 
     # Run the server
-    app_target: Union[str, FastAPI] = "mock_openai.server:app" if args.reload else app
+    app_target: Union[str, FastAPI] = (
+        "mock_openai.server:app" if args.reload else app
+    )
     uvicorn.run(
         app_target,
         host=host,

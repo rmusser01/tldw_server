@@ -654,7 +654,7 @@ describe("UnifiedSetupWizard", () => {
       });
     });
     await waitFor(() => {
-      expect(setupHookMocks.refresh).toHaveBeenCalledTimes(2);
+      expect(setupHookMocks.refresh).toHaveBeenCalledTimes(1);
     });
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(readinessHookMocks.refresh).not.toHaveBeenCalled();

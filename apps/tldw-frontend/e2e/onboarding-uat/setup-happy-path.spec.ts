@@ -10,7 +10,10 @@ import {
   sendWizardFirstChatAndWaitForMilestone,
 } from "./helpers"
 
-const mockOpenAiUrl = process.env.TLDW_MOCK_OPENAI_URL || "http://127.0.0.1:18112/v1"
+const mockOpenAiUrl = process.env.TLDW_MOCK_OPENAI_URL
+if (!mockOpenAiUrl) {
+  throw new Error("TLDW_MOCK_OPENAI_URL environment variable is required for UAT tests")
+}
 
 test.describe("Onboarding UAT setup to first chat", () => {
   test("hosted-openai-first-chat completes setup and receives a mock-backed assistant response", async ({
