@@ -307,7 +307,7 @@ The server auto-creates per-user subdirectories on first use.
 2. Or in Docker:
    ```bash
    docker compose exec app python -m tldw_Server_API.app.core.AuthNZ.create_admin \
-     --username tldw-admin --password <new-password>
+     --username tldw-admin --password "your-new-password"
    ```
 
 ### 26. JWT tokens rejected after server restart
