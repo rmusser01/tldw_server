@@ -24,11 +24,11 @@ Create a follow-up PR for unresolved review comments on PR #2230. Update TASK-50
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 TASK-508 modified_files frontmatter includes the primary Stage 1 deliverables and Backlog task files changed by PR #2230.
-- [ ] #2 ADR-005 is superseded by accepted portable Bandit report path guidance, and current AGENTS.md guidance avoids a hardcoded /tmp report path.
-- [ ] #3 Backlog task filename review comments are addressed without breaking the repository's canonical Backlog task-file naming convention.
-- [ ] #4 Verification commands pass, including git diff --check and targeted text checks.
-- [ ] #5 A new draft or ready PR is opened and linked from this Backlog task.
+- [x] #1 TASK-508 modified_files frontmatter includes the primary Stage 1 deliverables and Backlog task files changed by PR #2230.
+- [x] #2 ADR-005 is superseded by accepted portable Bandit report path guidance, and current AGENTS.md guidance avoids a hardcoded /tmp report path.
+- [x] #3 Backlog task filename review comments are addressed without breaking the repository's canonical Backlog task-file naming convention.
+- [x] #4 Verification commands pass, including git diff --check and targeted text checks.
+- [x] #5 A new draft or ready PR is opened and linked from this Backlog task.
 <!-- AC:END -->
 
 ## Implementation Plan
