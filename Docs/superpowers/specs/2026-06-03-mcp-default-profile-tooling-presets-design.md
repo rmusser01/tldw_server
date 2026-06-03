@@ -2,7 +2,7 @@
 
 Date: 2026-06-03
 Status: Spec review approved; draft PR placeholder pending active-work reconciliation
-Backlog: TASK-2232, TASK-2233
+Backlog: TASK-2232, TASK-2233, TASK-2234
 
 ## Summary
 
@@ -110,7 +110,7 @@ The progressive-disclosure references add a second important lesson:
 - Matthew Kruczek's progressive-disclosure MCP article compares two-stage
   tool use, category/Strata-style disclosure, semantic search, tree browsing,
   and skills. For tldw_server, the best fit is hybrid category navigation plus
-  semantic/BM25 search.
+  grant-aware BM25 search.
 
 Sources:
 
@@ -197,19 +197,22 @@ The following decisions are settled enough for the placeholder PR:
   configured provider or external binding supplies grants and provenance.
 - Represent issue/story output through native Kanban/cards and markdown first,
   with Jira/Linear/GitHub/GitLab as optional external bindings.
+- Use CDP as the first browser-inspection path.
+- Rank tool-search results without semantic search in the first version:
+  profile grants filter first, then installation status, then category filters,
+  then BM25 matching.
+- Manage profile recommendation catalog metadata separately from executable
+  policy so operators can patch recommendations without granting authority.
+- Treat `ChromeDevTools/chrome-devtools-mcp` as the first known exact external
+  MCP install target for the browser/CDP category.
 
 The following decisions remain provisional and must be rechecked before code
 implementation:
 
 - Exact public schemas and names for discovery, category, and bridge-call
   tools.
-- Native browser-inspection backend choice: Playwright, CDP, or host adapter.
 - Safe test runner command-definition source and workspace trust boundary.
-- Whether recommendation catalog metadata is immutable built-in data or
-  operator-patchable configuration.
-- Ranking implementation for profile-scoped tool search.
-- Which external MCP options are stable exact install targets instead of
-  category placeholders.
+- Exact external MCP install targets outside the browser/CDP category.
 
 ## Default Tool Substrate
 
@@ -225,7 +228,7 @@ listed below.
 | Git mutate | Recommended inactive | Add, commit, merge, rebase, conflict write require enablement and approval. |
 | Native Kanban/tasks | Enabled for Product Owner | Out-of-box issue/story surface. |
 | Markdown/doc write | Enabled by PO/docs/engineering roles | Workspace-scoped and approval-gated. |
-| Browser inspect | Enabled for QA/Frontend where available | Screenshots, DOM snapshot, console/network read. |
+| Browser inspect | Enabled for QA/Frontend where CDP is available | Start with CDP for screenshots, DOM snapshot, console/network read. |
 | Browser interact | Approval-gated | Navigation, click, type, select, and state mutation. |
 | Safe test runner | Enabled for Backend/Frontend/QA/SDET | Project-configured commands only, approval required. |
 | Shell/process | Not enabled by default | Recommended inactive for engineering/devops only. |
@@ -281,6 +284,24 @@ Profiles should expose tools in layers.
    Approvals, path scope, credential grants, external-server grants, and audit
    run against the resolved underlying tool, not against the generic bridge
    name.
+
+### Tool Search Ranking
+
+The first implementation should not use semantic search for tool discovery.
+Ranking must be deterministic and policy-first:
+
+1. Filter to tools visible under the active profile grants and workspace
+   assignment.
+2. Partition by installation status so installed/enabled tools rank ahead of
+   recommended-but-unavailable tools.
+3. Apply category filters when supplied.
+4. Run BM25 text matching over tool id, display name, category, description,
+   capability labels, and unavailable reason metadata.
+5. Return stable tie-breaks by category priority and tool id.
+
+This order keeps authorization and setup state ahead of text relevance. BM25
+improves findability inside the already-allowed result set; it must not expose
+tools outside the active profile's discovery scope.
 
 ## Profile Metadata Schema
 
@@ -458,7 +479,7 @@ and ACP workspaces.
 | Git scoped mutate | `git.apply_patch`, `git.conflicts.resolve_file`, `git.add`, `git.commit` as inactive/approval-gated |
 | Tool discovery | `tool_search`, `tool_describe`, `tool_call`, `tool_categories.list`, `profile.tools.list` |
 | Safe test runner | `tests.list_commands`, `tests.run_configured`, `tests.results.read` |
-| Browser inspect | `browser.snapshot`, `browser.screenshot`, `browser.console`, `browser.network`, `browser.page_state` |
+| Browser inspect | `browser.snapshot`, `browser.screenshot`, `browser.console`, `browser.network`, `browser.page_state`; CDP first |
 | Browser interact | `browser.navigate`, `browser.click`, `browser.type`, `browser.select`, all approval-gated |
 | LSP/code intel | `lsp.diagnostics`, `lsp.symbols`, `lsp.references`, `lsp.definition`, `lsp.code_actions` |
 | Review helpers | `review.findings.create`, `review.findings.list`, `review.summary.write` |
@@ -491,7 +512,7 @@ grouped by category with concrete options where known.
 | `repo_host` | GitHub, GitLab, Bitbucket, Forgejo/Gitea |
 | `pr_review` | GitHub PRs, GitLab merge requests, Bitbucket PRs |
 | `ci_cd` | GitHub Actions, GitLab CI, Buildkite, Jenkins, CircleCI |
-| `browser` | Playwright MCP, Chrome DevTools/CDP MCP |
+| `browser` | Chrome DevTools/CDP MCP, Playwright MCP |
 | `web_search` | Brave Search, Tavily, Exa, Kagi, SearxNG |
 | `docs_search` | Context7-style docs search, vendor docs MCP, local docs index |
 | `diagram` | Mermaid renderer, draw.io/Excalidraw integration |
@@ -517,6 +538,12 @@ Each option should carry:
 - `maturity` such as `exact_target`, `category_placeholder`, or
   `documented_candidate`
 - `setup_url` or package docs when known
+
+Initial exact target:
+
+| Category | Binding option | Maturity | Setup |
+| --- | --- | --- | --- |
+| `browser` | `ChromeDevTools/chrome-devtools-mcp` | `exact_target` | https://github.com/ChromeDevTools/chrome-devtools-mcp |
 
 ## Runtime Flow
 
@@ -602,6 +629,10 @@ The implementation plan should include these test groups:
   unavailable unless a configured provider/binding and required grants exist.
 - Progressive disclosure tests: direct tool list stays below threshold;
   deferred tools are found through `tool_search`; discovery is profile-scoped.
+- Tool-search ranking tests: profile grants filter results before ranking,
+  installed/enabled tools sort ahead of unavailable recommendations, category
+  filters apply before BM25 scoring, and the first implementation does not
+  require semantic-search infrastructure.
 - Runtime policy tests: `tool_call` dispatch checks the real underlying tool,
   path scope, risk, approval, external grants, credential grants, and audit.
 - Bridge-schema tests: `tool_call` requires `tool_id` and `arguments`, rejects
@@ -619,17 +650,18 @@ The implementation plan should include these test groups:
 - Docs tests: package-local user guide documents mode presets, categories, and
   setup-dependent bindings.
 
-## Open Implementation Questions
+## Resolved Implementation Decisions
 
-- Which native browser inspection path should be first: Playwright, CDP, or a
-  host-provided browser adapter?
-- How should tool-search ranking combine semantic search, BM25, category
-  filters, profile grants, and installation status?
-- Should profile recommendations be managed as immutable built-in metadata, or
-  should operators be able to patch the recommendation catalog separately from
-  executable policy?
-- Which exact external MCP install targets are stable enough to include as
-  `exact_target` rather than `category_placeholder`?
+- First browser inspection path: CDP.
+- Tool-search ranking: do not use semantic search initially. Filter first by
+  profile grants and workspace assignment, rank installed/enabled tools ahead
+  of unavailable recommendations, apply category filters, then use BM25 over
+  the filtered catalog.
+- Recommendation catalog mutability: operators can patch recommendation
+  metadata separately from executable policy. Patchable recommendations still
+  do not grant runtime authority.
+- Initial exact external MCP target: `ChromeDevTools/chrome-devtools-mcp` for
+  the browser/CDP category.
 
 ## Recommended Next Plan
 
