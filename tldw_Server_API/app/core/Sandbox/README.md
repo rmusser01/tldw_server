@@ -64,6 +64,10 @@ Trust-level rules:
 - macOS operator notes live in `Docs/Sandbox/macos-runtime-operator-notes.md`
   and remain the source of truth for prepared-host `vz_linux` helper,
   image-store, smoke-test, and repair workflows.
+- The `vz_linux` Apple `container`/`containerization` posture is recorded in
+  `Docs/ADR/010-sandbox-vz-runtime-ownership.md`; keep `vz_linux` repo-owned
+  unless a superseding ADR changes helper, guest-agent, dependency, or network
+  policy ownership.
 - The sandbox security policy matrix lives in
   `Docs/Sandbox/sandbox-security-policy-matrix.md`. It records the trust,
   network, workspace, user, artifact, helper/request allowlisting, and audit

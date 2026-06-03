@@ -1,6 +1,7 @@
 # Apple Containerization Evaluation For `vz_linux`
 
 **Status:** Architecture evaluation for future sandbox runtime work.
+**Covered by:** `Docs/ADR/010-sandbox-vz-runtime-ownership.md`
 **Date:** 2026-05-02.
 
 ## Goal
