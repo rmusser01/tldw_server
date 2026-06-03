@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Workspaces import root_binding_service
 
 
 class _CapturingJobManager:
@@ -72,6 +73,30 @@ def _get_workspace_roots_response(
         workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
         workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+
+def _put_workspace_primary_root_response(
+    workspace_fastapi_app: FastAPI,
+    db_like: Any,
+    payload: dict[str, Any],
+    workspace_id: str = "ws-root",
+):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            return client.put(
+                f"/api/v1/workspaces/{workspace_id}/roots/primary",
+                json=payload,
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
 
 class TestWorkspaceLifecycle:
@@ -424,6 +449,241 @@ def test_workspace_roots_endpoint_redacts_absolute_root_fallback(
     root = response.json()["primary_root"]
     assert root["path_hint"] == expected_hint
     assert "absolute_root" not in root
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_host_local_root_returns_redacted_roots_response(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed"
+    project = allowed / "project"
+    project.mkdir(parents=True)
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(project)},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_id"] == "ws-root"
+    assert payload["workspace_profile"] == "project"
+    assert payload["primary_root"]["root_id"] == "primary"
+    assert payload["primary_root"]["backend"] == "host_local"
+    assert payload["primary_root"]["path_hint"] == "project"
+    assert "absolute_root" not in payload["primary_root"]
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_host_local_root_outside_allowed_returns_service_error(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside" / "project"
+    allowed.mkdir()
+    outside.mkdir(parents=True)
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(outside)},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["detail"]["code"] == "workspace_project_root_outside_allowed_roots"
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_host_local_root_without_configured_roots_returns_503(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (),
+        raising=True,
+    )
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(project)},
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["code"] == "workspace_project_roots_not_configured"
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_different_root_without_replace_returns_409(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed"
+    original = allowed / "original"
+    replacement = allowed / "replacement"
+    original.mkdir(parents=True)
+    replacement.mkdir()
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-root",
+        {
+            "root_id": "primary",
+            "backend": "host_local",
+            "absolute_root": str(original.resolve()),
+            "root_state": "attached",
+            "is_primary": True,
+        },
+    )
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(replacement)},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "workspace_primary_root_exists"
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_replacement_with_replace_existing_returns_new_primary(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed"
+    original = allowed / "original"
+    replacement = allowed / "replacement"
+    original.mkdir(parents=True)
+    replacement.mkdir()
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-root",
+        {
+            "root_id": "primary",
+            "backend": "host_local",
+            "absolute_root": str(original.resolve()),
+            "root_state": "attached",
+            "is_primary": True,
+        },
+    )
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {
+            "backend": "host_local",
+            "absolute_root": str(replacement),
+            "replace_existing": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["primary_root"]["root_id"] == "primary"
+    assert payload["primary_root"]["backend"] == "host_local"
+    assert payload["primary_root"]["path_hint"] == "replacement"
+    assert "absolute_root" not in payload["primary_root"]
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_sandbox_volume_returns_not_configured_mount_state(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {
+            "backend": "sandbox_volume",
+            "sandbox_volume_id": "volume-123",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_profile"] == "project"
+    assert payload["primary_root"]["root_id"] == "primary"
+    assert payload["primary_root"]["backend"] == "sandbox_volume"
+    assert payload["primary_root"]["path_hint"] == "volume-123"
+    assert payload["primary_root"]["sandbox_mount_state"] == "not_configured"
+
+
+@pytest.mark.integration
+def test_attach_workspace_primary_stale_expected_workspace_version_returns_409(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed"
+    project = allowed / "project"
+    project.mkdir(parents=True)
+    workspace = db.upsert_workspace("ws-root", "Rooted Workspace")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+
+    response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {
+            "backend": "host_local",
+            "absolute_root": str(project),
+            "expected_workspace_version": workspace["version"] + 1,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "workspace_version_mismatch"
 
 
 @pytest.mark.integration

@@ -250,6 +250,19 @@ class WorkspaceProjectRoot(BaseModel):
     mcp_trust_state: str | None = None
 
 
+class WorkspacePrimaryRootAttachRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: WorkspaceProjectRootBackend
+    root_id: str | None = None
+    absolute_root: str | None = None
+    sandbox_volume_id: str | None = None
+    display_name: str | None = Field(default=None, max_length=120)
+    replace_existing: StrictBool = False
+    expected_workspace_version: int | None = Field(default=None, ge=1)
+    strict_sandbox_validation: StrictBool = False
+
+
 class WorkspaceFileInventory(BaseModel):
     state: str | None = None
     indexed_file_count: int | None = None

@@ -33,6 +33,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceNoteResponse,
     WorkspaceNoteUpdateRequest,
     WorkspacePatchRequest,
+    WorkspacePrimaryRootAttachRequest,
     WorkspaceCapabilitiesResponse,
     WorkspaceResponse,
     WorkspaceRootResponse,
@@ -63,6 +64,11 @@ from tldw_Server_API.app.core.Workspaces.source_jobs import (
 )
 from tldw_Server_API.app.core.Workspaces.service_capabilities import (
     collect_workspace_service_capabilities,
+)
+from tldw_Server_API.app.core.Workspaces.root_binding_service import (
+    WorkspaceRootAttachRequest,
+    WorkspaceRootServiceError,
+    attach_primary_workspace_root,
 )
 from tldw_Server_API.app.core.Workspaces.models import normalize_project_root_state
 from tldw_Server_API.app.core.Workspaces.status_projection import (
@@ -134,6 +140,21 @@ def _root_to_response(root: dict[str, Any]) -> WorkspaceRootResponse:
         is_primary=bool(root.get("is_primary", True)),
         version=root.get("version"),
         updated_at=str(root["updated_at"]) if root.get("updated_at") else None,
+    )
+
+
+def _workspace_roots_response(
+    *,
+    workspace_id: str,
+    workspace: dict[str, Any],
+    roots: list[dict[str, Any]],
+) -> WorkspaceRootsResponse:
+    primary_root = next((root for root in roots if bool(root.get("is_primary"))), None)
+    return WorkspaceRootsResponse(
+        workspace_id=workspace_id,
+        workspace_profile=str(workspace.get("workspace_profile") or "research"),
+        primary_root=_root_to_response(primary_root) if primary_root else None,
+        roots=[_root_to_response(root) for root in roots],
     )
 
 
@@ -996,13 +1017,46 @@ async def list_workspace_roots(
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace roots") from exc
 
-    primary_root = next((root for root in roots if bool(root.get("is_primary"))), None)
-    return WorkspaceRootsResponse(
-        workspace_id=workspace_id,
-        workspace_profile=str(workspace.get("workspace_profile") or "research"),
-        primary_root=_root_to_response(primary_root) if primary_root else None,
-        roots=[_root_to_response(root) for root in roots],
-    )
+    return _workspace_roots_response(workspace_id=workspace_id, workspace=workspace, roots=roots)
+
+
+@router.put(
+    "/{workspace_id}/roots/primary",
+    response_model=WorkspaceRootsResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Attach or replace the workspace primary project root",
+)
+async def attach_workspace_primary_root(
+    workspace_id: str,
+    body: WorkspacePrimaryRootAttachRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRootsResponse:
+    """Attach or replace a workspace primary project root through the root-binding service."""
+    try:
+        _require_workspace(db, workspace_id)
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id=workspace_id,
+            user_id=str(getattr(current_user, "id", "")),
+            request=WorkspaceRootAttachRequest(**body.model_dump()),
+        )
+        workspace = _require_workspace(db, workspace_id)
+        roots = db.list_workspace_project_roots(workspace_id)
+    except WorkspaceRootServiceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to attach workspace primary root",
+        ) from exc
+
+    return _workspace_roots_response(workspace_id=workspace_id, workspace=workspace, roots=roots)
 
 
 @router.get(
