@@ -27,11 +27,11 @@ This is the desired progression:
 9. Expose private or team-scoped previews and deployment-like instances.
 10. Add team membership, comments, governance, and audit around the same Workspace identity.
 
-External product references that inform this direction:
+External product references that inform this direction, accessed on June 3, 2026:
 
-- GitHub Copilot app: agent-native desktop experience around project work, local/cloud execution, review, and developer workflows.
-- Claude Artifacts: generated artifacts that can be iterated, viewed, shared, and used as interactive outputs.
-- Codex Sites: saved and deployed app previews with workspace-linked access modes.
+- GitHub Copilot app: agent-native desktop experience around project work, local/cloud execution, review, and developer workflows. <https://github.blog/news-insights/product-news/github-copilot-app-the-agent-native-desktop-experience/>
+- Claude Artifacts: generated artifacts that can be iterated, viewed, shared, and used as interactive outputs. <https://claude.com/blog/claude-powered-artifacts>
+- Codex Sites: saved and deployed app previews with workspace-linked access modes. <https://developers.openai.com/codex/sites>
 
 ## Core Decision
 
@@ -59,7 +59,9 @@ Owns:
 
 ### Research Workspace
 
-A Workspace with research capabilities enabled and no primary project root.
+A Workspace with `workspace_profile: research`.
+
+It has research capabilities enabled and does not have project intent. A Project Workspace with a missing or detached root is still a Project Workspace until the user explicitly downgrades it.
 
 Owns or references:
 
@@ -74,7 +76,9 @@ Owns or references:
 
 ### Project Workspace
 
-A Workspace with all Research Workspace capabilities plus a primary project root and agentic runtime bindings.
+A Workspace with `workspace_profile: project`.
+
+It has all Research Workspace capabilities plus project intent, root lifecycle state, and agentic runtime bindings. A healthy Project Workspace normally has one primary project root, but its root may temporarily be missing, detached, failed, archived, or not yet configured.
 
 Owns or references:
 
@@ -87,7 +91,7 @@ Owns or references:
 - preview and deploy instance records
 - team collaboration and comments over project activity
 
-Project Workspace is not a different top-level object. It is a Workspace whose `workspace_kind` or capability projection indicates `project`.
+Project Workspace is not a different top-level object. It is a Workspace whose persisted `workspace_profile` indicates `project`, with capability projections exposing the current root, Git, file, MCP, ACP/harness, and Sandbox states.
 
 ### Primary Root
 
@@ -168,7 +172,8 @@ flowchart LR
 These fields should be common across Research and Project Workspaces:
 
 - `workspace_id`
-- `workspace_kind`: `research` or `project`
+- `workspace_profile`: `research` or `project`
+- `workspace_kind`: response/display alias for `workspace_profile`, not a separate source of truth
 - `display_name`
 - `description`
 - `owner_scope_type`: `user`, `team`, `org`, `global`
@@ -182,7 +187,15 @@ These fields should be common across Research and Project Workspaces:
 - `capability_summary`
 - `allowed_actions`
 
-`workspace_kind` should be computed from capability bindings where possible. A workspace with a primary root is a Project Workspace. A workspace without one remains research-only.
+`workspace_profile` should be persisted because the user's product intent matters independently of the current health of attached capabilities. Capability states should be computed from bindings and operational modules.
+
+Important profile and state rules:
+
+- A new Workspace starts with `workspace_profile: research` unless the creation request explicitly creates a Project Workspace.
+- Attaching the first primary root upgrades the same Workspace to `workspace_profile: project`.
+- Project root health is represented separately as `project_root_state`: `not_configured`, `attached`, `missing`, `detached`, `failed`, or `archived`.
+- Detaching or losing the root must not silently downgrade the Workspace to research. It should remain a Project Workspace with a root problem until the user explicitly downgrades it.
+- `workspace_kind` may appear in older responses or UI adapters as a compatibility/display label, but new persistence and internal logic should use `workspace_profile`.
 
 ## Project Root Binding
 
@@ -197,6 +210,7 @@ Conceptual fields:
 - `absolute_root`: for host-local roots, redacted where needed
 - `sandbox_volume_id`: for sandbox-managed roots
 - `display_name`
+- `root_state`
 - `created_by`
 - `created_at`
 - `updated_at`
@@ -211,8 +225,23 @@ Rules:
 - Exactly one primary root per Project Workspace in the first implementation.
 - A research-only Workspace may have zero roots.
 - Attaching the first primary root upgrades the Workspace to project capability state.
-- Removing or detaching the primary root should either downgrade the Workspace to research-only or leave it as `project` with `project_root_missing`, depending on audit/history needs. The safer first behavior is to keep `project` and mark the root as missing or detached until explicitly downgraded.
+- Removing, detaching, or losing the primary root marks `project_root_state` as `missing`, `detached`, `archived`, or `failed`. It does not downgrade the Workspace automatically.
+- Downgrading a Project Workspace back to a Research Workspace must be an explicit user/admin action that records audit history and handles remaining root, file, Git, Sandbox, MCP, and harness bindings deliberately.
 - Root paths must be validated through allowlists, sandbox volume ownership, and symlink controls before use.
+
+## Root Binding Ownership Boundary
+
+Workspace Core owns the primary-root binding and the user-visible root state.
+
+Operational ownership should stay narrow:
+
+- Workspace Core owns `workspace_id`, `workspace_profile`, root binding identity, root state, capability projection, allowed actions, and the runtime context envelope.
+- Sandbox owns sandbox volume creation, mounting, sessions, runs, network policy, preview processes, and runtime failures.
+- MCP owns trusted-root policy, path scopes, tool permissions, and approval requirements.
+- Jobs owns user-visible long-running progress for file scans, extraction, chunking, indexing, and status projections.
+- ACP and harness adapters own agent sessions, adapter diagnostics, and run lineage.
+
+The logical owner of primary-root records is Workspace Core. The preferred physical persistence target is a new Workspace DB/table set. If an early implementation stages records in an existing DB for migration convenience, all callers should still access them through Workspace Core APIs so the storage decision remains reversible.
 
 ## File Tracking and Indexing
 
@@ -239,6 +268,27 @@ Indexing modes:
 
 Agents can use MCP/sandbox policy to inspect files when allowed, but grounded research answers should cite only indexed or explicitly attached file content.
 
+Non-trivial file inventory and indexing work should use Jobs rather than request-thread execution.
+
+File inventory should expose:
+
+- `file_inventory_state`: `not_started`, `queued`, `scanning`, `current`, `partial`, `stale`, `failed`, or `disabled`
+- `last_scan_job_id`
+- `last_scan_started_at`
+- `last_scan_completed_at`
+- bounded counts for discovered, ignored, indexed-eligible, indexed, failed, and skipped files
+- the active ignore-policy fingerprint
+- the root snapshot token or fingerprint used for incremental scans
+
+Scanning rules:
+
+- Small metadata previews may be synchronous, but any root-wide or recursive scan should be job-backed.
+- Incremental scans should be keyed by `root_id` and snapshot token/fingerprint when available.
+- Filesystem watchers, if added, should debounce changes and enqueue scan jobs rather than directly mutating the UI projection.
+- `.gitignore`, workspace ignore policy, generated-directory rules, and secret exclusion must run before content indexing.
+- Symlink traversal should be disabled by default and only enabled through explicit allowlists.
+- Partial success is valid: the UI should show available metadata and the bounded failure summary without implying that all files were scanned.
+
 ## MCP Alignment
 
 MCP Hub Shared Workspaces should become trusted-root bindings for canonical Workspaces.
@@ -258,6 +308,30 @@ MCP should not define a separate product Workspace. It should answer:
 - which policies govern tool use
 - which approvals are required
 
+### MCP Terminology Guardrails
+
+The existing MCP Hub "Shared Workspaces" term refers to trusted filesystem roots and tool policy administration. In new canonical Workspace documentation, API schemas, and UI copy, prefer "MCP trusted root binding" or "MCP tool scope" when referring to that subsystem.
+
+This avoids confusing two different ideas:
+
+- Product sharing or team Workspaces: membership, access, comments, governance, and collaboration around a canonical `workspace_id`.
+- MCP Shared Workspaces: trusted filesystem roots and path/tool policy used by MCP.
+
+Existing MCP route names and historical docs can keep their established term until migrated, but new Workspace Core APIs should not create another product-level "shared workspace" concept.
+
+## Workspace Sets, Groups, and Runtime Lineage
+
+Avoid adding a free-form Workspace group concept unless the product needs it.
+
+For runtime lineage:
+
+- MCP Workspace Sets can group canonical Workspace ids for policy.
+- Future team Workspaces can group canonical Workspace ids through owner scope, membership, and governance records.
+- ACP, harness adapters, and Sandbox may persist a runtime lineage field derived from a Workspace Set, team scope, or policy snapshot.
+- New APIs should prefer `workspace_id` plus resolved policy/scope context over accepting arbitrary `workspace_group_id` input.
+
+If compatibility requires `workspace_group_id`, it should be treated as runtime or policy lineage, not as a separate product identity.
+
 ## ACP and Harness Alignment
 
 ACP sessions and generic harness adapters should receive the same Workspace runtime context.
@@ -265,7 +339,7 @@ ACP sessions and generic harness adapters should receive the same Workspace runt
 ACP and harnesses should persist:
 
 - `workspace_id`
-- `workspace_group_id` when relevant
+- runtime group or scope lineage when relevant
 - `scope_snapshot_id`
 - `sandbox_session_id`
 - `sandbox_run_id`
@@ -292,6 +366,45 @@ Sandbox should answer:
 
 Sandbox should not own Workspace identity.
 
+## Sandbox Volume Lifecycle
+
+Sandbox-managed project roots must be first-class from the first Project Workspace slice that creates roots.
+
+Sandbox volumes should be created through Sandbox APIs with a Workspace-bound wrapper. The wrapper validates Workspace identity, ownership, root cardinality, and allowed actions before delegating runtime work to Sandbox.
+
+User-visible volume states should include:
+
+- `not_configured`
+- `creating`
+- `ready`
+- `mounting`
+- `mounted`
+- `snapshotting`
+- `archived`
+- `detached`
+- `delete_pending`
+- `deleted`
+- `failed`
+- `orphaned`
+
+Required lifecycle actions:
+
+- create sandbox project volume
+- attach existing Workspace-bound volume
+- mount for session/run
+- unmount
+- snapshot or export
+- archive
+- delete
+- recover or adopt orphaned volumes
+
+Safety rules:
+
+- A sandbox volume cannot be deleted while active sessions, runs, preview instances, or pending jobs depend on it.
+- Deleting or archiving a volume should mark the Project Workspace root state first, then perform runtime cleanup asynchronously.
+- Orphan detection should be possible after crashes or interrupted migrations.
+- Quotas, retention, backup/export availability, and failure diagnostics should be reported through Workspace capability state, but enforced by Sandbox.
+
 ## Runtime Context Envelope
 
 Every agentic harness should receive a bounded envelope shaped like this:
@@ -299,10 +412,19 @@ Every agentic harness should receive a bounded envelope shaped like this:
 ```json
 {
   "workspace_id": "workspace-123",
+  "workspace_profile": "project",
   "workspace_kind": "project",
+  "resolution": {
+    "status": "complete",
+    "warnings": []
+  },
   "owner_scope": {
     "type": "user",
     "id": 1
+  },
+  "workspace_group": {
+    "source": "workspace_set",
+    "id": null
   },
   "access": {
     "role": "owner",
@@ -357,6 +479,37 @@ Every agentic harness should receive a bounded envelope shaped like this:
 
 Sensitive fields must be redacted or replaced with bounded identifiers. Local absolute paths should not appear in user-visible diagnostics unless the endpoint is explicitly privileged and intended for local admins.
 
+## Context Resolver Failure Semantics
+
+The Workspace context resolver should fail closed for permissions and execution, but degrade gracefully for display-only metadata.
+
+Fail closed when resolution is incomplete for:
+
+- allowed actions
+- write access
+- root access
+- MCP tool access
+- sandbox execution
+- preview access
+- agent or harness launch
+- file content indexing
+
+Degrade for:
+
+- display labels
+- non-sensitive counts
+- last-known timestamps
+- high-level availability badges
+
+Runtime context responses should include:
+
+- `resolution.status`: `complete`, `partial`, or `failed`
+- subsystem reason codes
+- stale flags for cached projections
+- bounded warnings that avoid secrets and local absolute paths
+
+Agent harnesses should not start if a required root, policy scope, Sandbox binding, or permission projection cannot be resolved. A launched run should use an immutable `scope_snapshot_id` so a mid-run policy or membership change can be audited and handled deliberately rather than silently changing the run contract.
+
 ## Preview and Deploy Trajectory
 
 Project Workspaces should eventually support private and team-scoped hosted previews.
@@ -375,6 +528,23 @@ First-class future concepts:
 - `comments_enabled`
 
 The first design should leave room for this without requiring a full deploy platform immediately.
+
+`public_link` is future-only and should require a separate risk review. First-slice previews should default to `owner_private` or `workspace_members`.
+
+## Preview Access Defaults
+
+Preview and deploy-like instances should be treated as authenticated Workspace resources, not anonymous web servers.
+
+Defaults:
+
+- owner-private preview for single-user/local setups
+- workspace-member preview for team-capable setups
+- no implicit public exposure
+- reverse proxy or preview gateway enforces Workspace session/user auth
+- preview access and lifecycle changes are audited
+- CSRF, origin, and network exposure rules are explicit before team sharing ships
+
+The UI should show preview readiness only when Sandbox runtime, access policy, and active project root state all resolve successfully.
 
 ## Team Governance Trajectory
 
@@ -433,12 +603,14 @@ Suggested module:
 Responsibilities:
 
 - normalize Workspace identity
-- resolve Workspace kind
+- resolve persisted Workspace profile
+- resolve computed capability states
 - resolve primary root binding
 - resolve file inventory state
 - resolve MCP binding state
 - resolve ACP/harness state
 - resolve sandbox binding state
+- resolve Workspace Set, owner scope, and runtime lineage
 - build runtime context envelopes
 - build capability projections
 - centralize reason codes
@@ -452,13 +624,13 @@ The module should compose existing persistence layers instead of forcing an imme
 | `/api/v1/workspaces` | Canonical Workspace API family |
 | `workspace_schemas.py` | Canonical Workspace API schema home, expanded carefully |
 | `core/Workspaces/status_projection.py` | Keep source readiness, split capability projection into shared module later |
-| MCP Shared Workspaces | Trusted-root binding and admin registry |
+| MCP Shared Workspaces | MCP trusted-root binding and admin registry; existing name is compatibility terminology |
 | MCP Workspace Sets | Policy grouping of canonical Workspace ids |
 | MCP Path Scopes | Path enforcement for primary root and trusted roots |
 | ACP sessions | Runtime lineage and agent session diagnostics |
 | ACP adapter registry | Harness capability provider, not workspace identity |
 | Sandbox sessions/runs | Runtime execution and volume lineage |
-| Research Workspace UI | Main shell, with project capability mode when primary root exists |
+| Research Workspace UI | Main shell, with project capability mode when `workspace_profile` is `project` |
 | Chat/Document workspaces | Specialized entry points or modes that should feed canonical Workspace state |
 | Prototype Workspace | Separate experimental surface until deliberately migrated |
 
@@ -470,7 +642,7 @@ Recommended sequence:
 
 1. Add canonical context resolver and type contracts.
 2. Extend capabilities API to include root/file/git/runtime states.
-3. Teach MCP Shared Workspaces to optionally link to existing canonical Workspace ids.
+3. Teach MCP trusted-root bindings, including existing MCP Shared Workspace records, to optionally link to canonical Workspace ids.
 4. Add primary root binding with `host_local` and `sandbox_volume`.
 5. Add file inventory metadata scanning.
 6. Add explicit file indexing policy.
@@ -487,6 +659,7 @@ The first implementation should start with a narrow contract slice:
 - add read-only context resolver over existing Workspace, MCP, ACP, and Sandbox data
 - extend capabilities response with Project Workspace fields in fail-closed states
 - add schema for primary root binding
+- add persisted `workspace_profile` and explicit `project_root_state`
 - add tests proving research-only workspaces remain valid
 - add tests proving Project Workspace context can represent both `host_local` and `sandbox_volume`
 - keep MCP Shared Workspace records as bindings
@@ -520,8 +693,9 @@ The user should not need to understand MCP, ACP, or Sandbox to create a Workspac
 
 The UI should present:
 
-- "Research Workspace" when no primary root exists.
-- "Project Workspace" once a primary root is attached.
+- "Research Workspace" when `workspace_profile` is `research`.
+- "Project Workspace" when `workspace_profile` is `project`.
+- A root health banner or panel only when a Project Workspace root is missing, detached, failed, archived, or not yet configured.
 - A clear upgrade path: Attach folder, Create sandbox project volume, Clone repository.
 - A file tree that is visible before content indexing.
 - Explicit indexing controls.
@@ -538,15 +712,20 @@ The UI should present:
 - No public deployment platform in the first implementation slice.
 - No immediate physical database consolidation across MCP, ACP, Sandbox, and Workspace stores.
 
-## Open Implementation Questions
+## Resolved Decisions and Open Implementation Questions
 
-These should be answered during planning, not by changing the product model:
+These decisions are now part of the product model:
 
-1. Whether `workspace_kind` is persisted or computed from bindings.
-2. Whether primary root records live in ChaChaNotes DB, Sandbox DB, or a new Workspace DB table.
-3. Whether sandbox volumes are created through Workspace API or Sandbox API with a Workspace-bound wrapper.
-4. How much file metadata can be scanned synchronously before requiring Jobs.
-5. Which role names are needed before team Workspaces ship.
+1. Persist `workspace_profile`; compute operational capability states from bindings.
+2. Store primary root records in a new Workspace DB/table set, exposed only through Workspace Core.
+3. Create sandbox volumes through Sandbox APIs using a Workspace-bound wrapper.
+
+These should be answered during implementation planning:
+
+1. How much file metadata can be scanned synchronously before requiring Jobs.
+2. Which role names are needed before team Workspaces ship.
+3. Which scan/indexing thresholds should become configuration versus hard safety defaults.
+4. Which existing MCP Shared Workspace UI labels are renamed immediately versus left as compatibility labels.
 
 ## Design Principles
 
