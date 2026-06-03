@@ -31,6 +31,15 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
     import tomli as tomllib
 
 
+def _repo_root() -> Path:
+    """Locate the repository root from this test file."""
+
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise AssertionError("Unable to locate repository root from test path")
+
+
 def test_gateway_cli_validate_config_reports_success_json(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -2002,13 +2011,46 @@ def test_gateway_cli_memory_store_rejects_mutations_before_reading_payload_files
 def test_gateway_cli_project_script_is_registered() -> None:
     """Expose the package CLI through the installed project scripts."""
 
-    pyproject_path = Path(__file__).resolve().parents[5] / "pyproject.toml"
+    pyproject_path = _repo_root() / "pyproject.toml"
     pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
 
     assert (
         pyproject["project"]["scripts"]["mcp-unified-gateway"]
         == "mcp_unified.gateway.cli:main"
     )
+
+
+def test_gateway_cli_package_info_reports_release_gate(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expose conservative package-release metadata through the CLI."""
+
+    exit_code = gateway_cli.main(["package-info"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["package_name"] == "mcp-unified"
+    assert payload["package_status"] == "internal-experimental"
+    assert payload["publishing_status"] == "not-published"
+    assert payload["license_expression"] == "GPL-3.0-only"
+    assert payload["dependency_version_policy"] == "names-only"
+    assert "gateway" in payload["optional_extras"]
+
+
+def test_standalone_gateway_docs_describe_package_release_gate() -> None:
+    """Document the current package boundary without implying PyPI readiness."""
+
+    docs_path = _repo_root() / "Docs" / "MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md"
+    docs = docs_path.read_text(encoding="utf-8")
+
+    assert "package-info" in docs
+    assert "GPL-3.0-only" in docs
+    assert "internal/experimental" in docs
+    assert "names-only" in docs
+    assert "not a separately published standalone package" in docs
 
 
 def _parse_cli_timestamp(value: str) -> datetime:

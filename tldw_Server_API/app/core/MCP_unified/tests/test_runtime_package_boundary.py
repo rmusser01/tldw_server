@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
 import subprocess
 import sys
 from datetime import datetime
@@ -12,6 +13,15 @@ import pytest
 from pydantic import ValidationError
 
 PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
+
+
+def _dependency_package_name(dependency: str) -> str:
+    """Return a normalized package name from a dependency declaration."""
+
+    name = dependency.strip()
+    for separator in ("[", "<", ">", "=", "!", "~", ";"):
+        name = name.split(separator, 1)[0]
+    return name.strip().lower().replace("_", "-")
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -39,6 +49,89 @@ def test_runtime_package_boundary_has_no_tldw_server_imports() -> None:
         if imports:
             offenders[str(path)] = imports
     assert offenders == {}
+
+
+def test_mcp_unified_package_metadata_declares_release_gate() -> None:
+    metadata = importlib.import_module("mcp_unified.package_metadata")
+
+    assert metadata.PACKAGE_NAME == "mcp-unified"
+    assert metadata.PACKAGE_STATUS == "internal-experimental"
+    assert metadata.PUBLISHING_STATUS == "not-published"
+    assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
+
+    extras = metadata.OPTIONAL_EXTRAS
+    assert set(extras) == {
+        "core",
+        "fastapi",
+        "sqlite",
+        "federation",
+        "gateway",
+        "dev",
+    }
+    assert all(
+        isinstance(dependency, str)
+        for values in extras.values()
+        for dependency in values
+    )
+    assert all(
+        dependency == _dependency_package_name(dependency)
+        for values in extras.values()
+        for dependency in values
+    )
+
+    forbidden_dependency_names = {
+        "chromadb",
+        "faster-whisper",
+        "torch",
+        "yt-dlp",
+        "next",
+        "rag",
+        "tts",
+        "stt",
+    }
+    dependency_names = {
+        _dependency_package_name(dependency)
+        for values in extras.values()
+        for dependency in values
+    }
+    assert forbidden_dependency_names.isdisjoint(dependency_names)
+
+    summary = metadata.package_metadata_summary()
+    assert summary["ok"] is True
+    assert summary["package_name"] == metadata.PACKAGE_NAME
+    assert summary["dependency_version_policy"] == metadata.DEPENDENCY_VERSION_POLICY
+    assert summary["optional_extras"] == {
+        key: list(value)
+        for key, value in extras.items()
+    }
+
+
+def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
+    """Importing the package metadata must not pull in host or heavy stacks."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json, sys; "
+                "import mcp_unified; "
+                "import mcp_unified.package_metadata; "
+                "blocked = ["
+                "name for name in ("
+                "'tldw_Server_API', 'chromadb', 'torch', 'faster_whisper', "
+                "'yt_dlp', 'next'"
+                ") if name in sys.modules"
+                "]; "
+                "print(json.dumps(blocked))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == []
 
 
 def test_host_interface_shims_reexport_package_contracts() -> None:
