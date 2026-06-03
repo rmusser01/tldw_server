@@ -16691,6 +16691,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "root_version": root["version"],
             "scan_root_version": scan["root_version"],
             "ignore_policy_fingerprint": scan.get("ignore_policy_fingerprint"),
+            "root_snapshot_token": scan.get("root_snapshot_token"),
             "job_id": scan.get("job_id"),
             "job_uuid": scan.get("job_uuid"),
             "started_at": scan.get("started_at"),
@@ -16706,6 +16707,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         cursor: str | None = None,
         limit: int = 100,
         include_ignored: bool = False,
+        entry_kind: str | None = None,
     ) -> dict[str, Any]:
         """List non-deleted inventory items sorted by project-root-relative path."""
         normalized_workspace_id = str(workspace_id or "").strip()
@@ -16717,6 +16719,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return {"items": [], "next_cursor": None}
 
         normalized_prefix = self._workspace_file_inventory_prefix(prefix)
+        normalized_entry_kind = str(entry_kind or "").strip().lower() or None
         try:
             cursor_path = decode_inventory_cursor(cursor) if cursor else None
         except ValueError as exc:
@@ -16730,6 +16733,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if normalized_prefix is not None:
             clauses.append("relative_path LIKE ?")
             params.append(f"{normalized_prefix}%")
+        if normalized_entry_kind is not None:
+            clauses.append("entry_kind = ?")
+            params.append(normalized_entry_kind)
         if cursor_path is not None:
             clauses.append("relative_path > ?")
             params.append(cursor_path)

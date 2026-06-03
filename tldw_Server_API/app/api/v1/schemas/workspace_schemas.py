@@ -270,6 +270,93 @@ class WorkspaceFileInventory(BaseModel):
     updated_at: str | None = None
 
 
+WorkspaceFileInventoryState = Literal[
+    "not_started",
+    "queued",
+    "scanning",
+    "current",
+    "partial",
+    "stale",
+    "failed",
+    "disabled",
+]
+WorkspaceFileInventoryEntryKind = Literal["file", "directory", "symlink", "other"]
+
+
+class WorkspaceFileInventoryScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force: StrictBool = False
+    expected_root_version: int | None = Field(default=None, ge=1)
+
+
+class WorkspaceFileInventoryJobStatus(BaseModel):
+    id: int | None = None
+    uuid: str | None = None
+    status: str | None = None
+    job_type: str | None = None
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    error_message: str | None = None
+
+
+class WorkspaceFileInventoryCounts(BaseModel):
+    files: int = 0
+    directories: int = 0
+    symlinks: int = 0
+    ignored: int = 0
+    indexing_candidates: int = 0
+    diagnostics: int = 0
+    total_entries: int = 0
+
+
+class WorkspaceFileInventoryDiagnostic(BaseModel):
+    code: str
+    message: str
+    path_hint: str | None = None
+
+
+class WorkspaceFileInventoryStatusResponse(BaseModel):
+    workspace_id: str
+    root_id: str | None = None
+    state: WorkspaceFileInventoryState
+    durable_state: str | None = None
+    stale: bool = False
+    last_scan_id: str | None = None
+    last_scan_started_at: str | None = None
+    last_scan_completed_at: str | None = None
+    root_version: int | None = None
+    scan_root_version: int | None = None
+    ignore_policy_fingerprint: str | None = None
+    root_snapshot_token: str | None = None
+    counts: WorkspaceFileInventoryCounts = Field(default_factory=WorkspaceFileInventoryCounts)
+    diagnostics: list[WorkspaceFileInventoryDiagnostic] = Field(default_factory=list)
+    job: WorkspaceFileInventoryJobStatus | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceFileInventoryItemResponse(BaseModel):
+    relative_path: str
+    entry_kind: str
+    size_bytes: int | None = None
+    mtime_ns: int | None = None
+    mode_bits: int | None = None
+    extension: str | None = None
+    mime_hint: str | None = None
+    language_hint: str | None = None
+    ignored: bool = False
+    ignore_reason: str | None = None
+    indexing_candidate: bool = False
+
+
+class WorkspaceFileInventoryItemsResponse(BaseModel):
+    workspace_id: str
+    root_id: str | None = None
+    items: list[WorkspaceFileInventoryItemResponse]
+    next_cursor: str | None = None
+    limit: int
+
+
 class WorkspaceRuntimeBinding(BaseModel):
     service: str
     state: WorkspaceCapabilityServiceState
