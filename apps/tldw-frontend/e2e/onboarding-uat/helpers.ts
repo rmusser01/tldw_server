@@ -21,7 +21,8 @@ type WizardProviderOptions = {
   model: string
   apiKey?: string | null
   baseUrl?: string | null
-  expectedDiscoveredModel?: string
+  expectedDiscoveredModel?: string | null
+  expectManualModelFallback?: boolean
 }
 
 type FirstChatResponsePayload = {
@@ -137,7 +138,7 @@ export async function validateWizardProvider(
   await validateButton.click()
 
   const validationCopy = page
-    .getByText(/first chat verifies this provider|provider validation is ready|local_provider_unreachable|provider api key is required/i)
+    .getByText(/first chat verifies this provider|provider validation is ready|model discovery is unavailable|local_provider_unreachable|provider api key is required/i)
     .last()
   await expect(validationCopy).toBeVisible({ timeout: 30_000 })
   return validationCopy
@@ -170,11 +171,17 @@ export async function configureWizardProvider(
   }
 
   await page.getByLabel(/^default model$/i).fill(options.model)
-  await validateWizardProvider(page, options.label)
+  const validationCopy = await validateWizardProvider(page, options.label)
 
   if (options.expectedDiscoveredModel) {
     await expect(
       page.getByRole("button", { name: options.expectedDiscoveredModel })
+    ).toBeVisible({ timeout: 30_000 })
+  }
+  if (options.expectManualModelFallback) {
+    await expect(validationCopy).toContainText(/model discovery is unavailable/i)
+    await expect(
+      page.getByRole("button", { name: /continue with manual model/i })
     ).toBeVisible({ timeout: 30_000 })
   }
 }
@@ -233,14 +240,21 @@ export async function prepareLocalOllamaFirstChat(
     baseUrl: string
     model?: string
     setupPath?: SetupPathChoice
+    expectedDiscoveredModel?: string | null
+    expectManualModelFallback?: boolean
   }
 ): Promise<void> {
   await openWizardProviderStep(page, options.setupPath ?? "local")
+  const model = options.model ?? DEFAULT_LOCAL_PROVIDER_MODEL
   await configureWizardProvider(page, {
     label: "Ollama",
     baseUrl: options.baseUrl,
-    model: options.model ?? DEFAULT_LOCAL_PROVIDER_MODEL,
-    expectedDiscoveredModel: options.model ?? DEFAULT_LOCAL_PROVIDER_MODEL,
+    model,
+    expectedDiscoveredModel:
+      options.expectedDiscoveredModel === undefined
+        ? model
+        : options.expectedDiscoveredModel,
+    expectManualModelFallback: options.expectManualModelFallback,
   })
   await saveWizardProviderAndContinue(page)
   await advanceWizardDefaultsToFirstChat(page)

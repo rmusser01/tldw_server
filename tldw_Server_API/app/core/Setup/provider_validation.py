@@ -17,6 +17,7 @@ VALIDATION_STATUS_FAILED = "failed"
 FAILURE_LOCAL_PROVIDER_UNREACHABLE = "local_provider_unreachable"
 FAILURE_AUTH_FAILED = "auth_failed"
 FAILURE_UNSUPPORTED_API_SHAPE = "unsupported_api_shape"
+FAILURE_MODEL_DISCOVERY_UNAVAILABLE = "model_discovery_unavailable"
 FAILURE_PROVIDER_API_KEY_REQUIRED = "provider_api_key_required"
 FAILURE_PROVIDER_API_KEY_INVALID = "provider_api_key_invalid"
 FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED = "local_provider_endpoint_not_allowed"
@@ -50,6 +51,19 @@ def _failed_response(
         status=VALIDATION_STATUS_FAILED,
         failure_category=failure_category,
         message=message,
+    )
+
+
+def _manual_model_fallback_response(
+    payload: LocalEndpointValidationRequest,
+) -> SetupProviderValidationResponse:
+    return SetupProviderValidationResponse(
+        provider_key=payload.provider_key,
+        status=VALIDATION_STATUS_ACCEPTED,
+        failure_category=FAILURE_MODEL_DISCOVERY_UNAVAILABLE,
+        message="Model discovery is unavailable. Enter the model name manually; first chat will verify it.",
+        validation_level="live_endpoint_shape",
+        can_gate_first_chat=True,
     )
 
 
@@ -172,6 +186,17 @@ def _create_validation_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=5.0)
 
 
+def _openai_compatible_models_url(base_url: str) -> str:
+    """Return the OpenAI-compatible models URL matching runtime URL normalization."""
+    base = base_url.rstrip("/")
+    lower = base.lower()
+    if lower.endswith("/models"):
+        return base
+    if lower.endswith("/v1"):
+        return f"{base}/models"
+    return f"{base}/v1/models"
+
+
 async def validate_local_openai_endpoint(
     payload: LocalEndpointValidationRequest,
 ) -> SetupProviderValidationResponse:
@@ -179,7 +204,7 @@ async def validate_local_openai_endpoint(
     if rejected_response := _validate_local_provider_target(payload):
         return rejected_response
 
-    models_url = f"{payload.base_url.rstrip('/')}/models"
+    models_url = _openai_compatible_models_url(payload.base_url)
     headers: dict[str, str] = {}
     if payload.api_key:
         headers["Authorization"] = f"Bearer {payload.api_key}"
@@ -201,11 +226,7 @@ async def validate_local_openai_endpoint(
             message="Local provider rejected the supplied credentials.",
         )
     if response.status_code >= 400:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
-            message="Local provider did not return a supported OpenAI-compatible response.",
-        )
+        return _manual_model_fallback_response(payload)
 
     try:
         body = response.json()
@@ -217,12 +238,8 @@ async def validate_local_openai_endpoint(
         )
 
     model_ids = _extract_model_ids(body)
-    if model_ids is None:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
-            message="Local provider did not expose an OpenAI-compatible models list.",
-        )
+    if model_ids is None or not model_ids:
+        return _manual_model_fallback_response(payload)
 
     return SetupProviderValidationResponse(
         provider_key=payload.provider_key,

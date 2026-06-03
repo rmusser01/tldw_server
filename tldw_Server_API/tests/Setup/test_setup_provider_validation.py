@@ -98,7 +98,9 @@ async def test_openai_models_shape_maps_to_ready(monkeypatch):
             {"object": "list", "data": [{"id": "local-model", "object": "model"}]},
         )
     )
-    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+    monkeypatch.setattr(
+        provider_validation, "_create_validation_client", lambda: fake_client
+    )
 
     response = await validate_local_openai_endpoint(
         LocalEndpointValidationRequest(
@@ -110,6 +112,30 @@ async def test_openai_models_shape_maps_to_ready(monkeypatch):
     assert response.status == "ready"
     assert response.models == ["local-model"]
     assert fake_client.requests == [("http://127.0.0.1:11434/v1/models", {})]
+
+
+@pytest.mark.asyncio
+async def test_openai_models_probe_appends_v1_when_base_url_omits_version(
+    monkeypatch,
+):
+    fake_client = _FakeAsyncClient(
+        response=_FakeResponse(
+            200,
+            {"object": "list", "data": [{"id": "local-model", "object": "model"}]},
+        )
+    )
+    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url="http://127.0.0.1:8000/",
+        )
+    )
+
+    assert response.status == "ready"
+    assert response.models == ["local-model"]
+    assert fake_client.requests == [("http://127.0.0.1:8000/v1/models", {})]
 
 
 @pytest.mark.asyncio
@@ -241,7 +267,7 @@ async def test_auth_failure_maps_to_auth_failed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unsupported_api_shape_maps_to_unsupported_api_shape(monkeypatch):
+async def test_models_endpoint_unsupported_shape_accepts_manual_model_fallback(monkeypatch):
     fake_client = _FakeAsyncClient(response=_FakeResponse(200, {"models": ["local-model"]}))
     monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
 
@@ -252,8 +278,33 @@ async def test_unsupported_api_shape_maps_to_unsupported_api_shape(monkeypatch):
         )
     )
 
-    assert response.status == "failed"
-    assert response.failure_category == "unsupported_api_shape"
+    assert response.status == "accepted"
+    assert response.models == []
+    assert response.validation_level == "live_endpoint_shape"
+    assert response.can_gate_first_chat is True
+    assert response.failure_category == "model_discovery_unavailable"
+    assert "manual" in (response.message or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_models_endpoint_not_found_accepts_manual_model_fallback(monkeypatch):
+    fake_client = _FakeAsyncClient(response=_FakeResponse(404, {"error": "not found"}))
+    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url="http://127.0.0.1:8000/v1",
+            model="manual-local-model",
+        )
+    )
+
+    assert response.status == "accepted"
+    assert response.models == []
+    assert response.validation_level == "live_endpoint_shape"
+    assert response.can_gate_first_chat is True
+    assert response.failure_category == "model_discovery_unavailable"
+    assert "manual-local-model" not in response.model_dump_json()
 
 
 @pytest.mark.asyncio
