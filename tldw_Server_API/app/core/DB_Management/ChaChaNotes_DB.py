@@ -135,6 +135,8 @@ _FLASHCARD_TEMPLATE_FIELD_NAMES = ("front_template", "back_template", "notes_tem
 _FLASHCARD_TEMPLATE_TOKEN_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 _DECK_VISIBILITIES = frozenset({"private", "team", "org", "public"})
 _DECK_SHARE_ROLES = frozenset({"owner", "editor", "viewer"})
+_WORKSPACE_PROFILES = frozenset({"research", "project"})
+_WORKSPACE_PROJECT_ROOT_BACKENDS = frozenset({"host_local", "sandbox_volume"})
 
 
 def _coerce_scheduler_type(value: Any) -> str:
@@ -3302,6 +3304,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     description   TEXT,
     metadata_json TEXT    NOT NULL DEFAULT '{}',
     study_materials_policy TEXT NOT NULL DEFAULT 'general',
+    workspace_profile TEXT NOT NULL DEFAULT 'research',
     archived      BOOLEAN NOT NULL DEFAULT false,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -7344,6 +7347,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     name          TEXT    NOT NULL,
                     description   TEXT,
                     metadata_json TEXT    NOT NULL DEFAULT '{}',
+                    workspace_profile TEXT NOT NULL DEFAULT 'research',
                     archived      BOOLEAN  NOT NULL DEFAULT 0,
                     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -8615,6 +8619,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "banner_title": "TEXT",
                 "banner_subtitle": "TEXT",
                 "banner_color": "TEXT",
+                "workspace_profile": "TEXT NOT NULL DEFAULT 'research'",
                 "audio_provider": "TEXT",
                 "audio_model": "TEXT",
                 "audio_voice": "TEXT",
@@ -8623,6 +8628,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for col_name, col_type in new_ws_cols.items():
                 if col_name not in ws_cols:
                     conn.execute(f"ALTER TABLE workspaces ADD COLUMN {col_name} {col_type}")  # nosec B608
+            conn.execute(
+                "UPDATE workspaces SET workspace_profile = 'research' "
+                "WHERE workspace_profile IS NULL OR trim(workspace_profile) = ''"
+            )
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_project_roots (
+                    root_id              TEXT PRIMARY KEY NOT NULL,
+                    workspace_id         TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    is_primary           BOOLEAN NOT NULL DEFAULT 1,
+                    backend              TEXT NOT NULL,
+                    absolute_root        TEXT,
+                    sandbox_volume_id    TEXT,
+                    display_name         TEXT,
+                    root_state           TEXT NOT NULL DEFAULT 'not_configured',
+                    git_state            TEXT NOT NULL DEFAULT 'absent',
+                    file_inventory_state TEXT NOT NULL DEFAULT 'not_started',
+                    indexing_state       TEXT NOT NULL DEFAULT 'disabled',
+                    sandbox_mount_state  TEXT NOT NULL DEFAULT 'not_configured',
+                    mcp_trust_state      TEXT NOT NULL DEFAULT 'not_configured',
+                    metadata_json        TEXT NOT NULL DEFAULT '{}',
+                    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    version              INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_project_roots_workspace "
+                "ON workspace_project_roots(workspace_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_project_roots_one_primary "
+                "ON workspace_project_roots(workspace_id) WHERE is_primary = 1"
+            )
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS workspace_sources (
@@ -8760,10 +8799,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS banner_title TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS banner_subtitle TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS banner_color TEXT",
+            "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS workspace_profile TEXT NOT NULL DEFAULT 'research'",
+            "UPDATE workspaces SET workspace_profile = 'research' "
+            "WHERE workspace_profile IS NULL OR btrim(workspace_profile) = ''",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_provider TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_model TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_voice TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_speed REAL DEFAULT 1.0",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_project_roots (
+                root_id              TEXT PRIMARY KEY NOT NULL,
+                workspace_id         TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                is_primary           BOOLEAN NOT NULL DEFAULT true,
+                backend              TEXT NOT NULL,
+                absolute_root        TEXT,
+                sandbox_volume_id    TEXT,
+                display_name         TEXT,
+                root_state           TEXT NOT NULL DEFAULT 'not_configured',
+                git_state            TEXT NOT NULL DEFAULT 'absent',
+                file_inventory_state TEXT NOT NULL DEFAULT 'not_started',
+                indexing_state       TEXT NOT NULL DEFAULT 'disabled',
+                sandbox_mount_state  TEXT NOT NULL DEFAULT 'not_configured',
+                mcp_trust_state      TEXT NOT NULL DEFAULT 'not_configured',
+                metadata_json        TEXT NOT NULL DEFAULT '{}',
+                created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version              INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_project_roots_workspace ON workspace_project_roots(workspace_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_project_roots_one_primary "
+            "ON workspace_project_roots(workspace_id) WHERE is_primary = true",
             """
             CREATE TABLE IF NOT EXISTS workspace_sources (
                 id            TEXT    NOT NULL,
@@ -14229,6 +14295,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 description   TEXT,
                 metadata_json TEXT    NOT NULL DEFAULT '{}',
                 study_materials_policy TEXT NOT NULL DEFAULT 'general',
+                workspace_profile TEXT NOT NULL DEFAULT 'research',
                 archived      BOOLEAN NOT NULL DEFAULT false,
                 created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -15146,6 +15213,72 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Workspace Methods ---
 
+    @staticmethod
+    def _validate_workspace_profile(workspace_profile: str) -> str:
+        """Validate a persisted workspace profile value."""
+        normalized = str(workspace_profile or "").strip().lower()
+        if normalized not in _WORKSPACE_PROFILES:
+            raise InputError("workspace_profile must be 'research' or 'project'")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _validate_workspace_project_root_backend(backend: Any) -> str:
+        """Validate a Workspace-owned project-root backend."""
+        normalized = str(backend or "").strip().lower()
+        if normalized not in _WORKSPACE_PROJECT_ROOT_BACKENDS:
+            raise InputError("workspace project root backend must be 'host_local' or 'sandbox_volume'")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _serialize_workspace_project_root_metadata(value: Any) -> str:
+        """Serialize project-root metadata while rejecting malformed JSON strings."""
+        if value is None:
+            return "{}"
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError("metadata_json must be valid JSON when provided as a string.") from exc  # noqa: TRY003
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError("metadata_json must be JSON-serializable.") from exc  # noqa: TRY003
+
+    def _workspace_active_deleted_value(self) -> bool | int:
+        return False if self.backend_type == BackendType.POSTGRESQL else 0
+
+    def _workspace_primary_root_value(self) -> bool | int:
+        return True if self.backend_type == BackendType.POSTGRESQL else 1
+
+    def _workspace_project_root_row_by_id(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        workspace_id: str,
+        root_id: str,
+    ) -> dict[str, Any] | None:
+        row = conn.execute(
+            """
+            SELECT r.*
+              FROM workspace_project_roots r
+              JOIN workspaces w ON w.id = r.workspace_id
+             WHERE r.workspace_id = ?
+               AND r.root_id = ?
+               AND w.deleted = ?
+            """,
+            (workspace_id, root_id, self._workspace_active_deleted_value()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def _workspace_project_root_integrity_error(self, exc: Exception) -> CharactersRAGDBError:
+        message = str(exc).lower()
+        if "unique" in message or "duplicate" in message or "foreign key" in message or "constraint" in message:
+            return ConflictError(
+                f"Workspace project root write conflicted: {exc}",
+                entity="workspace_project_roots",
+            )
+        return CharactersRAGDBError(f"Workspace project root write failed: {exc}")  # noqa: TRY003
+
     def upsert_workspace(
         self,
         workspace_id: str,
@@ -15154,6 +15287,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         description: str | None = None,
         metadata_json: str | None = None,
         study_materials_policy: str = "general",
+        workspace_profile: str | None = None,
     ) -> dict[str, Any]:
         """Create a workspace or update the existing row in place.
 
@@ -15171,6 +15305,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise InputError("workspace_id and name are required.")  # noqa: TRY003
 
         normalized_policy = study_materials_policy or "general"
+        normalized_profile = (
+            self._validate_workspace_profile(workspace_profile)
+            if workspace_profile is not None
+            else "research"
+        )
         existing = self.get_workspace(workspace_id)
         if existing is not None:
             updates: dict[str, Any] = {}
@@ -15182,6 +15321,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 updates["metadata_json"] = metadata_json
             if existing.get("study_materials_policy") != normalized_policy:
                 updates["study_materials_policy"] = normalized_policy
+            if (
+                workspace_profile is not None
+                and existing.get("workspace_profile", "research") != normalized_profile
+            ):
+                updates["workspace_profile"] = normalized_profile
             if not updates:
                 return existing
             return self.update_workspace(workspace_id, updates, expected_version=int(existing["version"]))
@@ -15190,8 +15334,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         client_id = self.client_id or "unknown"
         query = (
             "INSERT INTO workspaces "
-            "(id, name, description, metadata_json, study_materials_policy, created_at, last_modified, deleted, client_id, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1)"
+            "(id, name, description, metadata_json, study_materials_policy, workspace_profile, "
+            "created_at, last_modified, deleted, client_id, version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)"
         )
         params = (
             workspace_id,
@@ -15199,6 +15344,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             description,
             metadata_json or "{}",
             normalized_policy,
+            normalized_profile,
             now,
             now,
             client_id,
@@ -15260,13 +15406,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params: list[Any] = [now, expected_version + 1]
 
         for col in (
-            "name", "description", "metadata_json", "study_materials_policy", "archived", "tag",
+            "name", "description", "metadata_json", "study_materials_policy", "workspace_profile", "archived", "tag",
             "banner_title", "banner_subtitle", "banner_color",
             "audio_provider", "audio_model", "audio_voice", "audio_speed",
         ):
             if col in update_data:
                 set_clauses.append(f"{col} = ?")
-                params.append(update_data[col])
+                if col == "workspace_profile":
+                    params.append(self._validate_workspace_profile(update_data[col]))
+                else:
+                    params.append(update_data[col])
 
         query = f"UPDATE workspaces SET {', '.join(set_clauses)} WHERE id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, expected_version])
@@ -15376,7 +15525,283 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
             self.hard_delete_conversation(str(conversation_id))
         with self.transaction() as conn:
+            conn.execute("DELETE FROM workspace_project_roots WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+
+    def upsert_workspace_primary_root(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Create or replace the primary project root for a workspace."""
+        if not workspace_id:
+            raise InputError("workspace_id is required.")  # noqa: TRY003
+        root_id = str(data.get("root_id") or "").strip()
+        if not root_id:
+            raise InputError("root_id is required.")  # noqa: TRY003
+        backend = self._validate_workspace_project_root_backend(data.get("backend"))
+        metadata_json = (
+            self._serialize_workspace_project_root_metadata(data.get("metadata_json"))
+            if "metadata_json" in data
+            else None
+        )
+        now = self._get_current_utc_timestamp_iso()
+        primary_value = self._workspace_primary_root_value()
+        deleted_value = self._workspace_active_deleted_value()
+
+        values = {
+            "root_id": root_id,
+            "workspace_id": workspace_id,
+            "is_primary": primary_value,
+            "backend": backend,
+            "absolute_root": data.get("absolute_root"),
+            "sandbox_volume_id": data.get("sandbox_volume_id"),
+            "display_name": data.get("display_name"),
+            "root_state": data.get("root_state") or "not_configured",
+            "git_state": data.get("git_state") or "absent",
+            "file_inventory_state": data.get("file_inventory_state") or "not_started",
+            "indexing_state": data.get("indexing_state") or "disabled",
+            "sandbox_mount_state": data.get("sandbox_mount_state") or "not_configured",
+            "mcp_trust_state": data.get("mcp_trust_state") or "not_configured",
+            "metadata_json": metadata_json or "{}",
+            "created_at": now,
+            "updated_at": now,
+            "version": 1,
+        }
+
+        try:
+            with self.transaction() as conn:
+                workspace_row = conn.execute(
+                    "SELECT id, workspace_profile, version FROM workspaces WHERE id = ? AND deleted = ?",
+                    (workspace_id, deleted_value),
+                ).fetchone()
+                if workspace_row is None:
+                    raise ConflictError(
+                        f"Workspace '{workspace_id}' not found.",
+                        entity="workspaces",
+                        entity_id=workspace_id,
+                    )
+                workspace = dict(workspace_row)
+                existing_primary_row = conn.execute(
+                    """
+                    SELECT *
+                      FROM workspace_project_roots
+                     WHERE workspace_id = ?
+                       AND is_primary = ?
+                    """,
+                    (workspace_id, primary_value),
+                ).fetchone()
+                existing_primary = dict(existing_primary_row) if existing_primary_row else None
+                root_binding_changed = existing_primary is None or existing_primary.get("root_id") != root_id
+
+                if existing_primary is not None and existing_primary.get("root_id") == root_id:
+                    if existing_primary.get("backend") != backend:
+                        raise ConflictError(
+                            f"Workspace project root '{root_id}' backend mismatch.",
+                            entity="workspace_project_roots",
+                            entity_id=root_id,
+                        )
+                    binding_columns = (
+                        "absolute_root",
+                        "sandbox_volume_id",
+                        "display_name",
+                        "metadata_json",
+                    )
+                    root_updates: dict[str, Any] = {}
+                    for column in binding_columns:
+                        if column not in data:
+                            continue
+                        new_value = metadata_json if column == "metadata_json" else values[column]
+                        if existing_primary.get(column) != new_value:
+                            root_updates[column] = new_value
+                    if root_updates:
+                        root_binding_changed = True
+                        set_clauses = ["updated_at = ?", "version = ?"]
+                        params: list[Any] = [now, int(existing_primary["version"]) + 1]
+                        for column, value in root_updates.items():
+                            set_clauses.append(f"{column} = ?")
+                            params.append(value)
+                        params.extend([workspace_id, root_id])
+                        conn.execute(
+                            f"""
+                            UPDATE workspace_project_roots
+                               SET {', '.join(set_clauses)}
+                             WHERE workspace_id = ?
+                               AND root_id = ?
+                            """,  # nosec B608
+                            tuple(params),
+                        )
+                else:
+                    conn.execute(
+                        "DELETE FROM workspace_project_roots WHERE workspace_id = ? AND is_primary = ?",
+                        (workspace_id, primary_value),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_project_roots (
+                            root_id, workspace_id, is_primary, backend, absolute_root, sandbox_volume_id,
+                            display_name, root_state, git_state, file_inventory_state, indexing_state,
+                            sandbox_mount_state, mcp_trust_state, metadata_json, created_at, updated_at, version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            values["root_id"],
+                            values["workspace_id"],
+                            values["is_primary"],
+                            values["backend"],
+                            values["absolute_root"],
+                            values["sandbox_volume_id"],
+                            values["display_name"],
+                            values["root_state"],
+                            values["git_state"],
+                            values["file_inventory_state"],
+                            values["indexing_state"],
+                            values["sandbox_mount_state"],
+                            values["mcp_trust_state"],
+                            values["metadata_json"],
+                            values["created_at"],
+                            values["updated_at"],
+                            values["version"],
+                        ),
+                    )
+                if root_binding_changed or workspace.get("workspace_profile") != "project":
+                    conn.execute(
+                        """
+                        UPDATE workspaces
+                           SET workspace_profile = 'project',
+                               last_modified = ?,
+                               version = version + 1
+                         WHERE id = ? AND deleted = ?
+                        """,
+                        (now, workspace_id, deleted_value),
+                    )
+                root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
+                if root is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to reload workspace project root '{root_id}'."
+                    )
+                return root
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace project root write failed: {exc}") from exc  # noqa: TRY003
+
+    def get_workspace_primary_root(self, workspace_id: str) -> dict[str, Any] | None:
+        """Return the active primary project root for a non-deleted workspace."""
+        if not workspace_id:
+            return None
+        cursor = self.execute_query(
+            """
+            SELECT r.*
+              FROM workspace_project_roots r
+              JOIN workspaces w ON w.id = r.workspace_id
+             WHERE r.workspace_id = ?
+               AND r.is_primary = ?
+               AND w.deleted = ?
+             ORDER BY r.created_at DESC
+             LIMIT 1
+            """,
+            (workspace_id, self._workspace_primary_root_value(), self._workspace_active_deleted_value()),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_workspace_project_roots(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Return project roots for a non-deleted workspace."""
+        if not workspace_id:
+            return []
+        cursor = self.execute_query(
+            """
+            SELECT r.*
+              FROM workspace_project_roots r
+              JOIN workspaces w ON w.id = r.workspace_id
+             WHERE r.workspace_id = ?
+               AND w.deleted = ?
+             ORDER BY r.is_primary DESC, r.created_at ASC, r.root_id ASC
+            """,
+            (workspace_id, self._workspace_active_deleted_value()),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_workspace_project_root_state(
+        self,
+        workspace_id: str,
+        root_id: str,
+        updates: dict[str, Any],
+        expected_version: int,
+    ) -> dict[str, Any]:
+        """Update mutable project-root state with optimistic locking."""
+        if not workspace_id or not root_id:
+            raise InputError("workspace_id and root_id are required.")  # noqa: TRY003
+        operational_updates = {
+            "root_state",
+            "git_state",
+            "file_inventory_state",
+            "indexing_state",
+            "sandbox_mount_state",
+            "mcp_trust_state",
+        }
+        clean_updates: dict[str, Any] = {}
+        for key, value in (updates or {}).items():
+            if key not in operational_updates:
+                raise InputError(f"Unsupported workspace project root state field: {key}")  # noqa: TRY003
+            clean_updates[key] = value
+        existing = self.get_workspace_primary_root(workspace_id)
+        if existing is None or existing.get("root_id") != root_id:
+            raise ConflictError(
+                f"Workspace project root '{root_id}' not found.",
+                entity="workspace_project_roots",
+                entity_id=root_id,
+            )
+        if int(existing["version"]) != int(expected_version):
+            raise ConflictError(
+                f"Workspace project root '{root_id}' version mismatch.",
+                entity="workspace_project_roots",
+                entity_id=root_id,
+            )
+        if not clean_updates:
+            return existing
+
+        now = self._get_current_utc_timestamp_iso()
+        set_clauses = ["updated_at = ?", "version = ?"]
+        params: list[Any] = [now, int(expected_version) + 1]
+        for key, value in clean_updates.items():
+            set_clauses.append(f"{key} = ?")
+            params.append(value)
+        params.extend([workspace_id, root_id, int(expected_version)])
+
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    f"""
+                    UPDATE workspace_project_roots
+                       SET {', '.join(set_clauses)}
+                     WHERE workspace_id = ?
+                       AND root_id = ?
+                       AND version = ?
+                    """,  # nosec B608
+                    tuple(params),
+                )
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Workspace project root '{root_id}' concurrent update detected.",
+                        entity="workspace_project_roots",
+                        entity_id=root_id,
+                    )
+                root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
+                if root is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to reload workspace project root '{root_id}'."
+                    )
+                return root
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace project root update failed: {exc}") from exc  # noqa: TRY003
 
     # --- Workspace Migration Methods ---
 
