@@ -120,12 +120,17 @@ def test_role_presets_include_tooling_metadata() -> None:
     bundled_by_id = {preset.id: preset for preset in presets.list_builtin_presets()}
 
     for preset_id in TOOLING_PRESET_IDS:
-        tooling = bundled_by_id[preset_id].profile.metadata["tooling"]
+        preset = bundled_by_id[preset_id]
+        tooling = preset.profile.metadata["tooling"]
 
         assert tooling["enabled_tools"]
         assert tooling["enabled_capabilities"]
-        assert "recommended_tools" in tooling
-        assert "recommended_servers" in tooling
+        assert tooling["recommended_tools"]
+        assert tooling["recommended_servers"]
+        assert all(
+            item["id"] not in preset.profile.policy_document.allowed_tools
+            for item in tooling["recommended_tools"]
+        )
         assert tooling["recommendation_catalog_patchable"] is True
         assert tooling["progressive_disclosure"]["max_direct_tools"] <= 24
 

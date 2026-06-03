@@ -33,7 +33,7 @@ Execute Task 1 from the MCP default profile tooling implementation plan: add pre
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Review follow-up completed: Product Owner web search now appears only as a non-required recommended server category. Strengthened the Product Owner preset test to assert web search is absent from executable allowed tools, enabled tools, enabled capabilities, recommended tools, and progressive disclosure categories while still present in recommended_servers with required False. Verification: RED run failed on web_search in deferred_categories; final focused pytest passed 15 tests; git diff --check passed.
+Second review follow-up completed: strengthened the role tooling metadata test to require non-empty recommended_tools and recommended_servers for all eleven requested presets, and to assert recommended tool IDs are not executable allowed_tools. Added recommendation-only tool metadata for each requested preset without changing policy grants. Product Owner web search remains absent from recommended_tools/direct/deferred categories and appears only as a non-required recommended server. RED evidence: focused pytest failed on empty recommended_tools. Final verification: focused pytest passed 15 tests; git diff --check passed; runtime Bandit on touched mcp_unified profile files had 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

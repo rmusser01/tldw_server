@@ -48,6 +48,24 @@ def tooling_metadata(
     }
 
 
+def recommended_tool(
+    tool_id: str,
+    *,
+    category: str,
+    description: str,
+    activation: str = "requires_operator_enablement",
+) -> dict[str, Any]:
+    """Return recommendation-only metadata for an optional tool."""
+    return {
+        "id": tool_id,
+        "category": category,
+        "description": description,
+        "activation": activation,
+        "required": False,
+        "authority": "recommendation_only",
+    }
+
+
 def browser_server_recommendation() -> dict[str, Any]:
     """Return the browser/CDP recommendation category."""
     return {

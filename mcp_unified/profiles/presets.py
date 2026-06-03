@@ -12,6 +12,7 @@ from .models import MCPProfile, ProfilePolicy
 from .tooling import (
     browser_server_recommendation,
     issue_tracker_server_recommendation,
+    recommended_tool,
     tooling_metadata,
     web_search_server_recommendation,
 )
@@ -226,6 +227,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "docs_search",
                 "browser",
             ],
+            recommended_tools=[
+                recommended_tool(
+                    "stories.acceptance_criteria.draft",
+                    category="issues",
+                    description="Draft acceptance criteria from scoped product notes.",
+                ),
+                recommended_tool(
+                    "requirements.traceability.map",
+                    category="docs",
+                    description="Prepare a requirements-to-story traceability map.",
+                ),
+            ],
             recommended_servers=[
                 web_search_server_recommendation(),
                 browser_server_recommendation(),
@@ -253,6 +266,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             direct_categories=["files", "tool_discovery", "code", "docs"],
             deferred_categories=["web_search", "browser", "diagramming"],
+            recommended_tools=[
+                recommended_tool(
+                    "architecture.decision_record.draft",
+                    category="docs",
+                    description="Draft architecture decision records from scoped context.",
+                ),
+                recommended_tool(
+                    "architecture.dependency_map.preview",
+                    category="code",
+                    description="Preview package and module dependency relationships.",
+                ),
+            ],
             recommended_servers=[
                 web_search_server_recommendation(),
                 browser_server_recommendation(),
@@ -284,6 +309,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             direct_categories=["git", "files", "tool_discovery"],
             deferred_categories=["safe_test_runner", "issue_tracker", "browser"],
+            recommended_tools=[
+                recommended_tool(
+                    "git.conflict_resolution.plan",
+                    category="git",
+                    description="Summarize conflict hunks and propose a resolution plan.",
+                ),
+                recommended_tool(
+                    "tests.impact.read",
+                    category="tests",
+                    description="Identify tests likely affected by conflict resolution.",
+                ),
+            ],
             recommended_servers=[
                 browser_server_recommendation(),
                 issue_tracker_server_recommendation(),
@@ -314,6 +351,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             direct_categories=["files", "docs", "tool_discovery", "memory"],
             deferred_categories=["web_search", "browser", "issue_tracker"],
+            recommended_tools=[
+                recommended_tool(
+                    "docs.link_check.request",
+                    category="docs",
+                    description="Request a scoped documentation link-check report.",
+                ),
+                recommended_tool(
+                    "docs.style_review.prepare",
+                    category="docs",
+                    description="Prepare style and consistency review notes.",
+                ),
+            ],
             recommended_servers=[
                 web_search_server_recommendation(),
                 browser_server_recommendation(),
@@ -336,6 +385,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             enabled_capabilities=["code_search", "filesystem.read", "docs.read"],
             direct_categories=["files", "code", "docs", "tool_discovery"],
             deferred_categories=["web_search", "browser", "citations"],
+            recommended_tools=[
+                recommended_tool(
+                    "project.map.generate",
+                    category="code",
+                    description="Generate a read-only project structure map.",
+                ),
+                recommended_tool(
+                    "citations.collect",
+                    category="citations",
+                    description="Collect citation candidates for later review.",
+                ),
+            ],
             recommended_servers=[
                 web_search_server_recommendation(),
                 browser_server_recommendation(),
@@ -384,6 +445,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             direct_categories=["files", "code", "git", "tests", "tool_discovery"],
             deferred_categories=["browser", "issue_tracker", "safe_test_runner"],
+            recommended_tools=[
+                recommended_tool(
+                    "review.findings.draft",
+                    category="code",
+                    description="Draft review findings from scoped diffs and files.",
+                ),
+                recommended_tool(
+                    "tests.failure_summarize",
+                    category="tests",
+                    description="Summarize existing test failure output.",
+                ),
+            ],
             recommended_servers=[
                 browser_server_recommendation(),
                 issue_tracker_server_recommendation(),
@@ -412,6 +485,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             enabled_capabilities=["deploy.inspect", "logs.read", "infra.read"],
             direct_categories=["deployments", "logs", "infra", "tool_discovery"],
             deferred_categories=["issue_tracker", "safe_test_runner", "browser"],
+            recommended_tools=[
+                recommended_tool(
+                    "deploy.plan.preview",
+                    category="deployments",
+                    description="Preview deployment plans without applying changes.",
+                ),
+                recommended_tool(
+                    "logs.incident_timeline.prepare",
+                    category="logs",
+                    description="Prepare an incident timeline from read-only logs.",
+                ),
+            ],
             recommended_servers=[
                 browser_server_recommendation(),
                 issue_tracker_server_recommendation(),
@@ -452,6 +537,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "issue_tracker",
                 "browser",
                 "web_search",
+            ],
+            recommended_tools=[
+                recommended_tool(
+                    "api.contract.diff",
+                    category="backend",
+                    description="Compare API contract snapshots for review.",
+                ),
+                recommended_tool(
+                    "database.schema.inspect",
+                    category="backend",
+                    description="Inspect database schema metadata without mutation.",
+                ),
             ],
             recommended_servers=[
                 browser_server_recommendation(),
@@ -495,6 +592,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "issue_tracker",
                 "web_search",
             ],
+            recommended_tools=[
+                recommended_tool(
+                    "ui.accessibility.audit_request",
+                    category="frontend",
+                    description="Request accessibility audit guidance for scoped UI changes.",
+                ),
+                recommended_tool(
+                    "design.tokens.inspect",
+                    category="frontend",
+                    description="Inspect design token usage across scoped frontend files.",
+                ),
+            ],
             recommended_servers=[
                 browser_server_recommendation(),
                 issue_tracker_server_recommendation(),
@@ -518,6 +627,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             enabled_capabilities=["logs.read", "screenshots.capture", "app_state.read"],
             direct_categories=["logs", "screenshots", "app_state", "tool_discovery"],
             deferred_categories=["browser", "safe_test_runner", "issue_tracker"],
+            recommended_tools=[
+                recommended_tool(
+                    "test_cases.generate",
+                    category="tests",
+                    description="Generate manual test case drafts from scoped requirements.",
+                ),
+                recommended_tool(
+                    "bug_report.draft",
+                    category="issues",
+                    description="Draft bug reports from logs and screenshots.",
+                ),
+            ],
             recommended_servers=[
                 browser_server_recommendation(),
                 issue_tracker_server_recommendation(),
@@ -548,6 +669,18 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             direct_categories=["files", "code", "tests", "tool_discovery"],
             deferred_categories=["safe_test_runner", "browser", "issue_tracker"],
+            recommended_tools=[
+                recommended_tool(
+                    "tests.plan.generate",
+                    category="tests",
+                    description="Generate test plan drafts for scoped code changes.",
+                ),
+                recommended_tool(
+                    "coverage.report.read",
+                    category="tests",
+                    description="Read and summarize coverage reports.",
+                ),
+            ],
             recommended_servers=[
                 browser_server_recommendation(),
                 issue_tracker_server_recommendation(),
