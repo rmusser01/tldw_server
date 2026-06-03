@@ -4,7 +4,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from tldw_Server_API.app.core import config
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -81,6 +81,24 @@ class SandboxVolumeBinding:
     reason_code: str | None = None
 
 
+@dataclass(frozen=True)
+class SandboxInventoryMount:
+    sandbox_volume_id: str
+    state: Literal["ready", "not_configured", "unavailable", "failed"]
+    local_path: str | None = None
+    reason_code: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedWorkspaceInventoryRoot:
+    ok: bool
+    backend: str
+    local_path: Path | None = None
+    root_snapshot_token: str | None = None
+    failure_code: str | None = None
+    message: str | None = None
+
+
 class SandboxVolumeResolver(Protocol):
     def validate_workspace_volume(
         self,
@@ -90,6 +108,17 @@ class SandboxVolumeResolver(Protocol):
         sandbox_volume_id: str,
     ) -> SandboxVolumeBinding:
         """Return the current binding state for a Workspace-owned sandbox volume."""
+
+
+class SandboxInventoryMountResolver(Protocol):
+    def resolve_workspace_volume_mount(
+        self,
+        *,
+        workspace_id: str,
+        root_id: str,
+        sandbox_volume_id: str,
+    ) -> SandboxInventoryMount:
+        """Return the current local mount state for a Workspace-owned sandbox volume."""
 
 
 class DefaultSandboxVolumeResolver:
@@ -331,6 +360,162 @@ def _raw_containing_allowed_roots(candidate: Path, allowed_roots: Sequence[Path]
         if common_path == str(base):
             containing_roots.append(base)
     return tuple(containing_roots)
+
+
+def resolve_workspace_root_for_inventory_scan(
+    *,
+    root: Mapping[str, Any],
+    allowed_roots: Sequence[Path | str] | None = None,
+    sandbox_mount_resolver: SandboxInventoryMountResolver | None = None,
+) -> ResolvedWorkspaceInventoryRoot:
+    backend = str(root.get("backend") or "").strip()
+    if backend == "host_local":
+        return _resolve_host_local_root_for_inventory_scan(root, allowed_roots)
+    if backend == "sandbox_volume":
+        return _resolve_sandbox_root_for_inventory_scan(root, sandbox_mount_resolver)
+    return _inventory_root_failure(
+        backend=backend or "unknown",
+        code="workspace_project_root_backend_unsupported",
+        message="Workspace project root backend is not supported for inventory scans.",
+    )
+
+
+def _resolve_host_local_root_for_inventory_scan(
+    root: Mapping[str, Any],
+    allowed_roots: Sequence[Path | str] | None,
+) -> ResolvedWorkspaceInventoryRoot:
+    absolute_root = str(root.get("absolute_root") or "").strip()
+    if not absolute_root:
+        return _inventory_root_failure(
+            backend="host_local",
+            code="workspace_project_root_path_required",
+            message="Workspace project root path is required.",
+        )
+    candidate = Path(absolute_root).expanduser()
+    if not candidate.is_absolute():
+        return _inventory_root_failure(
+            backend="host_local",
+            code="workspace_project_root_not_absolute",
+            message="Workspace project root path must be absolute.",
+        )
+    configured_allowed_roots = (
+        tuple(Path(root_path) for root_path in allowed_roots)
+        if allowed_roots is not None
+        else config.get_workspace_project_root_allowed_roots()
+    )
+    if not configured_allowed_roots:
+        return _inventory_root_failure(
+            backend="host_local",
+            code="workspace_project_roots_not_configured",
+            message="Workspace project root allowed roots are not configured.",
+        )
+    raw_containing_roots = _raw_containing_allowed_roots(candidate, configured_allowed_roots)
+    if not raw_containing_roots:
+        return _inventory_root_failure(
+            backend="host_local",
+            code="workspace_project_root_outside_allowed_roots",
+            message="Workspace project root is outside the configured allowed roots.",
+        )
+    if candidate.is_symlink():
+        return _inventory_root_failure(
+            backend="host_local",
+            code="workspace_project_root_symlink",
+            message="Workspace project root cannot be a symlink.",
+        )
+
+    resolved = candidate.resolve(strict=False)
+    if not any(resolve_safe_local_path(resolved, allowed_root) is not None for allowed_root in raw_containing_roots):
+        return _inventory_root_failure(
+            backend="host_local",
+            code="workspace_project_root_outside_allowed_roots",
+            message="Workspace project root is outside the configured allowed roots.",
+        )
+    return _resolve_existing_inventory_directory(
+        backend="host_local",
+        root=root,
+        path=resolved,
+    )
+
+
+def _resolve_sandbox_root_for_inventory_scan(
+    root: Mapping[str, Any],
+    sandbox_mount_resolver: SandboxInventoryMountResolver | None,
+) -> ResolvedWorkspaceInventoryRoot:
+    sandbox_volume_id = str(root.get("sandbox_volume_id") or "").strip()
+    if not sandbox_volume_id or sandbox_mount_resolver is None:
+        return _inventory_root_failure(
+            backend="sandbox_volume",
+            code="sandbox_mount_not_ready",
+            message="Workspace sandbox volume is not mounted.",
+        )
+    mount = sandbox_mount_resolver.resolve_workspace_volume_mount(
+        workspace_id=str(root.get("workspace_id") or "").strip(),
+        root_id=str(root.get("root_id") or "").strip(),
+        sandbox_volume_id=sandbox_volume_id,
+    )
+    if mount.state != "ready" or not mount.local_path:
+        return _inventory_root_failure(
+            backend="sandbox_volume",
+            code=mount.reason_code or "sandbox_mount_not_ready",
+            message="Workspace sandbox volume is not ready.",
+        )
+    candidate = Path(mount.local_path).expanduser()
+    if candidate.is_symlink():
+        return _inventory_root_failure(
+            backend="sandbox_volume",
+            code="workspace_project_root_symlink",
+            message="Workspace sandbox mount root cannot be a symlink.",
+        )
+    return _resolve_existing_inventory_directory(
+        backend="sandbox_volume",
+        root=root,
+        path=candidate.resolve(strict=False),
+    )
+
+
+def _resolve_existing_inventory_directory(
+    *,
+    backend: str,
+    root: Mapping[str, Any],
+    path: Path,
+) -> ResolvedWorkspaceInventoryRoot:
+    if not path.exists():
+        return _inventory_root_failure(
+            backend=backend,
+            code="workspace_project_root_missing",
+            message="Workspace project root does not exist.",
+        )
+    if not path.is_dir():
+        return _inventory_root_failure(
+            backend=backend,
+            code="workspace_project_root_not_directory",
+            message="Workspace project root is not a directory.",
+        )
+    return ResolvedWorkspaceInventoryRoot(
+        ok=True,
+        backend=backend,
+        local_path=path,
+        root_snapshot_token=_inventory_root_snapshot_token(root, path),
+    )
+
+
+def _inventory_root_snapshot_token(root: Mapping[str, Any], path: Path) -> str:
+    root_id = str(root.get("root_id") or "").strip() or "root"
+    version = str(root.get("version") or "").strip() or "0"
+    try:
+        stat_result = path.stat()
+        return f"{root_id}:{version}:{stat_result.st_mtime_ns}:{stat_result.st_ino}"
+    except OSError:
+        return f"{root_id}:{version}"
+
+
+def _inventory_root_failure(*, backend: str, code: str, message: str) -> ResolvedWorkspaceInventoryRoot:
+    return ResolvedWorkspaceInventoryRoot(
+        ok=False,
+        backend=backend,
+        failure_code=code,
+        message=message,
+    )
 
 
 def _normalize_sandbox_volume_request(
