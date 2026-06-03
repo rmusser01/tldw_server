@@ -11,6 +11,7 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-06-03-workspace-primary-root-attach-api-design.md
 - Docs/superpowers/plans/2026-06-03-workspace-primary-root-attach-api-implementation-plan.md
+- tldw_Server_API/tests/Workspaces/test_workspaces_api.py
 ---
 
 ## Description
