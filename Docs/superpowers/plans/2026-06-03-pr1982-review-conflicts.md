@@ -70,3 +70,4 @@ Validation completed:
 - Focused pytest slice for OCR runtime/backend tests and MCP catalog endpoint tests: `51 passed`.
 - Onboarding docs-gate reproduction for benchmark/OpenWebUI/flashcards discoverability tests: `9 passed`.
 - Post-push frontend install failure reproduction: `bun install --frozen-lockfile` initially failed because `apps/bun.lock` was stale after the merge; regenerated `apps/bun.lock` and reran successfully with no changes.
+- Post-push playground composer gate reproduction: `PlaygroundForm.signals.guard.test.ts` expected the old unused `_data` callback signature; updated the guard to assert the current `data` normalization path and reran `bun run test:playground:composer`: `6 passed`, `38 passed`.
