@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -264,7 +265,6 @@ def _normalize_host_local_request(
             code="workspace_project_root_not_absolute",
         )
 
-    resolved = candidate.resolve(strict=False)
     configured_allowed_roots = (
         tuple(Path(root) for root in allowed_roots)
         if allowed_roots is not None
@@ -275,10 +275,8 @@ def _normalize_host_local_request(
             "Workspace project root allowed roots are not configured.",
             code="workspace_project_roots_not_configured",
         )
-    if not any(
-        resolve_safe_local_path(resolved, allowed_root) is not None
-        for allowed_root in configured_allowed_roots
-    ):
+    raw_containing_roots = _raw_containing_allowed_roots(candidate, configured_allowed_roots)
+    if not raw_containing_roots:
         raise WorkspaceRootValidationError(
             "Workspace project root is outside the configured allowed roots.",
             code="workspace_project_root_outside_allowed_roots",
@@ -287,6 +285,16 @@ def _normalize_host_local_request(
         raise WorkspaceRootInputError(
             "Workspace project root cannot be a symlink.",
             code="workspace_project_root_symlink",
+        )
+
+    resolved = candidate.resolve(strict=False)
+    if not any(
+        resolve_safe_local_path(resolved, allowed_root) is not None
+        for allowed_root in raw_containing_roots
+    ):
+        raise WorkspaceRootValidationError(
+            "Workspace project root is outside the configured allowed roots.",
+            code="workspace_project_root_outside_allowed_roots",
         )
     if not resolved.exists():
         raise WorkspaceRootInputError(
@@ -309,6 +317,20 @@ def _normalize_host_local_request(
         absolute_root=str(resolved),
         display_name=display_name,
     )
+
+
+def _raw_containing_allowed_roots(candidate: Path, allowed_roots: Sequence[Path]) -> tuple[Path, ...]:
+    raw_candidate = Path(os.path.abspath(str(candidate)))
+    containing_roots: list[Path] = []
+    for allowed_root in allowed_roots:
+        base = Path(allowed_root).expanduser().resolve(strict=False)
+        try:
+            common_path = os.path.commonpath([str(base), str(raw_candidate)])
+        except ValueError:
+            continue
+        if common_path == str(base):
+            containing_roots.append(base)
+    return tuple(containing_roots)
 
 
 def _normalize_sandbox_volume_request(

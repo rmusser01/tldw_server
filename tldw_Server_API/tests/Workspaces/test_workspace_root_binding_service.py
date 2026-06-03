@@ -254,6 +254,56 @@ def test_host_local_symlink_root_raises_input_error(db, tmp_path):
     assert exc_info.value.code == "workspace_project_root_symlink"
 
 
+def test_host_local_allowed_symlink_to_outside_target_raises_input_error(db, tmp_path):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    outside_project = outside / "project"
+    symlink_project = allowed / "linked-project"
+    outside_project.mkdir(parents=True)
+    symlink_project.parent.mkdir(parents=True)
+    symlink_project.symlink_to(outside_project, target_is_directory=True)
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootInputError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="host_local",
+                absolute_root=str(symlink_project),
+            ),
+            allowed_roots=(allowed,),
+        )
+
+    assert exc_info.value.code == "workspace_project_root_symlink"
+
+
+def test_host_local_outside_symlink_path_is_rejected_as_outside_allowlist(db, tmp_path):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    target = outside / "target"
+    symlink = outside / "linked"
+    allowed.mkdir()
+    target.mkdir(parents=True)
+    symlink.symlink_to(target, target_is_directory=True)
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootValidationError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="host_local",
+                absolute_root=str(symlink),
+            ),
+            allowed_roots=(allowed,),
+        )
+
+    assert exc_info.value.code == "workspace_project_root_outside_allowed_roots"
+
+
 def test_different_primary_root_without_replace_existing_raises_conflict(db, tmp_path):
     allowed = tmp_path / "allowed"
     project_one = allowed / "one"
