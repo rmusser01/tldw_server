@@ -1,7 +1,7 @@
 ---
 id: TASK-2233
 title: Prepare MCP tooling presets spec placeholder PR
-status: In Progress
+status: Done
 labels:
 - mcp-unified
 - design
@@ -35,20 +35,27 @@ dependency revision triggers were implicit.
 Updated the spec with a Placeholder PR Scope section, a Decision Status
 section, and a pre-implementation reconciliation reminder in Recommended Next
 Plan.
+
+Opened draft placeholder PR: https://github.com/rmusser01/tldw_server/pull/2251
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Reviewed and improved the spec for placeholder-PR readiness. Added explicit
+draft placeholder scope, active-work revision triggers, settled/provisional
+decision status, and a pre-implementation reconciliation requirement. Draft PR:
+https://github.com/rmusser01/tldw_server/pull/2251. Verification: git diff
+--check passed; rg confirmed the new placeholder/reconciliation sections.
+Bandit skipped because this is documentation-only work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
