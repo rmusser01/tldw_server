@@ -357,6 +357,15 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(se
 
 ## Architecture Decision Records (ADRs)
 
+**Backfill note (2026-06-03):** This embedded ADR section is historical. Confirmed current decisions have canonical ADRs in `Docs/ADR/`:
+
+- [ADR-012](../ADR/012-evaluations-resource-id-prefixes.md) covers prefixed resource IDs.
+- [ADR-013](../ADR/013-evaluations-deletion-lifecycle.md) covers evaluation/dataset deletion lifecycle.
+- [ADR-014](../ADR/014-evaluations-openai-compatible-schemas.md) covers schema conventions.
+- [ADR-015](../ADR/015-evaluations-existing-evaluator-integration.md) covers evaluator integration.
+
+The SQLite-only storage, SQLite JSON TEXT, and broad async/background-task entries were not backfilled as accepted because current implementation evidence requires replacement or split decisions.
+
 ### ADR-001: Database Choice for Evaluations
 **Date**: 2024-01-09
 **Status**: Implemented

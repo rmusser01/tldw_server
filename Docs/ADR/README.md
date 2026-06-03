@@ -43,3 +43,7 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-009](009-quick-chat-docs-assistant-modes.md) | Accepted | Keep Quick Chat split into `Chat`, `Docs Q&A`, and `Browse Guides` modes. |
 | [ADR-010](010-sandbox-vz-runtime-ownership.md) | Accepted | Keep `vz_linux` as a repo-owned sandbox runtime path instead of requiring Apple `container`. |
 | [ADR-011](011-audio-api-semantics.md) | Accepted | Use centralized Audio API auth, model-first TTS routing, structured streaming errors, and non-streaming-only download links. |
+| [ADR-012](012-evaluations-resource-id-prefixes.md) | Accepted | Use OpenAI-style type-prefixed IDs for primary Evaluations API resources. |
+| [ADR-013](013-evaluations-deletion-lifecycle.md) | Accepted | Use soft deletes for evaluation definitions and hard deletes for datasets. |
+| [ADR-014](014-evaluations-openai-compatible-schemas.md) | Accepted | Use separate request and response schemas with OpenAI-compatible response conventions. |
+| [ADR-015](015-evaluations-existing-evaluator-integration.md) | Accepted | Wrap existing evaluator modules instead of rewriting evaluator logic inside the API runner or endpoints. |

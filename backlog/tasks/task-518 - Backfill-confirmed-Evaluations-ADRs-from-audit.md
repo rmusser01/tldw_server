@@ -1,15 +1,21 @@
 ---
 id: TASK-518
 title: Backfill confirmed Evaluations ADRs from audit
-status: To Do
+status: Done
 labels:
 - docs
 - process
 - adr
 - evaluations
 modified_files:
+- Docs/ADR/012-evaluations-resource-id-prefixes.md
+- Docs/ADR/013-evaluations-deletion-lifecycle.md
+- Docs/ADR/014-evaluations-openai-compatible-schemas.md
+- Docs/ADR/015-evaluations-existing-evaluator-integration.md
 - Docs/ADR/README.md
 - Docs/ADR/inventory/2026-06-03-decision-inventory.md
+- Docs/ADR/inventory/2026-06-03-evaluations-confirmation-audit.md
+- Docs/Evals/Evals-Plan-1.md
 ---
 
 ## Description
@@ -20,11 +26,11 @@ Backfill only the Evaluations decisions confirmed by TASK-517 as current governi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Create canonical ADRs only for confirmed current Evaluations decisions from TASK-517.
-- [ ] #2 Keep one decision per ADR; split resource ID conventions, deletion lifecycle, API schema shape, and evaluator integration strategy unless owner approves a narrower grouping.
-- [ ] #3 Do not backfill the old SQLite-only persistence ADR, SQLite JSON TEXT ADR, or broad async-background ADR as accepted without a replacement/split review.
-- [ ] #4 Update ADR index, inventory recommended actions, and relevant source links for the ADRs created.
-- [ ] #5 Record docs-only verification and Bandit skip.
+- [x] #1 Create canonical ADRs only for confirmed current Evaluations decisions from TASK-517.
+- [x] #2 Keep one decision per ADR; split resource ID conventions, deletion lifecycle, API schema shape, and evaluator integration strategy unless owner approves a narrower grouping.
+- [x] #3 Do not backfill the old SQLite-only persistence ADR, SQLite JSON TEXT ADR, or broad async-background ADR as accepted without a replacement/split review.
+- [x] #4 Update ADR index, inventory recommended actions, and relevant source links for the ADRs created.
+- [x] #5 Record docs-only verification and Bandit skip.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -36,21 +42,21 @@ Use Docs/ADR/inventory/2026-06-03-evaluations-confirmation-audit.md to draft one
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Created ADR-012 through ADR-015 for the confirmed current Evaluations decisions from TASK-517. Left INV-009, INV-012, and INV-014 unresolved because current evidence requires replacement or split decisions before accepted ADR backfill. Verification: `git diff --check`, targeted `rg` checks for ADR links/inventory mappings, and file existence checks for ADR-012 through ADR-015. Bandit skipped because only documentation and task-record files changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Backfilled the confirmed Evaluations ADR slice with ADR-012 through ADR-015 and updated the ADR index, decision inventory, Evals source note, and TASK-517 audit follow-up links. The stale/partial SQLite-only and broad async/background entries were not accepted as ADRs. Verification was docs-only: git diff --check plus targeted rg/link/file checks; Bandit was skipped because no Python/code paths changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

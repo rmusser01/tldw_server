@@ -38,10 +38,10 @@ This audit does not create accepted ADRs. It separates confirmed current decisio
 
 TASK-518 should backfill only these confirmed current decisions:
 
-- INV-010: Evaluations resource ID prefixes.
-- INV-011: Evaluation and dataset deletion lifecycle.
-- INV-013: OpenAI-compatible request/response schema shape.
-- INV-015: Reuse/wrap existing evaluator modules.
+- INV-010: Evaluations resource ID prefixes, backfilled by `Docs/ADR/012-evaluations-resource-id-prefixes.md`.
+- INV-011: Evaluation and dataset deletion lifecycle, backfilled by `Docs/ADR/013-evaluations-deletion-lifecycle.md`.
+- INV-013: OpenAI-compatible request/response schema shape, backfilled by `Docs/ADR/014-evaluations-openai-compatible-schemas.md`.
+- INV-015: Reuse/wrap existing evaluator modules, backfilled by `Docs/ADR/015-evaluations-existing-evaluator-integration.md`.
 
 TASK-518 should exclude these rows from direct accepted backfill:
 
