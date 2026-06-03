@@ -26,7 +26,7 @@ ADR-005 established the touched-scope Bandit gate but used `/tmp/bandit_<task>.j
 
 ## Consequences
 
-Agents should activate the project virtual environment and run `python -m bandit -r <touched_paths> -f json -o bandit_<task>.json` or another explicitly chosen portable output path for touched Python/code paths. New findings in changed code should be fixed before finishing. Docs-only work records Bandit as not applicable. Bandit report artifacts should not be committed unless explicitly requested.
+Agents should activate the project virtual environment and run `python -m bandit -r <touched_paths> -f json -o bandit_<task>.json` or another explicitly chosen portable output path for touched Python/code paths. New findings in changed code should be fixed before finishing. Docs-only work records Bandit as not applicable. Generated `bandit_*.json` report artifacts are ignored by `.gitignore` and should not be committed unless explicitly requested.
 
 ## Follow-up
 

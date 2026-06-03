@@ -8,6 +8,7 @@ labels:
 - adr
 - review-followup
 modified_files:
+- .gitignore
 - AGENTS.md
 - Docs/ADR/005-bandit-touched-scope-security-gate.md
 - Docs/ADR/006-bandit-report-path-portability.md
@@ -46,7 +47,7 @@ PR #2230 filename review comments suggested lowercase kebab-case Backlog task pa
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Final summary: Addressed PR #2230 review follow-up by expanding TASK-508 modified_files to include the Stage 1 deliverables, superseding ADR-005 with ADR-006 for portable Bandit report path guidance, aligning AGENTS.md to the portable command, and documenting why canonical Backlog task filenames were preserved instead of renamed. Verification passed: ADR-006 exists, ADR index/status checks passed, TASK-508 metadata checks passed, filename rationale check passed, and git diff --check passed. Bandit not applicable for docs/process-only changes. Draft PR: https://github.com/rmusser01/tldw_server/pull/2233
+Final summary: Addressed PR #2230 review follow-up by expanding TASK-508 modified_files to include the Stage 1 deliverables, superseding ADR-005 with ADR-006 for portable Bandit report path guidance, aligning AGENTS.md to the portable command, explicitly ignoring generated bandit_*.json report artifacts in .gitignore, and documenting why canonical Backlog task filenames were preserved instead of renamed. Verification passed: ADR-006 exists, ADR index/status checks passed, TASK-508 metadata checks passed, filename rationale check passed, bandit_TASK-512.json is ignored by git check-ignore, and git diff --check passed. Bandit not applicable for docs/process-only changes. Draft PR: https://github.com/rmusser01/tldw_server/pull/2233
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
