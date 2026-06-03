@@ -43,7 +43,7 @@ Executing Docs/superpowers/plans/2026-06-02-adr-workflow-adoption-stage-1-implem
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Final summary: Created Docs/ADR framework, seed ADRs, root AGENTS.md policy, and follow-up Backlog tasks for inventory/backfill and global Superpowers review. Follow-up tasks: TASK-509, TASK-510, TASK-511. Verification: final documentation checks passed; git diff --check passed; Bandit not applicable for docs-only changes.
+Final summary: Created Docs/ADR framework, seed ADRs, root AGENTS.md policy, and follow-up Backlog tasks for inventory/backfill and global Superpowers review. Follow-up tasks: TASK-509, TASK-510, TASK-511. Verification: final documentation checks passed; git diff --check passed; Bandit not applicable for docs-only changes. Draft PR: https://github.com/rmusser01/tldw_server/pull/2230
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
