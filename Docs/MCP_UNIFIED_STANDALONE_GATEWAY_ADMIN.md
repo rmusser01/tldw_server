@@ -25,7 +25,9 @@ mcp-unified-gateway package-info
 
 The dependency groups in that payload intentionally use a `names-only` policy.
 They identify the minimal standalone-package surface without duplicating the
-version floors carried by `mcp_unified/pyproject.toml`.
+version floors carried by `mcp_unified/pyproject.toml`. The package also ships
+`mcp_unified/py.typed` as a PEP 561 typed-package marker so downstream type
+checkers can recognize that the package exposes inline type information.
 
 Run the local standalone artifact gate before changing release metadata or
 package dependencies:
@@ -35,17 +37,19 @@ python -m pytest \
   -c mcp_unified/pytest-artifact-gate.ini \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
+  .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_artifacts_include_typed_marker \
+  .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_artifacts_include_package_docs \
   -q
 ```
 
 That gate builds the package-local wheel and sdist with `python -m build
 --no-isolation`, then checks the wheel metadata, console script entry point,
-optional extras, dependency boundary, and sdist contents. The `PyPI Package
-Check` GitHub Actions workflow runs the same focused non-host test path for
-`mcp_unified/**` changes before it builds the root `tldw-server` distribution.
-It uses `mcp_unified/pytest-artifact-gate.ini` to avoid repo-wide pytest
-plugins, host package imports, and host conftests, validates artifacts, and
-does not publish `mcp-unified`.
+optional extras, dependency boundary, typed-package marker, and sdist contents.
+The `PyPI Package Check` GitHub Actions workflow runs the same focused non-host
+test path for `mcp_unified/**` changes before it builds the root `tldw-server`
+distribution. It uses `mcp_unified/pytest-artifact-gate.ini` to avoid repo-wide
+pytest plugins, host package imports, and host conftests, validates artifacts,
+and does not publish `mcp-unified`.
 
 Run the local standalone install smoke when changing import behavior or the
 minimal package boundary:
