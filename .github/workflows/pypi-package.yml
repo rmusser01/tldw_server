@@ -8,6 +8,7 @@ on:
     paths:
       - pyproject.toml
       - README.md
+      - .github/tests/**
       - mcp_unified/**
       - tldw_Server_API/**
       - .github/workflows/pypi-package.yml
@@ -17,6 +18,7 @@ on:
     paths:
       - pyproject.toml
       - README.md
+      - .github/tests/**
       - mcp_unified/**
       - tldw_Server_API/**
       - .github/workflows/pypi-package.yml
@@ -53,8 +55,9 @@ jobs:
       - name: Validate MCP Unified standalone artifacts
         run: |
           python -m pytest \
-            tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
-            tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
+            -c mcp_unified/pytest-artifact-gate.ini \
+            .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
+            .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
             -q
 
       - name: Build and check package

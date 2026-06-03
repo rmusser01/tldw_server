@@ -205,8 +205,18 @@ def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
     )
     _assert_subprocess_succeeded(result, "python -m build")
 
-    wheels = sorted(dist_dir.glob("mcp_unified-*.whl"))
-    sdists = sorted(dist_dir.glob("mcp_unified-*.tar.gz"))
+    wheels = sorted(
+        [
+            *dist_dir.glob("mcp_unified-*.whl"),
+            *dist_dir.glob("mcp-unified-*.whl"),
+        ]
+    )
+    sdists = sorted(
+        [
+            *dist_dir.glob("mcp_unified-*.tar.gz"),
+            *dist_dir.glob("mcp-unified-*.tar.gz"),
+        ]
+    )
     assert len(wheels) == 1  # nosec B101
     assert len(sdists) == 1  # nosec B101
     return wheels[0], sdists[0]
@@ -496,6 +506,13 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
 def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
     """PyPI validation workflow must also gate package-local mcp_unified changes."""
 
+    artifact_gate_config = "mcp_unified/pytest-artifact-gate.ini"
+    config_path = PACKAGE_ROOT.parent / artifact_gate_config
+    assert config_path.is_file()  # nosec B101
+    pytest_config = configparser.ConfigParser()
+    pytest_config.read(config_path, encoding="utf-8")
+    assert "--noconftest" in pytest_config["pytest"]["addopts"]  # nosec B101
+
     workflow_path = (
         PACKAGE_ROOT.parent / ".github" / "workflows" / "pypi-package.yml"
     )
@@ -508,12 +525,14 @@ def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
 
     steps = workflow["jobs"]["build-and-check"]["steps"]
     run_blocks = [step.get("run", "") for step in steps]
+    artifact_gate_test_path = ".github/tests/test_mcp_unified_artifact_gate.py"
     artifact_gate_nodeids = (
         "test_mcp_unified_standalone_distribution_metadata_matches_extras",
         "test_mcp_unified_standalone_sdist_contains_only_package_boundary",
     )
     assert any(
-        all(nodeid in run_block for nodeid in artifact_gate_nodeids)
+        all(f"{artifact_gate_test_path}::{nodeid}" in run_block for nodeid in artifact_gate_nodeids)
+        and f"-c {artifact_gate_config}" in run_block
         for run_block in run_blocks
     )  # nosec B101
     assert any(

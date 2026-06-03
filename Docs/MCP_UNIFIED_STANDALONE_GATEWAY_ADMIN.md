@@ -32,17 +32,20 @@ package dependencies:
 
 ```bash
 python -m pytest \
-  tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
-  tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
+  -c mcp_unified/pytest-artifact-gate.ini \
+  .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
+  .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
   -q
 ```
 
 That gate builds the package-local wheel and sdist with `python -m build
 --no-isolation`, then checks the wheel metadata, console script entry point,
 optional extras, dependency boundary, and sdist contents. The `PyPI Package
-Check` GitHub Actions workflow runs the same focused gate for
+Check` GitHub Actions workflow runs the same focused non-host test path for
 `mcp_unified/**` changes before it builds the root `tldw-server` distribution.
-It validates artifacts but does not publish `mcp-unified`.
+It uses `mcp_unified/pytest-artifact-gate.ini` to avoid repo-wide pytest
+plugins, host package imports, and host conftests, validates artifacts, and
+does not publish `mcp-unified`.
 
 Run the local standalone install smoke when changing import behavior or the
 minimal package boundary:
