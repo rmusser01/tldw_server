@@ -4,6 +4,24 @@ This guide covers the standalone gateway admin/config surface for profiles,
 external server definitions, credential grants, config snapshots, and remote
 runtime lifecycle commands.
 
+## Package Release Status
+
+The `mcp_unified` package boundary is currently internal/experimental and is
+not a separately published standalone package. It is still distributed as part
+of the broader `tldw-server` source tree while the package release gate is
+being hardened.
+
+The current package metadata uses the canonical repository license expression
+`GPL-3.0-only`. Downstream projects should treat the boundary as an in-repo
+integration surface until a later packaging pass adds a clean minimal install,
+independent extras verification, and release CI for the standalone package.
+
+Inspect the current release-readiness metadata with:
+
+```bash
+mcp-unified-gateway package-info
+```
+
 ## Local Store Commands vs Remote Runtime Commands
 
 The `mcp-unified-gateway` CLI has two different operating modes:

@@ -11,6 +11,7 @@ from collections.abc import Callable, Coroutine, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
+from mcp_unified.package_metadata import package_metadata_summary
 from mcp_unified.profiles.presets import (
     duplicate_builtin_preset,
     get_builtin_preset,
@@ -134,6 +135,12 @@ def _build_parser() -> _JsonArgumentParser:
         parser_class=_JsonArgumentParser,
         required=True,
     )
+
+    package_info = subparsers.add_parser(
+        "package-info",
+        help="Show MCP Unified package release-readiness metadata.",
+    )
+    package_info.set_defaults(handler=_handle_package_info)
 
     validate_config = subparsers.add_parser(
         "validate-config",
@@ -573,6 +580,13 @@ def _handle_validate_config(args: argparse.Namespace) -> int:
         return 1
 
     _emit_json(_validated_config_payload(config, config_path), sys.stdout)
+    return 0
+
+
+def _handle_package_info(_args: argparse.Namespace) -> int:
+    """Emit MCP Unified package release-readiness metadata."""
+
+    _emit_json(package_metadata_summary(), sys.stdout)
     return 0
 
 

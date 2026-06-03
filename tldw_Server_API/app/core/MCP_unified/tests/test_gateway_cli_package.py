@@ -2011,6 +2011,41 @@ def test_gateway_cli_project_script_is_registered() -> None:
     )
 
 
+def test_gateway_cli_package_info_reports_release_gate(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expose conservative package-release metadata through the CLI."""
+
+    exit_code = gateway_cli.main(["package-info"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["package_name"] == "mcp-unified"
+    assert payload["package_status"] == "internal-experimental"
+    assert payload["publishing_status"] == "not-published"
+    assert payload["license_expression"] == "GPL-3.0-only"
+    assert "gateway" in payload["optional_extras"]
+
+
+def test_standalone_gateway_docs_describe_package_release_gate() -> None:
+    """Document the current package boundary without implying PyPI readiness."""
+
+    docs_path = (
+        Path(__file__).resolve().parents[5]
+        / "Docs"
+        / "MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md"
+    )
+    docs = docs_path.read_text(encoding="utf-8")
+
+    assert "package-info" in docs
+    assert "GPL-3.0-only" in docs
+    assert "internal/experimental" in docs
+    assert "not a separately published standalone package" in docs
+
+
 def _parse_cli_timestamp(value: str) -> datetime:
     """Parse a JSON timestamp without depending on a specific UTC suffix."""
 
