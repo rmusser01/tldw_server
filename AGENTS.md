@@ -567,7 +567,8 @@ When multiple valid approaches exist, choose based on:
 - Use the project virtual environment when running Bandit.
 - Fix new findings in changed code before finishing; do not defer silently.
 - Recommended command pattern:
-  `source .venv/bin/activate && python -m bandit -r <touched_paths> -f json -o /tmp/bandit_<task>.json`
+  `source .venv/bin/activate && python -m bandit -r <touched_paths> -f json -o bandit_<task>.json`
+- Canonical policy: `Docs/ADR/006-bandit-report-path-portability.md`
 
 ### Test Guidelines
 

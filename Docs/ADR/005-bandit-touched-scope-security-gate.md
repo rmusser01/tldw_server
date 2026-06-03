@@ -1,6 +1,6 @@
 # ADR-005: Bandit Touched-Scope Security Gate
 
-**Status:** Accepted
+**Status:** Superseded by ADR-006
 **Date:** 2026-06-02
 **Backfilled from:** `AGENTS.md`
 **Decision owner:** User + prior project guidance

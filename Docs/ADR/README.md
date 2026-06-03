@@ -36,4 +36,5 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-002](002-backlog-md-task-tracking.md) | Accepted | Require Backlog.md tasks for repo-changing work. |
 | [ADR-003](003-jobs-vs-scheduler-default.md) | Accepted | Use Jobs by default for new user-visible work and Scheduler for internal dependency orchestration. |
 | [ADR-004](004-ai-generated-pr-change-summary-gate.md) | Accepted | Require human-written change summaries for materially AI-authored PRs. |
-| [ADR-005](005-bandit-touched-scope-security-gate.md) | Accepted | Run Bandit on touched Python/code scope before completion. |
+| [ADR-005](005-bandit-touched-scope-security-gate.md) | Superseded by ADR-006 | Run Bandit on touched Python/code scope before completion. |
+| [ADR-006](006-bandit-report-path-portability.md) | Accepted | Keep the Bandit touched-scope gate but require portable report output paths. |

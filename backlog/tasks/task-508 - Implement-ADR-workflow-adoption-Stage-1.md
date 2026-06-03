@@ -7,6 +7,14 @@ labels:
 - process
 - adr
 modified_files:
+- AGENTS.md
+- Docs/ADR/000-template.md
+- Docs/ADR/001-adr-workflow-and-governance.md
+- Docs/ADR/002-backlog-md-task-tracking.md
+- Docs/ADR/003-jobs-vs-scheduler-default.md
+- Docs/ADR/004-ai-generated-pr-change-summary-gate.md
+- Docs/ADR/005-bandit-touched-scope-security-gate.md
+- Docs/ADR/README.md
 - backlog/tasks/task-508 - Implement-ADR-workflow-adoption-Stage-1.md
 - backlog/tasks/task-509 - Audit-docs-for-ADR-decision-inventory.md
 - backlog/tasks/task-510 - Backfill-authoritative-ADRs-from-decision-inventory.md
