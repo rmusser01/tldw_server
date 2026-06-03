@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import importlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -12,7 +14,13 @@ import mcp_unified
 import pytest
 from pydantic import ValidationError
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
+    import tomli as tomllib
+
 PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
+STANDALONE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 
 
 def _dependency_package_name(dependency: str) -> str:
@@ -22,6 +30,23 @@ def _dependency_package_name(dependency: str) -> str:
     for separator in ("[", "<", ">", "=", "!", "~", ";"):
         name = name.split(separator, 1)[0]
     return name.strip().lower().replace("_", "-")
+
+
+def _load_standalone_pyproject() -> dict[str, object]:
+    """Load the package-local MCP Unified pyproject document."""
+
+    assert STANDALONE_PYPROJECT.is_file()
+    with STANDALONE_PYPROJECT.open("rb") as pyproject_file:
+        return tomllib.load(pyproject_file)
+
+
+def _dependency_names(dependencies: list[str] | tuple[str, ...]) -> set[str]:
+    """Return normalized package names from dependency declarations."""
+
+    return {
+        _dependency_package_name(dependency)
+        for dependency in dependencies
+    }
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -103,6 +128,154 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert summary["optional_extras"] == {
         key: list(value)
         for key, value in extras.items()
+    }
+
+
+def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
+    """Standalone package metadata must stay aligned with release gate metadata."""
+
+    metadata = importlib.import_module("mcp_unified.package_metadata")
+    pyproject = _load_standalone_pyproject()
+    project = pyproject["project"]
+
+    assert project["name"] == metadata.PACKAGE_NAME
+    assert project["version"] == mcp_unified.__version__
+    assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
+    assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
+
+    assert _dependency_names(project["dependencies"]) == set(metadata.CORE_DEPENDENCIES)
+
+    optional_dependencies = project["optional-dependencies"]
+    assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)
+    assert {
+        extra: _dependency_names(dependencies)
+        for extra, dependencies in optional_dependencies.items()
+    } == {
+        extra: set(dependencies)
+        for extra, dependencies in metadata.OPTIONAL_EXTRAS.items()
+    }
+
+    forbidden_dependency_names = {
+        "chromadb",
+        "docling",
+        "faster-whisper",
+        "gradio",
+        "llama-cpp-python",
+        "nemo-toolkit",
+        "next",
+        "qwen",
+        "torch",
+        "tts",
+        "yt-dlp",
+    }
+    standalone_dependency_names = _dependency_names(project["dependencies"])
+    for dependencies in optional_dependencies.values():
+        standalone_dependency_names.update(_dependency_names(dependencies))
+
+    assert forbidden_dependency_names.isdisjoint(standalone_dependency_names)
+
+
+@pytest.mark.smoke
+def test_mcp_unified_standalone_package_installs_without_root_dependencies(
+    tmp_path: Path,
+) -> None:
+    """Install the standalone package into an isolated target without root deps."""
+
+    _load_standalone_pyproject()
+    package_source = tmp_path / "mcp_unified_source"
+    shutil.copytree(
+        PACKAGE_ROOT,
+        package_source,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "build",
+            "*.egg-info",
+        ),
+    )
+    wheel_dir = tmp_path / "dist"
+    build_env = {
+        **os.environ,
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PIP_NO_INDEX": "1",
+    }
+    build_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            str(wheel_dir),
+            str(package_source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=build_env,
+    )
+
+    wheels = sorted(wheel_dir.glob("mcp_unified-*.whl"))
+    assert wheels, build_result.stdout + build_result.stderr
+
+    install_dir = tmp_path / "install"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-index",
+            "--target",
+            str(install_dir),
+            str(wheels[-1]),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=build_env,
+    )
+    import_result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            (
+                "import json, sys; "
+                f"sys.path.insert(0, {str(install_dir)!r}); "
+                "import mcp_unified; "
+                "import mcp_unified.package_metadata as metadata; "
+                "blocked = ["
+                "name for name in ("
+                "'tldw_Server_API', 'chromadb', 'torch', 'faster_whisper', "
+                "'yt_dlp', 'fastapi', 'sqlalchemy'"
+                ") if name in sys.modules"
+                "]; "
+                "print(json.dumps({"
+                "'version': mcp_unified.__version__, "
+                "'package': metadata.PACKAGE_NAME, "
+                "'blocked': blocked"
+                "}))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONPATH": "",
+        },
+    )
+
+    assert json.loads(import_result.stdout) == {
+        "version": mcp_unified.__version__,
+        "package": "mcp-unified",
+        "blocked": [],
     }
 
 
