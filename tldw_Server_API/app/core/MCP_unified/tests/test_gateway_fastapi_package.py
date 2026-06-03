@@ -23,6 +23,13 @@ from mcp_unified.storage.models import ExternalServerDefinition
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 GATEWAY_ROOT = REPO_ROOT / "mcp_unified" / "gateway"
+PROFILE_DISCOVERY_READ_TOOL_NAMES = {
+    "tool_categories.list",
+    "profile.tools.list",
+    "tool_search",
+    "tool_describe",
+}
+PROFILE_DISCOVERY_CALL_TOOL_NAME = "tool_call"
 
 
 def _import_sources(path: Path) -> list[str]:
@@ -223,6 +230,30 @@ def _assert_jsonrpc_error(
     assert "message" in body["error"]
 
 
+def _listed_tool_names(tools: list[dict[str, Any]]) -> list[str]:
+    """Return tool names from JSON-RPC tool descriptors."""
+
+    return [tool["name"] for tool in tools]
+
+
+def _assert_profile_runtime_tool_names(
+    tools: list[dict[str, Any]],
+    *,
+    backend_tools: list[str],
+    includes_tool_call: bool = False,
+) -> None:
+    """Assert ordinary profile tools plus synthetic discovery helpers are exposed."""
+
+    names = set(_listed_tool_names(tools))
+    for tool_name in backend_tools:
+        assert tool_name in names
+    assert PROFILE_DISCOVERY_READ_TOOL_NAMES <= names
+    if includes_tool_call:
+        assert PROFILE_DISCOVERY_CALL_TOOL_NAME in names
+    else:
+        assert PROFILE_DISCOVERY_CALL_TOOL_NAME not in names
+
+
 def _profile_with_allowed_tools(profile_id: str, allowed_tools: list[str]) -> Any:
     """Build a profile that allows only the supplied explicit tool names."""
 
@@ -244,6 +275,41 @@ def _profile_with_capabilities(profile_id: str, capabilities: list[str]) -> Any:
         id=profile_id,
         name=f"Profile {profile_id}",
         policy_document=ProfilePolicy(capabilities=capabilities),
+    )
+
+
+def _profile_with_tooling_metadata(
+    profile_id: str,
+    *,
+    capabilities: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
+    denied_tools: list[str] | None = None,
+    recommended_tools: list[dict[str, Any]] | None = None,
+    direct_categories: list[str] | None = None,
+    deferred_categories: list[str] | None = None,
+) -> Any:
+    """Build a profile with default-profile tooling metadata."""
+
+    from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
+
+    return MCPProfile(
+        id=profile_id,
+        name=f"Profile {profile_id}",
+        policy_document=ProfilePolicy(
+            allowed_tools=allowed_tools or [],
+            denied_tools=denied_tools or [],
+            capabilities=capabilities or [],
+        ),
+        metadata={
+            "tooling": {
+                "recommended_tools": recommended_tools or [],
+                "progressive_disclosure": {
+                    "direct_categories": direct_categories or [],
+                    "deferred_categories": deferred_categories or [],
+                    "max_direct_tools": 24,
+                },
+            }
+        },
     )
 
 
@@ -2415,7 +2481,10 @@ def test_gateway_profile_runtime_filters_and_allows_default_profile_tools() -> N
             },
         )
 
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+    )
     assert allowed.json()["result"]["content"][0]["text"] == "echo.search:hello"
     assert backend.call_requests[-1][0] == "echo.search"
     denied_body = denied.json()
@@ -2514,7 +2583,7 @@ def test_gateway_profile_runtime_ignores_invalid_backend_tool_descriptors() -> N
 
     tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="invalid-tools")))
 
-    assert [tool["name"] for tool in tools] == ["echo.search"]
+    _assert_profile_runtime_tool_names(tools, backend_tools=["echo.search"])
 
 
 def test_gateway_profile_runtime_treats_non_list_backend_tools_as_empty() -> None:
@@ -2530,7 +2599,289 @@ def test_gateway_profile_runtime_treats_non_list_backend_tools_as_empty() -> Non
         default_profile_id="reviewer",
     )
 
-    assert asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="non-list-tools"))) == []
+    tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="non-list-tools")))
+
+    _assert_profile_runtime_tool_names(tools, backend_tools=[])
+
+
+def test_profile_runtime_exposes_discovery_bridge_tools_for_deferred_categories() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "browser.snapshot",
+                "description": "Inspect browser DOM.",
+                "metadata": {
+                    "capability": "browser.inspect",
+                    "category": "browser",
+                },
+            }
+        ]
+    )
+    profile = _profile_with_tooling_metadata(
+        "frontend",
+        capabilities=["browser.inspect"],
+        deferred_categories=["browser"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="frontend",
+    )
+
+    tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="bridge-list")))
+    descriptors = {tool["name"]: tool for tool in tools}
+
+    _assert_profile_runtime_tool_names(
+        tools,
+        backend_tools=["browser.snapshot"],
+        includes_tool_call=True,
+    )
+    for name in (
+        *PROFILE_DISCOVERY_READ_TOOL_NAMES,
+        PROFILE_DISCOVERY_CALL_TOOL_NAME,
+    ):
+        descriptor = descriptors[name]
+        assert descriptor["metadata"]["category"] == "tool_discovery"
+        assert "tool_discovery.read" in descriptor["metadata"]["capabilities"]
+        assert descriptor["inputSchema"]["type"] == "object"
+    assert descriptors["tool_call"]["inputSchema"]["required"] == [
+        "tool_id",
+        "arguments",
+    ]
+    assert descriptors["tool_call"]["inputSchema"]["additionalProperties"] is False
+
+
+def test_profile_runtime_omits_tool_call_without_deferred_categories() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_tooling_metadata(
+        "researcher",
+        capabilities=["code_search"],
+        direct_categories=["test"],
+        deferred_categories=[],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+
+    tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="bridge-read-only")))
+
+    _assert_profile_runtime_tool_names(tools, backend_tools=["echo.search"])
+
+
+def test_profile_runtime_tool_search_bridge_returns_profile_scoped_results() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "browser.snapshot",
+                "description": "Browser DOM snapshot.",
+                "metadata": {
+                    "capability": "browser.inspect",
+                    "category": "browser",
+                },
+            },
+            {
+                "name": "shell.run",
+                "description": "Run shell commands.",
+                "metadata": {
+                    "capability": "process.execute",
+                    "category": "shell",
+                },
+            },
+        ]
+    )
+    profile = _profile_with_tooling_metadata(
+        "frontend",
+        capabilities=["browser.inspect"],
+        recommended_tools=[
+            {
+                "id": "browser.trace",
+                "category": "browser",
+                "description": "Browser trace capture.",
+                "capability": "browser.inspect",
+                "activation": "requires_browser_runtime",
+            }
+        ],
+        deferred_categories=["browser"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="frontend",
+    )
+    context = GatewayRequestContext(request_id="bridge-search")
+
+    categories = asyncio.run(runtime.call_tool("tool_categories.list", {}, context))
+    catalog = asyncio.run(runtime.call_tool("profile.tools.list", {}, context))
+    results = asyncio.run(
+        runtime.call_tool(
+            "tool_search",
+            {"query": "browser", "category": "browser", "limit": 10},
+            context,
+        )
+    )
+
+    assert [category["category"] for category in categories["categories"]] == ["browser"]
+    assert [tool["tool_id"] for tool in catalog["tools"]] == [
+        "browser.snapshot",
+        "browser.trace",
+    ]
+    assert [tool["tool_id"] for tool in results["tools"]] == [
+        "browser.snapshot",
+        "browser.trace",
+    ]
+    assert results["tools"][0]["installation_status"] == "installed"
+    assert results["tools"][1]["installation_status"] == "recommended_unavailable"
+    assert backend.call_requests == []
+
+
+def test_profile_runtime_tool_describe_bridge_hides_denied_tools() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_capabilities("researcher", ["code_search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+
+    payload = asyncio.run(
+        runtime.call_tool(
+            "tool_describe",
+            {"tool_id": "admin.delete"},
+            GatewayRequestContext(request_id="bridge-describe-denied"),
+        )
+    )
+
+    assert payload["error"]["reason_code"] == "tool_not_found"
+    assert payload["tool_id"] == "admin.delete"
+    assert backend.call_requests == []
+
+
+def test_profile_runtime_tool_call_rejects_recommended_unavailable_tool() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([])
+    profile = _profile_with_tooling_metadata(
+        "frontend",
+        allowed_tools=["browser.trace"],
+        recommended_tools=[
+            {
+                "id": "browser.trace",
+                "category": "browser",
+                "description": "Browser trace capture.",
+                "activation": "requires_browser_runtime",
+            }
+        ],
+        deferred_categories=["browser"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="frontend",
+    )
+
+    payload = asyncio.run(
+        runtime.call_tool(
+            "tool_call",
+            {"tool_id": "browser.trace", "arguments": {}},
+            GatewayRequestContext(request_id="bridge-call-unavailable"),
+        )
+    )
+
+    assert payload["error"]["reason_code"] == "tool_not_enabled"
+    assert payload["tool_id"] == "browser.trace"
+    assert backend.call_requests == []
+
+
+def test_profile_runtime_tool_call_delegates_installed_tool_through_policy() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_tooling_metadata(
+        "researcher",
+        capabilities=["code_search"],
+        deferred_categories=["test"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+
+    payload = asyncio.run(
+        runtime.call_tool(
+            "tool_call",
+            {"tool_id": "echo.search", "arguments": {"query": "bridge"}},
+            GatewayRequestContext(request_id="bridge-call-installed"),
+        )
+    )
+
+    assert payload["content"][0]["text"] == "echo.search:bridge"
+    assert backend.call_requests[-1][0] == "echo.search"
+    assert backend.call_requests[-1][1] == {"query": "bridge"}
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"arguments": {}},
+        {"tool_id": "echo.search"},
+        {"tool_id": 123, "arguments": {}},
+        {"tool_id": "echo.search", "arguments": []},
+        {"tool_id": "echo.search", "arguments": {}, "extra": True},
+    ],
+)
+def test_profile_runtime_tool_call_rejects_invalid_arguments(
+    arguments: Any,
+) -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayPolicyDenied, GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_tooling_metadata(
+        "researcher",
+        capabilities=["code_search"],
+        deferred_categories=["test"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+
+    with pytest.raises(GatewayPolicyDenied) as exc_info:
+        asyncio.run(
+            runtime.call_tool(
+                "tool_call",
+                arguments,
+                GatewayRequestContext(request_id="bridge-call-invalid"),
+            )
+        )
+
+    assert exc_info.value.reason_code == "invalid_tool_call_arguments"
+    assert backend.call_requests == []
 
 
 def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> None:
@@ -2572,7 +2923,11 @@ def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> Non
         "kind": "memory",
         "persistent": False,
     }
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+        includes_tool_call=True,
+    )
     assert allowed.json()["result"]["content"][0]["text"] == "echo.search:bootstrap"
 
 
@@ -2601,7 +2956,10 @@ def test_gateway_profile_bootstrap_uses_caller_profiles_as_default() -> None:
     assert bootstrap.default_profile_id == "reviewer"
     assert bootstrap.seeded_profile_ids == ()
     assert [profile.id for profile in stored_profiles] == ["reviewer"]
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+    )
 
 
 def test_gateway_profile_bootstrap_keeps_explicit_default_when_seeding_preset() -> None:
@@ -2630,7 +2988,10 @@ def test_gateway_profile_bootstrap_keeps_explicit_default_when_seeding_preset() 
     assert bootstrap.default_profile_id == "reviewer"
     assert bootstrap.seeded_profile_ids == ("project-researcher",)
     assert {profile.id for profile in stored_profiles} == {"reviewer", "project-researcher"}
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["admin.delete"],
+    )
 
 
 def test_gateway_profile_bootstrap_manager_default_changes_runtime_without_restart() -> None:
@@ -2668,9 +3029,18 @@ def test_gateway_profile_bootstrap_manager_default_changes_runtime_without_resta
             json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-explicit"},
         )
 
-    assert [tool["name"] for tool in first.json()["result"]["tools"]] == ["echo.search"]
-    assert [tool["name"] for tool in second.json()["result"]["tools"]] == ["admin.delete"]
-    assert [tool["name"] for tool in explicit.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        first.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+    )
+    _assert_profile_runtime_tool_names(
+        second.json()["result"]["tools"],
+        backend_tools=["admin.delete"],
+    )
+    _assert_profile_runtime_tool_names(
+        explicit.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+    )
 
 
 def test_gateway_profile_management_http_default_changes_runtime_without_restart() -> None:
@@ -2713,10 +3083,16 @@ def test_gateway_profile_management_http_default_changes_runtime_without_restart
 
     assert first_default.status_code == 200
     assert first_default.json()["default"]["profile_id"] == "reviewer"
-    assert [tool["name"] for tool in first_tools.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        first_tools.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+    )
     assert second_default.status_code == 200
     assert second_default.json()["default"]["profile_id"] == "architect"
-    assert [tool["name"] for tool in second_tools.json()["result"]["tools"]] == ["admin.delete"]
+    _assert_profile_runtime_tool_names(
+        second_tools.json()["result"]["tools"],
+        backend_tools=["admin.delete"],
+    )
 
 
 def test_gateway_profile_bootstrap_rejects_existing_preset_profile_collision() -> None:
@@ -2770,7 +3146,11 @@ def test_gateway_config_bootstrap_uses_memory_store_default_preset() -> None:
 
     assert bootstrap.default_profile_id == "project-researcher"
     assert bootstrap.seeded_profile_ids == ("project-researcher",)
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+        includes_tool_call=True,
+    )
 
 
 def test_gateway_config_bootstrap_uses_sqlite_profile_store(tmp_path: Path) -> None:
@@ -3357,7 +3737,10 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
         )
 
     assert bootstrap.profile_store is injected_store
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["admin.delete"],
+    )
 
 
 def test_gateway_config_storage_reuses_injected_sqlite_store_capabilities(tmp_path: Path) -> None:
@@ -3667,7 +4050,10 @@ def test_gateway_config_bootstrap_copies_profile_mapping_inputs() -> None:
             json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-config-copy"},
         )
 
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+    )
 
 
 def test_gateway_config_loader_reads_json_and_bootstraps_default_preset(tmp_path: Path) -> None:
@@ -3700,7 +4086,11 @@ def test_gateway_config_loader_reads_json_and_bootstraps_default_preset(tmp_path
         )
 
     assert bootstrap.default_profile_id == "project-researcher"
-    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    _assert_profile_runtime_tool_names(
+        listed.json()["result"]["tools"],
+        backend_tools=["echo.search"],
+        includes_tool_call=True,
+    )
 
 
 def test_gateway_config_loader_reads_toml_store_config(tmp_path: Path) -> None:
