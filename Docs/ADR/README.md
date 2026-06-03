@@ -42,3 +42,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-008](008-workspace-split-key-persistence-and-indexeddb-offload.md) | Accepted | Use split localStorage workspace persistence with optional IndexedDB offload for heavy payloads. |
 | [ADR-009](009-quick-chat-docs-assistant-modes.md) | Accepted | Keep Quick Chat split into `Chat`, `Docs Q&A`, and `Browse Guides` modes. |
 | [ADR-010](010-sandbox-vz-runtime-ownership.md) | Accepted | Keep `vz_linux` as a repo-owned sandbox runtime path instead of requiring Apple `container`. |
+| [ADR-011](011-audio-api-semantics.md) | Accepted | Use centralized Audio API auth, model-first TTS routing, structured streaming errors, and non-streaming-only download links. |

@@ -32,6 +32,7 @@ Provider support snapshot (indicative): OpenAI (cloud), ElevenLabs (cloud, cloni
 
 - Architecture & Data Flow:
   - Entrypoint `TTSServiceV2` orchestrates provider selection, fallback, and streaming; adapters implement provider specifics.
+  - Audio API auth, routing, streaming-error, and download-link semantics are recorded in `Docs/ADR/011-audio-api-semantics.md`.
   - `TTSAdapterRegistry` lazily resolves adapters from dotted paths, honors enablement, and manages retry windows for failed initializations.
   - `tts_validation` sanitizes text and validates voice references before generation; `voice_manager` enforces provider-specific sample constraints and quotas.
   - `tts_resource_manager` tracks shared resources (HTTP clients, temp files, memory/GPU) and performs cleanup; circuit breakers guard providers.

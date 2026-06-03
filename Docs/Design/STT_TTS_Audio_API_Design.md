@@ -1,6 +1,7 @@
 # STT/TTS Audio API Design
 
 Status: Implemented
+Covered by: `Docs/ADR/011-audio-api-semantics.md`
 Last verified against code: 2026-02-22 (`915632a97ad41dc7712101612113928dbea6b358`)
 
 ## Purpose and scope
