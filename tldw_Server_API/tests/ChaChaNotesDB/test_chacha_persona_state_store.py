@@ -341,6 +341,7 @@ def test_persona_session_and_memory_roundtrip(store):
 
 
 def test_persona_memory_filter_builder_normalizes_shared_filters(store: PersonaStateStore) -> None:
+    """Verify shared persona memory filters strip caller-supplied string values."""
     where_sql, params = store._build_persona_memory_where_clause(
         entry_id="  entry-1  ",
         user_id="  user-1  ",
@@ -377,11 +378,13 @@ def test_persona_memory_filter_builder_rejects_conflicting_scope_filters(
     filter_kwargs: dict[str, object],
     message: str,
 ) -> None:
+    """Verify exact scope/session filters cannot be combined with missing filters."""
     with pytest.raises(ValueError, match=message):
         store._build_persona_memory_where_clause(user_id="user-1", **filter_kwargs)
 
 
 def test_persona_memory_facade_preserves_filter_lifecycle(db: CharactersRAGDB) -> None:
+    """Verify public persona memory facade methods share normalized filter behavior."""
     persona_id = db.create_persona_profile({"user_id": "user-1", "name": "Facade Memory Persona"})
     matching_entry_id = db.add_persona_memory_entry(
         {
@@ -575,7 +578,8 @@ def test_persona_exemplar_facade_normalizes_without_monolith_helper_fallback(db,
     assert exemplar["source_type"] == "manual"
 
 
-def test_persona_setup_and_live_voice_analytics_roundtrip(store):
+def test_persona_setup_and_live_voice_analytics_roundtrip(store: PersonaStateStore) -> None:
+    """Verify setup events and live voice summaries produce deterministic analytics."""
     first_event = store.record_persona_setup_event(
         user_id=7,
         persona_id="persona-analytics",
