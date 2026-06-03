@@ -18,7 +18,7 @@ This plan covers:
 - `TASK-510`: Backfill authoritative ADRs from decision inventory.
 - `TASK-511`: Evaluate global Superpowers ADR workflow updates.
 
-Do the tasks in this order: `TASK-509` first, `TASK-510` second, `TASK-511` third. `TASK-510` depends on an owner-reviewed inventory. `TASK-511` depends on repo-local ADR workflow outcomes, so it should not propose global skill edits before the inventory/backfill process has been exercised.
+Do the tasks in this order: `TASK-509` first, `TASK-510` second, `TASK-511` third. `TASK-510` depends on an owner-reviewed inventory. `TASK-511` depends on repo-local ADR workflow outcomes, so it should not propose global skill edits until at least one owner-reviewed ADR backfill child slice has completed, or until the owner explicitly records that the reviewed inventory plus slice-planning evidence is enough for a global workflow decision.
 
 ADR needed? No new ADR is needed for this plan itself. It operationalizes the accepted ADR workflow from `Docs/ADR/001-adr-workflow-and-governance.md`; it does not create a new durable architecture rule.
 
@@ -50,13 +50,16 @@ ADR needed? No new ADR is needed for this plan itself. It operationalizes the ac
 
 - [ ] **Step 1: Create or reuse a clean worktree**
 
-If already working in the clean worktree that contains this plan, reuse it. Otherwise run from the main repository:
+If already working in the clean worktree that contains this plan, reuse it. Otherwise create a worktree from the commit or target branch that already contains this plan. For example, after the plan branch is merged:
 
 ```bash
-git worktree add -b codex/adr-follow-up-sprint .worktrees/adr-follow-up-sprint codex/adr-follow-up-plan
+git fetch origin
+git worktree add -b codex/adr-follow-up-sprint .worktrees/adr-follow-up-sprint origin/codex/chat-sidebar-tools-first
 ```
 
-Expected: Worktree is created from the branch containing this plan, `Docs/ADR/`, and `TASK-509` through `TASK-511`.
+If executing before this plan branch is merged, replace the final argument with the local branch or commit containing the plan, such as `codex/adr-follow-up-plan` or `HEAD`.
+
+Expected: Worktree is created from a commit containing this plan, `Docs/ADR/`, and `TASK-509` through `TASK-511`.
 
 - [ ] **Step 2: Confirm task records are present**
 
@@ -119,6 +122,14 @@ rg -n -i --glob '*.md' --glob '*.rst' "decision|decided|choose|chosen|adopt|stan
 
 Expected: Search results identify candidate decision language across the required documentation and module-doc scopes. Record the command and output summary in `TASK-509` verification notes.
 
+Also enumerate the reviewable file universe so the inventory can prove coverage:
+
+```bash
+find Docs/Design Docs/Plans Docs/superpowers/specs Docs/superpowers/plans Docs/ADR tldw_Server_API/app -type f \( -name '*.md' -o -name '*.rst' \) | sort
+```
+
+Expected: Output provides the file list used for the coverage matrix. If the list is too large to paste into the task, summarize counts by scope and record skipped-file rationale in the inventory.
+
 - [ ] **Step 3: Create inventory header and classification rules**
 
 Write `Docs/ADR/inventory/2026-06-03-decision-inventory.md` with this structure:
@@ -140,13 +151,24 @@ Write `Docs/ADR/inventory/2026-06-03-decision-inventory.md` with this structure:
 | Duplicate | Same decision appears in multiple sources. | Pick a canonical source candidate; link duplicates. |
 | Needs owner review | Decision is ambiguous, contradicted, or policy-sensitive. | Do not accept/backfill until owner confirms. |
 
+## Coverage Matrix
+
+| Scope | Command/source | Candidate count | Reviewed files | Skipped files/rationale | Coverage result |
+| --- | --- | --- | --- | --- | --- |
+| Docs/Design/** | rg decision-language search plus file enumeration | TBD | TBD | TBD | TBD |
+| Docs/Plans/** | rg decision-language search plus file enumeration | TBD | TBD | TBD | TBD |
+| Docs/superpowers/specs/** | rg decision-language search plus file enumeration | TBD | TBD | TBD | TBD |
+| Docs/superpowers/plans/** | rg decision-language search plus file enumeration | TBD | TBD | TBD | TBD |
+| Embedded ADRs / Docs/ADR/** | ADR index and rg decision-language search | TBD | TBD | TBD | TBD |
+| Module docs | Markdown/RST files under app/module paths with decision language | TBD | TBD | TBD | TBD |
+
 ## Inventory
 
 | ID | Source path | Decision summary | Candidate status | Recommended action | Owner-review need | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 ```
 
-Expected: Inventory file exists with the required columns from `TASK-509`.
+Expected: Inventory file exists with the required columns from `TASK-509` and a coverage matrix that proves which required scopes were searched, reviewed, skipped, or deferred.
 
 - [ ] **Step 4: Fill the inventory from existing ADRs first**
 
@@ -171,11 +193,12 @@ Expected: No ambiguous or contradicted decision is promoted to an accepted ADR c
 Run:
 
 ```bash
+rg -n "## Coverage Matrix|Docs/Design|Docs/Plans|Docs/superpowers/specs|Docs/superpowers/plans|Embedded ADRs|Module docs" Docs/ADR/inventory/2026-06-03-decision-inventory.md
 rg -n "\| .* \| .* \| .* \| .* \| .* \| .* \|" Docs/ADR/inventory/2026-06-03-decision-inventory.md
 rg -n "Needs owner review|Current governing|Superseded|Stale|Duplicate" Docs/ADR/inventory/2026-06-03-decision-inventory.md
 ```
 
-Expected: Inventory has populated rows and uses the required classification vocabulary.
+Expected: Inventory has populated coverage rows, populated decision rows, and uses the required classification vocabulary.
 
 - [ ] **Step 8: Record non-code verification and Bandit skip**
 
@@ -185,6 +208,7 @@ Update `TASK-509` implementation notes:
 Verification:
 - Created Docs/ADR/inventory/2026-06-03-decision-inventory.md.
 - Ran rg decision-language search across required documentation and module-doc scopes.
+- Recorded coverage matrix with scope counts, reviewed files, skipped files/rationale, and coverage result.
 - Ran inventory structure/classification checks.
 - Bandit skipped: documentation-only task; no Python/code paths touched.
 ```
@@ -329,14 +353,26 @@ Expected: Source-doc link work is bounded and reviewable.
 Run:
 
 ```bash
-rg -n "Backfill Slices|Backfilled ADR output rules|Backfilled from:|Owner-reviewed" Docs/ADR/inventory/2026-06-03-decision-inventory.md backlog/tasks
+rg -n "Backfill Slices|Backfilled ADR output rules|Backfilled from:|Owner-reviewed|owner-reviewed|TASK-511 gate" Docs/ADR/inventory/2026-06-03-decision-inventory.md backlog/tasks
 ```
 
-Expected: Inventory and child tasks show slice assignments, owner-review prerequisites, and backfilled ADR output rules.
+Expected: Inventory and child tasks show slice assignments, owner-review prerequisites, backfilled ADR output rules, and the `TASK-511` evidence gate.
 
 - [ ] **Step 8: Complete or pause `TASK-510` based on created child tasks**
 
 If child tasks were created and no direct conversion was done, complete `TASK-510` as planning/coordination work. If direct conversion happened, verify ADR README index updates and source-doc links before completion.
+
+Before moving to `TASK-511`, record one of these outcomes in `TASK-510`:
+
+```text
+TASK-511 gate: at least one owner-reviewed ADR backfill child task completed: <task ID/ADR links>.
+```
+
+or:
+
+```text
+TASK-511 gate: owner approved using reviewed inventory plus bounded slice plan as sufficient repo-local workflow evidence before any child backfill completes.
+```
 
 Expected: `TASK-510` final summary lists child tasks, direct conversions if any, verification, and Bandit non-code skip.
 
@@ -367,7 +403,7 @@ Use the Backlog.md MCP task edit flow when available. Add:
 
 ```text
 Plan: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md
-Prerequisite: review outcomes from TASK-509 and TASK-510.
+Prerequisite: review outcomes from TASK-509 and TASK-510, plus the TASK-511 evidence gate recorded in TASK-510.
 ```
 
 Expected: `TASK-511` is `In Progress`.
@@ -382,6 +418,7 @@ Docs/ADR/001-adr-workflow-and-governance.md
 Docs/ADR/inventory/2026-06-03-decision-inventory.md
 TASK-509 final summary
 TASK-510 final summary
+Completed backfill child task and ADR links, or owner-approved waiver that inventory plus slice planning is sufficient evidence
 ```
 
 Expected: The design/spec is based on observed repo workflow outcomes, not just the original idea.
@@ -423,6 +460,7 @@ Expected: Separate design/spec exists before any global Superpowers skill file i
 Review these files:
 
 ```bash
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 sed -n '1,220p' "$CODEX_HOME/superpowers/skills/brainstorming/SKILL.md"
 sed -n '1,220p' "$CODEX_HOME/superpowers/skills/writing-plans/SKILL.md"
 sed -n '1,220p' "$CODEX_HOME/superpowers/skills/verification-before-completion/SKILL.md"
@@ -523,10 +561,10 @@ Run:
 
 ```bash
 git diff --stat
-git diff -- Docs/ADR Docs/superpowers backlog/tasks
+git diff -- Docs/ADR Docs/Design Docs/Plans Docs/superpowers backlog/tasks
 ```
 
-Expected: Diff is scoped to ADR inventory/backfill coordination/global workflow evaluation docs and Backlog task records.
+Expected: Diff is scoped to ADR inventory, bounded source-doc ADR links, backfill coordination, global workflow evaluation docs, and Backlog task records.
 
 - [ ] **Step 5: Commit any final task-record updates**
 
