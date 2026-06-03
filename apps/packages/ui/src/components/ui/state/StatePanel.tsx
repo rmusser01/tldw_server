@@ -14,6 +14,7 @@ export type StatePanelDiagnostic = Pick<DiagnosticRowProps, "label" | "value" | 
 export interface StatePanelProps {
   state: DesignSystemStateKey
   title: React.ReactNode
+  titleHeadingLevel?: 1 | 2 | 3 | 4
   message?: React.ReactNode
   diagnostics?: StatePanelDiagnostic[]
   primaryAction?: StateAction
@@ -48,6 +49,7 @@ const stateToneClasses: Partial<Record<DesignSystemStateKey, string>> = {
 export function StatePanel({
   state,
   title,
+  titleHeadingLevel = 2,
   message,
   diagnostics,
   primaryAction,
@@ -65,6 +67,7 @@ export function StatePanel({
   const toneClass = stateToneClasses[state] ?? severityClasses[definition.severity]
   const hasDiagnostics = diagnostics && diagnostics.length > 0
   const diagnosticsLabel = t("common:diagnostics", "Diagnostics")
+  const HeadingTag = `h${titleHeadingLevel}` as const
 
   return (
     <section
@@ -86,7 +89,7 @@ export function StatePanel({
             {definition.label}
           </span>
           <div>
-            <h2 className="text-base font-semibold text-text">{title}</h2>
+            <HeadingTag className="text-base font-semibold text-text">{title}</HeadingTag>
             {message ? <div className="mt-1 text-sm text-text-muted">{message}</div> : null}
           </div>
         </div>

@@ -18,6 +18,8 @@ from .profile_runtime import ProfileAwareGatewayRuntime
 from .runtime import GatewayRuntime
 
 if TYPE_CHECKING:
+    from mcp_unified.gateway.admin_auth import GatewayAdminAuthConfig
+    from mcp_unified.gateway.credential_grants import GatewayCredentialGrantManager
     from mcp_unified.gateway.external_registry import GatewayExternalRegistryManager
     from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeManager
 
@@ -37,6 +39,8 @@ class GatewayProfileBootstrap:
     external_registry_manager: GatewayExternalRegistryManager | None = None
     external_runtime_manager: GatewayExternalRuntimeManager | None = None
     external_runtime_lifecycle: GatewayExternalRuntimeLifecycleConfig | None = None
+    credential_grant_manager: GatewayCredentialGrantManager | None = None
+    admin_auth: GatewayAdminAuthConfig | None = None
 
 
 async def bootstrap_profile_gateway(
@@ -52,6 +56,8 @@ async def bootstrap_profile_gateway(
     external_registry_manager: GatewayExternalRegistryManager | None = None,
     external_runtime_manager: GatewayExternalRuntimeManager | None = None,
     external_runtime_lifecycle: GatewayExternalRuntimeLifecycleConfig | None = None,
+    credential_grant_manager: GatewayCredentialGrantManager | None = None,
+    admin_auth: GatewayAdminAuthConfig | None = None,
 ) -> GatewayProfileBootstrap:
     """Seed profile data and return a profile-aware gateway runtime."""
 
@@ -113,6 +119,8 @@ async def bootstrap_profile_gateway(
         external_registry_manager=external_registry_manager,
         external_runtime_manager=external_runtime_manager,
         external_runtime_lifecycle=external_runtime_lifecycle,
+        credential_grant_manager=credential_grant_manager,
+        admin_auth=admin_auth,
     )
 
 

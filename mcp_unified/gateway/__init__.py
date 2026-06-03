@@ -8,13 +8,19 @@ from .bootstrap import (
     build_profile_gateway_runtime,
 )
 from .config import (
+    GatewayAdminAuthBootstrapConfig,
     GatewayConfigFormat,
     GatewayExternalRuntimeBootstrapConfig,
     GatewayProfileBootstrapConfig,
     GatewayProfileStoreConfig,
     GatewayProfileStoreKind,
     bootstrap_profile_gateway_from_config,
+    credential_grant_manager_from_storage,
     load_gateway_profile_bootstrap_config,
+)
+from .credential_grants import (
+    GatewayCredentialGrantManagementError,
+    GatewayCredentialGrantManager,
 )
 from .lifecycle import GatewayExternalRuntimeLifecycleConfig
 from .profile_runtime import ProfileAwareGatewayRuntime
@@ -27,6 +33,7 @@ from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
 
 if TYPE_CHECKING:
+    from .admin_auth import GatewayAdminAuthConfig, GatewayAdminAuthError
     from .external_runtime import (
         GatewayExternalRuntimeError,
         GatewayExternalRuntimeManager,
@@ -36,7 +43,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GatewayPolicyDenied",
+    "GatewayAdminAuthBootstrapConfig",
+    "GatewayAdminAuthConfig",
+    "GatewayAdminAuthError",
     "GatewayConfigFormat",
+    "GatewayCredentialGrantManagementError",
+    "GatewayCredentialGrantManager",
     "GatewayExternalRuntimeBootstrapConfig",
     "GatewayExternalRuntimeLifecycleConfig",
     "GatewayExternalRuntimeError",
@@ -58,6 +70,7 @@ __all__ = [
     "build_profile_gateway_runtime",
     "create_gateway_app",
     "create_gateway_router",
+    "credential_grant_manager_from_storage",
     "handle_stdio_line",
     "load_gateway_profile_bootstrap_config",
 ]
@@ -72,6 +85,13 @@ def __getattr__(name: str) -> Any:
         return {
             "create_gateway_app": create_gateway_app,
             "create_gateway_router": create_gateway_router,
+        }[name]
+    if name in {"GatewayAdminAuthConfig", "GatewayAdminAuthError"}:
+        from .admin_auth import GatewayAdminAuthConfig, GatewayAdminAuthError
+
+        return {
+            "GatewayAdminAuthConfig": GatewayAdminAuthConfig,
+            "GatewayAdminAuthError": GatewayAdminAuthError,
         }[name]
     if name in {"GatewayExternalRuntimeError", "GatewayExternalRuntimeManager"}:
         from .external_runtime import (

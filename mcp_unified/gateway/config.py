@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from json import JSONDecodeError
@@ -27,10 +28,13 @@ from mcp_unified.profiles.store import (
 )
 
 from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
+from .admin_auth import GatewayAdminAuthConfig
+from .credential_grants import GatewayCredentialGrantManager
 from .external_registry import GatewayExternalRegistryManager, GatewayStoreMetadata
 from .lifecycle import GatewayExternalRuntimeLifecycleConfig
 from .profiles import GatewayProfileStoreMetadata
 from .runtime import GatewayRuntime
+from .snapshots import GatewayConfigSnapshotManager
 
 if TYPE_CHECKING:
     from mcp_unified.federation.installers import ExternalServerInstaller
@@ -49,6 +53,48 @@ except ModuleNotFoundError:  # pragma: no cover - defensive for unsupported runt
 GatewayConfigFormat = Literal["json", "toml"]
 GatewayExternalRuntimeFactoryKind = Literal["stdio"]
 GatewayProfileStoreKind = Literal["memory", "sqlite"]
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayAdminAuthBootstrapConfig:
+    """File-backed admin-auth bootstrap settings without persisted secrets."""
+
+    enabled: bool = False
+    header_name: str = "X-MCP-Gateway-Admin-Key"
+    api_key_env_var: str = "MCP_UNIFIED_GATEWAY_ADMIN_KEY"
+
+    def __post_init__(self) -> None:
+        """Validate admin auth config values that may appear in files."""
+
+        if not isinstance(self.enabled, bool):
+            raise ValueError("admin_auth.enabled must be a boolean")
+        header_name = str(self.header_name).strip()
+        if not header_name:
+            raise ValueError("admin_auth.header_name must be non-blank")
+        api_key_env_var = str(self.api_key_env_var).strip()
+        if not api_key_env_var:
+            raise ValueError("admin_auth.api_key_env_var must be non-blank")
+        object.__setattr__(self, "header_name", header_name)
+        object.__setattr__(self, "api_key_env_var", api_key_env_var)
+
+    def runtime_config(
+        self,
+        *,
+        environ: Mapping[str, str] | None = None,
+    ) -> GatewayAdminAuthConfig:
+        """Resolve the runtime admin auth config from the configured env var."""
+
+        if not self.enabled:
+            return GatewayAdminAuthConfig(
+                enabled=False,
+                header_name=self.header_name,
+            )
+        source = os.environ if environ is None else environ
+        return GatewayAdminAuthConfig(
+            enabled=True,
+            header_name=self.header_name,
+            api_key=source.get(self.api_key_env_var),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +190,9 @@ class GatewayProfileBootstrapConfig:
     external_runtime: GatewayExternalRuntimeBootstrapConfig | Mapping[str, Any] = field(
         default_factory=GatewayExternalRuntimeBootstrapConfig
     )
+    admin_auth: GatewayAdminAuthBootstrapConfig | Mapping[str, Any] = field(
+        default_factory=GatewayAdminAuthBootstrapConfig
+    )
 
     def __post_init__(self) -> None:
         """Normalize nested config values into copy-isolated profile data."""
@@ -163,8 +212,22 @@ class GatewayProfileBootstrapConfig:
                 "GatewayExternalRuntimeBootstrapConfig or mapping"
             )
 
+        admin_auth = self.admin_auth
+        if isinstance(admin_auth, Mapping):
+            if "api_key" in admin_auth:
+                raise ValueError(
+                    "admin_auth.api_key must not be stored in gateway config; "
+                    "use admin_auth.api_key_env_var instead"
+                )
+            admin_auth = GatewayAdminAuthBootstrapConfig(**admin_auth)
+        elif not isinstance(admin_auth, GatewayAdminAuthBootstrapConfig):
+            raise TypeError(
+                "admin_auth must be a GatewayAdminAuthBootstrapConfig or mapping"
+            )
+
         object.__setattr__(self, "store", store)
         object.__setattr__(self, "external_runtime", external_runtime)
+        object.__setattr__(self, "admin_auth", admin_auth)
         object.__setattr__(
             self,
             "profiles",
@@ -231,6 +294,7 @@ async def bootstrap_profile_gateway_from_config(
     )
     external_registry_manager: GatewayExternalRegistryManager | None = None
     external_storage: GatewayExternalRegistryStorageBundle | None = None
+    credential_grant_manager: GatewayCredentialGrantManager | None = None
     if _supports_external_registry_store(storage.profile_store):
         external_storage = build_gateway_external_registry_storage(
             resolved_config.store,
@@ -240,6 +304,11 @@ async def bootstrap_profile_gateway_from_config(
         external_registry_manager = external_registry_manager_from_storage(
             external_storage,
         )
+        if external_storage.credential_grant_store is not None:
+            credential_grant_manager = credential_grant_manager_from_storage(
+                external_storage,
+                profile_storage=storage,
+            )
 
     resolved_external_runtime_manager = external_runtime_manager
     if (
@@ -272,6 +341,8 @@ async def bootstrap_profile_gateway_from_config(
         external_registry_manager=external_registry_manager,
         external_runtime_manager=resolved_external_runtime_manager,
         external_runtime_lifecycle=resolved_config.external_runtime.lifecycle_config(),
+        credential_grant_manager=credential_grant_manager,
+        admin_auth=resolved_config.admin_auth.runtime_config(),
     )
 
 
@@ -444,6 +515,74 @@ def external_runtime_manager_from_storage(
     )
 
 
+def credential_grant_manager_from_storage(
+    external_registry_storage: GatewayExternalRegistryStorageBundle,
+    *,
+    profile_storage: GatewayProfileStorageBundle | None = None,
+    credential_grant_store: CredentialGrantStore | None = None,
+    profile_store: ProfileStore | None = None,
+    external_registry_store: ExternalRegistryStore | None = None,
+    audit_store: AuditStore | None = None,
+) -> GatewayCredentialGrantManager:
+    """Build a credential-grant manager from resolved storage dependencies."""
+
+    resolved_credential_store = (
+        credential_grant_store
+        if credential_grant_store is not None
+        else external_registry_storage.credential_grant_store
+    )
+    if resolved_credential_store is None:
+        raise ExternalRegistryStorageConfigurationError(
+            "credential grant management requires a credential grant store"
+        )
+
+    resolved_profile_store = profile_store
+    if resolved_profile_store is None and profile_storage is not None:
+        resolved_profile_store = profile_storage.profile_store
+
+    return GatewayCredentialGrantManager(
+        credential_grant_store=resolved_credential_store,
+        profile_store=resolved_profile_store,
+        external_registry_store=external_registry_store
+        if external_registry_store is not None
+        else external_registry_storage.external_registry_store,
+        audit_store=audit_store
+        if audit_store is not None
+        else external_registry_storage.audit_store,
+        store_metadata=external_registry_storage.metadata,
+    )
+
+
+def gateway_config_snapshot_manager_from_storage(
+    profile_storage: GatewayProfileStorageBundle,
+    external_registry_storage: GatewayExternalRegistryStorageBundle,
+    *,
+    credential_grant_store: CredentialGrantStore | None = None,
+    audit_store: AuditStore | None = None,
+) -> GatewayConfigSnapshotManager:
+    """Build a config snapshot manager from resolved storage dependencies."""
+
+    resolved_credential_store = (
+        credential_grant_store
+        if credential_grant_store is not None
+        else external_registry_storage.credential_grant_store
+    )
+    if resolved_credential_store is None:
+        raise ExternalRegistryStorageConfigurationError(
+            "config snapshots require a credential grant store"
+        )
+
+    return GatewayConfigSnapshotManager(
+        profile_store=profile_storage.profile_store,
+        assignment_store=profile_storage.assignment_store,
+        external_registry_store=external_registry_storage.external_registry_store,
+        credential_grant_store=resolved_credential_store,
+        audit_store=audit_store
+        if audit_store is not None
+        else profile_storage.audit_store or external_registry_storage.audit_store,
+    )
+
+
 def _metadata_for_store_config(
     store_config: GatewayProfileStoreConfig,
 ) -> GatewayProfileStoreMetadata:
@@ -526,6 +665,7 @@ def _supports_credential_grant_store(candidate: object) -> bool:
         for method_name in (
             "get_grant",
             "list_grants",
+            "create_grant",
             "upsert_grant",
             "delete_grant",
         )
@@ -681,6 +821,7 @@ def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
 
 
 __all__ = [
+    "GatewayAdminAuthBootstrapConfig",
     "GatewayConfigFormat",
     "GatewayExternalRuntimeBootstrapConfig",
     "GatewayExternalRuntimeFactoryKind",
@@ -692,6 +833,7 @@ __all__ = [
     "bootstrap_profile_gateway_from_config",
     "build_gateway_external_registry_storage",
     "build_gateway_profile_storage",
+    "credential_grant_manager_from_storage",
     "external_registry_manager_from_storage",
     "external_runtime_manager_from_storage",
     "load_gateway_profile_bootstrap_config",

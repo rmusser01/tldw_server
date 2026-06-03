@@ -18,6 +18,7 @@ describe("ConfigurationErrorScreen", () => {
     expect(screen.getByText("Setup required")).toBeInTheDocument()
     expect(
       screen.getByRole("heading", {
+        level: 1,
         name: "WebUI networking configuration error"
       })
     ).toBeInTheDocument()

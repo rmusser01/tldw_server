@@ -27,6 +27,14 @@ class ExternalServerAlreadyExistsError(RuntimeError):
         self.server_id = server_id
 
 
+class CredentialGrantAlreadyExistsError(RuntimeError):
+    """Raised when an atomic credential grant create conflicts with an existing id."""
+
+    def __init__(self, grant_id: str) -> None:
+        super().__init__(f"Credential grant already exists: {grant_id}")
+        self.grant_id = grant_id
+
+
 class ProfileStore(Protocol):
     """Store for named MCP tool and permission profiles.
 
@@ -154,6 +162,10 @@ class CredentialGrantStore(Protocol):
 
     async def upsert_grant(self, grant: CredentialGrant) -> CredentialGrant:
         """Create or replace credential grant metadata."""
+        ...
+
+    async def create_grant(self, grant: CredentialGrant) -> CredentialGrant:
+        """Create credential grant metadata and reject existing ids."""
         ...
 
     async def delete_grant(self, grant_id: str) -> bool:
