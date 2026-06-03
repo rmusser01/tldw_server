@@ -34,6 +34,7 @@ modified_files:
 - apps/packages/ui/src/utils/dynamic-ui.ts
 - apps/packages/ui/src/utils/dynamic-ui-openui-prompt.ts
 - apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/hosted-success.json
+- apps/tldw-frontend/e2e/workflows/onboarding-ingestion-first.spec.ts
 - apps/tldw-frontend/scripts/onboarding-uat/artifacts.mjs
 - apps/tldw-frontend/scripts/onboarding-uat/profile.mjs
 - apps/tldw-frontend/scripts/onboarding-uat/run.mjs
@@ -70,7 +71,7 @@ Rebase PR 2229 onto the latest dev branch and address actionable PR review comme
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR 2229 onto latest `origin/dev`, addressed all current actionable review comments, fixed frontend onboarding UAT TypeScript regressions surfaced by the rebase, verified focused tests/type gates, and force-pushed the updated branch.
+Rebased PR 2229 onto latest `origin/dev`, addressed current actionable review comments, fixed frontend onboarding UAT TypeScript regressions surfaced by the rebase, updated the onboarding first-source e2e gate to assert the current ready-state starter-question CTA, verified focused tests/type gates, and prepared the branch for push.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

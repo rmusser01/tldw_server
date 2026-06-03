@@ -399,15 +399,18 @@ test.describe("Onboarding First-Source Journey", () => {
         firstMediaId: "m4-e2e-media-id",
         label: "Pasted notes",
       })
+      await expect(authedPage.getByText(/starter questions/i)).toBeVisible({
+        timeout: 10_000,
+      })
       await expect(
-        authedPage.getByRole("button", { name: /ask a question about this source/i })
+        authedPage.getByRole("button", { name: /summarize this source/i })
       ).toBeVisible({ timeout: 10_000 })
       await captureStep(
         authedPage,
         evidenceRows,
         viewport.label,
         "05-source-ready",
-        "Grounded chat action appears only after a successful first-source media id exists."
+        "Grounded starter questions appear only after a successful first-source media id exists."
       )
 
       writeViewportEvidence(viewport.label, evidenceRows)
