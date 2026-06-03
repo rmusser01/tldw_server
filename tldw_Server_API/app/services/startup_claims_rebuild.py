@@ -7,10 +7,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+)
 from tldw_Server_API.app.services.lifecycle_workers import (
     ShutdownPhase,
     start_stop_event_worker,
@@ -25,11 +30,45 @@ _STARTUP_GUARD_EXCEPTIONS = (
 )
 
 
+@dataclass(frozen=True)
+class ClaimsRebuildWorkerHandle:
+    """Legacy direct-start handle for the claims rebuild worker."""
+
+    task: Any
+    stop_event: asyncio.Event
+
+
+def provide_claims_rebuild_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return the declarative spec for the claims rebuild worker."""
+
+    return (
+        WorkerSpec(
+            name="claims_rebuild",
+            task_name="claims_task",
+            category="claims",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_claims_rebuild_worker_enabled,
+            factory=lambda context, stop_event: _run_claims_rebuild_loop(
+                context.settings,
+                stop_event=stop_event,
+                interval_sec=int(context.settings.get("CLAIMS_REBUILD_INTERVAL_SEC", 3600)),
+                policy=str(context.settings.get("CLAIMS_REBUILD_POLICY", "missing")).lower(),
+            ),
+        ),
+    )
+
+
+def _claims_rebuild_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    return bool(context.settings.get("CLAIMS_REBUILD_ENABLED", False))
+
+
 async def start_claims_rebuild_worker(
     app_settings: Mapping[str, Any],
     *,
     worker_inventory: Any | None = None,
-) -> Any | None:
+) -> ClaimsRebuildWorkerHandle | Any | None:
     """Start the claims rebuild worker when enabled."""
     try:
         enabled = bool(app_settings.get("CLAIMS_REBUILD_ENABLED", False))
@@ -65,8 +104,7 @@ async def start_claims_rebuild_worker(
                 policy=policy,
             )
         )
-        setattr(task, "_tldw_claims_rebuild_stop_event", stop_event)
-        return task
+        return ClaimsRebuildWorkerHandle(task=task, stop_event=stop_event)
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start claims rebuild worker: {exc}")
         return None

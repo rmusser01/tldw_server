@@ -275,9 +275,15 @@ WORKER_OWNERSHIP_MATRIX = (
 )
 
 
+def legacy_worker_names_from_ownership_matrix() -> set[str]:
+    """Return bridge/registry-owned worker names tracked by the ownership matrix."""
+
+    return {row.managed_name for row in WORKER_OWNERSHIP_MATRIX}
+
+
 @pytest.mark.unit
 def test_worker_ownership_matrix_covers_phase_2_deletion_candidates() -> None:
-    assert {row.managed_name for row in WORKER_OWNERSHIP_MATRIX} == {
+    assert legacy_worker_names_from_ownership_matrix() == {
         "ephemeral_cleanup_task",
         "chatbooks_cleanup",
         "storage_cleanup_service",

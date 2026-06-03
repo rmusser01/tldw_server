@@ -7,6 +7,12 @@ import sys
 import pytest
 from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
+
 pytestmark = pytest.mark.unit
 
 
@@ -17,6 +23,136 @@ def _import_startup_recurring_schedulers():
 
 async def _wait_forever() -> None:
     await asyncio.Event().wait()
+
+
+def _context(*, test_mode: bool = False) -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=test_mode,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_recurring):
+    return {
+        spec.name: spec
+        for spec in startup_recurring.provide_recurring_scheduler_worker_specs()
+    }
+
+
+def test_recurring_scheduler_worker_specs_match_ownership_matrix() -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+
+    specs = _specs_by_name(startup_recurring)
+
+    expected_task_names = {
+        "authnz_scheduler": "authnz_scheduler",
+        "workflows_sched_task": "workflows_recurring_scheduler",
+        "reading_digest_sched_task": "reading_digest_scheduler",
+        "admin_backup_sched_task": "admin_backup_scheduler",
+        "companion_reflection_sched_task": "companion_reflection_scheduler",
+        "reminders_sched_task": "reminders_scheduler",
+        "connectors_sync_sched_task": "connectors_sync_scheduler",
+    }
+    assert set(specs) == set(expected_task_names)
+    for name, task_name in expected_task_names.items():
+        spec = specs[name]
+        assert spec.task_name == task_name
+        assert spec.category == "recurring-scheduler"
+        assert spec.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert spec.timeout_sec == 5.0
+        assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+        assert spec.factory is not None
+
+
+def test_recurring_scheduler_worker_spec_predicates_match_legacy_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    monkeypatch.setattr(startup_recurring, "_env_flag_enabled", lambda key: key != "DISABLE_AUTHNZ_SCHEDULER")
+    monkeypatch.setattr(
+        startup_recurring,
+        "_env_flag",
+        lambda key, default: key == "READING_DIGEST_SCHEDULER_ENABLED",
+    )
+
+    specs = _specs_by_name(startup_recurring)
+
+    assert specs["authnz_scheduler"].enabled(_context()) is True
+    assert specs["reading_digest_sched_task"].enabled(_context(test_mode=False)) is True
+
+
+@pytest.mark.asyncio
+async def test_authnz_scheduler_worker_spec_factory_starts_and_stops_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    calls: list[str] = []
+
+    async def _fake_start() -> None:
+        calls.append("start")
+
+    async def _fake_stop() -> None:
+        calls.append("stop")
+
+    monkeypatch.setattr(startup_recurring, "_start_authnz_scheduler_service", _fake_start)
+    monkeypatch.setattr(startup_recurring, "_stop_authnz_scheduler_service", _fake_stop)
+
+    spec = _specs_by_name(startup_recurring)["authnz_scheduler"]
+    stop_event = asyncio.Event()
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+
+    await asyncio.sleep(0)
+    assert calls == ["start"]
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+    assert calls == ["start", "stop"]
+
+
+@pytest.mark.asyncio
+async def test_recurring_scheduler_worker_spec_factory_starts_and_stops_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    scheduler_started = asyncio.Event()
+    stopped: list[str] = []
+
+    async def _scheduler_loop() -> None:
+        scheduler_started.set()
+        await asyncio.Event().wait()
+
+    async def _fake_start() -> asyncio.Task[None]:
+        return asyncio.create_task(_scheduler_loop(), name="workflows_recurring_scheduler")
+
+    async def _fake_stop(task: asyncio.Task[None]) -> None:
+        stopped.append(task.get_name())
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    monkeypatch.setattr(startup_recurring, "_start_workflows_scheduler_service", _fake_start)
+    monkeypatch.setattr(startup_recurring, "_stop_workflows_scheduler_service", _fake_stop)
+
+    spec = _specs_by_name(startup_recurring)["workflows_sched_task"]
+    stop_event = asyncio.Event()
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+
+    await asyncio.wait_for(scheduler_started.wait(), timeout=1)
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+    assert stopped == ["workflows_recurring_scheduler"]
 
 
 @pytest.mark.asyncio

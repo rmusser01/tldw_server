@@ -9,10 +9,8 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from tldw_Server_API.app.services.lifecycle_workers import (
-    ShutdownPhase,
-    stop_registered_workers,
-)
+from tldw_Server_API.app.services.lifecycle_worker_engine import LifecycleWorkerEngine
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
     LifespanWorkerRuntimeState,
 )
@@ -61,30 +59,42 @@ async def run_lifespan_shutdown_sequence(
         )
         legacy_shutdown_plan = transition_handoff_handles.legacy_shutdown_plan
 
+    lifecycle_worker_engine = LifecycleWorkerEngine()
+    worker_lifecycle_session = worker_runtime.worker_lifecycle_session
+
     from tldw_Server_API.app.services.shutdown_job_poller_handoff import (
         run_shutdown_job_poller_handoff,
     )
 
-    job_poller_handoff_handles = await run_shutdown_job_poller_handoff(
+    await run_shutdown_job_poller_handoff(
         app=app,
-        owned_job_pollers=worker_runtime.owned_job_pollers,
+        worker_lifecycle_session=worker_lifecycle_session,
+        lifecycle_worker_engine=lifecycle_worker_engine,
         quiesce_owned_job_pollers_for_shutdown=quiesce_owned_job_pollers_for_shutdown,
         startup_guard_exceptions=startup_guard_exceptions,
         import_exceptions=import_exceptions,
     )
-    should_run_late_stop = job_poller_handoff_handles.should_run_late_stop
 
+    stopped_background_worker_names: set[str] = set()
     with timed_shutdown_segment(app, "background_worker_shutdown"):
-        await stop_registered_workers(
-            app,
-            _handles_for_shutdown_phase(
-                worker_runtime,
+        if worker_lifecycle_session is not None:
+            await lifecycle_worker_engine.stop_phase(
+                worker_lifecycle_session,
                 ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
-            ),
-            stopped_names_attr="_tldw_shutdown_stopped_background_worker_names",
-            log_label="background worker",
-        )
-        stopped_background_worker_names = set(getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", []))
+            )
+            _publish_stopped_names_for_phase(
+                worker_lifecycle_session,
+                ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                startup_guard_exceptions,
+            )
+            stopped_background_worker_names = set(
+                getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
+            )
+        else:
+            try:
+                app.state._tldw_shutdown_stopped_background_worker_names = []
+            except startup_guard_exceptions:
+                pass
 
     from tldw_Server_API.app.services.shutdown_coordinated_legacy_components import (
         run_shutdown_coordinated_legacy_components,
@@ -103,108 +113,35 @@ async def run_lifespan_shutdown_sequence(
         run_shutdown_pre_worker_cleanup,
     )
 
-    pre_worker_cleanup_handles = await run_shutdown_pre_worker_cleanup(
+    await run_shutdown_pre_worker_cleanup(
         app=app,
         guard_exceptions=startup_guard_exceptions,
     )
-    worker_runtime.apply_pre_worker_cleanup_handles(pre_worker_cleanup_handles)
 
-    from tldw_Server_API.app.services.shutdown_primary_late_stop_workers import (
-        run_shutdown_primary_late_stop_workers,
-    )
-
-    primary_late_stop_worker_handles = await run_shutdown_primary_late_stop_workers(
-        core_jobs_task=worker_runtime.core_jobs_task,
-        core_jobs_stop_event=worker_runtime.core_jobs_stop_event,
-        files_jobs_task=worker_runtime.files_jobs_task,
-        files_jobs_stop_event=worker_runtime.files_jobs_stop_event,
-        data_tables_jobs_task=worker_runtime.data_tables_jobs_task,
-        data_tables_jobs_stop_event=worker_runtime.data_tables_jobs_stop_event,
-        prompt_studio_jobs_task=worker_runtime.prompt_studio_jobs_task,
-        prompt_studio_jobs_stop_event=worker_runtime.prompt_studio_jobs_stop_event,
-        privilege_snapshot_task=worker_runtime.privilege_snapshot_task,
-        privilege_snapshot_stop_event=worker_runtime.privilege_snapshot_stop_event,
-        audio_jobs_task=worker_runtime.audio_jobs_task,
-        audio_jobs_stop_event=worker_runtime.audio_jobs_stop_event,
-        presentation_render_jobs_task=worker_runtime.presentation_render_jobs_task,
-        presentation_render_jobs_stop_event=worker_runtime.presentation_render_jobs_stop_event,
-        should_run_late_stop=should_run_late_stop,
-        guard_exceptions=startup_guard_exceptions,
-    )
-    worker_runtime.apply_primary_late_stop_worker_handles(
-        primary_late_stop_worker_handles,
-    )
-
-    from tldw_Server_API.app.services.shutdown_grouped_late_stop_workers import (
-        run_shutdown_grouped_late_stop_workers,
-    )
-
-    grouped_late_stop_worker_handles = await run_shutdown_grouped_late_stop_workers(
-        media_ingest_jobs_task=worker_runtime.media_ingest_jobs_task,
-        media_ingest_jobs_stop_event=worker_runtime.media_ingest_jobs_stop_event,
-        media_ingest_heavy_jobs_task=worker_runtime.media_ingest_heavy_jobs_task,
-        media_ingest_heavy_jobs_stop_event=worker_runtime.media_ingest_heavy_jobs_stop_event,
-        reading_digest_jobs_task=worker_runtime.reading_digest_jobs_task,
-        reading_digest_jobs_stop_event=worker_runtime.reading_digest_jobs_stop_event,
-        study_pack_jobs_task=worker_runtime.study_pack_jobs_task,
-        study_pack_jobs_stop_event=worker_runtime.study_pack_jobs_stop_event,
-        study_suggestions_jobs_task=worker_runtime.study_suggestions_jobs_task,
-        study_suggestions_jobs_stop_event=worker_runtime.study_suggestions_jobs_stop_event,
-        companion_reflection_jobs_task=worker_runtime.companion_reflection_jobs_task,
-        companion_reflection_jobs_stop_event=worker_runtime.companion_reflection_jobs_stop_event,
-        reminder_jobs_task=worker_runtime.reminder_jobs_task,
-        admin_backup_jobs_task=worker_runtime.admin_backup_jobs_task,
-        admin_maintenance_rotation_jobs_task=worker_runtime.admin_maintenance_rotation_jobs_task,
-        admin_maintenance_rotation_jobs_stop_event=worker_runtime.admin_maintenance_rotation_jobs_stop_event,
-        recipe_run_jobs_task=worker_runtime.recipe_run_jobs_task,
-        recipe_run_jobs_stop_event=worker_runtime.recipe_run_jobs_stop_event,
-        evals_abtest_jobs_task=worker_runtime.evals_abtest_jobs_task,
-        evals_abtest_jobs_stop_event=worker_runtime.evals_abtest_jobs_stop_event,
-        should_run_late_stop=should_run_late_stop,
-        guard_exceptions=startup_guard_exceptions,
-    )
-    worker_runtime.apply_grouped_late_stop_worker_handles(
-        grouped_late_stop_worker_handles,
-    )
+    if worker_lifecycle_session is not None:
+        await lifecycle_worker_engine.stop_phase(
+            worker_lifecycle_session,
+            ShutdownPhase.POST_WORKER_SHUTDOWN,
+        )
+        _publish_stopped_names_for_phase(
+            worker_lifecycle_session,
+            ShutdownPhase.POST_WORKER_SHUTDOWN,
+            startup_guard_exceptions,
+        )
 
     from tldw_Server_API.app.services.shutdown_post_worker_services import (
-        run_shutdown_post_worker_services,
+        run_shutdown_post_worker_non_worker_cleanup,
     )
 
-    post_worker_shutdown_handles = await run_shutdown_post_worker_services(
-        jobs_notifications_bridge_task=worker_runtime.jobs_notifications_bridge_task,
-        jobs_metrics_task=worker_runtime.jobs_metrics_task,
-        jobs_metrics_stop_event=worker_runtime.jobs_metrics_stop_event,
-        loop_lag_task=worker_runtime.loop_lag_task,
-        loop_lag_stop_event=worker_runtime.loop_lag_stop_event,
-        jobs_metrics_reconcile_task=worker_runtime.jobs_metrics_reconcile_task,
-        jobs_metrics_reconcile_stop=worker_runtime.jobs_metrics_reconcile_stop,
-        jobs_crypto_rotate_task=worker_runtime.jobs_crypto_rotate_task,
-        jobs_crypto_rotate_stop_event=worker_runtime.jobs_crypto_rotate_stop_event,
-        jobs_integrity_task=worker_runtime.jobs_integrity_task,
-        jobs_integrity_stop_event=worker_runtime.jobs_integrity_stop_event,
-        jobs_webhooks_task=worker_runtime.jobs_webhooks_task,
-        jobs_webhooks_stop_event=worker_runtime.jobs_webhooks_stop_event,
-        meetings_webhook_dlq_task=worker_runtime.meetings_webhook_dlq_task,
-        meetings_webhook_dlq_stop_event=worker_runtime.meetings_webhook_dlq_stop_event,
-        workflows_dlq_task=worker_runtime.workflows_dlq_task,
-        workflows_dlq_stop_event=worker_runtime.workflows_dlq_stop_event,
-        workflows_gc_task=worker_runtime.workflows_gc_task,
-        workflows_gc_stop_event=worker_runtime.workflows_gc_stop_event,
-        workflows_maint_task=worker_runtime.workflows_maint_task,
-        workflows_maint_stop_event=worker_runtime.workflows_maint_stop_event,
-        stopped_background_worker_names=stopped_background_worker_names,
+    await run_shutdown_post_worker_non_worker_cleanup(
         guard_exceptions=startup_guard_exceptions,
-    )
-    worker_runtime.apply_post_worker_shutdown_handles(
-        post_worker_shutdown_handles,
     )
 
     from tldw_Server_API.app.services.shutdown_final_cleanup_tail import (
         shutdown_final_cleanup_tail,
     )
 
-    cleanup_timed_shutdown_handles = await shutdown_final_cleanup_tail(
+    await shutdown_final_cleanup_tail(
         app=app,
         db_pool=db_pool,
         session_manager=session_manager,
@@ -216,7 +153,6 @@ async def run_lifespan_shutdown_sequence(
         test_db_instance_ref=test_db_instance_ref,
         timed_shutdown_segment=timed_shutdown_segment,
     )
-    worker_runtime.apply_final_cleanup_handles(cleanup_timed_shutdown_handles)
 
     record_shutdown_timing_total(
         app,
@@ -224,18 +160,19 @@ async def run_lifespan_shutdown_sequence(
     )
 
 
-def _handles_for_shutdown_phase(
-    worker_runtime: LifespanWorkerRuntimeState,
-    shutdown_phase: ShutdownPhase,
-) -> list[Any]:
-    worker_inventory = getattr(worker_runtime, "worker_inventory", None)
-    handles_for_phase = getattr(worker_inventory, "handles_for_phase", None)
-    if callable(handles_for_phase):
-        return list(handles_for_phase(shutdown_phase))
-
-    target_phase_values = {shutdown_phase, shutdown_phase.value}
-    return [
-        handle
-        for handle in getattr(worker_runtime, "owned_job_pollers", [])
-        if getattr(handle, "shutdown_phase", None) in target_phase_values
-    ]
+def _publish_stopped_names_for_phase(
+    worker_lifecycle_session: Any,
+    phase: ShutdownPhase,
+    guard_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    publish_stopped_names = getattr(
+        worker_lifecycle_session,
+        "publish_stopped_names",
+        None,
+    )
+    if not callable(publish_stopped_names):
+        return
+    try:
+        publish_stopped_names(phase)
+    except guard_exceptions:
+        pass

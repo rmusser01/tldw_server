@@ -33,9 +33,14 @@ async def _wait_for_stop(stop_event: asyncio.Event) -> None:
     await stop_event.wait()
 
 
-async def _wait_for_optional_stop_event(stop_event_arg: asyncio.Event | None = None) -> None:
-    assert stop_event_arg is not None
-    await stop_event_arg.wait()
+async def _wait_for_optional_stop_event(
+    stop_event_arg: asyncio.Event | None = None,
+    *,
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    stop_event = stop_event or stop_event_arg
+    assert stop_event is not None
+    await stop_event.wait()
 
 
 _FIRST_BATCH_BACKGROUND_WORKER_NAMES = {
@@ -707,34 +712,31 @@ def test_lifespan_startup_registers_recipe_and_maintenance_pollers_once(
 
     start_counts = {"recipe": 0, "maintenance": 0}
 
-    async def _short_lived_task() -> None:
-        await asyncio.sleep(0)
-
-    async def _fake_start_recipe_run_jobs_worker(*, stop_event: asyncio.Event | None = None):
-        start_counts["recipe"] += 1
-        return asyncio.create_task(_short_lived_task(), name="recipe_run_jobs_worker")
-
-    async def _fake_start_admin_maintenance_rotation_jobs_worker(
-        *,
+    async def _fake_run_recipe_run_jobs_worker(
         stop_event: asyncio.Event | None = None,
-    ):
+    ) -> None:
+        start_counts["recipe"] += 1
+        assert stop_event is not None
+        await stop_event.wait()
+
+    async def _fake_run_admin_maintenance_rotation_jobs_worker(
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
         start_counts["maintenance"] += 1
-        return asyncio.create_task(
-            _short_lived_task(),
-            name="admin_maintenance_rotation_jobs_worker",
-        )
+        assert stop_event is not None
+        await stop_event.wait()
 
     monkeypatch.setenv("ADMIN_MAINTENANCE_ROTATION_JOBS_WORKER_ENABLED", "1")
     monkeypatch.setenv("EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ENABLED", "1")
     monkeypatch.setattr(
         admin_maintenance_rotation_jobs_worker,
-        "start_admin_maintenance_rotation_jobs_worker",
-        _fake_start_admin_maintenance_rotation_jobs_worker,
+        "run_admin_maintenance_rotation_jobs_worker",
+        _fake_run_admin_maintenance_rotation_jobs_worker,
     )
     monkeypatch.setattr(
         recipe_runs_jobs_worker,
-        "start_recipe_run_jobs_worker",
-        _fake_start_recipe_run_jobs_worker,
+        "run_recipe_run_jobs_worker",
+        _fake_run_recipe_run_jobs_worker,
     )
 
     with TestClient(app) as client:
@@ -756,6 +758,15 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
     app = main_module.app
     if hasattr(app.state, "_tldw_shutdown_job_poller_inventory"):
         delattr(app.state, "_tldw_shutdown_job_poller_inventory")
+
+    from tldw_Server_API.app.core.testing import env_flag_enabled
+
+    def _route_enabled_for_worker_test(flag_key: str, *_args, **_kwargs) -> bool:
+        if flag_key.endswith("_ENABLED"):
+            return env_flag_enabled(flag_key)
+        return True
+
+    monkeypatch.setattr(main_module, "route_enabled", _route_enabled_for_worker_test)
 
     for key in (
         "CHATBOOKS_CORE_WORKER_ENABLED",

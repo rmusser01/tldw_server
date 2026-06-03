@@ -7,6 +7,12 @@ import sys
 import pytest
 from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
+
 pytestmark = pytest.mark.unit
 
 
@@ -17,6 +23,107 @@ def _import_startup_maintenance_schedulers():
 
 async def _wait_forever() -> None:
     await asyncio.Event().wait()
+
+
+def _context() -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_maintenance):
+    return {
+        spec.name: spec
+        for spec in startup_maintenance.provide_maintenance_scheduler_worker_specs()
+    }
+
+
+def test_maintenance_scheduler_worker_specs_match_ownership_matrix() -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+
+    specs = _specs_by_name(startup_maintenance)
+
+    expected_task_names = {
+        "quality_eval_task": "rag_quality_eval_scheduler",
+        "outputs_purge_task": "outputs_purge_scheduler",
+        "kanban_activity_cleanup_scheduler": "kanban_activity_cleanup_scheduler",
+        "ingestion_sources_cleanup": "ingestion_sources_cleanup_task",
+        "kanban_purge_scheduler": "kanban_purge_scheduler",
+        "files_export_gc_task": "file_artifacts_export_gc",
+        "notifications_prune_task": "notifications_prune_scheduler",
+        "jobs_prune_task": "jobs_prune_scheduler",
+    }
+    assert set(specs) == set(expected_task_names)
+    for name, task_name in expected_task_names.items():
+        spec = specs[name]
+        assert spec.task_name == task_name
+        assert spec.category == "maintenance"
+        assert spec.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert spec.timeout_sec == 5.0
+        assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+        assert spec.factory is not None
+
+
+def test_maintenance_scheduler_worker_spec_predicates_use_legacy_env_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    seen_keys: list[str] = []
+    monkeypatch.setattr(
+        startup_maintenance,
+        "_env_enabled",
+        lambda key: seen_keys.append(key) or key == "OUTPUTS_PURGE_ENABLED",
+    )
+
+    specs = _specs_by_name(startup_maintenance)
+
+    assert specs["quality_eval_task"].enabled(_context()) is False
+    assert specs["outputs_purge_task"].enabled(_context()) is True
+    assert seen_keys == [
+        "RAG_QUALITY_EVAL_ENABLED",
+        "OUTPUTS_PURGE_ENABLED",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_scheduler_worker_spec_factory_starts_and_cancels_scheduler_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    started = asyncio.Event()
+    cancelled: list[str] = []
+
+    async def _scheduler_loop() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append("quality")
+            raise
+
+    async def _fake_start() -> asyncio.Task[None]:
+        return asyncio.create_task(_scheduler_loop(), name="rag_quality_eval_scheduler")
+
+    monkeypatch.setattr(startup_maintenance, "_start_quality_eval_scheduler_service", _fake_start)
+
+    spec = _specs_by_name(startup_maintenance)["quality_eval_task"]
+    stop_event = asyncio.Event()
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+
+    assert cancelled == ["quality"]
 
 
 @pytest.mark.asyncio

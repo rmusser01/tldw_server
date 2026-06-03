@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Generator
-from contextlib import suppress
 import importlib
 import sys
+from collections.abc import Generator
+from contextlib import suppress
+from typing import Any
 
-from fastapi import FastAPI
 import pytest
+from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -16,6 +22,134 @@ pytestmark = pytest.mark.unit
 def _import_startup_compactor_websub_workers():
     sys.modules.pop("tldw_Server_API.app.services.startup_compactor_websub_workers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_compactor_websub_workers")
+
+
+def _context(
+    *,
+    route_enabled=lambda *_args, **_kwargs: True,
+) -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=route_enabled,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_workers: Any) -> dict[str, Any]:
+    return {
+        spec.name: spec
+        for spec in startup_workers.provide_compactor_websub_worker_specs()
+    }
+
+
+def test_compactor_websub_worker_specs_match_legacy_worker_contract() -> None:
+    startup_workers = _import_startup_compactor_websub_workers()
+
+    specs = _specs_by_name(startup_workers)
+
+    compactor = specs["embeddings_compactor_task"]
+    assert compactor.task_name == "embeddings_compactor_task"
+    assert compactor.category == "embeddings"
+    assert compactor.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert compactor.timeout_sec == 5.0
+    assert compactor.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert compactor.factory is not None
+
+    websub = specs["websub_renewal_task"]
+    assert websub.task_name == "websub_renewal_task"
+    assert websub.category == "collections-websub"
+    assert websub.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert websub.timeout_sec == 5.0
+    assert websub.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert websub.factory is not None
+    assert websub.shutdown_callback_factory is None
+
+
+def test_compactor_websub_worker_specs_use_expected_names() -> None:
+    startup_workers = _import_startup_compactor_websub_workers()
+
+    assert [spec.name for spec in startup_workers.provide_compactor_websub_worker_specs()] == [
+        "embeddings_compactor_task",
+        "websub_renewal_task",
+    ]
+
+
+def test_embeddings_compactor_worker_spec_factory_delegates_to_existing_worker_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_compactor_websub_workers()
+    calls: list[object] = []
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_embeddings_vector_compactor_service",
+        lambda stop_event: calls.append(stop_event) or "compactor-awaitable",
+    )
+
+    spec = _specs_by_name(startup_workers)["embeddings_compactor_task"]
+
+    assert spec.factory is not None
+    assert spec.factory(_context(), "compactor-stop") == "compactor-awaitable"
+    assert calls == ["compactor-stop"]
+
+
+def test_websub_worker_spec_predicate_uses_callback_url_and_route_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_compactor_websub_workers()
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        startup_workers.os,
+        "getenv",
+        lambda key, default=None: {
+            "WEBSUB_CALLBACK_BASE_URL": "https://callback.test",
+            "WEBSUB_RENEWAL_WORKER_ENABLED": "true",
+        }.get(key, default),
+    )
+
+    def _route_enabled(*args: object, **kwargs: object) -> bool:
+        calls.append((args, kwargs))
+        return False
+
+    spec = _specs_by_name(startup_workers)["websub_renewal_task"]
+
+    assert spec.enabled(_context(route_enabled=_route_enabled)) is False
+    assert calls == [(("collections-websub",), {})]
+
+
+@pytest.mark.asyncio
+async def test_websub_worker_spec_factory_starts_and_cancels_legacy_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_compactor_websub_workers()
+    websub_started = asyncio.Event()
+    cancelled: list[str] = []
+
+    async def _websub_loop() -> None:
+        websub_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append("websub")
+            raise
+
+    monkeypatch.setattr(startup_workers, "_run_websub_renewal_loop", _websub_loop)
+
+    spec = _specs_by_name(startup_workers)["websub_renewal_task"]
+    stop_event = asyncio.Event()
+    assert spec.factory is not None
+    lifecycle_task = asyncio.create_task(spec.factory(_context(), stop_event))
+
+    await asyncio.wait_for(websub_started.wait(), timeout=1)
+    assert lifecycle_task.done() is False
+
+    stop_event.set()
+    await asyncio.wait_for(lifecycle_task, timeout=1)
+
+    assert cancelled == ["websub"]
 
 
 @pytest.mark.asyncio

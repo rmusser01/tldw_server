@@ -13,6 +13,13 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config import legacy_get as _legacy_get
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+)
+from tldw_Server_API.app.services.lifecycle_worker_startup_adapters import (
+    run_started_task_until_stop,
+)
 from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
@@ -32,6 +39,67 @@ class AuxiliaryStartupHandles:
     claims_review_metrics_task: Any | None = None
     usage_task: Any | None = None
     llm_usage_task: Any | None = None
+
+
+def provide_auxiliary_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for auxiliary scheduler workers."""
+
+    return (
+        _auxiliary_scheduler_spec(
+            name="claims_alerts_task",
+            task_name="claims_alerts_scheduler",
+            enabled=_claims_alerts_scheduler_enabled,
+            starter=_start_claims_alerts_scheduler_service,
+        ),
+        _auxiliary_scheduler_spec(
+            name="claims_review_metrics_task",
+            task_name="claims_review_metrics_scheduler",
+            enabled=_claims_review_metrics_scheduler_enabled,
+            starter=_start_claims_review_metrics_scheduler_service,
+        ),
+    )
+
+
+def _auxiliary_scheduler_spec(
+    *,
+    name: str,
+    task_name: str,
+    enabled,
+    starter,
+) -> WorkerSpec:
+    return WorkerSpec(
+        name=name,
+        task_name=task_name,
+        category="auxiliary",
+        phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        enabled=enabled,
+        factory=lambda _context, stop_event: run_started_task_until_stop(
+            stop_event,
+            starter=starter,
+        ),
+    )
+
+
+def _claims_alerts_scheduler_enabled(context: WorkerLifecycleContext) -> bool:
+    return _env_flag_enabled("CLAIMS_ALERTS_SCHEDULER_ENABLED") or bool(
+        _legacy_get(
+            "CLAIMS_ALERTS_SCHEDULER_ENABLED",
+            context.settings.get("CLAIMS_ALERTS_SCHEDULER_ENABLED", False),
+        )
+    )
+
+
+def _claims_review_metrics_scheduler_enabled(
+    context: WorkerLifecycleContext,
+) -> bool:
+    return _env_flag_enabled("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED") or bool(
+        _legacy_get(
+            "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED",
+            context.settings.get("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED", False),
+        )
+    )
 
 
 async def start_auxiliary_services(

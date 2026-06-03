@@ -4,6 +4,13 @@ import importlib
 import sys
 
 import pytest
+from fastapi import FastAPI
+
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -11,6 +18,74 @@ pytestmark = pytest.mark.unit
 def _import_startup_runtime_monitors():
     sys.modules.pop("tldw_Server_API.app.services.startup_runtime_monitors", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_runtime_monitors")
+
+
+def _context() -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=FastAPI(),
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_monitors):
+    return {
+        spec.name: spec
+        for spec in startup_monitors.provide_runtime_monitor_worker_specs()
+    }
+
+
+def test_runtime_monitor_worker_specs_match_legacy_worker_contract() -> None:
+    startup_monitors = _import_startup_runtime_monitors()
+
+    specs = _specs_by_name(startup_monitors)
+
+    jobs_metrics = specs["jobs_metrics_task"]
+    assert jobs_metrics.task_name == "jobs_metrics_task"
+    assert jobs_metrics.category == "jobs"
+    assert jobs_metrics.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert jobs_metrics.timeout_sec == 5.0
+    assert jobs_metrics.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert jobs_metrics.factory is not None
+
+    loop_lag = specs["loop_lag_task"]
+    assert loop_lag.task_name == "loop_lag_watchdog"
+    assert loop_lag.category == "monitoring"
+    assert loop_lag.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert loop_lag.timeout_sec == 2.0
+    assert loop_lag.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert loop_lag.factory is not None
+
+
+def test_runtime_monitor_worker_spec_factories_delegate_to_existing_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_monitors = _import_startup_runtime_monitors()
+    calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        startup_monitors,
+        "_run_jobs_metrics_gauges_service",
+        lambda stop_event: calls.append(("jobs-metrics", stop_event)) or "jobs-coro",
+    )
+    monkeypatch.setattr(
+        startup_monitors,
+        "_run_loop_lag_watchdog_service",
+        lambda stop_event: calls.append(("loop-lag", stop_event)) or "loop-coro",
+    )
+
+    specs = _specs_by_name(startup_monitors)
+
+    assert specs["jobs_metrics_task"].factory(_context(), "jobs-stop") == "jobs-coro"
+    assert specs["loop_lag_task"].factory(_context(), "loop-stop") == "loop-coro"
+    assert calls == [
+        ("jobs-metrics", "jobs-stop"),
+        ("loop-lag", "loop-stop"),
+    ]
 
 
 @pytest.mark.asyncio

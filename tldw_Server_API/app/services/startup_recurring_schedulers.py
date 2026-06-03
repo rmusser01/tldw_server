@@ -14,6 +14,15 @@ from loguru import logger
 
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+)
+from tldw_Server_API.app.services.lifecycle_worker_startup_adapters import (
+    run_start_stop_service_until_stop,
+    run_started_task_until_stop,
+)
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -42,6 +51,121 @@ class RecurringSchedulerHandles:
     companion_reflection_sched_task: Any | None = None
     reminders_sched_task: Any | None = None
     connectors_sync_sched_task: Any | None = None
+
+
+def provide_recurring_scheduler_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for recurring schedulers."""
+
+    return (
+        WorkerSpec(
+            name="authnz_scheduler",
+            task_name="authnz_scheduler",
+            category="recurring-scheduler",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_authnz_scheduler_spec_enabled,
+            factory=lambda _context, stop_event: run_start_stop_service_until_stop(
+                stop_event,
+                starter=_start_authnz_scheduler_service,
+                stopper=_stop_authnz_scheduler_service,
+            ),
+        ),
+        _recurring_scheduler_spec(
+            name="workflows_sched_task",
+            task_name="workflows_recurring_scheduler",
+            enabled=_env_enabled_predicate("WORKFLOWS_SCHEDULER_ENABLED"),
+            starter=_start_workflows_scheduler_service,
+            stopper=_stop_workflows_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="reading_digest_sched_task",
+            task_name="reading_digest_scheduler",
+            enabled=_reading_digest_scheduler_spec_enabled,
+            starter=_start_reading_digest_scheduler_for_spec,
+            stopper=_stop_reading_digest_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="admin_backup_sched_task",
+            task_name="admin_backup_scheduler",
+            enabled=_env_enabled_predicate("ADMIN_BACKUP_SCHEDULER_ENABLED"),
+            starter=_start_admin_backup_scheduler_service,
+            stopper=_stop_admin_backup_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="companion_reflection_sched_task",
+            task_name="companion_reflection_scheduler",
+            enabled=_companion_reflection_scheduler_spec_enabled,
+            starter=_start_companion_reflection_scheduler_for_spec,
+            stopper=_stop_companion_reflection_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="reminders_sched_task",
+            task_name="reminders_scheduler",
+            enabled=_env_enabled_predicate("REMINDERS_SCHEDULER_ENABLED"),
+            starter=_start_reminders_scheduler_service,
+            stopper=_stop_reminders_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="connectors_sync_sched_task",
+            task_name="connectors_sync_scheduler",
+            enabled=_env_enabled_predicate("CONNECTORS_SYNC_SCHEDULER_ENABLED"),
+            starter=_start_connectors_sync_scheduler_service,
+            stopper=_stop_connectors_sync_scheduler_service,
+        ),
+    )
+
+
+def _recurring_scheduler_spec(
+    *,
+    name: str,
+    task_name: str,
+    enabled: Callable[[WorkerLifecycleContext], bool],
+    starter: SchedulerStarter,
+    stopper: SchedulerStopper,
+) -> WorkerSpec:
+    return WorkerSpec(
+        name=name,
+        task_name=task_name,
+        category="recurring-scheduler",
+        phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        enabled=enabled,
+        factory=lambda _context, stop_event: run_started_task_until_stop(
+            stop_event,
+            starter=starter,
+            stopper=stopper,
+        ),
+    )
+
+
+def _authnz_scheduler_spec_enabled(_context: WorkerLifecycleContext) -> bool:
+    return not _env_flag_enabled("DISABLE_AUTHNZ_SCHEDULER")
+
+
+def _env_enabled_predicate(env_key: str) -> Callable[[WorkerLifecycleContext], bool]:
+    def _enabled(_context: WorkerLifecycleContext) -> bool:
+        return _env_flag_enabled(env_key)
+
+    return _enabled
+
+
+def _reading_digest_scheduler_spec_enabled(context: WorkerLifecycleContext) -> bool:
+    try:
+        enabled = _env_flag("READING_DIGEST_SCHEDULER_ENABLED", True)
+        if context.test_mode and os.getenv("READING_DIGEST_SCHEDULER_ENABLED") is None:
+            enabled = False
+        return enabled
+    except _STARTUP_GUARD_EXCEPTIONS:
+        return _is_truthy(os.getenv("READING_DIGEST_SCHEDULER_ENABLED", "true"))
+
+
+def _companion_reflection_scheduler_spec_enabled(
+    _context: WorkerLifecycleContext,
+) -> bool:
+    try:
+        return _env_flag("COMPANION_REFLECTION_SCHEDULER_ENABLED", False)
+    except _STARTUP_GUARD_EXCEPTIONS:
+        return _is_truthy(os.getenv("COMPANION_REFLECTION_SCHEDULER_ENABLED", "false"))
 
 
 async def start_recurring_schedulers(
@@ -430,6 +554,10 @@ async def _start_reading_digest_scheduler_service(*, enabled: bool) -> Any | Non
     return await start_reading_digest_scheduler(enabled=enabled)
 
 
+async def _start_reading_digest_scheduler_for_spec() -> Any | None:
+    return await _start_reading_digest_scheduler_service(enabled=True)
+
+
 async def _start_admin_backup_scheduler_service() -> Any | None:
     from tldw_Server_API.app.services.admin_backup_scheduler import start_admin_backup_scheduler
 
@@ -442,6 +570,10 @@ async def _start_companion_reflection_scheduler_service(*, enabled: bool) -> Any
     )
 
     return await start_companion_reflection_scheduler(enabled=enabled)
+
+
+async def _start_companion_reflection_scheduler_for_spec() -> Any | None:
+    return await _start_companion_reflection_scheduler_service(enabled=True)
 
 
 async def _start_reminders_scheduler_service() -> Any | None:

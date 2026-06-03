@@ -3,8 +3,15 @@ from __future__ import annotations
 import importlib
 import sys
 from collections.abc import Callable
+from typing import Any
 
 import pytest
+
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -12,6 +19,124 @@ pytestmark = pytest.mark.unit
 def _import_startup_study_privilege_jobs_pollers():
     sys.modules.pop("tldw_Server_API.app.services.startup_study_privilege_jobs_pollers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_study_privilege_jobs_pollers")
+
+
+def _context(
+    *,
+    route_enabled: Callable[..., bool] | None = None,
+) -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app="app",
+        settings={},
+        test_mode=True,
+        route_enabled=route_enabled or (lambda *_args, **_kwargs: True),
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
+    return {
+        spec.name: spec
+        for spec in startup_pollers.provide_study_privilege_jobs_worker_specs()
+    }
+
+
+@pytest.mark.parametrize(
+    "spec_name",
+    [
+        "study_pack_jobs_task",
+        "study_suggestions_jobs_task",
+        "privilege_snapshot_task",
+    ],
+)
+def test_study_privilege_jobs_worker_specs_match_legacy_worker_contract(
+    spec_name: str,
+) -> None:
+    startup_pollers = _import_startup_study_privilege_jobs_pollers()
+
+    spec = _specs_by_name(startup_pollers)[spec_name]
+
+    assert spec.task_name == spec_name
+    assert spec.category == "jobs"
+    assert spec.phase is ShutdownPhase.JOB_POLLER_QUIESCE
+    assert spec.timeout_sec == 5.0
+    assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert spec.factory is not None
+    assert callable(spec.factory)
+
+
+def test_study_privilege_jobs_worker_specs_use_expected_names() -> None:
+    startup_pollers = _import_startup_study_privilege_jobs_pollers()
+
+    assert [
+        spec.name
+        for spec in startup_pollers.provide_study_privilege_jobs_worker_specs()
+    ] == [
+        "study_pack_jobs_task",
+        "study_suggestions_jobs_task",
+        "privilege_snapshot_task",
+    ]
+
+
+def test_study_privilege_jobs_worker_spec_factories_delegate_to_existing_worker_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_study_privilege_jobs_pollers()
+    calls: list[tuple[str, object]] = []
+
+    for spec_name, factory_name in [
+        ("study_pack_jobs_task", "_run_study_pack_jobs_worker_service"),
+        ("study_suggestions_jobs_task", "_run_study_suggestions_jobs_worker_service"),
+        ("privilege_snapshot_task", "_run_privilege_snapshot_worker_service"),
+    ]:
+        monkeypatch.setattr(
+            startup_pollers,
+            factory_name,
+            lambda stop_event, name=spec_name: calls.append((name, stop_event)) or f"{name}-awaitable",
+        )
+
+    specs = _specs_by_name(startup_pollers)
+
+    for spec_name, spec in specs.items():
+        assert spec.factory is not None
+        assert spec.factory(_context(), f"{spec_name}-stop") == f"{spec_name}-awaitable"
+
+    assert calls == [
+        ("study_pack_jobs_task", "study_pack_jobs_task-stop"),
+        ("study_suggestions_jobs_task", "study_suggestions_jobs_task-stop"),
+        ("privilege_snapshot_task", "privilege_snapshot_task-stop"),
+    ]
+
+
+def test_study_privilege_jobs_worker_spec_predicates_use_route_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_study_privilege_jobs_pollers()
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _route_enabled(*args: object, **kwargs: object) -> bool:
+        calls.append((args, kwargs))
+        return False
+
+    context = _context(route_enabled=_route_enabled)
+    specs = _specs_by_name(startup_pollers)
+    for env_key in [
+        "STUDY_PACK_JOBS_WORKER_ENABLED",
+        "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+        "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
+    ]:
+        monkeypatch.setenv(env_key, "true")
+
+    assert specs["study_pack_jobs_task"].enabled(context) is False
+    assert specs["study_suggestions_jobs_task"].enabled(context) is False
+    assert specs["privilege_snapshot_task"].enabled(context) is False
+    assert calls == [
+        (("flashcards",), {}),
+        (("study-suggestions",), {}),
+        (("privileges",), {}),
+    ]
 
 
 @pytest.mark.asyncio

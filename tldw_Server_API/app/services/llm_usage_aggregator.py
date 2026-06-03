@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,6 +10,11 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
 from tldw_Server_API.app.services.lifecycle_workers import (
     ShutdownPhase,
     start_stop_event_worker,
@@ -23,6 +29,31 @@ _LLM_USAGE_AGGREGATOR_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+
+def provide_llm_usage_aggregator_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return the declarative spec for LLM usage aggregation."""
+
+    return (
+        stop_event_worker_spec(
+            name="llm_usage_aggregator",
+            worker_service=_aggregator_loop,
+            category="usage",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_llm_usage_aggregator_worker_enabled,
+        ),
+    )
+
+
+def _llm_usage_aggregator_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    settings = _context.settings
+    if settings is None:
+        settings = get_settings()
+    if isinstance(settings, Mapping):
+        return bool(settings.get("LLM_USAGE_AGGREGATOR_ENABLED", True))
+    return bool(getattr(settings, "LLM_USAGE_AGGREGATOR_ENABLED", True))
 
 
 async def aggregate_llm_usage_daily(db_pool: DatabasePool | None = None, day: str | None = None) -> None:

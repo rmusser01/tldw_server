@@ -13,6 +13,13 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+)
+from tldw_Server_API.app.services.lifecycle_worker_startup_adapters import (
+    run_started_task_until_stop,
+)
 from tldw_Server_API.app.services.lifecycle_workers import (
     ManagedWorker,
     ShutdownPhase,
@@ -41,6 +48,94 @@ class MaintenanceSchedulerHandles:
     files_export_gc_task: Any | None = None
     notifications_prune_task: Any | None = None
     jobs_prune_task: Any | None = None
+
+
+def provide_maintenance_scheduler_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for maintenance scheduler workers."""
+
+    return (
+        _maintenance_scheduler_spec(
+            name="quality_eval_task",
+            task_name="rag_quality_eval_scheduler",
+            env_key="RAG_QUALITY_EVAL_ENABLED",
+            starter=_start_quality_eval_scheduler_service,
+        ),
+        _maintenance_scheduler_spec(
+            name="outputs_purge_task",
+            task_name="outputs_purge_scheduler",
+            env_key="OUTPUTS_PURGE_ENABLED",
+            starter=_start_outputs_purge_scheduler_service,
+        ),
+        _maintenance_scheduler_spec(
+            name="kanban_activity_cleanup_scheduler",
+            task_name="kanban_activity_cleanup_scheduler",
+            env_key="KANBAN_ACTIVITY_CLEANUP_ENABLED",
+            starter=_start_kanban_activity_cleanup_scheduler_service,
+        ),
+        WorkerSpec(
+            name="ingestion_sources_cleanup",
+            task_name="ingestion_sources_cleanup_task",
+            category="maintenance",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_env_enabled_predicate("INGESTION_SOURCES_CLEANUP_ENABLED"),
+            factory=lambda _context, stop_event: _run_ingestion_sources_cleanup_loop(
+                stop_event
+            ),
+        ),
+        _maintenance_scheduler_spec(
+            name="kanban_purge_scheduler",
+            task_name="kanban_purge_scheduler",
+            env_key="KANBAN_PURGE_ENABLED",
+            starter=_start_kanban_purge_scheduler_service,
+        ),
+        _maintenance_scheduler_spec(
+            name="files_export_gc_task",
+            task_name="file_artifacts_export_gc",
+            env_key="FILES_EXPORT_GC_ENABLED",
+            starter=_start_file_artifacts_export_gc_scheduler_service,
+        ),
+        _maintenance_scheduler_spec(
+            name="notifications_prune_task",
+            task_name="notifications_prune_scheduler",
+            env_key="NOTIFICATIONS_PRUNE_ENABLED",
+            starter=_start_notifications_prune_scheduler_service,
+        ),
+        _maintenance_scheduler_spec(
+            name="jobs_prune_task",
+            task_name="jobs_prune_scheduler",
+            env_key="JOBS_PRUNE_ENFORCE",
+            starter=_start_jobs_prune_scheduler_service,
+        ),
+    )
+
+
+def _maintenance_scheduler_spec(
+    *,
+    name: str,
+    task_name: str,
+    env_key: str,
+    starter: Callable[[], Awaitable[Any | None]],
+) -> WorkerSpec:
+    return WorkerSpec(
+        name=name,
+        task_name=task_name,
+        category="maintenance",
+        phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        enabled=_env_enabled_predicate(env_key),
+        factory=lambda _context, stop_event: run_started_task_until_stop(
+            stop_event,
+            starter=starter,
+        ),
+    )
+
+
+def _env_enabled_predicate(env_key: str) -> Callable[[WorkerLifecycleContext], bool]:
+    def _enabled(_context: WorkerLifecycleContext) -> bool:
+        return _env_enabled(env_key)
+
+    return _enabled
 
 
 async def start_maintenance_schedulers(

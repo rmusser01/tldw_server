@@ -15,11 +15,23 @@ incoming_jobs_db_url="${JOBS_DB_URL:-}"
 incoming_database_url_override="${TLDW_DATABASE_URL_OVERRIDE:-}"
 incoming_jobs_db_url_override="${TLDW_JOBS_DB_URL_OVERRIDE:-}"
 
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    echo "[entrypoint] python3 or python is required" >&2
+    exit 127
+  fi
+fi
+
 generate_key() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -base64 32 | tr -d '\n'
   else
-    python -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+    "$PYTHON_BIN" -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
   fi
 }
 
@@ -34,7 +46,7 @@ is_invalid_key() {
 }
 
 derive_postgres_database_url() {
-  python - <<'PY'
+  "$PYTHON_BIN" - <<'PY'
 import os
 import sys
 from urllib.parse import quote
@@ -45,8 +57,8 @@ if not password:
 
 host = os.getenv("POSTGRES_HOST") or "postgres"
 port = os.getenv("POSTGRES_PORT") or "5432"
-user = os.getenv("POSTGRES_USER") or "tldw_user"
-db = os.getenv("POSTGRES_DB") or "tldw_users"
+user = os.getenv("POSTGRES_USER") or "postgres"
+db = os.getenv("POSTGRES_DB") or "postgres"
 
 sys.stdout.write(
     f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{quote(db, safe='')}"
@@ -60,7 +72,7 @@ load_env_file() {
   fi
 
   parsed_env_file="$(mktemp "${TMPDIR:-/tmp}/tldw-env.XXXXXX")"
-  if python - "$ENV_FILE" > "$parsed_env_file" <<'PY'
+  if "$PYTHON_BIN" - "$ENV_FILE" > "$parsed_env_file" <<'PY'
 import re
 import sys
 
@@ -93,6 +105,10 @@ try:
             if not key_re.match(key):
                 print(f"[entrypoint] Invalid env key in {path}:{line_number}: {key!r}", file=sys.stderr)
                 sys.exit(1)
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
             if "\n" in value:
                 print(f"[entrypoint] Refusing env value with newline for key {key}", file=sys.stderr)
                 sys.exit(1)

@@ -13,6 +13,11 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.services.lifecycle_exceptions import LIFECYCLE_GUARD_EXCEPTIONS
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
 from tldw_Server_API.app.services.lifecycle_workers import (
     ManagedWorker,
     ShutdownPhase,
@@ -30,6 +35,95 @@ class NotificationsAbtestStartupHandles:
     jobs_notifications_bridge_task: Any | None = None
     evals_abtest_jobs_stop_event: Any | None = None
     evals_abtest_jobs_task: Any | None = None
+
+
+def provide_notifications_abtest_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for notifications and embeddings A/B workers."""
+
+    return (
+        WorkerSpec(
+            name="jobs_notifications_bridge_task",
+            task_name="jobs_notifications_bridge_task",
+            category="jobs",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_jobs_notifications_bridge_spec_enabled,
+            factory=lambda _context, stop_event: _run_jobs_notifications_bridge_worker_service(stop_event),
+        ),
+        stop_event_worker_spec(
+            name="evals_abtest_jobs_task",
+            worker_service=_run_embeddings_abtest_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=_evals_abtest_jobs_spec_enabled,
+        ),
+    )
+
+
+def _jobs_notifications_bridge_spec_enabled(context: WorkerLifecycleContext) -> bool:
+    return not context.sidecar_mode and _jobs_notifications_bridge_enabled()
+
+
+def _evals_abtest_jobs_spec_enabled(context: WorkerLifecycleContext) -> bool:
+    return not context.sidecar_mode and _evals_abtest_jobs_worker_enabled()
+
+
+def _jobs_notifications_bridge_enabled() -> bool:
+    bridge_enabled = os.getenv("JOBS_NOTIFICATIONS_BRIDGE_ENABLED")
+    bridge_disabled = os.getenv("JOBS_NOTIFICATIONS_BRIDGE_DISABLED", "").lower() in _TRUTHY_ENV_VALUES
+    if bridge_disabled:
+        return False
+    return not (bridge_enabled is not None and bridge_enabled.lower() not in _TRUTHY_ENV_VALUES)
+
+
+def _evals_abtest_jobs_worker_enabled() -> bool:
+    return (
+        os.getenv("EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in _TRUTHY_ENV_VALUES
+        or os.getenv("EVALS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in _TRUTHY_ENV_VALUES
+    )
+
+
+async def _run_jobs_notifications_bridge_worker_service(stop_event: Any) -> None:
+    """Run the notifications bridge under lifecycle stop-event ownership."""
+
+    task = await _resolve_started_task_result(_start_jobs_notifications_service())
+    if task is None:
+        return
+    try:
+        await stop_event.wait()
+    finally:
+        await _cancel_and_wait_for_started_task(task, timeout=5.0)
+
+
+async def _cancel_and_wait_for_started_task(task: Any, *, timeout: float) -> None:
+    cancel = getattr(task, "cancel", None)
+    if callable(cancel):
+        cancel()
+    if inspect.isawaitable(task):
+        try:
+            await asyncio.wait_for(task, timeout=timeout)
+        except asyncio.CancelledError:
+            pass
+        except asyncio.TimeoutError:
+            if callable(cancel):
+                cancel()
+            logger.warning(
+                "Jobs notifications bridge task did not stop within {}s after cancellation",
+                timeout,
+            )
+            raise
+        except _STARTUP_GUARD_EXCEPTIONS as exc:
+            logger.debug(
+                "Jobs notifications bridge task cleanup failed after {}",
+                type(exc).__name__,
+            )
+
+
+async def _resolve_started_task_result(result: Any) -> Any:
+    if inspect.isawaitable(result) and not asyncio.isfuture(result):
+        return await result
+    return result
 
 
 async def start_notifications_abtest_workers(

@@ -11,7 +11,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerSpec,
+    route_enabled_predicate,
+    stop_event_worker_spec,
+)
+from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -36,6 +43,68 @@ class PrimaryJobsPollerHandles:
     data_tables_jobs_task: Any | None = None
     prompt_studio_jobs_stop_event: Any | None = None
     prompt_studio_jobs_task: Any | None = None
+
+
+def provide_primary_jobs_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for primary jobs pollers.
+
+    Core jobs preserve the legacy sidecar gate through
+    ``context.sidecar_mode``. Omitted settings default to the
+    existing non-sidecar behavior.
+    """
+
+    return (
+        stop_event_worker_spec(
+            name="core_jobs_task",
+            worker_service=_run_chatbooks_core_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=_core_jobs_worker_enabled,
+        ),
+        stop_event_worker_spec(
+            name="files_jobs_task",
+            worker_service=_run_file_artifacts_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate("FILES_JOBS_WORKER_ENABLED", "files"),
+        ),
+        stop_event_worker_spec(
+            name="data_tables_jobs_task",
+            worker_service=_run_data_tables_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "DATA_TABLES_JOBS_WORKER_ENABLED",
+                "data-tables",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="prompt_studio_jobs_task",
+            worker_service=_run_prompt_studio_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
+                "prompt-studio",
+            ),
+        ),
+    )
+
+
+def _core_jobs_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    backend = (
+        os.getenv("CHATBOOKS_JOBS_BACKEND")
+        or os.getenv("TLDW_JOBS_BACKEND")
+        or ""
+    ).lower()
+    is_core = backend == "core" or not backend
+    core_worker_enabled = (
+        os.getenv("CHATBOOKS_CORE_WORKER_ENABLED", "true").lower()
+        in _TRUTHY_ENV_VALUES
+    )
+    return is_core and core_worker_enabled and not context.sidecar_mode
 
 
 async def start_primary_jobs_pollers(

@@ -10,7 +10,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerSpec,
+    route_enabled_predicate,
+    stop_event_worker_spec,
+)
+from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -45,6 +52,115 @@ class ContentJobsPollerHandles:
     vn_asset_generation_jobs_task: Any | None = None
     companion_reflection_jobs_stop_event: Any | None = None
     companion_reflection_jobs_task: Any | None = None
+
+
+def provide_content_jobs_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for content-oriented jobs pollers."""
+
+    return (
+        stop_event_worker_spec(
+            name="audio_jobs_task",
+            worker_service=_run_audio_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs"),
+        ),
+        stop_event_worker_spec(
+            name="audiobook_jobs_task",
+            worker_service=_run_audiobook_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "AUDIOBOOK_JOBS_WORKER_ENABLED",
+                "audiobooks",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="presentation_render_jobs_task",
+            worker_service=_run_presentation_render_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
+                "slides",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="media_ingest_jobs_task",
+            worker_service=_run_media_ingest_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+                "media",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="media_ingest_heavy_jobs_task",
+            worker_service=_run_media_ingest_heavy_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+                "media-ingest-heavy-jobs",
+                default_stable=False,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="reading_digest_jobs_task",
+            worker_service=_run_reading_digest_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "READING_DIGEST_JOBS_WORKER_ENABLED",
+                "reading",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="llamacpp_acquisition_jobs_task",
+            worker_service=_run_llamacpp_acquisition_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+                "llamacpp-acquisition",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="vn_asset_jobs_task",
+            worker_service=_run_vn_asset_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "VN_ASSET_JOBS_WORKER_ENABLED",
+                "vn-assets",
+                default_stable=True,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="vn_asset_generation_jobs_task",
+            worker_service=_run_vn_asset_generation_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
+                "vn-assets-generation",
+                default_stable=True,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="companion_reflection_jobs_task",
+            worker_service=_run_companion_reflection_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "COMPANION_REFLECTION_JOBS_WORKER_ENABLED",
+                "companion",
+            ),
+        ),
+    )
 
 
 async def start_content_jobs_pollers(

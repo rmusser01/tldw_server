@@ -9,6 +9,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _empty_lifecycle_session() -> SimpleNamespace:
+    return SimpleNamespace(
+        graph=SimpleNamespace(specs=()),
+        handles_by_name={},
+        stopped_or_quiesced_names=set(),
+        publish_stopped_names=lambda _phase: None,
+        publish_inventory=lambda: None,
+    )
+
+
 @pytest.mark.integration
 def test_startup_shutdown_contract_is_reentrant() -> None:
     from tldw_Server_API.app.main import app
@@ -204,44 +214,39 @@ def test_lifespan_startup_delegates_startup_bg_tasks(
 
 
 @pytest.mark.integration
-def test_lifespan_startup_delegates_owned_job_pollers(
+def test_lifespan_startup_delegates_lifecycle_worker_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail, startup_worker_groups
+    from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
-    worker_group_calls: list[dict[str, object]] = []
-    service_tail_calls: list[dict[str, object]] = []
+    collect_calls: list[object] = []
+    start_calls: list[dict[str, object]] = []
+    lifecycle_session = _empty_lifecycle_session()
 
-    async def _fake_start_worker_groups(**kwargs):
-        worker_group_calls.append(kwargs)
-        return startup_worker_groups.StartupWorkerGroupHandles()
+    def _fake_collect_startup_worker_specs(context):
+        collect_calls.append(context)
+        return ("spec",)
 
-    async def _fake_initialize_startup_service_tail(**kwargs):
-        service_tail_calls.append(kwargs)
-        return startup_service_tail.StartupServiceTailHandles()
+    async def _fake_start_lifecycle_workers(context, specs):
+        start_calls.append({"context": context, "specs": specs})
+        return lifecycle_session
 
-    monkeypatch.setattr(
-        startup_worker_groups,
-        "start_worker_groups",
-        _fake_start_worker_groups,
-    )
-    monkeypatch.setattr(
-        startup_service_tail,
-        "initialize_startup_service_tail",
-        _fake_initialize_startup_service_tail,
-    )
+    async def _fake_run_startup_non_worker_tail(**_kwargs):
+        return None
+
+    monkeypatch.setattr(startup_worker_bootstrap, "_collect_startup_worker_specs", _fake_collect_startup_worker_specs)
+    monkeypatch.setattr(startup_worker_bootstrap, "_start_lifecycle_workers", _fake_start_lifecycle_workers)
+    monkeypatch.setattr(startup_worker_bootstrap, "_run_startup_non_worker_tail", _fake_run_startup_non_worker_tail)
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
-    assert len(worker_group_calls) == 1
-    assert len(service_tail_calls) == 1
-    owned_job_pollers = worker_group_calls[0]["owned_job_pollers"]
-    assert isinstance(owned_job_pollers, list)
-    assert service_tail_calls[0]["owned_job_pollers"] is owned_job_pollers
-    assert service_tail_calls[0]["worker_inventory"].handles is owned_job_pollers
+    assert len(collect_calls) == 1
+    assert len(start_calls) == 1
+    assert start_calls[0]["context"] is collect_calls[0]
+    assert start_calls[0]["specs"] == ("spec",)
 
 
 @pytest.mark.integration
@@ -404,14 +409,12 @@ def test_lifespan_shutdown_stops_recipe_run_and_evals_abtest_workers(
         await stop_event.wait()
         observed["abtest_stopped"] = True
 
-    async def _fake_start_recipe_run_jobs_worker_service(*, stop_event):
-        return asyncio.create_task(_fake_recipe_worker(stop_event), name="recipe_run_jobs_task")
-
+    monkeypatch.setenv("EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ENABLED", "1")
     monkeypatch.setenv("EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "1")
     monkeypatch.setattr(
         startup_sidecar_owned_jobs_pollers,
-        "_start_recipe_run_jobs_worker_service",
-        _fake_start_recipe_run_jobs_worker_service,
+        "_run_recipe_run_jobs_worker_service",
+        _fake_recipe_worker,
     )
     monkeypatch.setattr(
         startup_notifications_abtest_workers,
@@ -443,8 +446,8 @@ def test_lifespan_shutdown_cancels_claims_and_maintenance_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
+    from tldw_Server_API.app.core import config as core_config
     from tldw_Server_API.app.services import startup_claims_rebuild, startup_maintenance_schedulers
-    from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase
 
     app = main_module.app
     observed = {
@@ -461,58 +464,46 @@ def test_lifespan_shutdown_cancels_claims_and_maintenance_tasks(
             observed[flag_key] = True
             raise
 
-    async def _fake_start_claims_rebuild_worker(_app_settings, **kwargs):
-        worker_inventory = kwargs["worker_inventory"]
-        assert worker_inventory is not None
-        task = asyncio.create_task(_wait_forever("claims_cancelled"), name="claims_task")
-        worker_inventory.register(
-            ManagedWorker(
-                name="claims_rebuild",
-                task=task,
-                timeout_sec=0.1,
-                category="claims",
-                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
-            )
-        )
-        return task
+    async def _fake_claims_rebuild_loop(_app_settings, *, stop_event, interval_sec, policy):
+        del interval_sec, policy
+        await stop_event.wait()
+        observed["claims_cancelled"] = True
 
-    async def _fake_start_maintenance_schedulers(*, worker_inventory=None):
-        assert worker_inventory is not None
-        files_gc_task = asyncio.create_task(_wait_forever("files_gc_cancelled"), name="files_gc_task")
-        notifications_prune_task = asyncio.create_task(
+    async def _fake_files_gc_service():
+        return asyncio.create_task(_wait_forever("files_gc_cancelled"), name="files_gc_task")
+
+    async def _fake_notifications_prune_service():
+        return asyncio.create_task(
             _wait_forever("notifications_prune_cancelled"),
             name="notifications_prune_task",
         )
-        jobs_prune_task = asyncio.create_task(_wait_forever("jobs_prune_cancelled"), name="jobs_prune_task")
-        for worker_name, task in (
-            ("files_export_gc_task", files_gc_task),
-            ("notifications_prune_task", notifications_prune_task),
-            ("jobs_prune_task", jobs_prune_task),
-        ):
-            worker_inventory.register(
-                ManagedWorker(
-                    name=worker_name,
-                    task=task,
-                    timeout_sec=0.1,
-                    category="maintenance",
-                    shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
-                )
-            )
-        return startup_maintenance_schedulers.MaintenanceSchedulerHandles(
-            files_export_gc_task=files_gc_task,
-            notifications_prune_task=notifications_prune_task,
-            jobs_prune_task=jobs_prune_task,
-        )
 
+    async def _fake_jobs_prune_service():
+        return asyncio.create_task(_wait_forever("jobs_prune_cancelled"), name="jobs_prune_task")
+
+    monkeypatch.setitem(core_config.settings, "CLAIMS_REBUILD_ENABLED", True)
+    monkeypatch.setenv("FILES_EXPORT_GC_ENABLED", "1")
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_ENABLED", "1")
+    monkeypatch.setenv("JOBS_PRUNE_ENFORCE", "1")
     monkeypatch.setattr(
         startup_claims_rebuild,
-        "start_claims_rebuild_worker",
-        _fake_start_claims_rebuild_worker,
+        "_run_claims_rebuild_loop",
+        _fake_claims_rebuild_loop,
     )
     monkeypatch.setattr(
         startup_maintenance_schedulers,
-        "start_maintenance_schedulers",
-        _fake_start_maintenance_schedulers,
+        "_start_file_artifacts_export_gc_scheduler_service",
+        _fake_files_gc_service,
+    )
+    monkeypatch.setattr(
+        startup_maintenance_schedulers,
+        "_start_notifications_prune_scheduler_service",
+        _fake_notifications_prune_service,
+    )
+    monkeypatch.setattr(
+        startup_maintenance_schedulers,
+        "_start_jobs_prune_scheduler_service",
+        _fake_jobs_prune_service,
     )
 
     with TestClient(app) as client:
@@ -551,34 +542,34 @@ def test_lifespan_shutdown_stops_reminder_admin_workers(
         await stop_event.wait()
         observed[flag_key] = True
 
-    async def _fake_start_reminder_jobs_worker_service(*, stop_event):
-        del stop_event
-        return asyncio.create_task(_wait_for_cancel("reminder_cancelled"), name="reminder_jobs_task")
+    async def _fake_reminder_jobs_worker_service(stop_event):
+        await stop_event.wait()
+        observed["reminder_cancelled"] = True
 
-    async def _fake_start_admin_backup_jobs_worker_service(*, stop_event):
-        del stop_event
-        return asyncio.create_task(_wait_for_cancel("admin_backup_cancelled"), name="admin_backup_jobs_task")
+    async def _fake_admin_backup_jobs_worker_service(stop_event):
+        await stop_event.wait()
+        observed["admin_backup_cancelled"] = True
 
-    async def _fake_start_admin_maintenance_rotation_jobs_worker_service(*, stop_event):
-        return asyncio.create_task(
-            _wait_for_stop(stop_event, flag_key="admin_maintenance_stopped"),
-            name="admin_maintenance_rotation_jobs_task",
-        )
+    async def _fake_admin_maintenance_rotation_jobs_worker_service(stop_event):
+        await _wait_for_stop(stop_event, flag_key="admin_maintenance_stopped")
 
+    monkeypatch.setenv("REMINDER_JOBS_WORKER_ENABLED", "1")
+    monkeypatch.setenv("ADMIN_BACKUP_JOBS_WORKER_ENABLED", "1")
+    monkeypatch.setenv("ADMIN_MAINTENANCE_ROTATION_JOBS_WORKER_ENABLED", "1")
     monkeypatch.setattr(
         startup_sidecar_owned_jobs_pollers,
-        "_start_reminder_jobs_worker_service",
-        _fake_start_reminder_jobs_worker_service,
+        "_run_reminder_jobs_worker_service",
+        _fake_reminder_jobs_worker_service,
     )
     monkeypatch.setattr(
         startup_sidecar_owned_jobs_pollers,
-        "_start_admin_backup_jobs_worker_service",
-        _fake_start_admin_backup_jobs_worker_service,
+        "_run_admin_backup_jobs_worker_service",
+        _fake_admin_backup_jobs_worker_service,
     )
     monkeypatch.setattr(
         startup_sidecar_owned_jobs_pollers,
-        "_start_admin_maintenance_rotation_jobs_worker_service",
-        _fake_start_admin_maintenance_rotation_jobs_worker_service,
+        "_run_admin_maintenance_rotation_jobs_worker_service",
+        _fake_admin_maintenance_rotation_jobs_worker_service,
     )
 
     with TestClient(app) as client:
@@ -720,6 +711,14 @@ def test_lifespan_shutdown_stops_media_ingest_shutdown_workers(
 
     monkeypatch.setenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", "1")
     monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "1")
+    original_route_enabled = main_module.route_enabled
+
+    def _route_enabled_for_media_test(route_key: str, **kwargs) -> bool:
+        if route_key == "media-ingest-heavy-jobs":
+            return True
+        return original_route_enabled(route_key, **kwargs)
+
+    monkeypatch.setattr(main_module, "route_enabled", _route_enabled_for_media_test)
 
     async def _wait_for_stop(stop_event, *, event_key: str, stopped_key: str) -> None:
         observed[event_key] = stop_event
@@ -771,7 +770,7 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail, startup_worker_bootstrap, startup_worker_groups
+    from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
@@ -779,10 +778,7 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
         recorded_calls.append(kwargs)
         return startup_worker_bootstrap.StartupWorkerBootstrapHandles(
-            app_settings="settings",
-            owned_job_pollers=["poller"],
-            startup_worker_group_handles=startup_worker_groups.StartupWorkerGroupHandles(),
-            startup_service_tail_handles=startup_service_tail.StartupServiceTailHandles(),
+            worker_lifecycle_session=_empty_lifecycle_session(),
         )
 
     monkeypatch.setattr(
@@ -896,57 +892,61 @@ def test_lifespan_startup_delegates_core_initialization(
 
 
 @pytest.mark.integration
-def test_lifespan_startup_delegates_worker_groups(
+def test_lifespan_startup_collects_declarative_worker_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_worker_groups
+    from tldw_Server_API.app.services import startup_worker_bootstrap, startup_worker_groups
 
     app = main_module.app
-    recorded_calls: list[dict[str, object]] = []
+    recorded_contexts: list[object] = []
+    lifecycle_session = _empty_lifecycle_session()
 
-    async def _fake_start_worker_groups(**kwargs):
-        recorded_calls.append(kwargs)
-        return startup_worker_groups.StartupWorkerGroupHandles()
+    def _fake_collect_startup_worker_specs(context):
+        recorded_contexts.append(context)
+        return ()
 
-    monkeypatch.setattr(
-        startup_worker_groups,
-        "start_worker_groups",
-        _fake_start_worker_groups,
-    )
+    async def _fake_start_lifecycle_workers(_context, _specs):
+        return lifecycle_session
+
+    async def _fake_run_startup_non_worker_tail(**_kwargs):
+        return None
+
+    monkeypatch.setattr(startup_worker_groups, "collect_startup_worker_specs", _fake_collect_startup_worker_specs)
+    monkeypatch.setattr(startup_worker_bootstrap, "_start_lifecycle_workers", _fake_start_lifecycle_workers)
+    monkeypatch.setattr(startup_worker_bootstrap, "_run_startup_non_worker_tail", _fake_run_startup_non_worker_tail)
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
-    assert len(recorded_calls) == 1
-    assert recorded_calls[0]["app"] is app
-    assert recorded_calls[0]["test_mode"] is True
-    assert recorded_calls[0]["route_enabled"] is main_module.route_enabled
-    assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
-    assert recorded_calls[0]["register_owned_job_poller"] is main_module._register_owned_job_poller
-    assert "app_settings" in recorded_calls[0]
+    assert len(recorded_contexts) == 1
+    assert recorded_contexts[0].app is app
+    assert recorded_contexts[0].test_mode is True
+    assert recorded_contexts[0].route_enabled is main_module.route_enabled
+    assert recorded_contexts[0].startup_guard_exceptions == main_module._STARTUP_GUARD_EXCEPTIONS
+    assert recorded_contexts[0].import_exceptions == main_module._IMPORT_EXCEPTIONS
 
 
 @pytest.mark.integration
-def test_lifespan_startup_delegates_service_tail(
+def test_lifespan_startup_delegates_non_worker_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail
+    from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
+    lifecycle_session = _empty_lifecycle_session()
 
-    async def _fake_initialize_startup_service_tail(**kwargs):
+    async def _fake_start_lifecycle_workers(_context, _specs):
+        return lifecycle_session
+
+    async def _fake_run_startup_non_worker_tail(**kwargs):
         recorded_calls.append(kwargs)
-        return startup_service_tail.StartupServiceTailHandles()
 
-    monkeypatch.setattr(
-        startup_service_tail,
-        "initialize_startup_service_tail",
-        _fake_initialize_startup_service_tail,
-    )
+    monkeypatch.setattr(startup_worker_bootstrap, "_collect_startup_worker_specs", lambda _context: ())
+    monkeypatch.setattr(startup_worker_bootstrap, "_start_lifecycle_workers", _fake_start_lifecycle_workers)
+    monkeypatch.setattr(startup_worker_bootstrap, "_run_startup_non_worker_tail", _fake_run_startup_non_worker_tail)
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
@@ -954,15 +954,7 @@ def test_lifespan_startup_delegates_service_tail(
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
     assert recorded_calls[0]["logger"] is main_module.logger
-    assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
-    assert recorded_calls[0]["register_owned_job_poller"] is main_module._register_owned_job_poller
     assert recorded_calls[0]["run_pg_rls_auto_ensure"] is main_module._run_pg_rls_auto_ensure
-    assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (main_module._replace_owned_job_poller_inventory)
-    assert isinstance(
-        recorded_calls[0]["startup_worker_group_handles"],
-        object,
-    )
-    assert recorded_calls[0]["test_mode"] is True
     assert recorded_calls[0]["startup_api_key_log_value"] is main_module._startup_api_key_log_value
     assert recorded_calls[0]["shared_is_truthy"] is main_module._shared_is_truthy
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
@@ -1538,13 +1530,12 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
 ) -> None:
     from tldw_Server_API.app import main as main_module
     from tldw_Server_API.app.services import shutdown_coordinated_legacy_components as coordinated_legacy
-    from tldw_Server_API.app.services import shutdown_core_jobs_worker as core_jobs_shutdown
     from tldw_Server_API.app.services import shutdown_job_poller_handoff as job_poller_handoff
     from tldw_Server_API.app.services import shutdown_transition_handoff as transition_handoff
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
-    core_shutdown_calls: list[dict[str, object]] = []
 
     async def _fake_shutdown_transition_handoff(**kwargs):
         kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
@@ -1555,6 +1546,10 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
 
     async def _fake_run_shutdown_job_poller_handoff(**kwargs):
         recorded_calls.append(kwargs)
+        await kwargs["lifecycle_worker_engine"].stop_phase(
+            kwargs["worker_lifecycle_session"],
+            ShutdownPhase.JOB_POLLER_QUIESCE,
+        )
         return job_poller_handoff.JobPollerShutdownHandoffHandles(
             early_quiesced_job_poller_names={"core_jobs_task"},
             should_run_late_stop=lambda task_name, task: bool(task) and task_name != "core_jobs_task",
@@ -1563,13 +1558,6 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
     async def _fake_shutdown_coordinated_legacy_components(**kwargs):
         return coordinated_legacy.CoordinatedLegacyShutdownHandles(
             coordinated_legacy_component_names=set(),
-        )
-
-    async def _fake_shutdown_core_jobs_worker(**kwargs):
-        core_shutdown_calls.append(kwargs)
-        return core_jobs_shutdown.CoreJobsShutdownHandles(
-            core_jobs_task=kwargs["core_jobs_task"],
-            core_jobs_stop_event=kwargs["core_jobs_stop_event"],
         )
 
     monkeypatch.setattr(
@@ -1587,394 +1575,20 @@ def test_lifespan_shutdown_delegates_job_poller_handoff(
         "shutdown_coordinated_legacy_components",
         _fake_shutdown_coordinated_legacy_components,
     )
-    monkeypatch.setattr(
-        core_jobs_shutdown,
-        "shutdown_core_jobs_worker",
-        _fake_shutdown_core_jobs_worker,
-    )
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
-    assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
+    assert recorded_calls[0]["worker_lifecycle_session"] is not None
+    assert hasattr(recorded_calls[0]["lifecycle_worker_engine"], "stop_phase")
+    assert "owned_job_pollers" not in recorded_calls[0]
     assert recorded_calls[0]["quiesce_owned_job_pollers_for_shutdown"] is (
         main_module._quiesce_owned_job_pollers_for_shutdown
     )
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
     assert recorded_calls[0]["import_exceptions"] == main_module._IMPORT_EXCEPTIONS
-    assert len(core_shutdown_calls) == 1
-    should_run_late_stop = core_shutdown_calls[0]["should_run_late_stop"]
-    late_stop_task = object()
-    assert should_run_late_stop("core_jobs_task", late_stop_task) is False
-    assert should_run_late_stop("files_jobs_task", late_stop_task) is True
-
-
-@pytest.mark.integration
-def test_lifespan_shutdown_delegates_primary_late_stop_workers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import shutdown_coordinated_legacy_components as coordinated_legacy
-    from tldw_Server_API.app.services import shutdown_job_poller_handoff as job_poller_handoff
-    from tldw_Server_API.app.services import shutdown_primary_late_stop_workers as primary_workers
-    from tldw_Server_API.app.services import shutdown_transition_handoff as transition_handoff
-
-    app = main_module.app
-    recorded_calls: list[dict[str, object]] = []
-
-    def should_run_late_stop(task_name, task):
-        return bool(task) and task_name != "core_jobs_task"
-
-    async def _fake_shutdown_transition_handoff(**kwargs):
-        kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
-        return transition_handoff.TransitionHandoffHandles(
-            legacy_shutdown_plan=[],
-            transition_gate_applied=False,
-        )
-
-    async def _fake_shutdown_job_poller_handoff(**kwargs):
-        return job_poller_handoff.JobPollerShutdownHandoffHandles(
-            early_quiesced_job_poller_names={"core_jobs_task"},
-            should_run_late_stop=should_run_late_stop,
-        )
-
-    async def _fake_shutdown_coordinated_legacy_components(**kwargs):
-        return coordinated_legacy.CoordinatedLegacyShutdownHandles(
-            coordinated_legacy_component_names=set(),
-        )
-
-    async def _fake_run_shutdown_primary_late_stop_workers(**kwargs):
-        recorded_calls.append(kwargs)
-        return primary_workers.PrimaryLateStopWorkerHandles(
-            core_jobs_task=kwargs["core_jobs_task"],
-            core_jobs_stop_event=kwargs["core_jobs_stop_event"],
-            files_jobs_task=kwargs["files_jobs_task"],
-            files_jobs_stop_event=kwargs["files_jobs_stop_event"],
-            data_tables_jobs_task=kwargs["data_tables_jobs_task"],
-            data_tables_jobs_stop_event=kwargs["data_tables_jobs_stop_event"],
-            prompt_studio_jobs_task=kwargs["prompt_studio_jobs_task"],
-            prompt_studio_jobs_stop_event=kwargs["prompt_studio_jobs_stop_event"],
-            privilege_snapshot_task=kwargs["privilege_snapshot_task"],
-            privilege_snapshot_stop_event=kwargs["privilege_snapshot_stop_event"],
-            audio_jobs_task=kwargs["audio_jobs_task"],
-            audio_jobs_stop_event=kwargs["audio_jobs_stop_event"],
-            presentation_render_jobs_task=kwargs["presentation_render_jobs_task"],
-            presentation_render_jobs_stop_event=kwargs["presentation_render_jobs_stop_event"],
-        )
-
-    monkeypatch.setattr(
-        transition_handoff,
-        "shutdown_transition_handoff",
-        _fake_shutdown_transition_handoff,
-    )
-    monkeypatch.setattr(
-        job_poller_handoff,
-        "shutdown_job_poller_handoff",
-        _fake_shutdown_job_poller_handoff,
-    )
-    monkeypatch.setattr(
-        coordinated_legacy,
-        "shutdown_coordinated_legacy_components",
-        _fake_shutdown_coordinated_legacy_components,
-    )
-    monkeypatch.setattr(
-        primary_workers,
-        "run_shutdown_primary_late_stop_workers",
-        _fake_run_shutdown_primary_late_stop_workers,
-    )
-
-    with TestClient(app) as client:
-        assert client.get("/health").status_code == 200
-
-    assert len(recorded_calls) == 1
-    assert recorded_calls[0]["should_run_late_stop"] is should_run_late_stop
-    assert recorded_calls[0]["guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert "core_jobs_task" in recorded_calls[0]
-    assert "files_jobs_task" in recorded_calls[0]
-    assert "data_tables_jobs_task" in recorded_calls[0]
-    assert "prompt_studio_jobs_task" in recorded_calls[0]
-    assert "privilege_snapshot_task" in recorded_calls[0]
-    assert "audio_jobs_task" in recorded_calls[0]
-    assert "presentation_render_jobs_task" in recorded_calls[0]
-
-
-@pytest.mark.integration
-def test_lifespan_shutdown_delegates_grouped_late_stop_workers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import shutdown_coordinated_legacy_components as coordinated_legacy
-    from tldw_Server_API.app.services import shutdown_grouped_late_stop_workers as grouped_workers
-    from tldw_Server_API.app.services import shutdown_job_poller_handoff as job_poller_handoff
-    from tldw_Server_API.app.services import shutdown_primary_late_stop_workers as primary_workers
-    from tldw_Server_API.app.services import shutdown_transition_handoff as transition_handoff
-
-    app = main_module.app
-    recorded_calls: list[dict[str, object]] = []
-
-    def should_run_late_stop(task_name, task):
-        return bool(task) and task_name != "core_jobs_task"
-
-    async def _fake_shutdown_transition_handoff(**kwargs):
-        kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
-        return transition_handoff.TransitionHandoffHandles(
-            legacy_shutdown_plan=[],
-            transition_gate_applied=False,
-        )
-
-    async def _fake_shutdown_job_poller_handoff(**kwargs):
-        return job_poller_handoff.JobPollerShutdownHandoffHandles(
-            early_quiesced_job_poller_names={"core_jobs_task"},
-            should_run_late_stop=should_run_late_stop,
-        )
-
-    async def _fake_shutdown_coordinated_legacy_components(**kwargs):
-        return coordinated_legacy.CoordinatedLegacyShutdownHandles(
-            coordinated_legacy_component_names=set(),
-        )
-
-    async def _fake_shutdown_primary_late_stop_workers(**kwargs):
-        return primary_workers.PrimaryLateStopWorkerHandles(
-            core_jobs_task=kwargs["core_jobs_task"],
-            core_jobs_stop_event=kwargs["core_jobs_stop_event"],
-            files_jobs_task=kwargs["files_jobs_task"],
-            files_jobs_stop_event=kwargs["files_jobs_stop_event"],
-            data_tables_jobs_task=kwargs["data_tables_jobs_task"],
-            data_tables_jobs_stop_event=kwargs["data_tables_jobs_stop_event"],
-            prompt_studio_jobs_task=kwargs["prompt_studio_jobs_task"],
-            prompt_studio_jobs_stop_event=kwargs["prompt_studio_jobs_stop_event"],
-            privilege_snapshot_task=kwargs["privilege_snapshot_task"],
-            privilege_snapshot_stop_event=kwargs["privilege_snapshot_stop_event"],
-            audio_jobs_task=kwargs["audio_jobs_task"],
-            audio_jobs_stop_event=kwargs["audio_jobs_stop_event"],
-            presentation_render_jobs_task=kwargs["presentation_render_jobs_task"],
-            presentation_render_jobs_stop_event=kwargs["presentation_render_jobs_stop_event"],
-        )
-
-    async def _fake_run_shutdown_grouped_late_stop_workers(**kwargs):
-        recorded_calls.append(kwargs)
-        return grouped_workers.GroupedLateStopWorkerHandles(
-            media_ingest_jobs_task=kwargs["media_ingest_jobs_task"],
-            media_ingest_jobs_stop_event=kwargs["media_ingest_jobs_stop_event"],
-            media_ingest_heavy_jobs_task=kwargs["media_ingest_heavy_jobs_task"],
-            media_ingest_heavy_jobs_stop_event=kwargs["media_ingest_heavy_jobs_stop_event"],
-            reading_digest_jobs_task=kwargs["reading_digest_jobs_task"],
-            reading_digest_jobs_stop_event=kwargs["reading_digest_jobs_stop_event"],
-            study_pack_jobs_task=kwargs["study_pack_jobs_task"],
-            study_pack_jobs_stop_event=kwargs["study_pack_jobs_stop_event"],
-            study_suggestions_jobs_task=kwargs["study_suggestions_jobs_task"],
-            study_suggestions_jobs_stop_event=kwargs["study_suggestions_jobs_stop_event"],
-            companion_reflection_jobs_task=kwargs["companion_reflection_jobs_task"],
-            companion_reflection_jobs_stop_event=kwargs["companion_reflection_jobs_stop_event"],
-            reminder_jobs_task=kwargs["reminder_jobs_task"],
-            admin_backup_jobs_task=kwargs["admin_backup_jobs_task"],
-            admin_maintenance_rotation_jobs_task=kwargs["admin_maintenance_rotation_jobs_task"],
-            admin_maintenance_rotation_jobs_stop_event=kwargs["admin_maintenance_rotation_jobs_stop_event"],
-            recipe_run_jobs_task=kwargs["recipe_run_jobs_task"],
-            recipe_run_jobs_stop_event=kwargs["recipe_run_jobs_stop_event"],
-            evals_abtest_jobs_task=kwargs["evals_abtest_jobs_task"],
-            evals_abtest_jobs_stop_event=kwargs["evals_abtest_jobs_stop_event"],
-        )
-
-    monkeypatch.setattr(
-        transition_handoff,
-        "shutdown_transition_handoff",
-        _fake_shutdown_transition_handoff,
-    )
-    monkeypatch.setattr(
-        job_poller_handoff,
-        "shutdown_job_poller_handoff",
-        _fake_shutdown_job_poller_handoff,
-    )
-    monkeypatch.setattr(
-        coordinated_legacy,
-        "shutdown_coordinated_legacy_components",
-        _fake_shutdown_coordinated_legacy_components,
-    )
-    monkeypatch.setattr(
-        primary_workers,
-        "shutdown_primary_late_stop_workers",
-        _fake_shutdown_primary_late_stop_workers,
-    )
-    monkeypatch.setattr(
-        grouped_workers,
-        "run_shutdown_grouped_late_stop_workers",
-        _fake_run_shutdown_grouped_late_stop_workers,
-    )
-
-    with TestClient(app) as client:
-        assert client.get("/health").status_code == 200
-
-    assert len(recorded_calls) == 1
-    assert recorded_calls[0]["should_run_late_stop"] is should_run_late_stop
-    assert recorded_calls[0]["guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert "media_ingest_jobs_task" in recorded_calls[0]
-    assert "media_ingest_heavy_jobs_task" in recorded_calls[0]
-    assert "reading_digest_jobs_task" in recorded_calls[0]
-    assert "study_pack_jobs_task" in recorded_calls[0]
-    assert "study_suggestions_jobs_task" in recorded_calls[0]
-    assert "companion_reflection_jobs_task" in recorded_calls[0]
-    assert "reminder_jobs_task" in recorded_calls[0]
-    assert "admin_backup_jobs_task" in recorded_calls[0]
-    assert "admin_maintenance_rotation_jobs_task" in recorded_calls[0]
-    assert "recipe_run_jobs_task" in recorded_calls[0]
-    assert "evals_abtest_jobs_task" in recorded_calls[0]
-
-
-@pytest.mark.integration
-def test_lifespan_shutdown_delegates_post_worker_services(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import shutdown_coordinated_legacy_components as coordinated_legacy
-    from tldw_Server_API.app.services import shutdown_grouped_late_stop_workers as grouped_workers
-    from tldw_Server_API.app.services import shutdown_job_poller_handoff as job_poller_handoff
-    from tldw_Server_API.app.services import shutdown_post_worker_services as post_worker_services
-    from tldw_Server_API.app.services import shutdown_primary_late_stop_workers as primary_workers
-    from tldw_Server_API.app.services import shutdown_transition_handoff as transition_handoff
-
-    app = main_module.app
-    recorded_calls: list[dict[str, object]] = []
-
-    def should_run_late_stop(task_name, task):
-        return bool(task) and task_name != "core_jobs_task"
-
-    async def _fake_shutdown_transition_handoff(**kwargs):
-        kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
-        return transition_handoff.TransitionHandoffHandles(
-            legacy_shutdown_plan=[],
-            transition_gate_applied=False,
-        )
-
-    async def _fake_shutdown_job_poller_handoff(**kwargs):
-        return job_poller_handoff.JobPollerShutdownHandoffHandles(
-            early_quiesced_job_poller_names={"core_jobs_task"},
-            should_run_late_stop=should_run_late_stop,
-        )
-
-    async def _fake_shutdown_coordinated_legacy_components(**kwargs):
-        return coordinated_legacy.CoordinatedLegacyShutdownHandles(
-            coordinated_legacy_component_names=set(),
-        )
-
-    async def _fake_shutdown_primary_late_stop_workers(**kwargs):
-        return primary_workers.PrimaryLateStopWorkerHandles(
-            core_jobs_task=kwargs["core_jobs_task"],
-            core_jobs_stop_event=kwargs["core_jobs_stop_event"],
-            files_jobs_task=kwargs["files_jobs_task"],
-            files_jobs_stop_event=kwargs["files_jobs_stop_event"],
-            data_tables_jobs_task=kwargs["data_tables_jobs_task"],
-            data_tables_jobs_stop_event=kwargs["data_tables_jobs_stop_event"],
-            prompt_studio_jobs_task=kwargs["prompt_studio_jobs_task"],
-            prompt_studio_jobs_stop_event=kwargs["prompt_studio_jobs_stop_event"],
-            privilege_snapshot_task=kwargs["privilege_snapshot_task"],
-            privilege_snapshot_stop_event=kwargs["privilege_snapshot_stop_event"],
-            audio_jobs_task=kwargs["audio_jobs_task"],
-            audio_jobs_stop_event=kwargs["audio_jobs_stop_event"],
-            presentation_render_jobs_task=kwargs["presentation_render_jobs_task"],
-            presentation_render_jobs_stop_event=kwargs["presentation_render_jobs_stop_event"],
-        )
-
-    async def _fake_shutdown_grouped_late_stop_workers(**kwargs):
-        return grouped_workers.GroupedLateStopWorkerHandles(
-            media_ingest_jobs_task=kwargs["media_ingest_jobs_task"],
-            media_ingest_jobs_stop_event=kwargs["media_ingest_jobs_stop_event"],
-            media_ingest_heavy_jobs_task=kwargs["media_ingest_heavy_jobs_task"],
-            media_ingest_heavy_jobs_stop_event=kwargs["media_ingest_heavy_jobs_stop_event"],
-            reading_digest_jobs_task=kwargs["reading_digest_jobs_task"],
-            reading_digest_jobs_stop_event=kwargs["reading_digest_jobs_stop_event"],
-            study_pack_jobs_task=kwargs["study_pack_jobs_task"],
-            study_pack_jobs_stop_event=kwargs["study_pack_jobs_stop_event"],
-            study_suggestions_jobs_task=kwargs["study_suggestions_jobs_task"],
-            study_suggestions_jobs_stop_event=kwargs["study_suggestions_jobs_stop_event"],
-            companion_reflection_jobs_task=kwargs["companion_reflection_jobs_task"],
-            companion_reflection_jobs_stop_event=kwargs["companion_reflection_jobs_stop_event"],
-            reminder_jobs_task=kwargs["reminder_jobs_task"],
-            admin_backup_jobs_task=kwargs["admin_backup_jobs_task"],
-            admin_maintenance_rotation_jobs_task=kwargs["admin_maintenance_rotation_jobs_task"],
-            admin_maintenance_rotation_jobs_stop_event=kwargs["admin_maintenance_rotation_jobs_stop_event"],
-            recipe_run_jobs_task=kwargs["recipe_run_jobs_task"],
-            recipe_run_jobs_stop_event=kwargs["recipe_run_jobs_stop_event"],
-            evals_abtest_jobs_task=kwargs["evals_abtest_jobs_task"],
-            evals_abtest_jobs_stop_event=kwargs["evals_abtest_jobs_stop_event"],
-        )
-
-    async def _fake_run_shutdown_post_worker_services(**kwargs):
-        recorded_calls.append(kwargs)
-        return post_worker_services.PostWorkerShutdownHandles(
-            jobs_notifications_bridge_task=kwargs["jobs_notifications_bridge_task"],
-            jobs_metrics_task=kwargs["jobs_metrics_task"],
-            loop_lag_task=kwargs["loop_lag_task"],
-            jobs_metrics_reconcile_task=kwargs["jobs_metrics_reconcile_task"],
-            jobs_metrics_reconcile_stop=kwargs["jobs_metrics_reconcile_stop"],
-            jobs_crypto_rotate_task=kwargs["jobs_crypto_rotate_task"],
-            jobs_integrity_task=kwargs["jobs_integrity_task"],
-            jobs_webhooks_task=kwargs["jobs_webhooks_task"],
-            meetings_webhook_dlq_task=kwargs["meetings_webhook_dlq_task"],
-            workflows_dlq_task=kwargs["workflows_dlq_task"],
-            workflows_gc_task=kwargs["workflows_gc_task"],
-            workflows_maint_task=kwargs["workflows_maint_task"],
-        )
-
-    monkeypatch.setattr(
-        transition_handoff,
-        "shutdown_transition_handoff",
-        _fake_shutdown_transition_handoff,
-    )
-    monkeypatch.setattr(
-        job_poller_handoff,
-        "shutdown_job_poller_handoff",
-        _fake_shutdown_job_poller_handoff,
-    )
-    monkeypatch.setattr(
-        coordinated_legacy,
-        "shutdown_coordinated_legacy_components",
-        _fake_shutdown_coordinated_legacy_components,
-    )
-    monkeypatch.setattr(
-        primary_workers,
-        "shutdown_primary_late_stop_workers",
-        _fake_shutdown_primary_late_stop_workers,
-    )
-    monkeypatch.setattr(
-        grouped_workers,
-        "shutdown_grouped_late_stop_workers",
-        _fake_shutdown_grouped_late_stop_workers,
-    )
-    monkeypatch.setattr(
-        post_worker_services,
-        "run_shutdown_post_worker_services",
-        _fake_run_shutdown_post_worker_services,
-    )
-
-    with TestClient(app) as client:
-        assert client.get("/health").status_code == 200
-
-    assert len(recorded_calls) == 1
-    assert recorded_calls[0]["guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert "coordinated_legacy_component_names" not in recorded_calls[0]
-    assert "claims_task" not in recorded_calls[0]
-    assert "embeddings_compactor_task" not in recorded_calls[0]
-    assert "embeddings_compactor_stop_event" not in recorded_calls[0]
-    assert "websub_renewal_task" not in recorded_calls[0]
-    assert "usage_task" not in recorded_calls[0]
-    assert "llm_usage_task" not in recorded_calls[0]
-    assert "jobs_prune_task" not in recorded_calls[0]
-    assert "files_export_gc_task" not in recorded_calls[0]
-    assert "notifications_prune_task" not in recorded_calls[0]
-    assert "jobs_notifications_bridge_task" in recorded_calls[0]
-    assert "workflows_sched_task" not in recorded_calls[0]
-    assert "reading_digest_sched_task" not in recorded_calls[0]
-    assert "admin_backup_sched_task" not in recorded_calls[0]
-    assert "companion_reflection_sched_task" not in recorded_calls[0]
-    assert "reminders_sched_task" not in recorded_calls[0]
-    assert "connectors_sync_sched_task" not in recorded_calls[0]
-    assert "jobs_metrics_task" in recorded_calls[0]
-    assert "jobs_metrics_reconcile_task" in recorded_calls[0]
-    assert "jobs_crypto_rotate_task" in recorded_calls[0]
-    assert "workflows_maint_task" in recorded_calls[0]
 
 
 @pytest.mark.integration

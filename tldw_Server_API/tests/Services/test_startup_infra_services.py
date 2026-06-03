@@ -7,12 +7,87 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
+
 pytestmark = pytest.mark.unit
 
 
 def _import_startup_infra_services():
     sys.modules.pop("tldw_Server_API.app.services.startup_infra_services", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_infra_services")
+
+
+def _context() -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app=object(),
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_infra):
+    return {
+        spec.name: spec
+        for spec in startup_infra.provide_infra_worker_specs()
+    }
+
+
+def test_infra_worker_specs_match_legacy_worker_contract() -> None:
+    startup_infra = _import_startup_infra_services()
+
+    specs = _specs_by_name(startup_infra)
+
+    assert set(specs) == {"tts_history_cleanup_task", "connectors_jobs_task"}
+
+    tts = specs["tts_history_cleanup_task"]
+    assert tts.task_name == "tts_history_cleanup_task"
+    assert tts.category == "maintenance"
+    assert tts.phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert tts.timeout_sec == 5.0
+    assert tts.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert tts.factory is not None
+
+    connectors = specs["connectors_jobs_task"]
+    assert connectors.task_name == "connectors_jobs_task"
+    assert connectors.category == "jobs"
+    assert connectors.phase is ShutdownPhase.JOB_POLLER_QUIESCE
+    assert connectors.timeout_sec == 5.0
+    assert connectors.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert connectors.factory is not None
+
+
+def test_infra_worker_spec_factories_delegate_to_existing_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_infra = _import_startup_infra_services()
+    calls: list[tuple[str, object]] = []
+
+    async def _fake_connectors(*, stop_event: object) -> str:
+        calls.append(("connectors", stop_event))
+        return "connectors-task"
+
+    monkeypatch.setattr(
+        startup_infra,
+        "_run_tts_history_cleanup_loop",
+        lambda stop_event: calls.append(("tts", stop_event)) or "tts-coro",
+    )
+    monkeypatch.setattr(startup_infra, "_start_connectors_worker_service", _fake_connectors)
+
+    specs = _specs_by_name(startup_infra)
+
+    assert specs["tts_history_cleanup_task"].factory(_context(), "tts-stop") == "tts-coro"
+    connectors_result = specs["connectors_jobs_task"].factory(_context(), "connectors-stop")
+    assert inspect.isawaitable(connectors_result)
+    connectors_result.close()
+    assert calls == [("tts", "tts-stop")]
 
 
 @pytest.mark.asyncio

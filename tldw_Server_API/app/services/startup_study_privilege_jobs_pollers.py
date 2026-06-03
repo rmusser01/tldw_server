@@ -10,7 +10,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerSpec,
+    route_enabled_predicate,
+    stop_event_worker_spec,
+)
+from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -31,6 +38,45 @@ class StudyPrivilegeJobsPollerHandles:
     study_suggestions_jobs_task: Any | None = None
     privilege_snapshot_stop_event: Any | None = None
     privilege_snapshot_task: Any | None = None
+
+
+def provide_study_privilege_jobs_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for study and privilege jobs pollers."""
+
+    return (
+        stop_event_worker_spec(
+            name="study_pack_jobs_task",
+            worker_service=_run_study_pack_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "STUDY_PACK_JOBS_WORKER_ENABLED",
+                "flashcards",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="study_suggestions_jobs_task",
+            worker_service=_run_study_suggestions_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+                "study-suggestions",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="privilege_snapshot_task",
+            worker_service=_run_privilege_snapshot_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
+                "privileges",
+            ),
+        ),
+    )
 
 
 async def start_study_privilege_jobs_pollers(

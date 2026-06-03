@@ -11,6 +11,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
+
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
     OSError,
@@ -29,6 +37,76 @@ class CompactorWebsubStartupHandles:
     embeddings_compactor_stop_event: Any | None = None
     embeddings_compactor_task: Any | None = None
     websub_renewal_task: Any | None = None
+
+
+def provide_compactor_websub_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for embeddings compactor and WebSub renewal."""
+
+    return (
+        stop_event_worker_spec(
+            name="embeddings_compactor_task",
+            worker_service=_run_embeddings_vector_compactor_service,
+            category="embeddings",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_embeddings_compactor_worker_enabled,
+        ),
+        WorkerSpec(
+            name="websub_renewal_task",
+            task_name="websub_renewal_task",
+            category="collections-websub",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            enabled=_websub_renewal_worker_enabled,
+            factory=lambda _context, stop_event: _run_websub_renewal_worker_service(stop_event),
+        ),
+    )
+
+
+def _embeddings_compactor_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    return os.getenv("EMBEDDINGS_COMPACTOR_ENABLED", "false").lower() in _TRUTHY_ENV_VALUES
+
+
+def _websub_renewal_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    callback_base_url = os.getenv("WEBSUB_CALLBACK_BASE_URL", "").strip()
+    return (
+        bool(callback_base_url)
+        and env_flag_enabled("WEBSUB_RENEWAL_WORKER_ENABLED")
+        and context.route_enabled("collections-websub")
+    )
+
+
+async def _run_websub_renewal_worker_service(stop_event: Any) -> None:
+    """Run WebSub renewal under lifecycle stop-event ownership."""
+
+    task = _create_task(_run_websub_renewal_loop(), name="websub_renewal_task")
+    try:
+        await stop_event.wait()
+    finally:
+        await _cancel_and_wait_for_started_task(task, timeout=5.0)
+
+
+async def _cancel_and_wait_for_started_task(task: Any, *, timeout: float) -> None:
+    cancel = getattr(task, "cancel", None)
+    if callable(cancel):
+        cancel()
+    try:
+        await asyncio.wait_for(task, timeout=timeout)
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        if callable(cancel):
+            cancel()
+        logger.warning(
+            "WebSub renewal task did not stop within {}s after cancellation",
+            timeout,
+        )
+        raise
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(
+            "WebSub renewal task cleanup failed after {}",
+            type(exc).__name__,
+        )
 
 
 async def start_compactor_websub_workers(
@@ -142,7 +220,7 @@ async def _start_websub_renewal_worker(
                     await task
                 except asyncio.CancelledError:
                     pass
-                except Exception as exc:
+                except _STARTUP_GUARD_EXCEPTIONS as exc:
                     logger.debug(f"WebSub renewal task raised during startup rollback: {exc}")
                 raise
         logger.info("WebSub lease renewal worker started")

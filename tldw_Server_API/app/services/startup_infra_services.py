@@ -11,6 +11,14 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    WorkerLifecycleContext,
+    WorkerSpec,
+    stop_event_worker_spec,
+)
+from tldw_Server_API.app.services.lifecycle_worker_startup_adapters import (
+    run_started_task_until_stop,
+)
 from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
@@ -38,6 +46,38 @@ class ConnectorsStartupHandles:
     connectors_jobs_stop_event: Any | None = None
 
 
+def provide_infra_worker_specs(
+    _context: WorkerLifecycleContext | None = None,
+) -> tuple[WorkerSpec, ...]:
+    """Return declarative specs for infrastructure service workers."""
+
+    return (
+        stop_event_worker_spec(
+            name="tts_history_cleanup_task",
+            worker_service=_run_tts_history_cleanup_loop,
+            category="maintenance",
+            phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        ),
+        WorkerSpec(
+            name="connectors_jobs_task",
+            task_name="connectors_jobs_task",
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=_connectors_worker_enabled,
+            factory=lambda _context, stop_event: run_started_task_until_stop(
+                stop_event,
+                starter=lambda: _start_connectors_worker_service(
+                    stop_event=stop_event
+                ),
+            ),
+        ),
+    )
+
+
+def _connectors_worker_enabled(_context: WorkerLifecycleContext) -> bool:
+    return _env_flag_enabled("CONNECTORS_WORKER_ENABLED")
+
+
 async def start_infra_services(
     *,
     run_pg_rls_auto_ensure: Callable[[Any], Any],
@@ -52,6 +92,15 @@ async def start_infra_services(
         tts_history_cleanup_task=tts_history_cleanup_task,
         tts_history_cleanup_stop_event=tts_history_cleanup_stop_event,
     )
+
+
+async def run_startup_infra_non_worker_setup(
+    *,
+    run_pg_rls_auto_ensure: Callable[[Any], Any],
+) -> None:
+    """Run infrastructure startup setup that is not lifecycle-worker owned."""
+
+    await _maybe_ensure_pg_rls(run_pg_rls_auto_ensure)
 
 
 async def start_connectors_startup(

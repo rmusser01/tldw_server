@@ -3,8 +3,15 @@ from __future__ import annotations
 import importlib
 import sys
 from collections.abc import Callable
+from typing import Any
 
 import pytest
+
+from tldw_Server_API.app.services.lifecycle_worker_specs import (
+    ShutdownPhase,
+    WorkerLifecycleContext,
+    WorkerStrategy,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -12,6 +19,183 @@ pytestmark = pytest.mark.unit
 def _import_startup_primary_jobs_pollers():
     sys.modules.pop("tldw_Server_API.app.services.startup_primary_jobs_pollers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_primary_jobs_pollers")
+
+
+def _context(
+    *,
+    settings: dict[str, object] | None = None,
+    route_enabled: Callable[..., bool] | None = None,
+) -> WorkerLifecycleContext:
+    return WorkerLifecycleContext(
+        app="app",
+        settings=settings or {},
+        test_mode=True,
+        route_enabled=route_enabled or (lambda *_args, **_kwargs: True),
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+
+def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
+    return {
+        spec.name: spec
+        for spec in startup_pollers.provide_primary_jobs_worker_specs()
+    }
+
+
+@pytest.mark.parametrize(
+    "spec_name",
+    [
+        "core_jobs_task",
+        "files_jobs_task",
+        "data_tables_jobs_task",
+        "prompt_studio_jobs_task",
+    ],
+)
+def test_primary_jobs_worker_specs_match_legacy_worker_contract(
+    spec_name: str,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+
+    spec = _specs_by_name(startup_pollers)[spec_name]
+
+    assert spec.task_name == spec_name
+    assert spec.category == "jobs"
+    assert spec.phase is ShutdownPhase.JOB_POLLER_QUIESCE
+    assert spec.timeout_sec == 5.0
+    assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
+    assert spec.factory is not None
+    assert callable(spec.factory)
+
+
+def test_primary_jobs_worker_specs_use_expected_names() -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+
+    assert [spec.name for spec in startup_pollers.provide_primary_jobs_worker_specs()] == [
+        "core_jobs_task",
+        "files_jobs_task",
+        "data_tables_jobs_task",
+        "prompt_studio_jobs_task",
+    ]
+
+
+def test_primary_jobs_worker_spec_factories_delegate_to_existing_worker_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    calls: list[tuple[str, object]] = []
+
+    for spec_name, factory_name in [
+        ("core_jobs_task", "_run_chatbooks_core_jobs_worker_service"),
+        ("files_jobs_task", "_run_file_artifacts_jobs_worker_service"),
+        ("data_tables_jobs_task", "_run_data_tables_jobs_worker_service"),
+        ("prompt_studio_jobs_task", "_run_prompt_studio_jobs_worker_service"),
+    ]:
+        monkeypatch.setattr(
+            startup_pollers,
+            factory_name,
+            lambda stop_event, name=spec_name: calls.append((name, stop_event)) or f"{name}-awaitable",
+        )
+
+    specs = _specs_by_name(startup_pollers)
+
+    for spec_name, spec in specs.items():
+        assert spec.factory is not None
+        assert spec.factory(_context(), f"{spec_name}-stop") == f"{spec_name}-awaitable"
+
+    assert calls == [
+        ("core_jobs_task", "core_jobs_task-stop"),
+        ("files_jobs_task", "files_jobs_task-stop"),
+        ("data_tables_jobs_task", "data_tables_jobs_task-stop"),
+        ("prompt_studio_jobs_task", "prompt_studio_jobs_task-stop"),
+    ]
+
+
+def test_primary_jobs_worker_spec_predicates_use_route_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _route_enabled(*args: object, **kwargs: object) -> bool:
+        calls.append((args, kwargs))
+        return False
+
+    context = _context(route_enabled=_route_enabled)
+    specs = _specs_by_name(startup_pollers)
+    for env_key in [
+        "FILES_JOBS_WORKER_ENABLED",
+        "DATA_TABLES_JOBS_WORKER_ENABLED",
+        "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
+    ]:
+        monkeypatch.setenv(env_key, "true")
+
+    assert specs["files_jobs_task"].enabled(context) is False
+    assert specs["data_tables_jobs_task"].enabled(context) is False
+    assert specs["prompt_studio_jobs_task"].enabled(context) is False
+    assert calls == [
+        (("files",), {}),
+        (("data-tables",), {}),
+        (("prompt-studio",), {}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("env", "settings", "expected"),
+    [
+        ({}, {}, True),
+        ({"CHATBOOKS_JOBS_BACKEND": "core"}, {}, True),
+        ({"TLDW_JOBS_BACKEND": "core"}, {}, True),
+        ({"CHATBOOKS_JOBS_BACKEND": "jobs"}, {}, False),
+        ({"CHATBOOKS_CORE_WORKER_ENABLED": "false"}, {}, False),
+    ],
+)
+def test_core_jobs_worker_spec_preserves_backend_flag_predicate(
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+    settings: dict[str, object],
+    expected: bool,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    for key in [
+        "CHATBOOKS_JOBS_BACKEND",
+        "TLDW_JOBS_BACKEND",
+        "CHATBOOKS_CORE_WORKER_ENABLED",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    spec = _specs_by_name(startup_pollers)["core_jobs_task"]
+
+    assert spec.enabled(_context(settings=settings)) is expected
+
+
+def test_core_jobs_worker_spec_uses_explicit_sidecar_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    for key in [
+        "CHATBOOKS_JOBS_BACKEND",
+        "TLDW_JOBS_BACKEND",
+        "CHATBOOKS_CORE_WORKER_ENABLED",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    spec = _specs_by_name(startup_pollers)["core_jobs_task"]
+
+    context = WorkerLifecycleContext(
+        app="app",
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+        sidecar_mode=True,
+    )
+    assert spec.enabled(context) is False
 
 
 @pytest.mark.asyncio
