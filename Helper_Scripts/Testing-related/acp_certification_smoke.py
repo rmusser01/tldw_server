@@ -13,6 +13,7 @@ import json
 import os
 import queue
 import shlex
+import signal
 # subprocess is intentionally used to run static manifest argv with shell=False.
 import subprocess  # nosec B404
 import sys
@@ -36,6 +37,7 @@ _ERROR_MESSAGE_LIMIT = 240
 _STDOUT_LINE_LIMIT = 64 * 1024
 _STDOUT_QUEUE_MAXSIZE = 32
 _SESSION_ID_PLACEHOLDER = "${session_id}"
+_FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -194,8 +196,8 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "profile": profile,
         "name": entrypoint.get("name") or profile,
-        "support_state": "documented_unverified",
-        "verification_level": "documented_only",
+        "support_state": entrypoint.get("support_state") or "documented_unverified",
+        "verification_level": entrypoint.get("verification_level") or "documented_only",
         "requires_live_agent": True,
         "required_environment": [],
         "entrypoint": {
@@ -206,6 +208,14 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
             "primary_blocker": primary_blocker,
             "status_message": entrypoint.get("status_message") or "",
             "docs_url": entrypoint.get("docs_url"),
+            "adapter_source": entrypoint.get("adapter_source"),
+            "adapter_docs_url": entrypoint.get("adapter_docs_url"),
+            "adapter_package": entrypoint.get("adapter_package"),
+            "adapter_version": entrypoint.get("adapter_version"),
+            "adapter_version_policy": entrypoint.get("adapter_version_policy"),
+            "adapter_install_source": entrypoint.get("adapter_install_source"),
+            "credential_policy": entrypoint.get("credential_policy"),
+            "runtime_backend": entrypoint.get("runtime_backend"),
         },
         "blockers": blockers,
         "notes": [
@@ -700,6 +710,37 @@ def _wait_for_process(process: subprocess.Popen[str], timeout: float) -> bool:
         return True
 
 
+def _signal_process_group(process: subprocess.Popen[str], sig: int) -> bool:
+    """Signal the process group owned by a stdio probe subprocess."""
+    if os.name != "posix" or not hasattr(os, "killpg"):
+        return False
+    pid = getattr(process, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.killpg(pid, sig)
+        return True
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+
+
+def _stop_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) -> None:
+    """Terminate a stdio probe subprocess and any children it spawned."""
+    if force_kill:
+        if not _signal_process_group(process, _FORCE_KILL_SIGNAL):
+            process.kill()
+        return
+
+    if _signal_process_group(process, signal.SIGTERM):
+        return
+    if hasattr(process, "terminate"):
+        process.terminate()
+        return
+    process.kill()
+
+
 def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) -> None:
     """Close stdio, stop the subprocess, and wait so failure paths do not leak."""
     is_running = True
@@ -717,12 +758,7 @@ def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) 
 
     if is_running:
         try:
-            if force_kill:
-                process.kill()
-            elif hasattr(process, "terminate"):
-                process.terminate()
-            else:
-                process.kill()
+            _stop_stdio_process(process, force_kill=force_kill)
         except OSError:
             pass
 
@@ -730,7 +766,7 @@ def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) 
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:
         try:
-            process.kill()
+            _stop_stdio_process(process, force_kill=True)
         except OSError:
             pass
         try:
@@ -917,6 +953,7 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             env=_command_env(command),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            start_new_session=os.name == "posix",
             text=True,
         )
     except FileNotFoundError as exc:
@@ -1047,6 +1084,14 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
 def run_manifest_dict(manifest: dict[str, Any]) -> int:
     """Run safe-by-default commands from a certification manifest dictionary."""
     if manifest["requires_live_agent"]:
+        blockers = [str(blocker) for blocker in manifest.get("blockers", []) if blocker]
+        if blockers:
+            print(
+                "Refusing to run ACP certification for blocked manifest: "
+                + ", ".join(blockers),
+                file=sys.stderr,
+            )
+            return 2
         missing = [
             name for name in manifest["required_environment"]
             if not os.environ.get(name)
@@ -1055,6 +1100,12 @@ def run_manifest_dict(manifest: dict[str, Any]) -> int:
             print(
                 "Refusing to run live ACP certification without required environment: "
                 + ", ".join(missing),
+                file=sys.stderr,
+            )
+            return 2
+        if not manifest["commands"]:
+            print(
+                "Refusing to run ACP certification: manifest has no runnable commands.",
                 file=sys.stderr,
             )
             return 2
@@ -1079,6 +1130,7 @@ def run_manifest_dict(manifest: dict[str, Any]) -> int:
             result_code = _run_stdio_jsonrpc_sequence(command, cwd)
             if result_code != 0:
                 return int(result_code)
+            print(f"PASS {command['id']}")
             continue
         try:
             result = subprocess.run(  # nosec B603
@@ -1114,8 +1166,22 @@ def _build_registry_agent_manifest(agent_profile: str) -> dict[str, Any]:
     if entry is None:
         raise ValueError(f"Unknown ACP agent profile: {agent_profile}")
     classification = classify_agent_entrypoint(entry)
+    entry_metadata = {
+        "support_state": getattr(entry, "support_state", None),
+        "verification_level": getattr(entry, "verification_level", None),
+        "adapter_source": getattr(entry, "adapter_source", None),
+        "adapter_docs_url": getattr(entry, "adapter_docs_url", None),
+        "adapter_package": getattr(entry, "adapter_package", None),
+        "adapter_version": getattr(entry, "adapter_version", None),
+        "adapter_version_policy": getattr(entry, "adapter_version_policy", None),
+        "adapter_install_source": getattr(entry, "adapter_install_source", None),
+        "credential_policy": getattr(entry, "credential_policy", None),
+        "runtime_backend": getattr(entry, "runtime_backend", None),
+    }
     return build_agent_profile_manifest(
-        classification.as_dict() | {"type": entry.type, "name": entry.name}
+        classification.as_dict()
+        | {key: value for key, value in entry_metadata.items() if value is not None}
+        | {"type": entry.type, "name": entry.name}
     )
 
 

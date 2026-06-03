@@ -57,6 +57,47 @@ agents:
     assert entry.acp_args == ["acp"]
 
 
+def test_seeded_codex_profile_uses_pinned_external_acp_adapter() -> None:
+    registry = AgentRegistry()
+    registry.load()
+
+    entry = registry.get_entry("codex")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "codex"
+    assert entry.acp_command == "codex-acp"
+    assert entry.adapter_source == "zed-industries/codex-acp"
+    assert entry.adapter_version == "0.15.0"
+    assert entry.adapter_version_policy == "exact_pin_required"
+    assert entry.adapter_install_source == "github_release_preferred"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.support_state == "experimental"
+    assert entry.verification_level == "documented_only"
+
+
+def test_legacy_adapter_acp_input_is_imported_as_external_acp_adapter(tmp_path) -> None:
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(
+        """
+agents:
+  - type: legacy_codex
+    name: Legacy Codex
+    command: codex
+    entrypoint_strategy: adapter_acp
+    acp_command: codex-acp
+"""
+    )
+
+    registry = AgentRegistry(yaml_path=str(yaml_file))
+    registry.load()
+
+    entry = registry.get_entry("legacy_codex")
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert classify_agent_entrypoint(entry).entrypoint_strategy == "external_acp_adapter"
+
+
 def test_registry_loads_null_yaml_acp_command_as_missing_entrypoint(tmp_path) -> None:
     yaml_file = tmp_path / "agents.yaml"
     yaml_file.write_text(
@@ -98,7 +139,7 @@ def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> No
         certification_blocker="adapter_missing",
     )
 
-    assert entry.entrypoint_strategy == "adapter_acp"
+    assert entry.entrypoint_strategy == "external_acp_adapter"
     assert entry.acp_command == "agent-acp"
     assert entry.acp_args == ["--stdio"]
 
@@ -106,12 +147,49 @@ def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> No
     reloaded._load_api_entries()
     persisted = reloaded.get_entry("adapter_agent")
     assert persisted is not None
-    assert persisted.entrypoint_strategy == "adapter_acp"
+    assert persisted.entrypoint_strategy == "external_acp_adapter"
     assert persisted.acp_command == "agent-acp"
     assert persisted.acp_args == ["--stdio"]
     assert persisted.adapter_source == "example/agent-acp"
     assert persisted.adapter_docs_url == "https://example.test/agent-acp"
     assert persisted.certification_blocker == "adapter_missing"
+
+
+def test_dynamic_registration_preserves_adapter_metadata_fields(acp_db) -> None:
+    registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+
+    entry = registry.register_agent(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="adapter_acp",
+        acp_command="codex-acp",
+        adapter_source="zed-industries/codex-acp",
+        adapter_package="@zed-industries/codex-acp",
+        adapter_version="0.15.0",
+        adapter_version_policy="exact_pin_required",
+        adapter_install_source="github_release_preferred",
+        credential_policy="delegated_to_adapter",
+        runtime_backend="acp_downstream",
+    )
+
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.adapter_version == "0.15.0"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.runtime_backend == "acp_downstream"
+
+    reloaded = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+    reloaded._load_api_entries()
+    persisted = reloaded.get_entry("codex")
+    assert persisted is not None
+    assert persisted.entrypoint_strategy == "external_acp_adapter"
+    assert persisted.adapter_source == "zed-industries/codex-acp"
+    assert persisted.adapter_package == "@zed-industries/codex-acp"
+    assert persisted.adapter_version == "0.15.0"
+    assert persisted.adapter_version_policy == "exact_pin_required"
+    assert persisted.adapter_install_source == "github_release_preferred"
+    assert persisted.credential_policy == "delegated_to_adapter"
+    assert persisted.runtime_backend == "acp_downstream"
 
 
 def test_update_agent_clears_nullable_entrypoint_metadata(acp_db) -> None:
@@ -141,6 +219,35 @@ def test_update_agent_clears_nullable_entrypoint_metadata(acp_db) -> None:
     assert persisted["adapter_source"] is None
     assert persisted["adapter_docs_url"] is None
     assert persisted["certification_blocker"] is None
+
+
+def test_update_agent_preserves_adapter_metadata_fields(acp_db) -> None:
+    registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+    registry.register_agent(type="codex", name="Codex")
+
+    updated = registry.update_agent(
+        "codex",
+        entrypoint_strategy="adapter_acp",
+        adapter_package="@zed-industries/codex-acp",
+        adapter_version="0.15.0",
+        adapter_version_policy="exact_pin_required",
+        adapter_install_source="github_release_preferred",
+        credential_policy="delegated_to_adapter",
+        runtime_backend="acp_downstream",
+    )
+
+    assert updated is not None
+    assert updated.entrypoint_strategy == "external_acp_adapter"
+    assert updated.adapter_version == "0.15.0"
+    assert updated.credential_policy == "delegated_to_adapter"
+    assert updated.runtime_backend == "acp_downstream"
+
+    persisted = acp_db.get_agent_entry("codex")
+    assert persisted is not None
+    assert persisted["entrypoint_strategy"] == "external_acp_adapter"
+    assert persisted["adapter_version"] == "0.15.0"
+    assert persisted["credential_policy"] == "delegated_to_adapter"
+    assert persisted["runtime_backend"] == "acp_downstream"
 
 
 def test_update_agent_ignores_none_for_required_name_without_db_failure(acp_db) -> None:
@@ -242,6 +349,28 @@ def test_classifier_ready_to_probe_native_entrypoint() -> None:
     assert result.blockers == ()
     assert result.as_dict()["acp_args"] == ["acp"]
     assert result.as_dict()["blockers"] == []
+
+
+def test_external_acp_adapter_is_canonical_strategy() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="codex-acp",
+        adapter_source="zed-industries/codex-acp",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+        env_getter=lambda _name: None,
+    )
+
+    assert result.entrypoint_strategy == "external_acp_adapter"
+    assert result.probe_state == "ready_to_probe"
+    assert result.acp_command == "codex-acp"
+    assert result.primary_blocker is None
 
 
 def test_classification_is_immutable_against_source_and_as_dict_mutation() -> None:
@@ -417,6 +546,69 @@ def test_classifier_adapter_requires_adapter_command() -> None:
 
     assert result.probe_state == "blocked"
     assert result.primary_blocker == "adapter_missing"
+
+
+def test_external_adapter_reports_adapter_missing_without_falling_back_to_agent_command() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="codex-acp",
+        adapter_source="zed-industries/codex-acp",
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: "/usr/bin/codex" if command == "codex" else None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "adapter_missing"
+    assert "adapter_missing" in result.blockers
+    assert "binary_missing" not in result.blockers
+
+
+def test_external_adapter_reports_display_agent_binary_missing_separately() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="codex-acp",
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: "/usr/bin/codex-acp" if command == "codex-acp" else None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "agent_binary_missing"
+    assert "agent_binary_missing" in result.blockers
+
+
+def test_external_adapter_blocks_mutable_npx_latest_invocation() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="npx",
+        acp_args=["@zed-industries/codex-acp@latest"],
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "mutable_adapter_invocation"
+    assert "mutable_adapter_invocation" in result.blockers
 
 
 def test_classifier_custom_template_is_never_probe_ready() -> None:

@@ -26,19 +26,50 @@ except ImportError:
 ACP_COMPATIBILITY_DOCS_URL = "/docs-static/Development/ACP_Compatibility_Matrix.md"
 AgentEntrypointStrategy = Literal[
     "native_acp",
-    "adapter_acp",
+    "external_acp_adapter",
     "documented_candidate",
     "custom_template",
 ]
 AgentProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+AdapterVersionPolicy = Literal["exact_pin_required", "operator_managed", "unknown"]
+AdapterInstallSource = Literal["github_release_preferred", "npm_pinned_allowed", "operator_managed", "unknown"]
+CredentialPolicy = Literal["env_var", "delegated_to_adapter", "none", "unknown"]
+CredentialState = Literal["ready", "missing", "delegated", "unknown"]
+RuntimeBackend = Literal["acp_downstream", "codex_app_server", "runner_adapter", "unknown"]
+_LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
+    "adapter_acp": "external_acp_adapter",
+}
 _SHELL_BUILTIN_COMMANDS = frozenset({"alias", "cd", "export", "set", "source", "unset"})
+_ADAPTER_VERSION_POLICIES = frozenset({"exact_pin_required", "operator_managed", "unknown"})
+_ADAPTER_INSTALL_SOURCES = frozenset({
+    "github_release_preferred",
+    "npm_pinned_allowed",
+    "operator_managed",
+    "unknown",
+})
+_CREDENTIAL_POLICIES = frozenset({"env_var", "delegated_to_adapter", "none", "unknown"})
+_RUNTIME_BACKENDS = frozenset({"acp_downstream", "codex_app_server", "runner_adapter", "unknown"})
 
 
 def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
     """Return a valid entrypoint strategy, defaulting unknown input conservatively."""
-    if value in {"native_acp", "adapter_acp", "documented_candidate", "custom_template"}:
-        return value
+    normalized = _LEGACY_ENTRYPOINT_STRATEGY_ALIASES.get(str(value), value)
+    if normalized in {"native_acp", "external_acp_adapter", "documented_candidate", "custom_template"}:
+        return normalized
     return "documented_candidate"
+
+
+def _coerce_literal(value: Any, allowed: frozenset[str], default: str) -> str:
+    """Return a known registry literal value, falling back conservatively."""
+    normalized = str(value) if value is not None else default
+    return normalized if normalized in allowed else default
+
+
+def _is_mutable_adapter_invocation(command: str, args: list[str]) -> bool:
+    """Detect mutable package-manager adapter invocations that are not stable binaries."""
+    if command != "npx":
+        return False
+    return any(str(arg).endswith("@latest") for arg in args)
 
 
 @dataclass(frozen=True)
@@ -53,6 +84,14 @@ class AgentEntrypointClassification:
     blockers: tuple[str, ...]
     status_message: str
     docs_url: str | None
+    display_command: str = ""
+    display_binary_found: bool | None = None
+    adapter_found: bool | None = None
+    credential_state: CredentialState = "unknown"
+    adapter_source: str | None = None
+    adapter_package: str | None = None
+    adapter_version: str | None = None
+    runtime_backend: str = "acp_downstream"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "acp_args", tuple(self.acp_args))
@@ -69,6 +108,14 @@ class AgentEntrypointClassification:
             "blockers": list(self.blockers),
             "status_message": self.status_message,
             "docs_url": self.docs_url,
+            "display_command": self.display_command,
+            "display_binary_found": self.display_binary_found,
+            "adapter_found": self.adapter_found,
+            "credential_state": self.credential_state,
+            "adapter_source": self.adapter_source,
+            "adapter_package": self.adapter_package,
+            "adapter_version": self.adapter_version,
+            "runtime_backend": self.runtime_backend,
         }
 
 
@@ -105,8 +152,14 @@ class AgentRegistryEntry:
     acp_command: str = ""
     acp_args: list[str] = field(default_factory=list)
     adapter_source: str | None = None
+    adapter_package: str | None = None
+    adapter_version: str | None = None
+    adapter_version_policy: AdapterVersionPolicy = "unknown"
+    adapter_install_source: AdapterInstallSource = "unknown"
     adapter_docs_url: str | None = None
     certification_blocker: str | None = None
+    credential_policy: CredentialPolicy = "unknown"
+    runtime_backend: RuntimeBackend = "acp_downstream"
 
     # Protocol adapter fields (new for agent workspace harness)
     protocol: Literal["stdio", "mcp", "openai_tool_use"] = "stdio"
@@ -126,6 +179,29 @@ class AgentRegistryEntry:
     mcp_llm_model: str | None = None
     mcp_max_iterations: int = 20
     mcp_refresh_tools: bool = False
+
+    def __post_init__(self) -> None:
+        self.entrypoint_strategy = _coerce_entrypoint_strategy(self.entrypoint_strategy)
+        self.adapter_version_policy = _coerce_literal(
+            self.adapter_version_policy,
+            _ADAPTER_VERSION_POLICIES,
+            "unknown",
+        )  # type: ignore[assignment]
+        self.adapter_install_source = _coerce_literal(
+            self.adapter_install_source,
+            _ADAPTER_INSTALL_SOURCES,
+            "unknown",
+        )  # type: ignore[assignment]
+        self.credential_policy = _coerce_literal(
+            self.credential_policy,
+            _CREDENTIAL_POLICIES,
+            "unknown",
+        )  # type: ignore[assignment]
+        self.runtime_backend = _coerce_literal(
+            self.runtime_backend,
+            _RUNTIME_BACKENDS,
+            "acp_downstream",
+        )  # type: ignore[assignment]
 
     def check_availability(self) -> dict[str, Any]:
         """Check runtime availability of this agent."""
@@ -148,13 +224,22 @@ class AgentRegistryEntry:
         else:
             result["binary_found"] = True  # No binary required (e.g., "custom")
 
-        # Check API key
-        if self.requires_api_key:
+        # Check API key. External adapters may own their provider login, so passive
+        # availability should not infer host env-var readiness for delegated auth.
+        if self.credential_policy == "delegated_to_adapter":
+            result["api_key_set"] = True
+            result["credential_state"] = "delegated"
+        elif self.credential_policy == "none":
+            result["api_key_set"] = True
+            result["credential_state"] = "ready"
+        elif self.requires_api_key:
             result["api_key_set"] = bool(os.getenv(self.requires_api_key))
             if not result["api_key_set"]:
                 result["missing_api_key"] = self.requires_api_key
+            result["credential_state"] = "ready" if result["api_key_set"] else "missing"
         else:
             result["api_key_set"] = True
+            result["credential_state"] = "unknown"
 
         # Overall status
         if not result.get("binary_found"):
@@ -164,7 +249,8 @@ class AgentRegistryEntry:
         else:
             result["status"] = "available"
 
-        result["is_configured"] = result["status"] == "available"
+        entrypoint = classify_agent_entrypoint(self)
+        result["is_configured"] = entrypoint.probe_state == "ready_to_probe"
         return result
 
 
@@ -179,6 +265,26 @@ def classify_agent_entrypoint(
     acp_command = entry.acp_command
     acp_args = list(entry.acp_args)
     docs_url = entry.compatibility_docs_url or entry.docs_url
+    display_command = entry.command
+    display_binary_found = (
+        bool(command_resolver(display_command))
+        if display_command
+        else None
+    )
+    entrypoint_binary_found = (
+        bool(command_resolver(acp_command))
+        if acp_command
+        else None
+    )
+    adapter_found = entrypoint_binary_found if strategy == "external_acp_adapter" else None
+
+    credential_state: CredentialState = "unknown"
+    if entry.credential_policy == "delegated_to_adapter":
+        credential_state = "delegated"
+    elif entry.credential_policy == "none":
+        credential_state = "ready"
+    elif entry.requires_api_key:
+        credential_state = "ready" if env_getter(entry.requires_api_key) else "missing"
 
     def classification(
         probe_state: AgentProbeState,
@@ -200,6 +306,14 @@ def classify_agent_entrypoint(
             blockers=normalized_blockers,
             status_message=status_message,
             docs_url=docs_url,
+            display_command=display_command,
+            display_binary_found=display_binary_found,
+            adapter_found=adapter_found,
+            credential_state=credential_state,
+            adapter_source=entry.adapter_source,
+            adapter_package=entry.adapter_package,
+            adapter_version=entry.adapter_version,
+            runtime_backend=entry.runtime_backend,
         )
 
     def blocked_status(blockers: list[str]) -> str:
@@ -209,7 +323,9 @@ def classify_agent_entrypoint(
             "shell_builtin_collision": "Configured ACP command matches a shell builtin or alias-like value.",
             "credentials_missing": "Required API key or credential environment variable is missing.",
             "adapter_missing": "Configured ACP adapter command is not available on PATH.",
+            "agent_binary_missing": "Downstream agent CLI controlled by the adapter is not available on PATH.",
             "binary_missing": "Configured ACP entrypoint command is not available on PATH.",
+            "mutable_adapter_invocation": "Configured ACP adapter invocation uses a mutable package version.",
         }
         if not blockers:
             return "ACP entrypoint readiness is blocked."
@@ -247,12 +363,17 @@ def classify_agent_entrypoint(
     if shell_builtin_collision:
         blockers.append("shell_builtin_collision")
 
-    if entry.requires_api_key and not env_getter(entry.requires_api_key):
+    if credential_state == "missing" and entry.requires_api_key:
         blockers.append("credentials_missing")
 
-    if acp_command and not shell_builtin_collision and not command_resolver(acp_command):
-        blocker = "adapter_missing" if strategy == "adapter_acp" else "binary_missing"
-        blockers.append(blocker)
+    if strategy == "external_acp_adapter" and _is_mutable_adapter_invocation(acp_command, acp_args):
+        blockers.append("mutable_adapter_invocation")
+
+    if acp_command and not shell_builtin_collision and entrypoint_binary_found is False:
+        blockers.append("adapter_missing" if strategy == "external_acp_adapter" else "binary_missing")
+
+    if strategy == "external_acp_adapter" and display_binary_found is False:
+        blockers.append("agent_binary_missing")
 
     if blockers:
         return classification(
@@ -347,8 +468,14 @@ class AgentRegistry:
                 acp_command=str(item.get("acp_command") or ""),
                 acp_args=list(item.get("acp_args", [])),
                 adapter_source=item.get("adapter_source"),
+                adapter_package=item.get("adapter_package"),
+                adapter_version=item.get("adapter_version"),
+                adapter_version_policy=item.get("adapter_version_policy", "unknown"),
+                adapter_install_source=item.get("adapter_install_source", "unknown"),
                 adapter_docs_url=item.get("adapter_docs_url"),
                 certification_blocker=item.get("certification_blocker"),
+                credential_policy=item.get("credential_policy", "unknown"),
+                runtime_backend=item.get("runtime_backend", "acp_downstream"),
                 mcp_orchestration=item.get("mcp_orchestration", "agent_driven"),
                 mcp_entry_tool=str(item.get("mcp_entry_tool", "execute")),
                 mcp_structured_response=bool(item.get("mcp_structured_response", False)),
@@ -429,8 +556,14 @@ class AgentRegistry:
                     acp_command=row.get("acp_command", ""),
                     acp_args=self._load_json(row.get("acp_args"), []),
                     adapter_source=row.get("adapter_source"),
+                    adapter_package=row.get("adapter_package"),
+                    adapter_version=row.get("adapter_version"),
+                    adapter_version_policy=row.get("adapter_version_policy", "unknown"),
+                    adapter_install_source=row.get("adapter_install_source", "unknown"),
                     adapter_docs_url=row.get("adapter_docs_url"),
                     certification_blocker=row.get("certification_blocker"),
+                    credential_policy=row.get("credential_policy", "unknown"),
+                    runtime_backend=row.get("runtime_backend", "acp_downstream"),
                     mcp_orchestration=row.get("mcp_orchestration", "agent_driven"),
                     mcp_entry_tool=row.get("mcp_entry_tool", "execute"),
                     mcp_structured_response=bool(row.get("mcp_structured_response", 0)),
@@ -500,8 +633,14 @@ class AgentRegistry:
         acp_command: str = "",
         acp_args: list[str] | None = None,
         adapter_source: str | None = None,
+        adapter_package: str | None = None,
+        adapter_version: str | None = None,
+        adapter_version_policy: AdapterVersionPolicy = "unknown",
+        adapter_install_source: AdapterInstallSource = "unknown",
         adapter_docs_url: str | None = None,
         certification_blocker: str | None = None,
+        credential_policy: CredentialPolicy = "unknown",
+        runtime_backend: RuntimeBackend = "acp_downstream",
     ) -> AgentRegistryEntry:
         """Register or update a dynamic agent entry."""
         with self._lock:
@@ -527,8 +666,14 @@ class AgentRegistry:
                 acp_command=acp_command,
                 acp_args=acp_args or [],
                 adapter_source=adapter_source,
+                adapter_package=adapter_package,
+                adapter_version=adapter_version,
+                adapter_version_policy=adapter_version_policy,
+                adapter_install_source=adapter_install_source,
                 adapter_docs_url=adapter_docs_url,
                 certification_blocker=certification_blocker,
+                credential_policy=credential_policy,
+                runtime_backend=runtime_backend,
             )
             if self._db is not None:
                 self._db.save_agent_entry({
@@ -552,8 +697,14 @@ class AgentRegistry:
                     "acp_command": acp_command,
                     "acp_args": json.dumps(acp_args or []),
                     "adapter_source": adapter_source,
+                    "adapter_package": entry.adapter_package,
+                    "adapter_version": entry.adapter_version,
+                    "adapter_version_policy": entry.adapter_version_policy,
+                    "adapter_install_source": entry.adapter_install_source,
                     "adapter_docs_url": adapter_docs_url,
                     "certification_blocker": certification_blocker,
+                    "credential_policy": entry.credential_policy,
+                    "runtime_backend": entry.runtime_backend,
                     "source": "api",
                 })
             self._api_entries = [e for e in self._api_entries if e.type != type]
@@ -574,7 +725,9 @@ class AgentRegistry:
         "name", "description", "command", "args", "env",
         "requires_api_key", "install_instructions", "docs_url",
         "entrypoint_strategy", "acp_command", "acp_args", "adapter_source",
-        "adapter_docs_url", "certification_blocker",
+        "adapter_package", "adapter_version", "adapter_version_policy",
+        "adapter_install_source", "adapter_docs_url", "certification_blocker",
+        "credential_policy", "runtime_backend",
         "mcp_orchestration", "mcp_entry_tool", "mcp_structured_response",
         "mcp_llm_provider", "mcp_llm_model", "mcp_max_iterations", "mcp_refresh_tools",
     })
@@ -591,6 +744,10 @@ class AgentRegistry:
         "description",
         "command",
         "acp_command",
+        "adapter_version_policy",
+        "adapter_install_source",
+        "credential_policy",
+        "runtime_backend",
         "mcp_orchestration",
         "mcp_entry_tool",
         "mcp_structured_response",
@@ -617,6 +774,14 @@ class AgentRegistry:
                         continue
                     if key == "entrypoint_strategy":
                         value = _coerce_entrypoint_strategy(value)
+                    elif key == "adapter_version_policy":
+                        value = _coerce_literal(value, _ADAPTER_VERSION_POLICIES, "unknown")
+                    elif key == "adapter_install_source":
+                        value = _coerce_literal(value, _ADAPTER_INSTALL_SOURCES, "unknown")
+                    elif key == "credential_policy":
+                        value = _coerce_literal(value, _CREDENTIAL_POLICIES, "unknown")
+                    elif key == "runtime_backend":
+                        value = _coerce_literal(value, _RUNTIME_BACKENDS, "acp_downstream")
                     setattr(existing, key, value)
             if self._db is not None:
                 self._db.save_agent_entry({
@@ -640,8 +805,14 @@ class AgentRegistry:
                     "acp_command": existing.acp_command,
                     "acp_args": json.dumps(existing.acp_args),
                     "adapter_source": existing.adapter_source,
+                    "adapter_package": existing.adapter_package,
+                    "adapter_version": existing.adapter_version,
+                    "adapter_version_policy": existing.adapter_version_policy,
+                    "adapter_install_source": existing.adapter_install_source,
                     "adapter_docs_url": existing.adapter_docs_url,
                     "certification_blocker": existing.certification_blocker,
+                    "credential_policy": existing.credential_policy,
+                    "runtime_backend": existing.runtime_backend,
                     "source": "api",
                 })
             return existing

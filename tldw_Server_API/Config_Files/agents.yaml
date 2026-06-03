@@ -20,9 +20,11 @@
 #   compatibility_notes: Release-facing compatibility caveat
 #   compatibility_docs_url: Compatibility matrix or evidence document
 #   entrypoint_strategy: ACP entrypoint strategy; one of native_acp,
-#     adapter_acp, documented_candidate, custom_template
+#     external_acp_adapter, documented_candidate, custom_template
 #   acp_command: ACP stdio command to probe; not inferred from command
 #   acp_args: ACP stdio command arguments
+#   adapter_source: Upstream adapter source when entrypoint_strategy is external_acp_adapter
+#   credential_policy: How readiness checks account for credentials
 
 agents:
   - type: claude_code
@@ -47,22 +49,30 @@ agents:
 
   - type: codex
     name: OpenAI Codex CLI
-    description: "OpenAI's coding agent"
+    description: "OpenAI's coding agent via the Codex ACP adapter"
     command: codex
     args: []
     env: {}
-    requires_api_key: OPENAI_API_KEY
+    requires_api_key: null
     install_instructions:
-      - "npm install -g @openai/codex"
+      - "Install OpenAI Codex CLI using the current OpenAI instructions."
+      - "Install zed-industries/codex-acp 0.15.0 from the GitHub release artifact and ensure codex-acp is on PATH."
     docs_url: "https://github.com/openai/codex"
-    support_state: documented_unverified
-    verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Codex ACP compatibility remains blocked until an ACP-compatible stdio command and provider credentials are verified."
+    support_state: supported_with_caveats
+    verification_level: live_e2e_tested
+    compatibility_notes: "Codex CLI 0.128.0 via zed-industries/codex-acp 0.15.0 completed June 2, 2026 backend live E2E through the macOS host runner on branch codex/acp-codex-orchestration-progress with tldw-agent runner 0.1.0: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
-    entrypoint_strategy: documented_candidate
-    acp_command: ""
+    entrypoint_strategy: external_acp_adapter
+    acp_command: codex-acp
     acp_args: []
-    certification_blocker: adapter_required
+    adapter_source: zed-industries/codex-acp
+    adapter_docs_url: "https://github.com/zed-industries/codex-acp"
+    adapter_package: "@zed-industries/codex-acp"
+    adapter_version: "0.15.0"
+    adapter_version_policy: exact_pin_required
+    adapter_install_source: github_release_preferred
+    credential_policy: delegated_to_adapter
+    runtime_backend: acp_downstream
 
   - type: aider
     name: Aider

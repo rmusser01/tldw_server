@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, ClassVar, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 
@@ -39,12 +39,30 @@ ACPVerificationLevel = Literal[
 ]
 ACPEntryPointStrategy = Literal[
     "native_acp",
-    "adapter_acp",
+    "external_acp_adapter",
     "documented_candidate",
     "custom_template",
 ]
 ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+ACPCredentialState = Literal["ready", "missing", "delegated", "unknown"]
+ACPAdapterVersionPolicy = Literal["exact_pin_required", "operator_managed", "unknown"]
+ACPAdapterInstallSource = Literal[
+    "github_release_preferred",
+    "npm_pinned_allowed",
+    "operator_managed",
+    "unknown",
+]
+ACPCredentialPolicy = Literal["env_var", "delegated_to_adapter", "none", "unknown"]
+ACPRuntimeBackend = Literal["acp_downstream", "codex_app_server", "runner_adapter", "unknown"]
 ACPSetupHealthStatus = Literal["unknown", "ready", "blocked", "not_configured", "partial"]
+_LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
+    "adapter_acp": "external_acp_adapter",
+}
+
+
+def _coerce_entrypoint_strategy(value: Any) -> Any:
+    """Import legacy ACP strategy aliases before public schema validation."""
+    return _LEGACY_ENTRYPOINT_STRATEGY_ALIASES.get(str(value), value)
 
 
 class ACPAgentEntrypointStatus(BaseModel):
@@ -58,6 +76,19 @@ class ACPAgentEntrypointStatus(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     status_message: str = Field(default="")
     docs_url: str | None = Field(default=ACP_COMPATIBILITY_DOCS_URL)
+    display_command: str = Field(default="")
+    display_binary_found: bool | None = Field(default=None)
+    adapter_found: bool | None = Field(default=None)
+    credential_state: ACPCredentialState = Field(default="unknown")
+    adapter_source: str | None = Field(default=None)
+    adapter_package: str | None = Field(default=None)
+    adapter_version: str | None = Field(default=None)
+    runtime_backend: str = Field(default="acp_downstream")
+
+    @field_validator("entrypoint_strategy", mode="before")
+    @classmethod
+    def import_legacy_entrypoint_strategy(cls, value: Any) -> Any:
+        return _coerce_entrypoint_strategy(value)
 
 
 class ACPAgentInfo(BaseModel):
@@ -166,8 +197,14 @@ class ACPAgentRegisterRequest(BaseModel):
     acp_command: str = Field(default="")
     acp_args: list[str] = Field(default_factory=list)
     adapter_source: str | None = Field(default=None)
+    adapter_package: str | None = Field(default=None)
+    adapter_version: str | None = Field(default=None)
+    adapter_version_policy: ACPAdapterVersionPolicy = Field(default="unknown")
+    adapter_install_source: ACPAdapterInstallSource = Field(default="unknown")
     adapter_docs_url: str | None = Field(default=None)
     certification_blocker: str | None = Field(default=None)
+    credential_policy: ACPCredentialPolicy = Field(default="unknown")
+    runtime_backend: ACPRuntimeBackend = Field(default="acp_downstream")
     mcp_orchestration: Literal["agent_driven", "llm_driven"] = Field(
         default="agent_driven",
         description="MCP orchestration mode when protocol='mcp'",
@@ -185,6 +222,11 @@ class ACPAgentRegisterRequest(BaseModel):
         description="Refresh MCP tool inventory before each prompt",
     )
 
+    @field_validator("entrypoint_strategy", mode="before")
+    @classmethod
+    def import_legacy_entrypoint_strategy(cls, value: Any) -> Any:
+        return _coerce_entrypoint_strategy(value)
+
 
 class ACPAgentUpdateRequest(BaseModel):
     """Request to update an existing agent."""
@@ -194,6 +236,10 @@ class ACPAgentUpdateRequest(BaseModel):
         "command",
         "entrypoint_strategy",
         "acp_command",
+        "adapter_version_policy",
+        "adapter_install_source",
+        "credential_policy",
+        "runtime_backend",
         "mcp_orchestration",
         "mcp_entry_tool",
         "mcp_structured_response",
@@ -213,8 +259,14 @@ class ACPAgentUpdateRequest(BaseModel):
     acp_command: str | None = None
     acp_args: list[str] | None = None
     adapter_source: str | None = None
+    adapter_package: str | None = None
+    adapter_version: str | None = None
+    adapter_version_policy: ACPAdapterVersionPolicy | None = None
+    adapter_install_source: ACPAdapterInstallSource | None = None
     adapter_docs_url: str | None = None
     certification_blocker: str | None = None
+    credential_policy: ACPCredentialPolicy | None = None
+    runtime_backend: ACPRuntimeBackend | None = None
     mcp_orchestration: Literal["agent_driven", "llm_driven"] | None = None
     mcp_entry_tool: str | None = None
     mcp_structured_response: bool | None = None
@@ -222,6 +274,11 @@ class ACPAgentUpdateRequest(BaseModel):
     mcp_llm_model: str | None = None
     mcp_max_iterations: int | None = None
     mcp_refresh_tools: bool | None = None
+
+    @field_validator("entrypoint_strategy", mode="before")
+    @classmethod
+    def import_legacy_entrypoint_strategy(cls, value: Any) -> Any:
+        return _coerce_entrypoint_strategy(value)
 
     @model_validator(mode="before")
     @classmethod

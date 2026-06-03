@@ -8,6 +8,24 @@ agents:
       args: []
       env: []
 
+    - type: codex
+      name: OpenAI Codex CLI
+      description: OpenAI Codex CLI via zed-industries/codex-acp.
+      command: codex
+      args: []
+      env:
+        - TERM=xterm-256color
+        - HOME=${TLDW_ACP_HOST_HOME}
+      entrypoint_strategy: external_acp_adapter
+      acp_command: codex-acp
+      acp_args: []
+      adapter_source: zed-industries/codex-acp
+      adapter_docs_url: https://github.com/zed-industries/codex-acp
+      adapter_package: "@zed-industries/codex-acp"
+      adapter_version: "0.15.0"
+      credential_policy: delegated_to_adapter
+      runtime_backend: acp_downstream
+
     - type: goose
       name: Goose
       description: Block's autonomous coding agent.

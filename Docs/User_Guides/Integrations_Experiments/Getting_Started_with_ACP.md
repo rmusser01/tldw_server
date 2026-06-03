@@ -351,13 +351,38 @@ When you're done:
 
 ### Codex CLI (OpenAI)
 
+Codex uses an external ACP adapter profile. Install the OpenAI Codex CLI
+separately first, then install `zed-industries/codex-acp` `0.15.0` from the
+GitHub release artifact and ensure both `codex` and `codex-acp` are on PATH.
+
+For operator setup or certification environments where release artifacts are not
+available, a pinned npm install of `@zed-industries/codex-acp@0.15.0` is an
+acceptable alternative. Do not use `@latest` for certification or seeded runtime
+configuration.
+
+Passive readiness checks only inspect configured binaries and metadata. They do
+not install packages, invoke package managers, or run `npx @latest`.
+
+Codex CLI `0.128.0` through `codex-acp` `0.15.0` has backend live E2E
+coverage on the macOS host runner for health/setup-guide, session creation,
+prompting, redacted support views, diagnostics, cancel, and close. Sandbox,
+non-empty MCP injection, artifact-producing workflows, and reviewer-loop
+behavior remain unverified.
+
 ```yaml
-# ~/.tldw-agent/config.yaml
-agent:
-  command: "codex"
-  args: []
-  env:
-    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+# tldw_Server_API/Config_Files/agents.yaml
+- type: codex
+  command: codex
+  entrypoint_strategy: external_acp_adapter
+  acp_command: codex-acp
+  acp_args: []
+  adapter_source: zed-industries/codex-acp
+  adapter_version: "0.15.0"
+  adapter_version_policy: exact_pin_required
+  adapter_install_source: github_release_preferred
+  credential_policy: delegated_to_adapter
+  support_state: supported_with_caveats
+  verification_level: live_e2e_tested
 ```
 
 ### OpenCode
@@ -405,6 +430,8 @@ Work through these steps in order. Stop at the first failure and apply the fix.
 **4. Is the downstream agent installed?**
 
 - Test: `claude --version` (or `codex --version`, `opencode --version`)
+- For Codex: also test `codex-acp --version`; install the pinned adapter
+  separately if it is missing.
 - If no: Install your chosen agent. For Claude Code see [claude.ai/download](https://claude.ai/download).
 
 **5. Is the API key set?**

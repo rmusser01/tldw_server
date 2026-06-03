@@ -24,6 +24,38 @@ export type ACPVerificationLevel =
   | "production_supported"
 
 export type ACPSetupHealthStatus = "ok" | "degraded" | "blocked" | "unknown"
+export type ACPEntryPointStrategy =
+  | "native_acp"
+  | "external_acp_adapter"
+  | "documented_candidate"
+  | "custom_template"
+export type ACPProbeState =
+  | "ready_to_probe"
+  | "blocked"
+  | "custom_template"
+  | "documented_only"
+  | "unsupported_backend"
+export type ACPCredentialState = "ready" | "missing" | "delegated" | "unknown"
+
+export interface ACPAgentEntrypointStatus {
+  profile_key: string
+  entrypoint_strategy: ACPEntryPointStrategy
+  probe_state: ACPProbeState
+  acp_command: string
+  acp_args: string[]
+  primary_blocker?: string | null
+  blockers: string[]
+  status_message?: string | null
+  docs_url?: string | null
+  display_command?: string | null
+  display_binary_found?: boolean | null
+  adapter_found?: boolean | null
+  credential_state?: ACPCredentialState
+  adapter_source?: string | null
+  adapter_package?: string | null
+  adapter_version?: string | null
+  runtime_backend?: string | null
+}
 
 export interface ACPAgentInfo {
   type: ACPAgentType
@@ -35,6 +67,7 @@ export interface ACPAgentInfo {
   verification_level?: ACPVerificationLevel
   compatibility_notes?: string
   compatibility_docs_url?: string | null
+  entrypoint?: ACPAgentEntrypointStatus | null
 }
 
 export interface ACPAgentListResponse {

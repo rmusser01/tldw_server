@@ -277,16 +277,34 @@ def test_acp_setup_guide_marks_configured_but_unverified_agents(client_user_only
 
 
 def test_acp_setup_guide_codex_includes_entrypoint_blocker_steps(client_user_only, stub_runner_client):
-    """Setup guide surfaces documented-candidate ACP adapter blockers."""
+    """Setup guide surfaces canonical Codex external-adapter blockers."""
     resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=codex")
     assert resp.status_code == 200
     data = resp.json()
     guide = data["guides"][0]
 
     entrypoint = guide["entrypoint"]
-    assert entrypoint["entrypoint_strategy"] == "documented_candidate"
-    assert entrypoint["primary_blocker"] == "adapter_required"
+    assert entrypoint["entrypoint_strategy"] == "external_acp_adapter"
+    assert entrypoint["primary_blocker"] in {
+        "adapter_missing",
+        "agent_binary_missing",
+        "live_certification_required",
+    }
     assert any("adapter" in step.lower() for step in guide["steps"])
+
+
+def test_entrypoint_setup_steps_include_external_adapter_specific_actions() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _entrypoint_setup_steps
+
+    steps = _entrypoint_setup_steps({
+        "entrypoint_strategy": "external_acp_adapter",
+        "primary_blocker": "adapter_missing",
+        "blockers": ["adapter_missing", "agent_binary_missing"],
+    })
+
+    joined = " ".join(steps)
+    assert "ACP adapter" in joined
+    assert "agent binary" in joined or "Codex" in joined
 
 
 def test_acp_agents_includes_opencode_entrypoint_metadata(client_user_only, stub_runner_client):
@@ -366,7 +384,7 @@ def test_acp_agents_normalizes_invalid_runner_compatibility_values(
     assert agent["support_state"] == "documented_unverified"
     assert agent["verification_level"] == "documented_only"
     assert agent["compatibility_docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
-    assert agent["entrypoint"]["entrypoint_strategy"] == "adapter_acp"
+    assert agent["entrypoint"]["entrypoint_strategy"] == "external_acp_adapter"
     assert agent["entrypoint"]["primary_blocker"] == "adapter_missing"
     assert agent["entrypoint"]["blockers"] == ["adapter_missing"]
 

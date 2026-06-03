@@ -332,7 +332,7 @@ def test_acp_agent_registration_forwards_entrypoint_kwargs(
     client_user_only,
     monkeypatch,
 ):
-    """Dynamic registration forwards ACP entrypoint metadata into the registry."""
+    """Dynamic registration imports legacy strategy aliases before registry writes."""
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
     import tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry as registry_mod
 
@@ -366,12 +366,23 @@ def test_acp_agent_registration_forwards_entrypoint_kwargs(
         client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
 
     assert response.status_code == 200
-    assert captured["entrypoint_strategy"] == "adapter_acp"
+    assert captured["entrypoint_strategy"] == "external_acp_adapter"
     assert captured["acp_command"] == "adapter-agent-acp"
     assert captured["acp_args"] == ["--stdio"]
     assert captured["adapter_source"] == "https://example.test/adapter"
     assert captured["adapter_docs_url"] == "https://example.test/adapter/docs"
     assert captured["certification_blocker"] == "adapter_missing"
+
+
+def test_entrypoint_setup_steps_include_live_certification_required() -> None:
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    steps = acp_endpoints._entrypoint_setup_steps({
+        "primary_blocker": "live_certification_required",
+        "blockers": ["live_certification_required"],
+    })
+
+    assert steps == ["Run live ACP certification before claiming this agent is supported."]
 
 
 def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):

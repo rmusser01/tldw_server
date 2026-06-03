@@ -26,6 +26,10 @@ import { getDesignSystemState } from "@/design-system"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
 import { buildACPClientConfig } from "@/services/acp/connection"
+import {
+  buildACPAgentSetupSummary,
+  isACPAgentReadyToStart,
+} from "@/services/acp/readiness"
 import type {
   ACPAgentType,
   ACPAgentInfo,
@@ -66,7 +70,8 @@ interface AgentCardProps {
 
 const AgentCard: React.FC<AgentCardProps> = ({ agent, selected, onSelect }) => {
   const { t } = useTranslation("playground")
-  const disabled = !agent.is_configured
+  const setupSummary = buildACPAgentSetupSummary(agent)
+  const disabled = setupSummary.disabled
 
   return (
     <div
@@ -89,18 +94,28 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, selected, onSelect }) => {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-text">{agent.name}</span>
-          {!agent.is_configured && (
+          {agent.entrypoint?.entrypoint_strategy === "external_acp_adapter" && (
+            <span className="rounded border border-border px-1.5 py-0.5 text-[11px] font-medium text-text-muted">
+              {t("acp.create.adapterBadge", "Adapter")}
+            </span>
+          )}
+          {disabled && (
             <Tooltip
-              title={t("acp.create.requiresApiKey", {
-                key: agent.requires_api_key,
-                defaultValue: `Requires {{key}}. Set it in your shell (export {{key}}=...) or in the [ACP] runner_env in config.txt.`,
-              })}
+              title={
+                <span>
+                  <span className="block font-medium">{setupSummary.title}</span>
+                  <span className="block">{setupSummary.description}</span>
+                </span>
+              }
             >
               <AlertCircle className="h-4 w-4 text-warning" />
             </Tooltip>
           )}
         </div>
         <p className="mt-0.5 text-xs text-text-muted">{agent.description}</p>
+        {disabled && (
+          <p className="mt-1 text-xs text-warning">{setupSummary.title}</p>
+        )}
       </div>
       {selected && (
         <div className="absolute right-2 top-2">
@@ -220,14 +235,10 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
 
   const agents = agentsData?.agents ?? []
   const defaultAgent = agentsData?.default_agent ?? "claude_code"
-
-  // Set default agent type when loaded
-  useEffect(() => {
-    if (open && agents.length > 0) {
-      const configuredAgent = agents.find((a) => a.is_configured)
-      form.setFieldValue("agentType", configuredAgent?.type ?? defaultAgent)
-    }
-  }, [open, agents, defaultAgent, form])
+  const selectedAgentType =
+    Form.useWatch("agentType", form) ?? form.getFieldValue("agentType") ?? defaultAgent
+  const selectedAgent = agents.find((agent) => agent.type === selectedAgentType)
+  const selectedAgentBlocked = !selectedAgent || !isACPAgentReadyToStart(selectedAgent)
 
   // Reset form when modal opens
   useEffect(() => {
@@ -238,6 +249,25 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
       setCreationError(undefined)
     }
   }, [open, form])
+
+  // Set default agent type when loaded
+  useEffect(() => {
+    if (!open || agents.length === 0) {
+      return
+    }
+
+    const currentAgentType = form.getFieldValue("agentType") as ACPAgentType | undefined
+    const currentAgent = agents.find((agent) => agent.type === currentAgentType)
+    if (currentAgent && isACPAgentReadyToStart(currentAgent)) {
+      return
+    }
+
+    const configuredAgent = agents.find(isACPAgentReadyToStart)
+    const targetAgentType = configuredAgent?.type ?? defaultAgent
+    if (currentAgentType !== targetAgentType) {
+      form.setFieldValue("agentType", targetAgentType)
+    }
+  }, [open, agents, defaultAgent, form])
 
   // Create session mutation
   const createMutation = useMutation({
@@ -565,7 +595,7 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
             type="primary"
             htmlType="submit"
             loading={isPending}
-            disabled={isAgentSelectionLoading || !restClient}
+            disabled={isAgentSelectionLoading || !restClient || selectedAgentBlocked}
           >
             {isPending ? (
               <span className="flex items-center gap-2">
