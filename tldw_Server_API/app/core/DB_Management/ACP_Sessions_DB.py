@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 15
+_SCHEMA_VERSION = 16
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     workspace_id TEXT,
     workspace_group_id TEXT,
     scope_snapshot_id TEXT,
+    sandbox_session_id TEXT,
+    sandbox_run_id TEXT,
     policy_snapshot_version TEXT,
     policy_snapshot_fingerprint TEXT,
     policy_snapshot_refreshed_at TEXT,
@@ -59,6 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON sessions(user_id, status)
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_created_agent ON sessions(created_at, agent_type);
 CREATE INDEX IF NOT EXISTS idx_sessions_forked ON sessions(forked_from);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
 
 CREATE TABLE IF NOT EXISTS session_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -206,6 +209,8 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "auto_terminate_at_budget": "auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0",
         "budget_exhausted": "budget_exhausted INTEGER NOT NULL DEFAULT 0",
         "ancestry_chain_json": "ancestry_chain_json TEXT",
+        "sandbox_session_id": "sandbox_session_id TEXT",
+        "sandbox_run_id": "sandbox_run_id TEXT",
     },
     "agent_registry": {
         "mcp_orchestration": "mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven'",
@@ -639,6 +644,22 @@ class ACPSessionsDB:
                     "runtime_backend",
                     "runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream'",
                 )
+            if current_version < 16:
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "sandbox_session_id",
+                    "sandbox_session_id TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "sandbox_run_id",
+                    "sandbox_run_id TEXT",
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)"
+                )
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -685,6 +706,8 @@ class ACPSessionsDB:
         workspace_id: str | None = None,
         workspace_group_id: str | None = None,
         scope_snapshot_id: str | None = None,
+        sandbox_session_id: str | None = None,
+        sandbox_run_id: str | None = None,
         policy_snapshot_version: str | None = None,
         policy_snapshot_fingerprint: str | None = None,
         policy_snapshot_refreshed_at: str | None = None,
@@ -707,11 +730,12 @@ class ACPSessionsDB:
                 created_at, last_activity_at,
                 tags, mcp_servers,
                 persona_id, workspace_id, workspace_group_id, scope_snapshot_id,
+                sandbox_session_id, sandbox_run_id,
                 policy_snapshot_version, policy_snapshot_fingerprint, policy_snapshot_refreshed_at,
                 policy_summary, policy_provenance_summary, policy_refresh_error,
                 forked_from, needs_bootstrap, model,
                 token_budget, auto_terminate_at_budget
-            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id, user_id, agent_type, name, cwd,
@@ -719,6 +743,7 @@ class ACPSessionsDB:
                 json.dumps(tags or []),
                 json.dumps(mcp_servers or []),
                 persona_id, workspace_id, workspace_group_id, scope_snapshot_id,
+                sandbox_session_id, sandbox_run_id,
                 policy_snapshot_version,
                 policy_snapshot_fingerprint,
                 policy_snapshot_refreshed_at,
@@ -841,78 +866,44 @@ class ACPSessionsDB:
         user_id: int | None = None,
         status: str | None = None,
         agent_type: str | None = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         """List sessions with optional filters. Returns (rows, total_count)."""
         conn = self._get_conn()
-        params: list[Any] = []
+        filter_params: list[Any] = [
+            user_id,
+            user_id,
+            status,
+            status,
+            agent_type,
+            agent_type,
+            workspace_id,
+            workspace_id,
+        ]
+        count_query = """
+            SELECT COUNT(*) FROM sessions
+            WHERE (? IS NULL OR user_id = ?)
+              AND (? IS NULL OR status = ?)
+              AND (? IS NULL OR agent_type = ?)
+              AND (? IS NULL OR workspace_id = ?)
+        """
+        rows_query = """
+            SELECT * FROM sessions
+            WHERE (? IS NULL OR user_id = ?)
+              AND (? IS NULL OR status = ?)
+              AND (? IS NULL OR agent_type = ?)
+              AND (? IS NULL OR workspace_id = ?)
+            ORDER BY created_at DESC LIMIT ? OFFSET ?
+        """
 
-        query_key = (user_id is not None, status is not None, agent_type is not None)
-        match query_key:
-            case (False, False, False):
-                count_query = "SELECT COUNT(*) FROM sessions"
-                rows_query = "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ? OFFSET ?"
-            case (True, False, False):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE user_id = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE user_id = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.append(user_id)
-            case (False, True, False):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE status = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE status = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.append(status)
-            case (False, False, True):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE agent_type = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.append(agent_type)
-            case (True, True, False):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE user_id = ? AND status = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE user_id = ? AND status = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([user_id, status])
-            case (True, False, True):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE user_id = ? AND agent_type = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE user_id = ? AND agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([user_id, agent_type])
-            case (False, True, True):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE status = ? AND agent_type = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE status = ? AND agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([status, agent_type])
-            case _:
-                count_query = (
-                    "SELECT COUNT(*) FROM sessions "
-                    "WHERE user_id = ? AND status = ? AND agent_type = ?"
-                )
-                rows_query = (
-                    "SELECT * FROM sessions "
-                    "WHERE user_id = ? AND status = ? AND agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([user_id, status, agent_type])
-
-        count_row = conn.execute(count_query, params).fetchone()
+        count_row = conn.execute(count_query, filter_params).fetchone()
         total = count_row[0] if count_row else 0
 
         rows = conn.execute(
             rows_query,
-            params + [limit, offset],
+            filter_params + [limit, offset],
         ).fetchall()
 
         return [self._row_to_dict(r) for r in rows], total

@@ -7,6 +7,10 @@ import { ExternalLink } from "lucide-react"
 import { Alert as DSAlert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
+import type {
+  ACPSessionListItem,
+  ACPSessionListResponse
+} from "@/services/acp/types"
 import {
   resolveBrowserRequestTransport,
   type BrowserRequestTransport
@@ -14,6 +18,7 @@ import {
 
 const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
 const PROJECTS_PATH = `${AGENT_ORCHESTRATION_BASE_PATH}/projects`
+const ACP_SESSIONS_PATH = "/api/v1/acp/sessions"
 const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE =
   "Agent orchestration is not available on this server."
@@ -131,6 +136,14 @@ const buildCanonicalProjectsPath = (canonicalWorkspaceId: string): string => {
   return `${PROJECTS_PATH}?${params.toString()}`
 }
 
+const buildWorkspaceSessionsPath = (canonicalWorkspaceId: string): string => {
+  const params = new URLSearchParams({
+    workspace_id: canonicalWorkspaceId,
+    limit: String(MAX_RECENT_RUNS)
+  })
+  return `${ACP_SESSIONS_PATH}?${params.toString()}`
+}
+
 const readApiErrorMessage = async (response: Response): Promise<string> => {
   const payload = await response.json().catch(() => null)
   const detail =
@@ -167,9 +180,20 @@ const getTaskTimestamp = (task: TaskSummary): number => {
   return Number.isNaN(timestamp) ? task.id : timestamp
 }
 
+const getDirectSessionTimestamp = (session: ACPSessionListItem): number => {
+  const candidate = session.last_activity_at || session.created_at
+  if (!candidate) return 0
+  const timestamp = Date.parse(candidate)
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
 const getSessionId = (run: RunItem): string | null =>
   normalizeWorkspaceId(run.session?.session_id) ||
   normalizeWorkspaceId(run.session_id)
+
+const getDirectSessionWorkspaceId = (session: ACPSessionListItem): string | null =>
+  normalizeWorkspaceId(session.workspace_context?.workspace_id) ||
+  normalizeWorkspaceId(session.workspace_id)
 
 const statusColor = (status: string): string => {
   if (status === "completed" || status === "complete") return "success"
@@ -177,6 +201,9 @@ const statusColor = (status: string): string => {
   if (status === "running" || status === "inprogress") return "processing"
   return "default"
 }
+
+const formatCountLabel = (count: number, singular: string, plural: string): string =>
+  `${count} ${count === 1 ? singular : plural}`
 
 const createUnsupportedError = (): Error & { code: string } =>
   Object.assign(new Error(AGENT_ORCHESTRATION_UNSUPPORTED_CODE), {
@@ -205,6 +232,7 @@ export const WorkspaceACPHistoryModal: React.FC<
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<WorkspaceACPHistoryError | null>(null)
   const [entries, setEntries] = React.useState<WorkspaceRunHistoryEntry[]>([])
+  const [directSessions, setDirectSessions] = React.useState<ACPSessionListItem[]>([])
 
   const buildRequestTransport = React.useCallback(
     (path: string): BrowserRequestTransport | null => {
@@ -269,6 +297,7 @@ export const WorkspaceACPHistoryModal: React.FC<
       setLoading(true)
       setError(null)
       setEntries([])
+      setDirectSessions([])
 
       try {
         if (!canonicalWorkspaceId) {
@@ -277,65 +306,120 @@ export const WorkspaceACPHistoryModal: React.FC<
           )
         }
 
-        const projectsPayload = await fetchJson<unknown>(
-          buildCanonicalProjectsPath(canonicalWorkspaceId),
-          abortController.signal
-        )
-        const projects = normalizeListPayload<ProjectSummary>(
-          projectsPayload,
-          "projects"
-        )
-        const matchingProjects = projects.filter(
-          (project) => getCanonicalWorkspaceId(project) === canonicalWorkspaceId
-        )
-
-        const taskRows = (
-          await Promise.all(
-            matchingProjects.map(async (project) => {
-              const tasksPayload = await fetchJson<unknown>(
-                `${PROJECTS_PATH}/${project.id}/tasks`,
-                abortController.signal
-              )
-              const tasks = normalizeListPayload<TaskSummary>(
-                tasksPayload,
-                "tasks"
-              )
-              return tasks.map((task) => ({ project, task }))
-            })
+        const agentTaskHistoryPromise = (async (): Promise<
+          WorkspaceRunHistoryEntry[]
+        > => {
+          const projectsPayload = await fetchJson<unknown>(
+            buildCanonicalProjectsPath(canonicalWorkspaceId),
+            abortController.signal
           )
-        ).flat()
+          const projects = normalizeListPayload<ProjectSummary>(
+            projectsPayload,
+            "projects"
+          )
+          const matchingProjects = projects.filter(
+            (project) => getCanonicalWorkspaceId(project) === canonicalWorkspaceId
+          )
 
-        const taskDetails = await Promise.all(
-          [...taskRows]
+          const taskRows = (
+            await Promise.all(
+              matchingProjects.map(async (project) => {
+                const tasksPayload = await fetchJson<unknown>(
+                  `${PROJECTS_PATH}/${project.id}/tasks`,
+                  abortController.signal
+                )
+                const tasks = normalizeListPayload<TaskSummary>(
+                  tasksPayload,
+                  "tasks"
+                )
+                return tasks.map((task) => ({ project, task }))
+              })
+            )
+          ).flat()
+
+          const taskDetails = await Promise.all(
+            [...taskRows]
+              .sort(
+                (left, right) =>
+                  getTaskTimestamp(right.task) - getTaskTimestamp(left.task)
+              )
+              .slice(0, MAX_TASK_DETAILS)
+              .map(async ({ project, task }) => {
+                const detail = await fetchJson<TaskDetail>(
+                  `${AGENT_ORCHESTRATION_BASE_PATH}/tasks/${task.id}`,
+                  abortController.signal
+                )
+                return { project, task: detail }
+              })
+          )
+
+          return taskDetails
+            .flatMap(({ project, task }) =>
+              (task.runs || []).map((run) => ({
+                projectId: project.id,
+                projectName: project.name,
+                taskId: task.id,
+                taskTitle: task.title,
+                run
+              }))
+            )
+            .sort((left, right) => getRunTimestamp(right.run) - getRunTimestamp(left.run))
+            .slice(0, MAX_RECENT_RUNS)
+        })()
+
+        const directSessionsPromise = (async (): Promise<ACPSessionListItem[]> => {
+          const sessionsPayload = await fetchJson<ACPSessionListResponse | unknown>(
+            buildWorkspaceSessionsPath(canonicalWorkspaceId),
+            abortController.signal
+          )
+          return normalizeListPayload<ACPSessionListItem>(
+            sessionsPayload,
+            "sessions"
+          )
+            .filter(
+              (session) =>
+                getDirectSessionWorkspaceId(session) === canonicalWorkspaceId
+            )
             .sort(
               (left, right) =>
-                getTaskTimestamp(right.task) - getTaskTimestamp(left.task)
+                getDirectSessionTimestamp(right) - getDirectSessionTimestamp(left)
             )
-            .slice(0, MAX_TASK_DETAILS)
-            .map(async ({ project, task }) => {
-              const detail = await fetchJson<TaskDetail>(
-                `${AGENT_ORCHESTRATION_BASE_PATH}/tasks/${task.id}`,
-                abortController.signal
-              )
-              return { project, task: detail }
-            })
-        )
+            .slice(0, MAX_RECENT_RUNS)
+        })()
 
-        const recentEntries = taskDetails
-          .flatMap(({ project, task }) =>
-            (task.runs || []).map((run) => ({
-              projectId: project.id,
-              projectName: project.name,
-              taskId: task.id,
-              taskTitle: task.title,
-              run
-            }))
-          )
-          .sort((left, right) => getRunTimestamp(right.run) - getRunTimestamp(left.run))
-          .slice(0, MAX_RECENT_RUNS)
+        const [agentTaskHistoryResult, directSessionsResult] =
+          await Promise.allSettled([agentTaskHistoryPromise, directSessionsPromise])
+
+        if (
+          agentTaskHistoryResult.status === "rejected" &&
+          directSessionsResult.status === "rejected"
+        ) {
+          const errors = [
+            agentTaskHistoryResult.reason,
+            directSessionsResult.reason
+          ]
+          throw errors.find(isUnsupportedError) || errors[0]
+        }
+        if (
+          agentTaskHistoryResult.status === "rejected" &&
+          !isUnsupportedError(agentTaskHistoryResult.reason) &&
+          directSessionsResult.status === "fulfilled" &&
+          directSessionsResult.value.length === 0
+        ) {
+          throw agentTaskHistoryResult.reason
+        }
 
         if (!cancelled) {
-          setEntries(recentEntries)
+          setEntries(
+            agentTaskHistoryResult.status === "fulfilled"
+              ? agentTaskHistoryResult.value
+              : []
+          )
+          setDirectSessions(
+            directSessionsResult.status === "fulfilled"
+              ? directSessionsResult.value
+              : []
+          )
         }
       } catch (err) {
         if (cancelled || abortController.signal.aborted) {
@@ -380,6 +464,15 @@ export const WorkspaceACPHistoryModal: React.FC<
     [navigate]
   )
 
+  const openDirectSessionRoute = React.useCallback(
+    (sessionId: string, view?: string) => {
+      const params = new URLSearchParams({ session: sessionId })
+      if (view) params.set("view", view)
+      navigate(`/acp-playground?${params.toString()}`)
+    },
+    [navigate]
+  )
+
   const errorDescription =
     error?.kind === "unsupported"
       ? t(
@@ -387,6 +480,7 @@ export const WorkspaceACPHistoryModal: React.FC<
           AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE
         )
       : error?.message
+  const hasHistory = entries.length > 0 || directSessions.length > 0
 
   return (
     <Modal
@@ -429,7 +523,7 @@ export const WorkspaceACPHistoryModal: React.FC<
           </DSAlert>
         )}
 
-        {!loading && !error && entries.length === 0 && (
+        {!loading && !error && !hasHistory && (
           <Empty
             description={t(
               "playground:workspace.acpRunHistoryEmpty",
@@ -438,7 +532,7 @@ export const WorkspaceACPHistoryModal: React.FC<
           />
         )}
 
-        {!loading && !error && entries.length > 0 && (
+        {!loading && !error && hasHistory && (
           <div className="space-y-3">
             {entries.map((entry) => {
               const { run } = entry
@@ -531,6 +625,110 @@ export const WorkspaceACPHistoryModal: React.FC<
                 </div>
               )
             })}
+            {directSessions.length > 0 && (
+              <div className="space-y-3">
+                <div className="text-sm font-medium">
+                  {t(
+                    "playground:workspace.directAcpSessions",
+                    "Direct ACP sessions"
+                  )}
+                </div>
+                {directSessions.map((session) => {
+                  const mcpCount =
+                    session.workspace_context?.mcp_server_count ?? 0
+                  return (
+                    <div
+                      key={session.session_id}
+                      className="rounded-lg border border-border p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium">
+                            {session.name || session.session_id}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {session.session_id}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Tag color={statusColor(session.status)}>
+                            {session.status}
+                          </Tag>
+                          {session.agent_type && <Tag>{session.agent_type}</Tag>}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {formatCountLabel(
+                            session.message_count ?? 0,
+                            "message",
+                            "messages"
+                          )}
+                        </span>
+                        <span>
+                          {formatCountLabel(
+                            mcpCount,
+                            "MCP server",
+                            "MCP servers"
+                          )}
+                        </span>
+                        <span>
+                          {session.workspace_context?.verification_level ||
+                            session.workspace_context?.support_state ||
+                            "unverified"}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="small"
+                          icon={<ExternalLink className="h-3 w-3" />}
+                          onClick={() =>
+                            openDirectSessionRoute(session.session_id)
+                          }
+                        >
+                          {t("playground:workspace.openSession", "Open session")}
+                        </Button>
+                        <Button
+                          size="small"
+                          icon={<ExternalLink className="h-3 w-3" />}
+                          onClick={() =>
+                            openDirectSessionRoute(
+                              session.session_id,
+                              "diagnostics"
+                            )
+                          }
+                        >
+                          {t(
+                            "playground:workspace.openDiagnostics",
+                            "Open diagnostics"
+                          )}
+                        </Button>
+                        <Button
+                          size="small"
+                          icon={<ExternalLink className="h-3 w-3" />}
+                          onClick={() =>
+                            openDirectSessionRoute(session.session_id, "artifacts")
+                          }
+                        >
+                          {t("playground:workspace.openArtifacts", "Open artifacts")}
+                        </Button>
+                        <Button
+                          size="small"
+                          icon={<ExternalLink className="h-3 w-3" />}
+                          onClick={() =>
+                            openDirectSessionRoute(session.session_id, "audit")
+                          }
+                        >
+                          {t("playground:workspace.openAudit", "Open audit")}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -176,6 +176,8 @@ const fetchMockState = {
 }
 const ACP_PROJECTS_FOR_ALPHA_URL =
   "http://127.0.0.1:8000/api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace"
+const ACP_SESSIONS_FOR_ALPHA_URL =
+  "http://127.0.0.1:8000/api/v1/acp/sessions?workspace_id=workspace-alpha&limit=6"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -1395,6 +1397,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
     fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
 
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], total: 0 })
+        } as Response
+      }
+
       if (
         url ===
         ACP_PROJECTS_FOR_ALPHA_URL
@@ -1523,6 +1532,99 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
   })
 
+  it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({
+            sessions: [
+              {
+                session_id: "direct-session-alpha",
+                user_id: 1,
+                agent_type: "codex",
+                name: "Codex workspace session",
+                status: "active",
+                created_at: "2026-05-13T13:00:00.000Z",
+                last_activity_at: "2026-05-13T13:10:00.000Z",
+                message_count: 4,
+                usage: {
+                  prompt_tokens: 12,
+                  completion_tokens: 8,
+                  total_tokens: 20
+                },
+                tags: [],
+                has_websocket: false,
+                workspace_id: "workspace-alpha",
+                sandbox_session_id: "sandbox-session-1",
+                sandbox_run_id: "sandbox-run-1",
+                workspace_context: {
+                  workspace_id: "workspace-alpha",
+                  mcp_server_count: 1,
+                  mcp_server_names: ["filesystem"],
+                  sandbox_session_id: "sandbox-session-1",
+                  sandbox_run_id: "sandbox-run-1",
+                  agent_type: "codex",
+                  runtime_backend: "acp_downstream",
+                  entrypoint_strategy: "external_acp_adapter",
+                  adapter_source: "zed-industries/codex-acp",
+                  adapter_package: "@zed-industries/codex-acp",
+                  adapter_version: "0.15.0",
+                  support_state: "supported_with_caveats",
+                  verification_level: "live_e2e_tested"
+                }
+              }
+            ],
+            total: 1
+          })
+        } as Response
+      }
+
+      if (url === ACP_PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Direct ACP sessions")).toBeInTheDocument()
+    expect(within(modal).getByText("Codex workspace session")).toBeInTheDocument()
+    expect(within(modal).getByText("direct-session-alpha")).toBeInTheDocument()
+    expect(within(modal).getByText("4 messages")).toBeInTheDocument()
+    expect(within(modal).getByText("1 MCP server")).toBeInTheDocument()
+    expect(fetchMockState.fetch).toHaveBeenCalledWith(
+      ACP_SESSIONS_FOR_ALPHA_URL,
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-API-KEY": "test-api-key" })
+      })
+    )
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open diagnostics" }))
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/acp-playground?session=direct-session-alpha&view=diagnostics"
+    )
+  })
+
   it("opens sandbox diagnostics from the settings menu", async () => {
     render(
       <WorkspaceHeader
@@ -1582,6 +1684,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], total: 0 })
+        } as Response
+      }
 
       if (
         url ===
@@ -1760,6 +1869,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
   it("surfaces missing task errors instead of treating them as unsupported orchestration", async () => {
     fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], total: 0 })
+        } as Response
+      }
 
       if (
         url ===

@@ -46,6 +46,41 @@ async def test_register_and_record_prompt_preserve_creation_config_and_bootstrap
 
 
 @pytest.mark.asyncio
+async def test_session_store_preserves_sandbox_context_and_filters_by_workspace(tmp_path):
+    _db = ACPSessionsDB(db_path=str(tmp_path / "store_test.db"))
+    store = ACPSessionStore(db=_db)
+
+    await store.register_session(
+        session_id="session-workspace",
+        user_id=7,
+        agent_type="codex",
+        name="Workspace Session",
+        cwd="/tmp/project",
+        workspace_id="workspace-1",
+        sandbox_session_id="sandbox-session-1",
+        sandbox_run_id="sandbox-run-1",
+    )
+    await store.register_session(
+        session_id="session-other",
+        user_id=7,
+        agent_type="codex",
+        name="Other Session",
+        cwd="/tmp/project",
+        workspace_id="workspace-2",
+    )
+
+    record = await store.get_session("session-workspace")
+    assert record is not None
+    assert record.sandbox_session_id == "sandbox-session-1"
+    assert record.sandbox_run_id == "sandbox-run-1"
+    assert record.to_info_dict()["sandbox_session_id"] == "sandbox-session-1"
+
+    rows, total = await store.list_sessions(user_id=7, workspace_id="workspace-1")
+    assert total == 1
+    assert [row.session_id for row in rows] == ["session-workspace"]
+
+
+@pytest.mark.asyncio
 async def test_session_store_exposes_policy_snapshot_fields_in_info_and_detail_dict(tmp_path):
     _db = ACPSessionsDB(db_path=str(tmp_path / "store_test.db"))
     store = ACPSessionStore(db=_db)
