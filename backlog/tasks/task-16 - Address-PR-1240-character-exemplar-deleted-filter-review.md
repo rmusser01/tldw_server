@@ -1,7 +1,7 @@
 ---
 id: TASK-16
 title: Address PR 1240 character exemplar deleted-filter review
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-03 21:07'
 labels:
@@ -23,9 +23,9 @@ Fix the extracted CharacterStore character exemplar methods to use backend-aware
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 get_character_exemplar_by_id uses backend-safe deleted filtering when include_deleted is false.
-- [ ] #2 list_character_exemplars uses backend-safe deleted filtering for non-deleted rows.
-- [ ] #3 Focused tests, Bandit touched-source scope, and git diff --check are run and recorded.
+- [x] #1 get_character_exemplar_by_id uses backend-safe deleted filtering when include_deleted is false.
+- [x] #2 list_character_exemplars uses backend-safe deleted filtering for non-deleted rows.
+- [x] #3 Focused tests, Bandit touched-source scope, and git diff --check are run and recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -38,10 +38,10 @@ Fix the extracted CharacterStore character exemplar methods to use backend-aware
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant or not required
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
