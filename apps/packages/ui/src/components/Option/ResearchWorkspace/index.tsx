@@ -1134,11 +1134,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     accountUsedBytes: null,
     accountQuotaBytes: null
   })
-  const [, setWorkspaceSourceStatus] =
+  const [workspaceSourceStatus, setWorkspaceSourceStatus] =
     React.useState<WorkspaceSourceStatusListResponse | null>(null)
   const [workspaceCapabilities, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
-  const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
+  const [
+    workspaceStatusProjectionLoading,
+    setWorkspaceStatusProjectionLoading
+  ] = React.useState(false)
   const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
   const [workspaceMigrationResult, setWorkspaceMigrationResult] =
@@ -3564,8 +3567,8 @@ const ResearchWorkspaceBody: React.FC = () => {
           <WorkspaceTrustPanel
             sourceStatus={workspaceSourceStatus}
             capabilities={workspaceCapabilities}
-            loading={workspaceTrustLoading}
-            errorMessage={workspaceTrustError}
+            loading={workspaceStatusProjectionLoading}
+            errorMessage={workspaceStatusProjectionError}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
           />
 
@@ -3624,8 +3627,8 @@ const ResearchWorkspaceBody: React.FC = () => {
           <WorkspaceTrustPanel
             sourceStatus={workspaceSourceStatus}
             capabilities={workspaceCapabilities}
-            loading={workspaceTrustLoading}
-            errorMessage={workspaceTrustError}
+            loading={workspaceStatusProjectionLoading}
+            errorMessage={workspaceStatusProjectionError}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
           />
 
