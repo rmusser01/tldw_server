@@ -9,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Workspaces import root_binding_service
 from tldw_Server_API.app.core.Workspaces.root_binding_service import (
     SandboxVolumeBinding,
     WorkspaceRootAttachRequest,
@@ -47,6 +48,51 @@ def test_host_local_attach_validates_allowlist_and_persists_absolute_path(db, tm
     assert root["absolute_root"] == str(project.resolve())
     assert root["root_state"] == "attached"
     assert root["display_name"] == "project"
+
+
+def test_host_local_attach_uses_configured_allowed_roots_when_not_injected(db, tmp_path, monkeypatch):
+    allowed = tmp_path / "configured"
+    project = allowed / "project"
+    project.mkdir(parents=True)
+    db.upsert_workspace("ws-1", "Workspace")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+    )
+
+    root = attach_primary_workspace_root(
+        db=db,
+        workspace_id="ws-1",
+        user_id="user-1",
+        request=WorkspaceRootAttachRequest(
+            backend="host_local",
+            absolute_root=str(project),
+        ),
+    )
+
+    assert root["absolute_root"] == str(project.resolve())
+
+
+def test_host_local_attach_without_expected_version_succeeds_and_increments_workspace_version(db, tmp_path):
+    allowed = tmp_path / "allowed"
+    project = allowed / "project"
+    project.mkdir(parents=True)
+    workspace = db.upsert_workspace("ws-1", "Workspace")
+
+    root = attach_primary_workspace_root(
+        db=db,
+        workspace_id="ws-1",
+        user_id="user-1",
+        request=WorkspaceRootAttachRequest(
+            backend="host_local",
+            absolute_root=str(project),
+        ),
+        allowed_roots=(allowed,),
+    )
+
+    assert root["root_id"] == "primary"
+    assert db.get_workspace("ws-1")["version"] == workspace["version"] + 1
 
 
 def test_omitted_root_id_is_idempotent_and_uses_current_root_id(db, tmp_path):
@@ -157,6 +203,27 @@ def test_host_local_outside_allowlist_raises_validation_error(db, tmp_path):
             request=WorkspaceRootAttachRequest(
                 backend="host_local",
                 absolute_root=str(outside),
+            ),
+            allowed_roots=(allowed,),
+        )
+
+    assert exc_info.value.code == "workspace_project_root_outside_allowed_roots"
+
+
+def test_host_local_outside_missing_path_is_rejected_as_outside_allowlist(db, tmp_path):
+    allowed = tmp_path / "allowed"
+    outside_missing = tmp_path / "outside" / "missing"
+    allowed.mkdir()
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootValidationError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="host_local",
+                absolute_root=str(outside_missing),
             ),
             allowed_roots=(allowed,),
         )
@@ -297,6 +364,12 @@ class _InvalidStateSandboxResolver:
         )
 
 
+@dataclass(frozen=True)
+class _MismatchedSandboxResolver:
+    def validate_workspace_volume(self, *, workspace_id, user_id, sandbox_volume_id):
+        return SandboxVolumeBinding(sandbox_volume_id="different", state="ready")
+
+
 def test_sandbox_resolver_invalid_state_is_rejected(db):
     db.upsert_workspace("ws-1", "Workspace")
 
@@ -313,6 +386,25 @@ def test_sandbox_resolver_invalid_state_is_rejected(db):
         )
 
     assert exc_info.value.code == "workspace_sandbox_volume_state_invalid"
+    assert db.get_workspace_primary_root("ws-1") is None
+
+
+def test_sandbox_resolver_volume_id_mismatch_is_rejected(db):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+            sandbox_resolver=_MismatchedSandboxResolver(),
+        )
+
+    assert exc_info.value.code == "workspace_sandbox_volume_id_mismatch"
     assert db.get_workspace_primary_root("ws-1") is None
 
 
@@ -347,6 +439,9 @@ def test_ready_sandbox_resolver_repairs_prior_unavailable_retry(db):
 
 
 class _VersionConflictDB:
+    def get_workspace(self, workspace_id):
+        return {"version": 1}
+
     def get_workspace_primary_root(self, workspace_id):
         return None
 
@@ -355,6 +450,9 @@ class _VersionConflictDB:
 
 
 class _LoadConflictDB:
+    def get_workspace(self, workspace_id):
+        return {"version": 1}
+
     def get_workspace_primary_root(self, workspace_id):
         raise ConflictError("Workspace 'ws-1' version mismatch.")
 
@@ -363,11 +461,56 @@ class _LoadConflictDB:
 
 
 class _LoadInputErrorDB:
+    def get_workspace(self, workspace_id):
+        return {"version": 1}
+
     def get_workspace_primary_root(self, workspace_id):
         raise InputError("workspace_id is invalid.")
 
     def upsert_workspace_primary_root(self, workspace_id, payload):
         pytest.fail("upsert should not run when current-root load fails")
+
+
+class _WorkspaceLoadConflictDB:
+    def get_workspace(self, workspace_id):
+        raise ConflictError("Workspace 'ws-1' version mismatch.")
+
+    def get_workspace_primary_root(self, workspace_id):
+        pytest.fail("current root should not load when workspace load fails")
+
+    def upsert_workspace_primary_root(self, workspace_id, payload):
+        pytest.fail("upsert should not run when workspace load fails")
+
+
+class _MissingWorkspaceDB:
+    def get_workspace(self, workspace_id):
+        return None
+
+    def get_workspace_primary_root(self, workspace_id):
+        pytest.fail("current root should not load when workspace is missing")
+
+    def upsert_workspace_primary_root(self, workspace_id, payload):
+        pytest.fail("upsert should not run when workspace is missing")
+
+
+class _RacingAttachDB:
+    def __init__(self, real_db, replacement_root):
+        self.real_db = real_db
+        self.replacement_root = replacement_root
+        self.loaded_workspace_version = None
+
+    def get_workspace(self, workspace_id):
+        workspace = self.real_db.get_workspace(workspace_id)
+        self.loaded_workspace_version = workspace["version"]
+        return workspace
+
+    def get_workspace_primary_root(self, workspace_id):
+        assert self.loaded_workspace_version is not None
+        self.real_db.upsert_workspace_primary_root(workspace_id, self.replacement_root)
+        return None
+
+    def upsert_workspace_primary_root(self, workspace_id, payload):
+        return self.real_db.upsert_workspace_primary_root(workspace_id, payload)
 
 
 def test_db_conflict_with_version_text_is_wrapped_as_version_mismatch():
@@ -383,6 +526,36 @@ def test_db_conflict_with_version_text_is_wrapped_as_version_mismatch():
         )
 
     assert exc_info.value.code == "workspace_version_mismatch"
+
+
+def test_db_conflict_from_workspace_load_is_wrapped_as_version_mismatch():
+    with pytest.raises(WorkspaceRootConflictError) as exc_info:
+        attach_primary_workspace_root(
+            db=_WorkspaceLoadConflictDB(),
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+        )
+
+    assert exc_info.value.code == "workspace_version_mismatch"
+
+
+def test_missing_workspace_load_is_wrapped_as_workspace_not_found():
+    with pytest.raises(WorkspaceRootConflictError) as exc_info:
+        attach_primary_workspace_root(
+            db=_MissingWorkspaceDB(),
+            workspace_id="ws-missing",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+        )
+
+    assert exc_info.value.code == "workspace_not_found"
 
 
 def test_db_conflict_from_current_root_load_is_wrapped_as_version_mismatch():
@@ -413,3 +586,29 @@ def test_db_input_error_from_current_root_load_is_wrapped_as_invalid_request():
         )
 
     assert exc_info.value.code == "workspace_root_invalid_request"
+
+
+def test_service_auto_expected_version_prevents_read_before_write_replacement_race(db, tmp_path):
+    allowed = tmp_path / "allowed"
+    requested = allowed / "requested"
+    requested.mkdir(parents=True)
+    db.upsert_workspace("ws-1", "Workspace")
+    racing_db = _RacingAttachDB(
+        db,
+        {"root_id": "other", "backend": "sandbox_volume", "sandbox_volume_id": "volume-other"},
+    )
+
+    with pytest.raises(WorkspaceRootConflictError) as exc_info:
+        attach_primary_workspace_root(
+            db=racing_db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="host_local",
+                absolute_root=str(requested),
+            ),
+            allowed_roots=(allowed,),
+        )
+
+    assert exc_info.value.code == "workspace_version_mismatch"
+    assert db.get_workspace_primary_root("ws-1")["root_id"] == "other"

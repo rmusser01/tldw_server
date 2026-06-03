@@ -129,6 +129,7 @@ def attach_primary_workspace_root(
 ) -> dict[str, Any]:
     """Validate and persist a Workspace primary project-root binding."""
 
+    workspace_version = _load_workspace_version_for_attach(db, workspace_id)
     current_primary = _load_current_primary_root(db, workspace_id)
     normalized = _normalize_request(
         workspace_id=workspace_id,
@@ -153,7 +154,11 @@ def attach_primary_workspace_root(
         "sandbox_volume_id": normalized.sandbox_volume_id,
         "display_name": normalized.display_name,
         "root_state": "attached",
-        "expected_workspace_version": request.expected_workspace_version,
+        "expected_workspace_version": (
+            request.expected_workspace_version
+            if request.expected_workspace_version is not None
+            else workspace_version
+        ),
         "replace_existing": request.replace_existing,
     }
     if normalized.sandbox_mount_state is not None:
@@ -167,6 +172,30 @@ def attach_primary_workspace_root(
         raise WorkspaceRootInputError(str(exc), code="workspace_root_invalid_request") from exc
     except CharactersRAGDBError:
         raise
+
+
+def _load_workspace_version_for_attach(db: Any, workspace_id: str) -> int:
+    try:
+        workspace = db.get_workspace(workspace_id)
+    except ConflictError as exc:
+        raise _wrap_db_conflict(exc) from exc
+    except InputError as exc:
+        raise WorkspaceRootInputError(str(exc), code="workspace_root_invalid_request") from exc
+    except CharactersRAGDBError:
+        raise
+
+    if workspace is None:
+        raise WorkspaceRootConflictError(
+            "Workspace was not found.",
+            code="workspace_not_found",
+        )
+    try:
+        return int(workspace["version"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkspaceRootInputError(
+            "Workspace version is invalid.",
+            code="workspace_root_invalid_request",
+        ) from exc
 
 
 def _load_current_primary_root(db: Any, workspace_id: str) -> dict[str, Any] | None:
@@ -234,24 +263,8 @@ def _normalize_host_local_request(
             "absolute_root must be absolute after user expansion.",
             code="workspace_project_root_not_absolute",
         )
-    if candidate.is_symlink():
-        raise WorkspaceRootInputError(
-            "Workspace project root cannot be a symlink.",
-            code="workspace_project_root_symlink",
-        )
 
     resolved = candidate.resolve(strict=False)
-    if not resolved.exists():
-        raise WorkspaceRootInputError(
-            "Workspace project root does not exist.",
-            code="workspace_project_root_missing",
-        )
-    if not resolved.is_dir():
-        raise WorkspaceRootInputError(
-            "Workspace project root is not a directory.",
-            code="workspace_project_root_not_directory",
-        )
-
     configured_allowed_roots = (
         tuple(Path(root) for root in allowed_roots)
         if allowed_roots is not None
@@ -269,6 +282,21 @@ def _normalize_host_local_request(
         raise WorkspaceRootValidationError(
             "Workspace project root is outside the configured allowed roots.",
             code="workspace_project_root_outside_allowed_roots",
+        )
+    if candidate.is_symlink():
+        raise WorkspaceRootInputError(
+            "Workspace project root cannot be a symlink.",
+            code="workspace_project_root_symlink",
+        )
+    if not resolved.exists():
+        raise WorkspaceRootInputError(
+            "Workspace project root does not exist.",
+            code="workspace_project_root_missing",
+        )
+    if not resolved.is_dir():
+        raise WorkspaceRootInputError(
+            "Workspace project root is not a directory.",
+            code="workspace_project_root_not_directory",
         )
 
     display_name = _normalize_display_name(
@@ -313,6 +341,11 @@ def _normalize_sandbox_volume_request(
         user_id=user_id,
         sandbox_volume_id=sandbox_volume_id,
     )
+    if str(binding.sandbox_volume_id or "").strip() != sandbox_volume_id:
+        raise WorkspaceRootConfigurationError(
+            "Workspace sandbox volume resolver returned a mismatched volume id.",
+            code="workspace_sandbox_volume_id_mismatch",
+        )
     if binding.state not in _SANDBOX_VOLUME_STATES:
         raise WorkspaceRootConfigurationError(
             "Workspace sandbox volume resolver returned an invalid state.",
