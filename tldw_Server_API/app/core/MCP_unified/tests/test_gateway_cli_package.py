@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -222,22 +225,33 @@ def test_gateway_cli_argument_errors_are_json(
 
 
 def test_gateway_cli_list_presets_reports_builtin_summary(
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """List bundled presets as a small JSON summary for front-end discovery."""
 
-    exit_code = gateway_cli.main(["list-presets"])
+    result = subprocess.run(
+        [sys.executable, "-m", "mcp_unified.gateway.cli", "list-presets"],
+        check=False,
+        cwd=_repo_root(),
+        env={**os.environ, "PYTHONWARNINGS": "ignore"},
+        text=True,
+        capture_output=True,
+    )
 
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
+    payload = json.loads(result.stdout)
     preset_ids = {preset["id"] for preset in payload["presets"]}
-    assert exit_code == 0
-    assert captured.err == ""
+    product_owner = next(
+        preset for preset in payload["presets"] if preset["id"] == "product-owner"
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
     assert "project-researcher" in preset_ids
     assert all(
         {"description", "id", "name", "version"} <= set(preset)
         for preset in payload["presets"]
     )
+    assert product_owner["tooling"]["direct_categories"]
+    assert product_owner["tooling"]["deferred_categories"]
+    assert product_owner["tooling"]["recommendation_catalog_patchable"] is True
 
 
 def test_gateway_cli_show_preset_reports_full_builtin_profile(

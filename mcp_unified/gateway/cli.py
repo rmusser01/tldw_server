@@ -13,6 +13,7 @@ from typing import Any, NoReturn, TextIO
 
 from mcp_unified.package_metadata import package_metadata_summary
 from mcp_unified.profiles.presets import (
+    ProfilePreset,
     duplicate_builtin_preset,
     get_builtin_preset,
     list_builtin_presets,
@@ -1516,6 +1517,32 @@ def _load_json_argument_file(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _preset_tooling_summary(preset: ProfilePreset) -> dict[str, Any]:
+    """Build compact tooling discovery metadata for preset list output."""
+
+    tooling = preset.profile.metadata.get("tooling")
+    if not isinstance(tooling, dict):
+        return {}
+
+    progressive = tooling.get("progressive_disclosure")
+    if not isinstance(progressive, dict):
+        progressive = {}
+
+    return {
+        "direct_categories": list(progressive.get("direct_categories") or []),
+        "deferred_categories": list(progressive.get("deferred_categories") or []),
+        "recommended_server_categories": [
+            server.get("category")
+            for server in tooling.get("recommended_servers", [])
+            if isinstance(server, dict) and isinstance(server.get("category"), str)
+        ],
+        "recommendation_catalog_patchable": tooling.get(
+            "recommendation_catalog_patchable"
+        )
+        is True,
+    }
+
+
 def _handle_list_presets(_args: argparse.Namespace) -> int:
     """Emit bundled profile preset summaries as deterministic JSON."""
 
@@ -1527,6 +1554,7 @@ def _handle_list_presets(_args: argparse.Namespace) -> int:
                     "description": preset.profile.description,
                     "id": preset.id,
                     "name": preset.profile.name,
+                    "tooling": _preset_tooling_summary(preset),
                     "version": preset.version,
                 }
                 for preset in presets
