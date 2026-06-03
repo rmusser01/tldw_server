@@ -197,6 +197,7 @@
       "devDependencies": {
         "@types/audioworklet": "^0.0.60",
         "@types/dom-webcodecs": "^0.1.14",
+        "@types/react": "^18.3.3",
         "typescript": "^5.0.0",
       },
       "peerDependencies": {
