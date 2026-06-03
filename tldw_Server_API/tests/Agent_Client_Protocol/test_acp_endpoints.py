@@ -2,6 +2,7 @@ import importlib.machinery
 import json
 import sys
 import types
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -91,7 +92,7 @@ class StubRunnerClient:
         )
         return "session-123"
 
-    async def get_session_metadata(self, session_id: str, user_id: int | None = None):
+    async def get_session_metadata(self, session_id: str, user_id: int | None = None) -> dict[str, Any]:
         del user_id
         return self.session_metadata.get(session_id, {})
 

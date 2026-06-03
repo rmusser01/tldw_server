@@ -103,8 +103,9 @@ def test_workspace_live_e2e_manifest_declares_workspace_capabilities() -> None:
         "TLDW_E2E_SERVER_URL",
         "TLDW_E2E_API_KEY",
         "ACP_AGENT_PROFILE",
+        "ACP_E2E_WORKSPACE_ID",
     ]
-    assert "ACP_E2E_WORKSPACE_ID" in manifest["optional_environment"]
+    assert "ACP_E2E_WORKSPACE_ID" not in manifest["optional_environment"]
     backend_command = next(
         command for command in manifest["commands"]
         if command["id"] == "workspace_live_backend_acp_e2e"
@@ -788,6 +789,7 @@ def test_backend_workspace_live_e2e_runs_workspace_evidence_sequence(
     evidence = json.loads(captured.out.split(": ", 1)[1])
     assert evidence["agent_profile"] == "codex"
     assert evidence["workspace_id"] == "workspace-alpha"
+    assert evidence["workspace_id_source"] == "env"
     assert evidence["session_id"] == "sess-codex-workspace-1"
     assert evidence["capabilities"]["workspace_env"] == "pass"
     assert evidence["capabilities"]["mcp_injection"] == "pass"

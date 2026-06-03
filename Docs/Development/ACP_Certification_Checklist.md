@@ -64,8 +64,9 @@ detail/events/artifacts, diagnostics, cancel, and close. The manifest also runs
 the Go runner verification script so runner/profile changes are covered by the
 same evidence record.
 
-Workspace live E2E uses the same required backend variables and adds optional
-workspace-specific controls:
+Workspace live E2E uses the same required backend variables and also requires a
+real Research Workspace id. The remaining workspace-specific controls are
+optional:
 
 ```bash
 export ACP_E2E_WORKSPACE_ID=<research-workspace-id>
@@ -88,7 +89,9 @@ then queries redacted detail/events/artifacts, diagnostics, and
 `/api/v1/acp/sessions?workspace_id=...`. `workspace_env`, `mcp_injection`,
 diagnostics, redacted support views, and cleanup must pass. Artifacts, sandbox
 IDs, and reviewer-loop evidence are reported as `pass` or `skip` unless the
-matching `ACP_E2E_EXPECT_*` flag makes them required.
+matching `ACP_E2E_EXPECT_*` flag makes them required. A run without
+`ACP_E2E_WORKSPACE_ID` must refuse to run and cannot be used as Research
+Workspace evidence.
 
 ## Stub-Smoke Checklist
 

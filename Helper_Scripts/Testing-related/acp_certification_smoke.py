@@ -183,10 +183,10 @@ _MANIFESTS: dict[str, dict[str, Any]] = {
             "TLDW_E2E_SERVER_URL",
             "TLDW_E2E_API_KEY",
             "ACP_AGENT_PROFILE",
+            "ACP_E2E_WORKSPACE_ID",
         ],
         "optional_environment": [
             "ACP_E2E_WORKSPACE_CWD",
-            "ACP_E2E_WORKSPACE_ID",
             "ACP_E2E_MCP_SERVER_NAME",
             "ACP_E2E_MCP_SERVER_COMMAND",
             "ACP_E2E_MCP_SERVER_ARGS_JSON",
@@ -731,11 +731,7 @@ def _workspace_live_e2e_workspace_id(profile: str) -> str:
     configured = os.environ.get("ACP_E2E_WORKSPACE_ID", "").strip()
     if configured:
         return configured
-    normalized = "".join(
-        char.lower() if char.isalnum() else "-"
-        for char in str(profile or "agent")
-    ).strip("-")
-    return f"acp-cert-{normalized or 'agent'}"
+    raise ValueError("ACP_E2E_WORKSPACE_ID is required for workspace-live-e2e certification")
 
 
 def _workspace_live_e2e_mcp_servers() -> list[dict[str, Any]]:
@@ -847,7 +843,12 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
     """Run the backend ACP REST lifecycle with workspace evidence checks."""
     required_env = {
         name: os.environ.get(name, "").strip()
-        for name in ("TLDW_E2E_SERVER_URL", "TLDW_E2E_API_KEY", "ACP_AGENT_PROFILE")
+        for name in (
+            "TLDW_E2E_SERVER_URL",
+            "TLDW_E2E_API_KEY",
+            "ACP_AGENT_PROFILE",
+            "ACP_E2E_WORKSPACE_ID",
+        )
     }
     missing = [
         name for name, value in required_env.items()
@@ -863,6 +864,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
 
     profile = required_env["ACP_AGENT_PROFILE"]
     workspace_id = _workspace_live_e2e_workspace_id(profile)
+    workspace_id_source = "env"
     workspace_cwd = os.environ.get("ACP_E2E_WORKSPACE_CWD", "").strip() or str(ROOT)
     mcp_servers = _workspace_live_e2e_mcp_servers()
     session_id: str | None = None
@@ -936,6 +938,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
         evidence: dict[str, Any] = {
             "agent_profile": profile,
             "workspace_id": workspace_id,
+            "workspace_id_source": workspace_id_source,
             "session_id": session_id,
             "stop_reason": stop_reason,
         }

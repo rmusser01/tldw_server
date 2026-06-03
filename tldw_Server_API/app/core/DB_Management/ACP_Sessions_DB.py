@@ -872,31 +872,22 @@ class ACPSessionsDB:
     ) -> tuple[list[dict[str, Any]], int]:
         """List sessions with optional filters. Returns (rows, total_count)."""
         conn = self._get_conn()
-        filter_params: list[Any] = [
-            user_id,
-            user_id,
-            status,
-            status,
-            agent_type,
-            agent_type,
-            workspace_id,
-            workspace_id,
-        ]
-        count_query = """
-            SELECT COUNT(*) FROM sessions
-            WHERE (? IS NULL OR user_id = ?)
-              AND (? IS NULL OR status = ?)
-              AND (? IS NULL OR agent_type = ?)
-              AND (? IS NULL OR workspace_id = ?)
-        """
-        rows_query = """
-            SELECT * FROM sessions
-            WHERE (? IS NULL OR user_id = ?)
-              AND (? IS NULL OR status = ?)
-              AND (? IS NULL OR agent_type = ?)
-              AND (? IS NULL OR workspace_id = ?)
-            ORDER BY created_at DESC LIMIT ? OFFSET ?
-        """
+        where_clauses: list[str] = []
+        filter_params: list[Any] = []
+        for column, value in (
+            ("user_id", user_id),
+            ("status", status),
+            ("agent_type", agent_type),
+            ("workspace_id", workspace_id),
+        ):
+            if value is None:
+                continue
+            where_clauses.append(f"{column} = ?")
+            filter_params.append(value)
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        # Safe dynamic SQL: column names are fixed above; values remain bound parameters.
+        count_query = f"SELECT COUNT(*) FROM sessions{where_sql}"  # nosec B608
+        rows_query = f"SELECT * FROM sessions{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"  # nosec B608
 
         count_row = conn.execute(count_query, filter_params).fetchone()
         total = count_row[0] if count_row else 0

@@ -690,8 +690,13 @@ def _build_acp_workspace_context(rec: Any) -> dict[str, Any] | None:
                     "verification_level": _bounded_acp_context_label(entry.verification_level),
                 }
             )
-    except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        pass
+    except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Unable to enrich ACP workspace context from agent registry for session_id={} agent_type={}: {}",
+            _bounded_acp_context_label(getattr(rec, "session_id", None), redact_paths=True),
+            context["agent_type"],
+            _bounded_acp_context_error(exc) or exc.__class__.__name__,
+        )
 
     if (
         mcp_server_count > 0
