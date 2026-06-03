@@ -4,7 +4,7 @@ title: Harden MCP Unified standalone extras and CI artifact gate
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-06-03 03:14
+updated_date: 2026-06-03 03:33
 labels:
 - mcp-unified
 - packaging
@@ -41,15 +41,13 @@ Docs/superpowers/plans/2026-06-03-mcp-unified-standalone-extras-ci-gate-plan.md
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Review follow-up complete: verified Qodo, CodeRabbit, and Gemini comments against current PR code. Implemented still-valid fixes for mandatory artifact gate build-tool assertions, shared artifact build fixture, structured workflow YAML assertions, null-safe Provides-Extra handling, explicit importlib.util import, and workflow-file existence guard.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented a package-local MCP Unified artifact gate that builds wheel and sdist artifacts, validates wheel metadata/extras/entry point/dependency boundary, validates sdist contents, wires the PyPI Package Check workflow to run the focused gate for mcp_unified/** changes, and documents the pre-publish gate. Verification: focused MCP package-boundary pytest passed; Bandit medium+ threshold passed on the touched Python test file; default Bandit output contains only existing low-severity test-scope findings.
+Implemented a package-local MCP Unified artifact gate that builds wheel and sdist artifacts, validates wheel metadata/extras/entry point/dependency boundary, validates sdist contents, wires the PyPI Package Check workflow to run the focused gate for mcp_unified/** changes, and documents the pre-publish gate. Review follow-up addressed still-valid Qodo, CodeRabbit, and Gemini comments: artifact-gate build tool checks now fail instead of skipping, distribution artifacts are built once via a shared fixture, workflow assertions parse YAML structure, Provides-Extra handling is null-safe, importlib.util is explicitly imported, and workflow-file existence is checked before reading. Verification: focused MCP package-boundary pytest passed; Bandit medium+ threshold passed on the touched Python test file; default Bandit output contains only existing low-severity test-scope findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

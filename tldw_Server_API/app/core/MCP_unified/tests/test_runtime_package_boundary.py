@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import configparser
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import mcp_unified
 import pytest
+import yaml
 from pydantic import ValidationError
 
 try:
@@ -97,9 +99,8 @@ def _version_satisfies_minimum(
     )
 
 
-def _require_offline_build_tools() -> None:
-    """Skip the offline build smoke when local build tools are unavailable."""
-
+def _offline_build_tool_issues() -> list[str]:
+    """Return missing or incompatible offline build tool requirements."""
     pyproject = _load_standalone_pyproject()
     build_requires = pyproject["build-system"]["requires"]
     missing: list[str] = []
@@ -115,16 +116,36 @@ def _require_offline_build_tools() -> None:
         if not _version_satisfies_minimum(installed_version, minimum):
             incompatible.append(f"{requirement} (found {installed_version})")
 
-    if missing or incompatible:
-        details = []
-        if missing:
-            details.append(f"missing: {', '.join(missing)}")
-        if incompatible:
-            details.append(f"incompatible: {', '.join(incompatible)}")
+    details = []
+    if missing:
+        details.append(f"missing: {', '.join(missing)}")
+    if incompatible:
+        details.append(f"incompatible: {', '.join(incompatible)}")
+    return details
+
+
+def _require_offline_build_tools() -> None:
+    """Skip the offline build smoke when local build tools are unavailable."""
+
+    details = _offline_build_tool_issues()
+    if details:
         pytest.skip(
             "Offline standalone package smoke requires preinstalled build-system "
             "requirements because it uses PIP_NO_INDEX=1 and "
             f"--no-build-isolation; {'; '.join(details)}."
+        )
+
+
+def _assert_artifact_gate_build_tools_available() -> None:
+    """Assert the mandatory artifact gate build tools are available."""
+
+    details = _offline_build_tool_issues()
+    if importlib.util.find_spec("build") is None:
+        details.append("missing: build")
+    if details:
+        raise AssertionError(
+            "Standalone artifact gate requires preinstalled build tools; "
+            f"{'; '.join(details)}."
         )
 
 
@@ -145,9 +166,7 @@ def _assert_subprocess_succeeded(
 def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
     """Build standalone MCP Unified wheel and sdist into a temporary directory."""
 
-    _require_offline_build_tools()
-    if importlib.util.find_spec("build") is None:
-        pytest.skip("Standalone distribution gate requires the 'build' package.")
+    _assert_artifact_gate_build_tools_available()
 
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
@@ -259,6 +278,17 @@ def _read_sdist_members(sdist: Path) -> set[str]:
 
     with tarfile.open(sdist, "r:gz") as archive:
         return {member.name for member in archive.getmembers()}
+
+
+@pytest.fixture(scope="module")
+def standalone_distributions(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, Path]:
+    """Build standalone artifacts once for distribution metadata tests."""
+
+    return _build_standalone_distributions(
+        tmp_path_factory.mktemp("mcp_unified_distribution")
+    )
 
 
 def test_subprocess_failure_assertion_includes_captured_output() -> None:
@@ -408,20 +438,19 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
 
 
 def test_mcp_unified_standalone_distribution_metadata_matches_extras(
-    tmp_path: Path,
+    standalone_distributions: tuple[Path, Path],
 ) -> None:
     """Built standalone artifacts must preserve the package-local extras contract."""
 
     metadata = importlib.import_module("mcp_unified.package_metadata")
-    wheel, _sdist = _build_standalone_distributions(tmp_path)
+    wheel, _sdist = standalone_distributions
     distribution_metadata = _read_wheel_metadata(wheel)
     entry_points = _read_wheel_entry_points(wheel)
 
     assert distribution_metadata["Name"] == metadata.PACKAGE_NAME  # nosec B101
     assert distribution_metadata["Version"] == mcp_unified.__version__  # nosec B101
-    assert set(distribution_metadata.get_all("Provides-Extra")) == set(
-        metadata.OPTIONAL_EXTRAS
-    )  # nosec B101
+    provides_extra = distribution_metadata.get_all("Provides-Extra") or []
+    assert set(provides_extra) == set(metadata.OPTIONAL_EXTRAS)  # nosec B101
     assert _wheel_extra_dependency_names(distribution_metadata) == {
         extra: set(dependencies)
         for extra, dependencies in metadata.OPTIONAL_EXTRAS.items()
@@ -450,11 +479,11 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
 
 
 def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
-    tmp_path: Path,
+    standalone_distributions: tuple[Path, Path],
 ) -> None:
     """Built standalone sdist must not include the host server package tree."""
 
-    _wheel, sdist = _build_standalone_distributions(tmp_path)
+    _wheel, sdist = standalone_distributions
     members = _read_sdist_members(sdist)
 
     assert any(member.endswith("/pyproject.toml") for member in members)  # nosec B101
@@ -467,19 +496,35 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
 def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
     """PyPI validation workflow must also gate package-local mcp_unified changes."""
 
-    workflow = (
+    workflow_path = (
         PACKAGE_ROOT.parent / ".github" / "workflows" / "pypi-package.yml"
-    ).read_text(encoding="utf-8")
+    )
+    assert workflow_path.is_file()  # nosec B101
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    triggers = workflow.get("on") or workflow.get(True)
 
-    expected_fragments = (
-        "mcp_unified/**",
-        "make pypi-check",
-        "Upload dist artifacts",
+    assert "mcp_unified/**" in triggers["pull_request"]["paths"]  # nosec B101
+    assert "mcp_unified/**" in triggers["push"]["paths"]  # nosec B101
+
+    steps = workflow["jobs"]["build-and-check"]["steps"]
+    run_blocks = [step.get("run", "") for step in steps]
+    artifact_gate_nodeids = (
         "test_mcp_unified_standalone_distribution_metadata_matches_extras",
         "test_mcp_unified_standalone_sdist_contains_only_package_boundary",
     )
-    for fragment in expected_fragments:
-        assert fragment in workflow  # nosec B101
+    assert any(
+        all(nodeid in run_block for nodeid in artifact_gate_nodeids)
+        for run_block in run_blocks
+    )  # nosec B101
+    assert any(
+        run_block.strip() == "make pypi-check"
+        for run_block in run_blocks
+    )  # nosec B101
+    assert any(
+        str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        and step.get("with", {}).get("path") == "dist/*"
+        for step in steps
+    )  # nosec B101
 
 
 @pytest.mark.smoke
