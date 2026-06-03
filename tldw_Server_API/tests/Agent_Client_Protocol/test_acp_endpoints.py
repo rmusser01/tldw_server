@@ -376,6 +376,20 @@ def test_acp_session_diagnostics_includes_bounded_workspace_context(
     assert "/private/bin/mcp-filesystem" not in serialized_payload
 
 
+def test_acp_workspace_context_adapter_source_redacts_local_paths():
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    assert acp_endpoints._redact_acp_adapter_source(
+        "zed-industries/codex-acp"
+    ) == "zed-industries/codex-acp"
+    assert acp_endpoints._redact_acp_adapter_source(
+        "/Users/example/.local/bin/codex-acp"
+    ) == "[redacted]"
+    assert acp_endpoints._redact_acp_adapter_source(
+        "C:\\Users\\example\\codex-acp"
+    ) == "[redacted]"
+
+
 def test_acp_session_new_preserves_explicit_empty_mcp_servers(
     client_user_only,
     stub_runner_client,

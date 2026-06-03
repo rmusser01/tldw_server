@@ -4,7 +4,7 @@ title: Certify Codex ACP workspace live evidence harness
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-03 05:58'
+updated_date: '2026-06-03 06:20'
 labels: []
 dependencies: []
 references:
@@ -45,9 +45,9 @@ Docs/superpowers/plans/2026-06-03-codex-acp-workspace-live-certification-plan.md
 Implemented in TDD slices: workspace-live-e2e manifest contract, backend workspace live runner contract, strict optional artifact expectation regression, and documentation updates. Main-checkout MCP-created TASK-509 was not used for this branch because the worktree already had task-509 collisions; TASK-2227 is the canonical branch-local task.
 
 Verification:
-- PASS: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py` -> 43 passed, 6 warnings.
-- PASS: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -q Helper_Scripts/Testing-related/acp_certification_smoke.py` -> exit 0.
-- LIVE SKIP/REFUSAL: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --run` -> exit 2, missing `TLDW_E2E_SERVER_URL`, `TLDW_E2E_API_KEY`, `ACP_AGENT_PROFILE`. No live certification claim made.
+- PASS: `python -m pytest -q tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py` -> 43 passed, 6 warnings.
+- PASS: `python -m bandit -q Helper_Scripts/Testing-related/acp_certification_smoke.py` -> exit 0.
+- LIVE SKIP/REFUSAL: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --run` -> exit 2, missing `TLDW_E2E_SERVER_URL`, `TLDW_E2E_API_KEY`, `ACP_AGENT_PROFILE`, `ACP_E2E_WORKSPACE_ID`. No live certification claim made.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 
@@ -57,9 +57,9 @@ Verification:
 Added an opt-in `workspace-live-e2e` ACP certification profile and backend runner for Research Workspace-scoped Codex/ACP validation. The helper now creates a workspace-bound session with a non-empty MCP server config, prompts for artifact-like output, queries redacted detail/events/artifacts plus diagnostics and workspace-filtered session history, and emits bounded pass/skip/fail capability evidence. Strict `ACP_E2E_EXPECT_ARTIFACTS`, `ACP_E2E_EXPECT_SANDBOX`, and `ACP_E2E_EXPECT_REVIEWER_LOOP` flags turn skipped optional evidence into failure without double-closing already closed sessions. Documentation now distinguishes plain host live E2E from workspace live evidence and keeps the Codex matrix caveats unupgraded until a real workspace run passes.
 
 Verification:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py` -> 43 passed, 6 warnings.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -q Helper_Scripts/Testing-related/acp_certification_smoke.py` -> exit 0.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --run` -> exit 2 with safe refusal because `TLDW_E2E_SERVER_URL`, `TLDW_E2E_API_KEY`, and `ACP_AGENT_PROFILE` were not set. No live certification claim was made.
+- `python -m pytest -q tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py` -> 43 passed, 6 warnings.
+- `python -m bandit -q Helper_Scripts/Testing-related/acp_certification_smoke.py` -> exit 0.
+- `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --run` -> exit 2 with safe refusal because `TLDW_E2E_SERVER_URL`, `TLDW_E2E_API_KEY`, `ACP_AGENT_PROFILE`, and `ACP_E2E_WORKSPACE_ID` were not set. No live certification claim was made.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

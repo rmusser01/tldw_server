@@ -408,6 +408,14 @@ export const WorkspaceACPHistoryModal: React.FC<
         ) {
           throw agentTaskHistoryResult.reason
         }
+        if (
+          directSessionsResult.status === "rejected" &&
+          !isUnsupportedError(directSessionsResult.reason) &&
+          agentTaskHistoryResult.status === "fulfilled" &&
+          agentTaskHistoryResult.value.length === 0
+        ) {
+          throw directSessionsResult.reason
+        }
 
         if (!cancelled) {
           setEntries(

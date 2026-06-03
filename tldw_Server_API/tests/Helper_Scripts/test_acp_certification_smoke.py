@@ -827,6 +827,50 @@ def test_backend_workspace_live_e2e_runs_workspace_evidence_sequence(
     ]
 
 
+def test_payload_contains_review_evidence_requires_structured_signal() -> None:
+    module = _load_module()
+
+    assert module._payload_contains_review_evidence(
+        {"diagnostics": [{"message": "reviewer loop not configured"}]}
+    ) is False
+    assert module._payload_contains_review_evidence(
+        {"diagnostics": [{"review_decision": {"status": "approved"}}]}
+    ) is True
+    assert module._payload_contains_review_evidence(
+        {"review_loop": {"status": "completed"}}
+    ) is True
+
+
+def test_backend_workspace_live_e2e_uses_workspace_failure_label(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "codex")
+    monkeypatch.setenv("ACP_E2E_WORKSPACE_ID", "workspace-alpha")
+
+    def _fake_http(
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        del method, path, body, timeout_seconds
+        return 503, {"detail": "runner offline"}
+
+    monkeypatch.setattr(module, "_http_json_request", _fake_http)
+
+    rc = module._run_backend_workspace_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "FAIL workspace_live_backend_acp_e2e: health returned HTTP 503" in captured.err
+    assert "FAIL live_backend_acp_e2e" not in captured.err
+
+
 def test_backend_workspace_live_e2e_strict_artifact_expectation_fails_once_closed(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -897,7 +941,7 @@ def test_backend_workspace_live_e2e_strict_artifact_expectation_fails_once_close
     captured = capsys.readouterr()
 
     assert rc == 1
-    assert "FAIL live_backend_acp_e2e: workspace evidence" in captured.err
+    assert "FAIL workspace_live_backend_acp_e2e: workspace evidence" in captured.err
     assert "artifacts" in captured.err
     assert close_calls == 1
 

@@ -1625,6 +1625,52 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
   })
 
+  it("surfaces direct ACP session fetch errors when Agent Tasks history has no runs", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({
+            detail: "Direct ACP session history is temporarily unavailable"
+          })
+        } as Response
+      }
+
+      if (url === ACP_PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText(
+        "Direct ACP session history is temporarily unavailable"
+      )
+    ).toBeInTheDocument()
+  })
+
   it("opens sandbox diagnostics from the settings menu", async () => {
     render(
       <WorkspaceHeader

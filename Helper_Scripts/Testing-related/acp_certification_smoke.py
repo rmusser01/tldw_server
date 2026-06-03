@@ -566,20 +566,32 @@ def _payload_preview(payload: Any) -> str:
     return text[:240] + ("..." if len(text) > 240 else "")
 
 
-def _fail_backend_live_e2e(step: str, status: int, payload: Any) -> int:
+def _fail_backend_live_e2e(
+    step: str,
+    status: int,
+    payload: Any,
+    *,
+    label: str = "live_backend_acp_e2e",
+) -> int:
     """Print a bounded backend live-E2E failure and return a failure code."""
     print(
-        f"FAIL live_backend_acp_e2e: {step} returned HTTP {status}: "
+        f"FAIL {label}: {step} returned HTTP {status}: "
         f"{_payload_preview(payload)}",
         file=sys.stderr,
     )
     return 1
 
 
-def _check_backend_response(step: str, status: int, payload: Any) -> int | None:
+def _check_backend_response(
+    step: str,
+    status: int,
+    payload: Any,
+    *,
+    label: str = "live_backend_acp_e2e",
+) -> int | None:
     """Return an exit code when a backend response should fail certification."""
     if status >= 400:
-        return _fail_backend_live_e2e(step, status, payload)
+        return _fail_backend_live_e2e(step, status, payload, label=label)
     return None
 
 
@@ -801,12 +813,29 @@ def _filtered_sessions_include(
 
 
 def _payload_contains_review_evidence(payload: Any) -> bool:
-    """Return True when a bounded support payload appears to include review-loop evidence."""
-    try:
-        rendered = json.dumps(payload or {}, sort_keys=True, default=str).lower()
-    except TypeError:
-        rendered = str(payload or "").lower()
-    return any(marker in rendered for marker in ("review_loop", "reviewer", "review_decision"))
+    """Return True when support payloads include structured review-loop evidence."""
+    review_evidence_keys = {"review_loop", "reviewer", "review_decision"}
+
+    def is_positive_evidence(value: Any) -> bool:
+        if value in (None, False, "", [], {}):
+            return False
+        if value is True:
+            return True
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            normalized_key = str(key).strip().lower()
+            if normalized_key in review_evidence_keys and is_positive_evidence(value):
+                return True
+            if isinstance(value, (dict, list)) and _payload_contains_review_evidence(value):
+                return True
+        return False
+    if isinstance(payload, list):
+        return any(_payload_contains_review_evidence(item) for item in payload)
+    return False
 
 
 def _required_workspace_live_failures(capabilities: dict[str, str]) -> list[str]:
@@ -878,6 +907,14 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             timeout_seconds=timeout_seconds,
         )
 
+    def check_workspace_response(step: str, status: int, payload: Any) -> int | None:
+        return _check_backend_response(
+            step,
+            status,
+            payload,
+            label="workspace_live_backend_acp_e2e",
+        )
+
     try:
         timeout_seconds = _backend_e2e_timeout_seconds()
         for step, method, path, body in (
@@ -891,7 +928,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             ),
         ):
             status, payload = request(method, path, body)
-            failed = _check_backend_response(step, status, payload)
+            failed = check_workspace_response(step, status, payload)
             if failed is not None:
                 return failed
 
@@ -903,12 +940,17 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             "mcp_servers": mcp_servers,
         }
         status, new_payload = request("POST", "/api/v1/acp/sessions/new", new_body)
-        failed = _check_backend_response("sessions/new", status, new_payload)
+        failed = check_workspace_response("sessions/new", status, new_payload)
         if failed is not None:
             return failed
         session_id = str(new_payload.get("session_id") or "")
         if not session_id:
-            return _fail_backend_live_e2e("sessions/new", status, {"detail": "missing session_id"})
+            return _fail_backend_live_e2e(
+                "sessions/new",
+                status,
+                {"detail": "missing session_id"},
+                label="workspace_live_backend_acp_e2e",
+            )
 
         prompt_body = {
             "session_id": session_id,
@@ -920,7 +962,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             ],
         }
         status, prompt_payload = request("POST", "/api/v1/acp/sessions/prompt", prompt_body)
-        failed = _check_backend_response("sessions/prompt", status, prompt_payload)
+        failed = check_workspace_response("sessions/prompt", status, prompt_payload)
         if failed is not None:
             return failed
 
@@ -944,7 +986,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
         }
         for step, path in redacted_paths:
             status, payload = request("GET", path, None)
-            failed = _check_backend_response(step, status, payload)
+            failed = check_workspace_response(step, status, payload)
             if failed is not None:
                 return failed
             support_payloads[step] = payload
@@ -956,7 +998,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             + urllib.parse.urlencode({"workspace_id": workspace_id, "limit": 20})
         )
         status, session_list_payload = request("GET", filtered_path, None)
-        failed = _check_backend_response("sessions?workspace_id", status, session_list_payload)
+        failed = check_workspace_response("sessions?workspace_id", status, session_list_payload)
         if failed is not None:
             return failed
 
@@ -965,7 +1007,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             "/api/v1/acp/sessions/cancel",
             {"session_id": session_id},
         )
-        failed = _check_backend_response("sessions/cancel", status, payload)
+        failed = check_workspace_response("sessions/cancel", status, payload)
         if failed is not None:
             return failed
 
@@ -974,7 +1016,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
             "/api/v1/acp/sessions/close",
             {"session_id": session_id},
         )
-        failed = _check_backend_response("sessions/close", status, payload)
+        failed = check_workspace_response("sessions/close", status, payload)
         if failed is not None:
             return failed
         closed_session_id = session_id
@@ -1043,6 +1085,7 @@ def _run_backend_workspace_live_e2e_from_env() -> int:
                 "workspace evidence",
                 200,
                 {"failed_capabilities": failures, "evidence": evidence},
+                label="workspace_live_backend_acp_e2e",
             )
 
         print("PASS workspace_live_backend_acp_e2e: " + json.dumps(evidence, sort_keys=True))

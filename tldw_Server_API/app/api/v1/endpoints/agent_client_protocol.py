@@ -597,6 +597,21 @@ def _bounded_acp_context_label(
     return text
 
 
+def _redact_acp_adapter_source(value: Any) -> str | None:
+    """Return adapter source metadata with local filesystem paths redacted."""
+    text = _bounded_acp_context_label(value)
+    if text is None:
+        return None
+    lowered = text.lower()
+    if (
+        text.startswith(("/", ".", "~", "\\\\"))
+        or ":\\" in text
+        or (":/" in text and not lowered.startswith(("http://", "https://")))
+    ):
+        return _ACP_REDACTED_VALUE
+    return text
+
+
 def _bounded_acp_context_error(value: Any) -> str | None:
     """Return a redacted, bounded diagnostic error summary for context metadata."""
     if value is None:
@@ -683,7 +698,7 @@ def _build_acp_workspace_context(rec: Any) -> dict[str, Any] | None:
                 {
                     "runtime_backend": _bounded_acp_context_label(entry.runtime_backend),
                     "entrypoint_strategy": _bounded_acp_context_label(entry.entrypoint_strategy),
-                    "adapter_source": _bounded_acp_context_label(entry.adapter_source),
+                    "adapter_source": _redact_acp_adapter_source(entry.adapter_source),
                     "adapter_package": _bounded_acp_context_label(entry.adapter_package),
                     "adapter_version": _bounded_acp_context_label(entry.adapter_version),
                     "support_state": _bounded_acp_context_label(entry.support_state),
