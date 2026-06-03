@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mcp-unified"
 version = "0.1.0"
 description = "Standalone MCP Unified runtime and gateway package boundary."
+readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-only"}
 dependencies = [
@@ -70,4 +71,4 @@ mcp_unified = "."
 "mcp_unified.storage" = "storage"
 
 [tool.setuptools.package-data]
-mcp_unified = ["py.typed"]
+mcp_unified = ["py.typed", "README.md", "USER_GUIDE.md"]
