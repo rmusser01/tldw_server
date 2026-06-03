@@ -1,15 +1,20 @@
 import React from "react"
+import type { DynamicUISurface } from "@/types/dynamic-ui"
 
 export const DynamicUISourceFallback = ({
   title = "OpenUI source",
   source,
-  error
+  error,
+  surface
 }: {
   title?: string
   source: string
   error?: string
+  surface?: DynamicUISurface
 }) => (
   <details
+    data-testid="dynamic-ui-source-fallback"
+    data-dynamic-ui-surface={surface}
     className="rounded-md border border-border bg-surface2 p-3 text-sm text-text"
     open>
     <summary className="cursor-pointer font-medium text-text">{title}</summary>

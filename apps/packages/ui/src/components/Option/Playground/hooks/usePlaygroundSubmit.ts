@@ -167,6 +167,17 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       const requestOverrides = messageForModel
         ? { messageForModel }
         : undefined
+      const openUIRequestOverrides =
+        openUIRequestMode && !intent.isImageCommand
+          ? { dynamicUIRequest: { renderer: "openui" } }
+          : undefined
+      const mergedRequestOverrides =
+        requestOverrides || openUIRequestOverrides
+          ? {
+              ...(requestOverrides ?? {}),
+              ...(openUIRequestOverrides ?? {})
+            }
+          : undefined
       if (
         !intent.isImageCommand &&
         visiblePrompt.length === 0 &&
@@ -236,10 +247,13 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           promptText: visiblePrompt,
           image: value.image,
           intent,
-          requestOverrides
+          ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
         })
         if (queuedItem && messageForModel) {
           clearImportedSidepanelContext?.()
+        }
+        if (queuedItem && openUIRequestMode) {
+          clearOpenUIRequestMode()
         }
         return
       }
@@ -304,15 +318,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         imageGenerationSource: intent.isImageCommand
           ? "slash-command"
           : undefined,
-        requestOverrides:
-          openUIRequestMode && !intent.isImageCommand
-            ? { dynamicUIRequest: { renderer: "openui" } }
-            : undefined,
         researchContext:
           intent.isImageCommand || compareModeActive
             ? undefined
             : researchContext,
-        ...(requestOverrides ? { requestOverrides } : {})
+        ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
       }
 
       await dispatch(payload, {

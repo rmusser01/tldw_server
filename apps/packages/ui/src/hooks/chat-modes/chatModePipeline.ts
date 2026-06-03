@@ -739,6 +739,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     const assistantContent = isAbort
       ? fullText
       : buildAssistantErrorContent(fullText, e)
+    const assistantErrorDynamicUIEnvelope =
+      params.dynamicUIRequest?.renderer === "openui"
+        ? buildDynamicUIEnvelope("openui", assistantContent)
+        : null
+    const assistantErrorMetadataExtra = assistantErrorDynamicUIEnvelope
+      ? { dynamic_ui: assistantErrorDynamicUIEnvelope }
+      : undefined
     const interruptionReason = isAbort
       ? "Request cancelled"
       : e instanceof Error && e.message.trim().length > 0
@@ -786,7 +793,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       isContinue: mode.isContinue,
       prompt_content: promptContent,
       prompt_id: promptId,
-      userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined
+      userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
+      assistantMetadataExtra: assistantErrorMetadataExtra
     })
 
     if (isAbort) {

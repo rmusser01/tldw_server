@@ -11,6 +11,8 @@ describe("PlaygroundChat dynamic UI action bridge guard", () => {
 
     expect(source).toContain("useDynamicUIActionBridge")
     expect(source).toContain("confirmSensitiveValues")
+    expect(source).toContain("window.confirm")
+    expect(source).not.toContain("React.useCallback(async () => false")
     expect(source).toContain("resolvedDynamicUIAction")
     expect(source).toContain("onDynamicUIAction={resolvedDynamicUIAction}")
   })

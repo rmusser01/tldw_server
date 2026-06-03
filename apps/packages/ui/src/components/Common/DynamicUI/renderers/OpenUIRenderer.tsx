@@ -88,14 +88,17 @@ const normalizeOpenUIFormValues = (
   )
 }
 
-const stripActionParams = (params: ActionEvent["params"]): Record<string, unknown> =>
-  Object.fromEntries(
+const stripActionParams = (params: ActionEvent["params"]): Record<string, unknown> => {
+  if (!isRecord(params)) return {}
+  return Object.fromEntries(
     Object.entries(params).filter(([key]) => key !== "actionId" && key !== "actionType")
   )
+}
 
 const getOpenUIActionId = (event: ActionEvent): string => {
-  if (typeof event.params.actionId === "string" && event.params.actionId.trim()) {
-    return event.params.actionId.trim()
+  const params = isRecord(event.params) ? event.params : null
+  if (typeof params?.actionId === "string" && params.actionId.trim()) {
+    return params.actionId.trim()
   }
   if (typeof event.formName === "string" && event.formName.trim()) {
     return event.formName.trim()

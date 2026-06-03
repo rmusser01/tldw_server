@@ -2512,13 +2512,14 @@ export const PlaygroundMessage = (props: Props) => {
                     <DynamicMessageRenderer
                       envelope={dynamicUIEnvelope}
                       sourceMessageId={props.messageId}
-                      sourceText={props.message}
+                      sourceText={dynamicUIEnvelope.source}
                       surface={resolvedDynamicUISurface}
                       onAction={props.onDynamicUIAction}
                     />
                   ) : (
                     <DynamicUISourceFallback
-                      source={props.message}
+                      source={dynamicUIEnvelope.source}
+                      surface={resolvedDynamicUISurface}
                       error="Dynamic UI actions require a saved assistant message id."
                     />
                   )

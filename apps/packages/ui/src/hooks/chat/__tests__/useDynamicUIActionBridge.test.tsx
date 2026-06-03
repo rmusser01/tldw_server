@@ -37,6 +37,13 @@ describe("useDynamicUIActionBridge", () => {
       expect.objectContaining({
         message: expect.stringContaining("OpenUI action: submit survey"),
         image: "",
+        dynamicUIRequest: expect.objectContaining({
+          renderer: "openui",
+          sourceMessageId: "assistant-1",
+          actionId: "survey",
+          actionType: "submit",
+          values: { answer: "yes" }
+        }),
         userMetadataExtra: expect.objectContaining({
           dynamic_ui_action: expect.objectContaining({ actionId: "survey" })
         })

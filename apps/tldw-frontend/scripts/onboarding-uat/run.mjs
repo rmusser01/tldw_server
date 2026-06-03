@@ -112,16 +112,26 @@ function projectForViewport(viewport) {
   return null
 }
 
+/**
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} baseEnv
+ * @param {string[]} keys
+ * @returns {Record<string, string>}
+ */
 function safeEnv(baseEnv, keys) {
-  const env = {}
+  const env = /** @type {Record<string, string>} */ ({})
   for (const key of keys) {
-    if (baseEnv[key] !== undefined) {
-      env[key] = baseEnv[key]
+    const value = baseEnv[key]
+    if (typeof value === "string") {
+      env[key] = value
     }
   }
   return env
 }
 
+/**
+ * @param {{ repoRoot?: string, baseEnv?: NodeJS.ProcessEnv | Record<string, string | undefined> }} [options]
+ * @returns {string}
+ */
 export function resolvePythonCommand({ repoRoot = repoRootDefault, baseEnv = process.env } = {}) {
   if (baseEnv.PYTHON) {
     return baseEnv.PYTHON
@@ -174,6 +184,20 @@ export function copyReviewedEvidence({ artifacts, repoRoot = repoRootDefault }) 
   return destination
 }
 
+/**
+ * @param {{
+ *   repoRoot?: string,
+ *   frontendRoot?: string,
+ *   ports: { backend: number, web: number, mock: number },
+ *   profile: Record<string, string>,
+ *   mockConfig?: string,
+ *   scenario?: string | null,
+ *   viewport?: string,
+ *   runId?: string,
+ *   artifactRoot?: string,
+ *   baseEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>,
+ * }} options
+ */
 export function buildCommands({
   repoRoot = repoRootDefault,
   frontendRoot = frontendRootDefault,

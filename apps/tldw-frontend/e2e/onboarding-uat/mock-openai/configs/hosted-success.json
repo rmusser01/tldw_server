@@ -7,7 +7,7 @@
     "log_requests": true,
     "simulate_errors": false,
     "error_rate": 0,
-    "require_auth": false
+    "require_auth": true
   },
   "streaming": {
     "enabled": true,

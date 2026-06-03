@@ -37,8 +37,6 @@ Removed duplicate review_prompt_side fields from five Flashcards deck fixtures. 
 Reduced the Flashcards TypeScript baseline cluster by removing duplicated deck fixture properties in five tests. Verification: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false leaves the remaining non-Flashcards 7-diagnostic baseline; bunx vitest run the five touched Flashcards test files passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

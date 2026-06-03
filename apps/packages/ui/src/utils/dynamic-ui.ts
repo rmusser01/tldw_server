@@ -62,9 +62,9 @@ const keySegments = (key: string): string[] =>
       return normalized === "apikey" ? ["api", "key"] : [normalized]
     })
     .map((segment) => {
-      if (segment === "authorization") return "auth"
-      if (segment.endsWith("s")) return segment.slice(0, -1)
-      return segment
+      const normalized = segment.endsWith("s") ? segment.slice(0, -1) : segment
+      if (normalized === "authorization") return "auth"
+      return normalized
     })
     .filter(Boolean)
 

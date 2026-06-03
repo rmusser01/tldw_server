@@ -14,7 +14,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const DynamicMessageRenderer = ({
   envelope,
   sourceMessageId,
-  sourceText,
   surface,
   onAction
 }: {
@@ -68,18 +67,26 @@ export const DynamicMessageRenderer = ({
     }
   }, [envelope.renderer, surface])
 
+  const fallbackSource = envelope.source
+
   if (!isDynamicUIEnabledForSurface(surface)) {
-    return <DynamicUISourceFallback source={sourceText} />
+    return <DynamicUISourceFallback source={fallbackSource} surface={surface} />
   }
   if (error) {
-    return <DynamicUISourceFallback source={sourceText} error={error} />
+    return (
+      <DynamicUISourceFallback
+        source={fallbackSource}
+        error={error}
+        surface={surface}
+      />
+    )
   }
   if (!Renderer) {
-    return <DynamicUISourceFallback source={sourceText} />
+    return <DynamicUISourceFallback source={fallbackSource} surface={surface} />
   }
 
   return (
-    <DynamicUIErrorBoundary source={sourceText}>
+    <DynamicUIErrorBoundary source={fallbackSource} surface={surface}>
       <Renderer
         envelope={envelope}
         sourceMessageId={sourceMessageId}

@@ -131,4 +131,56 @@ describe("saveMessageOnError", () => {
     )
     expect(setHistoryId).toHaveBeenCalledWith("new-history-id")
   })
+
+  it("persists user and assistant metadata extras when saving error records", async () => {
+    await expect(
+      saveMessageOnError({
+        e: new Error("provider failed"),
+        history: [],
+        setHistory: vi.fn(),
+        image: "",
+        userMessage: "Submit OpenUI action",
+        botMessage: "",
+        historyId: "history-1",
+        selectedModel: "openai/gpt-4o",
+        setHistoryId: vi.fn(),
+        isRegenerating: false,
+        userMessageId: "user-1",
+        assistantMessageId: "assistant-1",
+        userMetadataExtra: {
+          dynamic_ui_action: { actionId: "survey" }
+        },
+        assistantMetadataExtra: {
+          dynamic_ui: {
+            renderer: "openui",
+            version: "v1",
+            source: "root = <Card />"
+          }
+        }
+      } as any)
+    ).resolves.toBe("history-1")
+
+    expect(mocks.saveMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "user-1",
+        role: "user",
+        metadataExtra: {
+          dynamic_ui_action: { actionId: "survey" }
+        }
+      })
+    )
+    expect(mocks.saveMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "assistant-1",
+        role: "assistant",
+        metadataExtra: {
+          dynamic_ui: {
+            renderer: "openui",
+            version: "v1",
+            source: "root = <Card />"
+          }
+        }
+      })
+    )
+  })
 })

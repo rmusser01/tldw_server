@@ -14,7 +14,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create an approved design spec for supporting OpenUI as the first renderer in a broader dynamic UI/artifact system across shared chat surfaces, including /chat, extension sidepanel chat, and workspace chat. Scope is design only; implementation planning follows after spec review and user approval.
+Create an approved design spec for supporting OpenUI as the first renderer in a broader dynamic UI/artifact system across shared chat surfaces, including /chat, extension sidepanel chat, and workspace chat. Scope is design only; implementation planning follows spec review and user approval.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

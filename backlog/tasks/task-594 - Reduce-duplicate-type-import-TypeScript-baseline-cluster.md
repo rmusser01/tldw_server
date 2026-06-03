@@ -37,8 +37,6 @@ Removed redundant standalone type imports from the StudySuggestions hook test an
 Reduced the duplicate type import TypeScript baseline cluster by relying on the existing grouped type imports in two tests. Verification: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false leaves the remaining 3-diagnostic baseline; bunx vitest run the two touched test files passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

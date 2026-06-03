@@ -1,8 +1,9 @@
 import React from "react"
+import type { DynamicUISurface } from "@/types/dynamic-ui"
 import { DynamicUISourceFallback } from "./DynamicUISourceFallback"
 
 export class DynamicUIErrorBoundary extends React.Component<
-  { source: string; children: React.ReactNode },
+  { source: string; surface?: DynamicUISurface; children: React.ReactNode },
   { error: string | null }
 > {
   state = { error: null }
@@ -12,6 +13,12 @@ export class DynamicUIErrorBoundary extends React.Component<
       error:
         error instanceof Error ? error.message : "Dynamic UI render failed."
     }
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("[DynamicUI] render error", error, errorInfo, {
+      source: this.props.source
+    })
   }
 
   componentDidUpdate(prevProps: { source: string }) {
@@ -26,6 +33,7 @@ export class DynamicUIErrorBoundary extends React.Component<
         <DynamicUISourceFallback
           source={this.props.source}
           error={this.state.error}
+          surface={this.props.surface}
         />
       )
     }

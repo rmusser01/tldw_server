@@ -37,8 +37,6 @@ Typed the external shell fixture with optional setOverrides, rendered SidepanelH
 Cleared the final UI package TypeScript diagnostics in three tests. Verification: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false exited 0 with empty output; bunx vitest run the three touched test files passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

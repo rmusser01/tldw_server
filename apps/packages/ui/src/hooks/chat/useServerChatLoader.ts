@@ -1038,6 +1038,7 @@ export const useServerChatLoader = ({
                         modelName: m.modelName || assistantName,
                         modelImage: m.modelImage,
                         parent_message_id: m.parentMessageId ?? null,
+                        metadataExtra: m.metadataExtra,
                         createdAt: resolvedCreatedAt
                       })
                     })

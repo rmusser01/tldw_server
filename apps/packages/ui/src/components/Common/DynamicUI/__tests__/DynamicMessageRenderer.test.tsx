@@ -72,6 +72,26 @@ describe("DynamicMessageRenderer", () => {
     expect(screen.getByText(/OpenUI source/i)).toBeInTheDocument()
   })
 
+  it("falls back to the canonical envelope source on disabled surfaces", () => {
+    render(
+      <DynamicMessageRenderer
+        envelope={{
+          renderer: "openui",
+          version: "v1",
+          source: "root = <Card><Text>Canonical source</Text></Card>"
+        }}
+        sourceMessageId="assistant-1"
+        sourceText="assistant prose that differs from source"
+        surface="workspace"
+      />
+    )
+
+    const fallback = screen.getByTestId("dynamic-ui-source-fallback")
+    expect(fallback).toHaveAttribute("data-dynamic-ui-surface", "workspace")
+    expect(fallback).toHaveTextContent("root = <Card><Text>Canonical source</Text></Card>")
+    expect(fallback).not.toHaveTextContent("assistant prose that differs from source")
+  })
+
   it("falls back to source with an alert when the renderer component throws", async () => {
     render(
       <DynamicMessageRenderer

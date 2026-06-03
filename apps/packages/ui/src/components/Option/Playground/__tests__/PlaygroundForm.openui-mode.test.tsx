@@ -4,7 +4,9 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
+const onSubmitMock = vi.hoisted(() =>
+  vi.fn(async (_payload: unknown) => ({ status: "submitted" as const }))
+)
 
 const messageOptionState = vi.hoisted(() => ({
   value: null as any
@@ -291,6 +293,7 @@ vi.mock("@/store/model", () => ({
       llamaGrammarOverride: "",
       jsonMode: false,
       numCtx: 8192,
+      setActiveSettingsScope: vi.fn(),
       updateSetting: vi.fn(),
       updateSettings: vi.fn()
     })
@@ -382,7 +385,7 @@ vi.mock("@/hooks/useMcpTools", () => ({
   })
 }))
 
-vi.mock("@/hooks/useChatSettingsRecord", () => ({
+vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({ settings: null, updateSettings: vi.fn() })
 }))
 
@@ -390,8 +393,8 @@ vi.mock("@/hooks/useChatMoodBadgePreference", () => ({
   useChatMoodBadgePreference: () => [false, vi.fn()]
 }))
 
-vi.mock("@/hooks/useSelectedCharacter", () => ({
-  useSelectedCharacter: () => [null, vi.fn()]
+vi.mock("@/hooks/useSelectedAssistant", () => ({
+  useSelectedAssistant: () => [null, vi.fn()]
 }))
 
 vi.mock("@/hooks/useVoiceChatSettings", () => ({
@@ -483,6 +486,7 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
+  useLocation: () => ({ pathname: "/chat", search: "", hash: "" }),
   useNavigate: () => vi.fn()
 }))
 

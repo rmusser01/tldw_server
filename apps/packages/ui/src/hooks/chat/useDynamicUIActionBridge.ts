@@ -39,6 +39,7 @@ export const useDynamicUIActionBridge = ({
       await onSubmit({
         message: formatDynamicUIActionUserMessage(metadata),
         image: "",
+        dynamicUIRequest: normalized,
         userMetadataExtra: {
           dynamic_ui_action: metadata
         }

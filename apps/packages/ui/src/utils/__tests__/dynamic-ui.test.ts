@@ -159,6 +159,7 @@ describe("dynamic UI utilities", () => {
     expect(shouldBlockDynamicUIActionValues({ settings: { accessKeys: ["abc123"] } })).toBe(true)
     expect(shouldBlockDynamicUIActionValues({ credentials: { username: "Ada" } })).toBe(true)
     expect(shouldBlockDynamicUIActionValues([{ authorization: "Bearer abc123" }])).toBe(true)
+    expect(shouldBlockDynamicUIActionValues([{ authorizations: "Bearer abc123" }])).toBe(true)
   })
 
   it("blocks when sensitive action value inspection exceeds the depth limit", () => {

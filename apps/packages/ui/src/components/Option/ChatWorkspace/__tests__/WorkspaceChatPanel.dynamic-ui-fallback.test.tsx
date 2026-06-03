@@ -38,7 +38,7 @@ vi.mock("@/components/Common/Playground/Message", () => ({
             data-testid="dynamic-ui-source-fallback"
             data-dynamic-ui-surface={props.dynamicUISurface}
           >
-            {props.message}
+            {envelope.source}
           </pre>
         ) : (
           props.message
@@ -60,12 +60,12 @@ describe("WorkspaceChatPanel Dynamic UI fallback", () => {
         id: "assistant-openui",
         role: "assistant",
         isBot: true,
-        message: "root = <Card />",
+        message: "Here is the requested UI.",
         metadataExtra: {
           dynamic_ui: {
             renderer: "openui",
             version: "v1",
-            source: "root = <Card />"
+            source: "root = <Card><Text>Workspace source</Text></Card>"
           }
         }
       }
@@ -81,7 +81,10 @@ describe("WorkspaceChatPanel Dynamic UI fallback", () => {
     )
 
     expect(screen.getByTestId("dynamic-ui-source-fallback")).toHaveTextContent(
-      "root = <Card />"
+      "root = <Card><Text>Workspace source</Text></Card>"
+    )
+    expect(screen.getByTestId("dynamic-ui-source-fallback")).not.toHaveTextContent(
+      "Here is the requested UI."
     )
     expect(screen.getByTestId("dynamic-ui-source-fallback")).toHaveAttribute(
       "data-dynamic-ui-surface",

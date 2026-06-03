@@ -197,7 +197,17 @@ export const PlaygroundChat = ({
     setCompareSplitChat,
     compareMaxModels
   } = useMessageOption()
-  const confirmSensitiveValues = React.useCallback(async () => false, [])
+  const confirmSensitiveValues = React.useCallback(async () => {
+    if (typeof window === "undefined" || typeof window.confirm !== "function") {
+      return false
+    }
+    return window.confirm(
+      t(
+        "playground:dynamicUI.confirmSensitiveValues",
+        "This OpenUI action includes fields that look like credentials or secrets. Submit it anyway?"
+      ) as string
+    )
+  }, [t])
   const bridgedDynamicUIAction = useDynamicUIActionBridge({
     messages,
     onSubmit,

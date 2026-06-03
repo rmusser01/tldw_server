@@ -133,4 +133,34 @@ describe("OpenUIRenderer", () => {
       values: { answer: "yes" }
     })
   })
+
+  it("normalizes OpenUI actions with missing params without throwing", () => {
+    const onAction = vi.fn()
+
+    render(
+      <OpenUIRenderer
+        envelope={{
+          renderer: "openui",
+          version: "v1",
+          source: "root = <Form name=\"surveyForm\" />"
+        }}
+        source={'root = <Form name="surveyForm" />'}
+        sourceMessageId="assistant-1"
+        onAction={onAction}
+      />
+    )
+
+    const rendererProps = openuiMocks.rendererSpy.mock.calls.at(-1)?.[0]
+    expect(() =>
+      rendererProps?.onAction?.({
+        type: "Submit",
+        formName: "surveyForm"
+      } as any)
+    ).not.toThrow()
+    expect(onAction).toHaveBeenCalledWith({
+      actionId: "surveyForm",
+      actionType: "submit",
+      values: {}
+    })
+  })
 })

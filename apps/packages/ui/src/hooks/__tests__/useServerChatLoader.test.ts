@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import type { Message } from "@/store/option"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
@@ -482,6 +484,17 @@ describe("mapServerChatMessagesToPlaygroundMessages", () => {
       "flux-test-backend"
     )
     expect(mapped[0].generationInfo?.image_generation?.sync?.status).toBe("synced")
+  })
+})
+
+describe("useServerChatLoader local mirror guard", () => {
+  it("persists normalized metadataExtra when seeding the local server-chat mirror", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../chat/useServerChatLoader.ts"),
+      "utf8"
+    )
+
+    expect(source).toContain("metadataExtra: m.metadataExtra")
   })
 })
 
