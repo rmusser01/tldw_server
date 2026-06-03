@@ -74,7 +74,7 @@ Out of scope:
 - Modify: `tldw_Server_API/Config_Files/README.md`
 - Test: `tldw_Server_API/tests/Config/test_startup_validation.py`
 
-- [ ] **Step 1: Write failing config tests**
+- [x] **Step 1: Write failing config tests**
 
 Add tests next to `test_get_ingestion_source_allowed_roots_resolves_relative_paths_from_project_root`.
 
@@ -138,7 +138,7 @@ def test_get_workspace_project_root_allowed_roots_dedupes_config_and_env(monkeyp
     )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -148,7 +148,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Config/test_
 
 Expected: FAIL because `get_workspace_project_root_allowed_roots` is not defined.
 
-- [ ] **Step 3: Add config helper**
+- [x] **Step 3: Add config helper**
 
 Implement:
 
@@ -209,7 +209,7 @@ def get_workspace_project_root_allowed_roots(*, reload: bool = False) -> tuple[P
 
 Refactor `get_ingestion_source_allowed_roots` to reuse `_dedupe_normalized_allowed_roots` without changing its behavior.
 
-- [ ] **Step 4: Add config docs**
+- [x] **Step 4: Add config docs**
 
 In `tldw_Server_API/Config_Files/config.txt`, add a new section before `[ACP-WORKSPACE]`:
 
@@ -231,7 +231,7 @@ If unset, the Workspace API falls back to ACP workspace roots for compatibility.
 roots are not used for project-root writes.
 ```
 
-- [ ] **Step 5: Run config tests**
+- [x] **Step 5: Run config tests**
 
 Run:
 
@@ -241,7 +241,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Config/test_
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/config.py tldw_Server_API/Config_Files/config.txt tldw_Server_API/Config_Files/README.md tldw_Server_API/tests/Config/test_startup_validation.py
@@ -254,7 +254,7 @@ git commit -m "feat: add workspace project root allowlist config"
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:15531-15688`
 - Test: `tldw_Server_API/tests/Workspaces/test_workspace_project_roots_db.py`
 
-- [ ] **Step 1: Write failing DB tests**
+- [x] **Step 1: Write failing DB tests**
 
 Add:
 
@@ -339,7 +339,7 @@ def test_retrying_same_primary_root_upsert_repairs_operational_state_when_provid
     assert repaired["version"] == root["version"] + 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -349,7 +349,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL on version enforcement, same-root backend replacement, or operational repair.
 
-- [ ] **Step 3: Extend DB method**
+- [x] **Step 3: Extend DB method**
 
 Update `upsert_workspace_primary_root`:
 
@@ -393,7 +393,7 @@ for column in (*binding_columns, *operational_columns):
         root_updates[column] = new_value
 ```
 
-- [ ] **Step 4: Run DB tests**
+- [x] **Step 4: Run DB tests**
 
 Run:
 
@@ -403,7 +403,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/Workspaces/test_workspace_project_roots_db.py
@@ -416,7 +416,7 @@ git commit -m "feat: harden workspace primary root db upsert"
 - Create: `tldw_Server_API/app/core/Workspaces/root_binding_service.py`
 - Test: `tldw_Server_API/tests/Workspaces/test_workspace_root_binding_service.py`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Create `test_workspace_root_binding_service.py` with a `CharactersRAGDB` fixture and tests for:
 
@@ -457,7 +457,7 @@ Add targeted tests:
 - default sandbox resolver persists fail-closed `sandbox_mount_state == "not_configured"`.
 - fake sandbox resolver with `state="ready"` repairs a prior `sandbox_mount_state == "unavailable"` retry.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -467,7 +467,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL because service module does not exist.
 
-- [ ] **Step 3: Implement service types and exceptions**
+- [x] **Step 3: Implement service types and exceptions**
 
 Create `root_binding_service.py`:
 
@@ -556,7 +556,7 @@ class SandboxVolumeResolver(Protocol):
 
 Add `DefaultSandboxVolumeResolver` that returns `not_configured` and does not claim ownership.
 
-- [ ] **Step 4: Implement host-local validation**
+- [x] **Step 4: Implement host-local validation**
 
 Rules:
 
@@ -578,7 +578,7 @@ Use explicit codes:
 - `workspace_project_root_symlink`
 - `workspace_project_root_outside_allowed_roots`
 
-- [ ] **Step 5: Implement sandbox-volume validation**
+- [x] **Step 5: Implement sandbox-volume validation**
 
 Rules:
 
@@ -589,7 +589,7 @@ Rules:
 - if `strict_sandbox_validation` and state is not `ready`, raise `WorkspaceRootConfigurationError(code="workspace_sandbox_volume_resolver_unavailable")`.
 - otherwise persist fail-closed with `root_state="attached"` and `sandbox_mount_state=binding.state`.
 
-- [ ] **Step 6: Implement replacement/idempotency policy**
+- [x] **Step 6: Implement replacement/idempotency policy**
 
 `attach_primary_workspace_root` should:
 
@@ -629,7 +629,7 @@ except CharactersRAGDBError:
     raise
 ```
 
-- [ ] **Step 7: Run service tests**
+- [x] **Step 7: Run service tests**
 
 Run:
 
@@ -639,7 +639,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Workspaces/root_binding_service.py tldw_Server_API/tests/Workspaces/test_workspace_root_binding_service.py
@@ -652,7 +652,7 @@ git commit -m "feat: add workspace root binding service"
 - Modify: `tldw_Server_API/app/core/Workspaces/context.py:309-316`
 - Test: `tldw_Server_API/tests/Workspaces/test_workspace_core_context.py`
 
-- [ ] **Step 1: Write failing context test**
+- [x] **Step 1: Write failing context test**
 
 Add:
 
@@ -695,7 +695,7 @@ def test_sandbox_volume_root_fails_closed_until_mount_ready() -> None:
     }
 ```
 
-- [ ] **Step 2: Run context tests to verify failure**
+- [x] **Step 2: Run context tests to verify failure**
 
 Run:
 
@@ -705,7 +705,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL because current root readiness only checks `root_state`, `root_id`, and backend.
 
-- [ ] **Step 3: Add sandbox mount readiness gate**
+- [x] **Step 3: Add sandbox mount readiness gate**
 
 Update `_project_root_ready`:
 
@@ -726,7 +726,7 @@ def _project_root_ready(profile: str, project_root: Mapping[str, Any]) -> tuple[
 
 Keep `"mounted"` as a compatibility alias because existing tests and prior slices use it.
 
-- [ ] **Step 4: Run context tests**
+- [x] **Step 4: Run context tests**
 
 Run:
 
@@ -736,7 +736,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Workspaces/context.py tldw_Server_API/tests/Workspaces/test_workspace_core_context.py
@@ -751,7 +751,7 @@ git commit -m "feat: fail closed for unready sandbox workspace roots"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/workspaces.py:978-1005`
 - Test: `tldw_Server_API/tests/Workspaces/test_workspaces_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Add tests:
 
@@ -823,7 +823,7 @@ Add endpoint tests for:
 - stale `expected_workspace_version` returns `409` with
   `detail.code == "workspace_version_mismatch"`.
 
-- [ ] **Step 2: Run API tests to verify they fail**
+- [x] **Step 2: Run API tests to verify they fail**
 
 Run:
 
@@ -833,7 +833,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL because schema/endpoint do not exist.
 
-- [ ] **Step 3: Add Pydantic request schema**
+- [x] **Step 3: Add Pydantic request schema**
 
 In `workspace_schemas.py`, add:
 
@@ -853,7 +853,7 @@ class WorkspacePrimaryRootAttachRequest(BaseModel):
 
 Keep field-specific backend validation in `root_binding_service`; this avoids duplicating domain errors in Pydantic and preserves stable service error codes.
 
-- [ ] **Step 4: Add endpoint helpers**
+- [x] **Step 4: Add endpoint helpers**
 
 In `workspaces.py`, import:
 
@@ -884,7 +884,7 @@ def _workspace_roots_response(
 
 Refactor `list_workspace_roots` to use this helper.
 
-- [ ] **Step 5: Add endpoint**
+- [x] **Step 5: Add endpoint**
 
 Add before the existing `GET /{workspace_id}/roots` route:
 
@@ -923,7 +923,7 @@ async def attach_workspace_primary_root_endpoint(
         raise map_db_error_to_http(exc, default_detail="Failed to attach workspace primary root") from exc
 ```
 
-- [ ] **Step 6: Run API tests**
+- [x] **Step 6: Run API tests**
 
 Run:
 
@@ -933,7 +933,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py
@@ -946,7 +946,7 @@ git commit -m "feat: add workspace primary root attach endpoint"
 - Modify: `tldw_Server_API/tests/Workspaces/test_workspaces_api.py`
 - Modify as needed from earlier tasks.
 
-- [ ] **Step 1: Add read contract regression test**
+- [x] **Step 1: Add read contract regression test**
 
 After attaching a host-local root through the new endpoint, call:
 
@@ -961,7 +961,7 @@ Assert:
 - serialized JSON does not contain the temp absolute path string.
 - capability actions are conservative for file indexing/preview unless those states are explicitly ready.
 
-- [ ] **Step 2: Add sandbox fail-closed API regression test**
+- [x] **Step 2: Add sandbox fail-closed API regression test**
 
 Attach `sandbox_volume` with default resolver. Assert:
 
@@ -969,7 +969,7 @@ Attach `sandbox_volume` with default resolver. Assert:
 - `/capabilities` and `/context` return `allowed_actions.use_sandbox.allowed is False`.
 - `reason_code == "sandbox_mount_not_configured"` for project-root-gated sandbox/ACP actions.
 
-- [ ] **Step 3: Run focused Workspace suite**
+- [x] **Step 3: Run focused Workspace suite**
 
 Run:
 
@@ -984,7 +984,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tldw_Server_API/tests/Workspaces/test_workspaces_api.py
@@ -997,7 +997,7 @@ git commit -m "test: cover workspace root attach read contracts"
 - Modify: `backlog/tasks/task-2235 - Implement-Workspace-primary-root-attach-write-API-slice.md`
 - Move to: `backlog/completed/task-2235 - Implement-Workspace-primary-root-attach-write-API-slice.md`
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1012,7 +1012,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run compile smoke**
+- [x] **Step 2: Run compile smoke**
 
 ```bash
 source .venv/bin/activate && python -m compileall \
@@ -1025,7 +1025,7 @@ source .venv/bin/activate && python -m compileall \
 
 Expected: `0` exit.
 
-- [ ] **Step 3: Run Bandit on touched backend scope**
+- [x] **Step 3: Run Bandit on touched backend scope**
 
 ```bash
 source .venv/bin/activate && python -m bandit -r \
@@ -1039,7 +1039,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new findings in touched code.
 
-- [ ] **Step 4: Run diff hygiene**
+- [x] **Step 4: Run diff hygiene**
 
 ```bash
 git diff --check
@@ -1047,7 +1047,7 @@ git diff --check
 
 Expected: no output and `0` exit.
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Record:
 
@@ -1059,12 +1059,30 @@ Record:
 
 Then complete the task using Backlog MCP if available.
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 ```bash
 git add backlog/tasks/task-2235\ -\ Implement-Workspace-primary-root-attach-write-API-slice.md backlog/completed/task-2235\ -\ Implement-Workspace-primary-root-attach-write-API-slice.md
 git commit -m "chore: close workspace primary root attach task"
 ```
+
+## Final Verification
+
+Completed on 2026-06-03 in the isolated worktree:
+`/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/workspace-core-project-model`.
+
+- Focused backend suite:
+  `python -m pytest tldw_Server_API/tests/Config/test_startup_validation.py tldw_Server_API/tests/Workspaces/test_workspace_project_roots_db.py tldw_Server_API/tests/Workspaces/test_workspace_root_binding_service.py tldw_Server_API/tests/Workspaces/test_workspace_core_context.py tldw_Server_API/tests/Workspaces/test_workspace_service_capabilities.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q`
+  Result: `139 passed, 6 warnings in 34.55s`.
+- Compile smoke:
+  `python -m compileall -q tldw_Server_API/app/core/config.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/root_binding_service.py tldw_Server_API/app/core/Workspaces/context.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/app/api/v1/endpoints/workspaces.py`
+  Result: exit `0`.
+- Diff hygiene:
+  `git diff --check`
+  Result: exit `0`.
+- Bandit touched backend scope:
+  `python -m bandit -r tldw_Server_API/app/core/config.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/root_binding_service.py tldw_Server_API/app/core/Workspaces/context.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/app/api/v1/endpoints/workspaces.py -f json -o /tmp/bandit_task_2235_workspace_primary_root.json`
+  Result: exit `0`, JSON `results_count: 0`.
 
 ## Plan Review Notes
 
