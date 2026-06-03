@@ -244,14 +244,17 @@ def _assert_profile_runtime_tool_names(
 ) -> None:
     """Assert ordinary profile tools plus synthetic discovery helpers are exposed."""
 
-    names = set(_listed_tool_names(tools))
-    for tool_name in backend_tools:
-        assert tool_name in names
-    assert PROFILE_DISCOVERY_READ_TOOL_NAMES <= names
+    expected_names = {
+        *backend_tools,
+        *PROFILE_DISCOVERY_READ_TOOL_NAMES,
+    }
     if includes_tool_call:
-        assert PROFILE_DISCOVERY_CALL_TOOL_NAME in names
+        expected_names.add(PROFILE_DISCOVERY_CALL_TOOL_NAME)
     else:
-        assert PROFILE_DISCOVERY_CALL_TOOL_NAME not in names
+        expected_names.discard(PROFILE_DISCOVERY_CALL_TOOL_NAME)
+    listed_names = _listed_tool_names(tools)
+    assert len(listed_names) == len(set(listed_names))
+    assert set(listed_names) == expected_names
 
 
 def _profile_with_allowed_tools(profile_id: str, allowed_tools: list[str]) -> Any:
@@ -2842,6 +2845,56 @@ def test_profile_runtime_tool_call_delegates_installed_tool_through_policy() -> 
     assert backend.call_requests[-1][1] == {"query": "bridge"}
 
 
+def test_profile_runtime_backend_tool_with_bridge_name_wins_collision() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "tool_search",
+                "description": "Backend search tool.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+                "metadata": {"category": "test"},
+            },
+            {
+                "name": "admin.delete",
+                "description": "Denied admin tool.",
+                "metadata": {"category": "admin"},
+            },
+        ]
+    )
+    profile = _profile_with_allowed_tools("collision", ["tool_search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="collision",
+    )
+    context = GatewayRequestContext(request_id="bridge-name-collision")
+
+    tools = asyncio.run(runtime.list_tools(context))
+    descriptors = {tool["name"]: tool for tool in tools}
+    payload = asyncio.run(
+        runtime.call_tool(
+            "tool_search",
+            {"query": "backend"},
+            context,
+        )
+    )
+
+    _assert_profile_runtime_tool_names(tools, backend_tools=["tool_search"])
+    assert descriptors["tool_search"]["description"] == "Backend search tool."
+    assert descriptors["tool_search"]["metadata"]["category"] == "test"
+    assert payload["content"][0]["text"] == "tool_search:backend"
+    assert backend.call_requests[-1][0] == "tool_search"
+    assert all(tool["name"] != "admin.delete" for tool in tools)
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -2850,6 +2903,7 @@ def test_profile_runtime_tool_call_delegates_installed_tool_through_policy() -> 
         {"tool_id": 123, "arguments": {}},
         {"tool_id": "echo.search", "arguments": []},
         {"tool_id": "echo.search", "arguments": {}, "extra": True},
+        {"tool_id": "echo.search", "arguments": {}, "extra": True, 1: True},
     ],
 )
 def test_profile_runtime_tool_call_rejects_invalid_arguments(

@@ -183,22 +183,26 @@ class ProfileAwareGatewayRuntime:
 
         tools = await self._safe_backend_tools(context)
         allowed_tools: list[dict[str, Any]] = []
+        allowed_tool_names: set[str] = set()
         for tool in tools:
             if not isinstance(tool, dict):
                 continue
             name = _tool_name(tool)
             if (
                 name is not None
-                and not _is_bridge_tool_name(name)
                 and _tool_allowed_by_profile(
                     profile_result.profile,
                     tool,
                 )
             ):
+                allowed_tool_names.add(name)
                 allowed_tools.append(deepcopy(tool))
         return [
             *allowed_tools,
-            *_profile_bridge_tool_descriptors(profile_result.profile),
+            *_profile_bridge_tool_descriptors(
+                profile_result.profile,
+                suppressed_names=allowed_tool_names,
+            ),
         ]
 
     async def call_tool(
@@ -211,7 +215,23 @@ class ProfileAwareGatewayRuntime:
 
         profile = await self._require_profile(context)
         if _is_bridge_tool_name(name):
-            return await self._call_bridge_tool(profile, name, arguments, context)
+            backend_tools = await self._safe_backend_tools(context)
+            collision_tool = _allowed_backend_tool_by_name(profile, backend_tools, name)
+            if collision_tool is not None:
+                return await self._call_backend_tool_through_policy(
+                    profile,
+                    name,
+                    arguments,
+                    context,
+                    tool=collision_tool,
+                )
+            return await self._call_bridge_tool(
+                profile,
+                name,
+                arguments,
+                context,
+                backend_tools=backend_tools,
+            )
         return await self._call_backend_tool_through_policy(
             profile,
             name,
@@ -312,6 +332,8 @@ class ProfileAwareGatewayRuntime:
         name: str,
         arguments: dict[str, Any],
         context: GatewayRequestContext,
+        *,
+        backend_tools: list[Any],
     ) -> dict[str, Any]:
         """Execute one synthetic profile-scoped tool discovery helper."""
 
@@ -322,7 +344,6 @@ class ProfileAwareGatewayRuntime:
                 _EMPTY_ARGUMENT_KEYS,
                 reason_code="invalid_tool_categories_arguments",
             )
-            backend_tools = await self._safe_backend_tools(context)
             catalog = list_profile_tools(profile, backend_tools)
             return {
                 "profile_id": catalog["profile_id"],
@@ -336,11 +357,9 @@ class ProfileAwareGatewayRuntime:
                 _EMPTY_ARGUMENT_KEYS,
                 reason_code="invalid_profile_tools_list_arguments",
             )
-            backend_tools = await self._safe_backend_tools(context)
             return list_profile_tools(profile, backend_tools)
         if name == _TOOL_SEARCH:
             query, category, limit = _validated_tool_search_arguments(arguments)
-            backend_tools = await self._safe_backend_tools(context)
             return {
                 "tools": search_profile_tools(
                     profile,
@@ -352,7 +371,6 @@ class ProfileAwareGatewayRuntime:
             }
         if name == _TOOL_DESCRIBE:
             tool_id = _validated_tool_describe_arguments(arguments)
-            backend_tools = await self._safe_backend_tools(context)
             description = describe_profile_tool(profile, backend_tools, tool_id)
             if description is None:
                 return _bridge_tool_error_payload(
@@ -369,7 +387,6 @@ class ProfileAwareGatewayRuntime:
                     reason_code="tool_not_allowed",
                     provenance={"profile_id": profile.id, "tool_name": name},
                 )
-            backend_tools = await self._safe_backend_tools(context)
             resolution = resolve_profile_tool_call(profile, backend_tools, tool_id)
             if resolution.get("status") == "not_found":
                 return _bridge_tool_error_payload(
@@ -450,7 +467,28 @@ def _is_bridge_tool_name(name: str) -> bool:
     return name in _BRIDGE_TOOL_NAMES
 
 
-def _profile_bridge_tool_descriptors(profile: MCPProfile) -> list[dict[str, Any]]:
+def _allowed_backend_tool_by_name(
+    profile: MCPProfile,
+    backend_tools: list[Any],
+    name: str,
+) -> dict[str, Any] | None:
+    """Return an allowed backend descriptor matching a bridge-reserved name."""
+
+    for tool in backend_tools:
+        if (
+            isinstance(tool, dict)
+            and _tool_name(tool) == name
+            and _tool_allowed_by_profile(profile, tool)
+        ):
+            return tool
+    return None
+
+
+def _profile_bridge_tool_descriptors(
+    profile: MCPProfile,
+    *,
+    suppressed_names: set[str],
+) -> list[dict[str, Any]]:
     """Return caller-owned synthetic discovery tool descriptors for a profile."""
 
     names = [
@@ -461,7 +499,11 @@ def _profile_bridge_tool_descriptors(profile: MCPProfile) -> list[dict[str, Any]
     ]
     if _profile_has_deferred_categories(profile):
         names.append(_TOOL_CALL)
-    return [deepcopy(_BRIDGE_TOOL_DESCRIPTORS[name]) for name in names]
+    return [
+        deepcopy(_BRIDGE_TOOL_DESCRIPTORS[name])
+        for name in names
+        if name not in suppressed_names
+    ]
 
 
 def _profile_has_deferred_categories(profile: MCPProfile) -> bool:
@@ -569,9 +611,12 @@ def _validate_bridge_argument_keys(
 
     if not isinstance(arguments, dict):
         raise _invalid_bridge_arguments(tool_name, reason_code=reason_code)
-    keys = set(arguments)
-    missing = sorted(required_keys - keys)
-    unknown = sorted(keys - allowed_keys)
+    missing = sorted(key for key in required_keys if key not in arguments)
+    unknown = [
+        _bridge_argument_key_label(key)
+        for key in arguments
+        if key not in allowed_keys
+    ]
     if missing or unknown:
         raise _invalid_bridge_arguments(
             tool_name,
@@ -579,6 +624,12 @@ def _validate_bridge_argument_keys(
             missing=missing,
             unknown=unknown,
         )
+
+
+def _bridge_argument_key_label(key: Any) -> str:
+    """Return a stable validation label for arbitrary mapping keys."""
+
+    return key if isinstance(key, str) else repr(key)
 
 
 def _required_bridge_tool_id(
