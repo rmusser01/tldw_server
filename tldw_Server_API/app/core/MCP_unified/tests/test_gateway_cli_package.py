@@ -2050,6 +2050,8 @@ def test_standalone_gateway_docs_describe_package_release_gate() -> None:
     assert "GPL-3.0-only" in docs
     assert "internal/experimental" in docs
     assert "names-only" in docs
+    assert "py.typed" in docs  # nosec B101
+    assert "PEP 561" in docs  # nosec B101
     assert "not a separately published standalone package" in docs
 
 

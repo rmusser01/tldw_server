@@ -68,3 +68,6 @@ mcp_unified = "."
 "mcp_unified.interfaces" = "interfaces"
 "mcp_unified.profiles" = "profiles"
 "mcp_unified.storage" = "storage"
+
+[tool.setuptools.package-data]
+mcp_unified = ["py.typed"]

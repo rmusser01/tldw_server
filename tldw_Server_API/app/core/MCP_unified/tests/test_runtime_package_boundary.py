@@ -30,6 +30,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
 
 PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
 STANDALONE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
+PY_TYPED_MARKER = PACKAGE_ROOT / "py.typed"
 REQUIRES_DIST_NAME_PATTERN = re.compile(r"^\s*([A-Za-z0-9_.-]+)")
 REQUIRES_DIST_EXTRA_PATTERN = re.compile(r"extra\s*==\s*['\"]([^'\"]+)['\"]")
 
@@ -252,6 +253,13 @@ def _read_wheel_entry_points(wheel: Path) -> configparser.ConfigParser:
     return parser
 
 
+def _read_wheel_members(wheel: Path) -> set[str]:
+    """Return normalized member names from a standalone wheel."""
+
+    with zipfile.ZipFile(wheel) as archive:
+        return set(archive.namelist())
+
+
 def _wheel_declared_dependency_names(distribution_metadata: Message) -> set[str]:
     """Return normalized dependency names declared by wheel metadata."""
 
@@ -402,6 +410,13 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     }
 
 
+def test_mcp_unified_package_declares_pep561_typed_marker() -> None:
+    """The standalone package source must advertise typed-package support."""
+
+    assert PY_TYPED_MARKER.is_file()  # nosec B101
+    assert PY_TYPED_MARKER.read_text(encoding="utf-8").strip() == ""  # nosec B101
+
+
 def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     """Standalone package metadata must stay aligned with release gate metadata."""
 
@@ -414,6 +429,9 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert project["version"] == mcp_unified.__version__
     assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
     assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
+    assert pyproject["tool"]["setuptools"]["package-data"] == {  # nosec B101
+        "mcp_unified": ["py.typed"],
+    }
 
     assert _dependency_names(project["dependencies"]) == set(metadata.CORE_DEPENDENCIES)
 
@@ -503,6 +521,19 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     assert not any("/apps/tldw-frontend/" in member for member in members)  # nosec B101
 
 
+def test_mcp_unified_standalone_artifacts_include_typed_marker(
+    standalone_distributions: tuple[Path, Path],
+) -> None:
+    """Built standalone artifacts must carry the PEP 561 marker."""
+
+    wheel, sdist = standalone_distributions
+    wheel_members = _read_wheel_members(wheel)
+    sdist_members = _read_sdist_members(sdist)
+
+    assert "mcp_unified/py.typed" in wheel_members  # nosec B101
+    assert any(member.endswith("/py.typed") for member in sdist_members)  # nosec B101
+
+
 def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
     """PyPI validation workflow must also gate package-local mcp_unified changes."""
 
@@ -529,6 +560,7 @@ def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
     artifact_gate_nodeids = (
         "test_mcp_unified_standalone_distribution_metadata_matches_extras",
         "test_mcp_unified_standalone_sdist_contains_only_package_boundary",
+        "test_mcp_unified_standalone_artifacts_include_typed_marker",
     )
     assert any(
         all(f"{artifact_gate_test_path}::{nodeid}" in run_block for nodeid in artifact_gate_nodeids)

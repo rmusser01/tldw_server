@@ -53,3 +53,6 @@ test_mcp_unified_standalone_distribution_metadata_matches_extras = (
 test_mcp_unified_standalone_sdist_contains_only_package_boundary = (
     _boundary_tests.test_mcp_unified_standalone_sdist_contains_only_package_boundary
 )
+test_mcp_unified_standalone_artifacts_include_typed_marker = (
+    _boundary_tests.test_mcp_unified_standalone_artifacts_include_typed_marker
+)
