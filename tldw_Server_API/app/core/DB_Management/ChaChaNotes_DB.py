@@ -115,6 +115,14 @@ from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     simulate_fsrs_review_transition,
 )
 from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile  # noqa: E402
+from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa: E402
+    bounded_inventory_diagnostics,
+    decode_inventory_cursor,
+    encode_inventory_cursor,
+    normalize_durable_inventory_state,
+    normalize_inventory_counts,
+    sort_inventory_relative_paths,
+)
 
 #
 ########################################################################################################################
@@ -9037,6 +9045,139 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
 
+    def _ensure_workspace_file_inventory_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure Workspace file inventory scan and item tables exist for SQLite."""
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_file_inventory_scans (
+                    scan_id                   TEXT PRIMARY KEY NOT NULL,
+                    workspace_id              TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    root_id                   TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                    root_version              INTEGER NOT NULL,
+                    job_id                    INTEGER,
+                    job_uuid                  TEXT,
+                    state                     TEXT NOT NULL,
+                    requested_by              TEXT,
+                    ignore_policy_fingerprint TEXT NOT NULL,
+                    root_snapshot_token       TEXT,
+                    started_at                DATETIME,
+                    completed_at              DATETIME,
+                    counts_json               TEXT NOT NULL DEFAULT '{}',
+                    diagnostics_json          TEXT NOT NULL DEFAULT '[]',
+                    created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    version                   INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_root_created "
+                "ON workspace_file_inventory_scans(workspace_id, root_id, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_active "
+                "ON workspace_file_inventory_scans(workspace_id, root_id, state)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_job_id "
+                "ON workspace_file_inventory_scans(job_id)"
+            )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_file_inventory_items (
+                    workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    root_id            TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                    relative_path      TEXT NOT NULL,
+                    scan_id            TEXT NOT NULL REFERENCES workspace_file_inventory_scans(scan_id) ON DELETE CASCADE,
+                    entry_kind         TEXT NOT NULL,
+                    size_bytes         INTEGER,
+                    mtime_ns           INTEGER,
+                    mode_bits          INTEGER,
+                    extension          TEXT,
+                    mime_hint          TEXT,
+                    language_hint      TEXT,
+                    ignored            BOOLEAN NOT NULL DEFAULT 0,
+                    ignore_reason      TEXT,
+                    indexing_candidate BOOLEAN NOT NULL DEFAULT 0,
+                    coverage_state     TEXT NOT NULL DEFAULT 'current',
+                    last_seen_at       DATETIME NOT NULL,
+                    deleted            BOOLEAN NOT NULL DEFAULT 0,
+                    metadata_json      TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY (workspace_id, root_id, relative_path)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_root_path "
+                "ON workspace_file_inventory_items(workspace_id, root_id, relative_path)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_scan "
+                "ON workspace_file_inventory_items(scan_id)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite workspace file inventory schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_workspace_file_inventory_schema_postgres(self, conn: Any) -> None:
+        """Ensure Workspace file inventory scan and item tables exist for PostgreSQL."""
+        if not hasattr(self.backend, "execute"):
+            return
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS workspace_file_inventory_scans (
+                scan_id                   TEXT PRIMARY KEY NOT NULL,
+                workspace_id              TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                root_id                   TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                root_version              INTEGER NOT NULL,
+                job_id                    INTEGER,
+                job_uuid                  TEXT,
+                state                     TEXT NOT NULL,
+                requested_by              TEXT,
+                ignore_policy_fingerprint TEXT NOT NULL,
+                root_snapshot_token       TEXT,
+                started_at                TIMESTAMP,
+                completed_at              TIMESTAMP,
+                counts_json               TEXT NOT NULL DEFAULT '{}',
+                diagnostics_json          TEXT NOT NULL DEFAULT '[]',
+                created_at                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version                   INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_root_created "
+            "ON workspace_file_inventory_scans(workspace_id, root_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_active "
+            "ON workspace_file_inventory_scans(workspace_id, root_id, state)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_job_id "
+            "ON workspace_file_inventory_scans(job_id)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_file_inventory_items (
+                workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                root_id            TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                relative_path      TEXT NOT NULL,
+                scan_id            TEXT NOT NULL REFERENCES workspace_file_inventory_scans(scan_id) ON DELETE CASCADE,
+                entry_kind         TEXT NOT NULL,
+                size_bytes         INTEGER,
+                mtime_ns           BIGINT,
+                mode_bits          INTEGER,
+                extension          TEXT,
+                mime_hint          TEXT,
+                language_hint      TEXT,
+                ignored            BOOLEAN NOT NULL DEFAULT FALSE,
+                ignore_reason      TEXT,
+                indexing_candidate BOOLEAN NOT NULL DEFAULT FALSE,
+                coverage_state     TEXT NOT NULL DEFAULT 'current',
+                last_seen_at       TIMESTAMP NOT NULL,
+                deleted            BOOLEAN NOT NULL DEFAULT FALSE,
+                metadata_json      TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (workspace_id, root_id, relative_path)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_root_path "
+            "ON workspace_file_inventory_items(workspace_id, root_id, relative_path)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_scan "
+            "ON workspace_file_inventory_items(scan_id)",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
     def _ensure_workspace_study_material_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure workspace ownership columns and workspace study-material policy exist for SQLite."""
         try:
@@ -9873,6 +10014,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
+                self._ensure_workspace_file_inventory_schema_sqlite(conn)
                 self._ensure_workspace_migration_schema_sqlite(conn)
                 self._ensure_workspace_study_material_schema_sqlite(conn)
                 self._ensure_flashcard_asset_schema_sqlite(conn)
@@ -13711,6 +13853,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
+            self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
 
@@ -15874,6 +16017,743 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise self._workspace_project_root_integrity_error(exc) from exc
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Workspace project root update failed: {exc}") from exc  # noqa: TRY003
+
+    # --- Workspace File Inventory Methods ---
+
+    def _workspace_file_inventory_bool_value(self, value: bool) -> bool | int:
+        return bool(value) if self.backend_type == BackendType.POSTGRESQL else int(bool(value))
+
+    @staticmethod
+    def _workspace_file_inventory_integrity_error(exc: Exception) -> CharactersRAGDBError:
+        message = str(exc).lower()
+        if "unique" in message or "duplicate" in message or "foreign key" in message or "constraint" in message:
+            return ConflictError(
+                f"Workspace file inventory write conflicted: {exc}",
+                entity="workspace_file_inventory",
+            )
+        return CharactersRAGDBError(f"Workspace file inventory write failed: {exc}")  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None:
+        if value is None:
+            if required:
+                raise InputError(f"{field_name} is required.")  # noqa: TRY003
+            return None
+        if isinstance(value, bool):
+            raise InputError(f"{field_name} must be an integer.")  # noqa: TRY003
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped and (stripped.isdecimal() or (stripped.startswith("-") and stripped[1:].isdecimal())):
+                return int(stripped)
+        raise InputError(f"{field_name} must be an integer.")  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_json(value: Any, *, default: Any) -> str:
+        if value is None:
+            value = default
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError("workspace file inventory JSON fields must contain valid JSON.") from exc  # noqa: TRY003
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError("workspace file inventory values must be JSON serializable.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_json_load(value: Any, *, fallback: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+
+    def _workspace_file_inventory_counts_json(self, value: Any) -> str:
+        return json.dumps(normalize_inventory_counts(value), ensure_ascii=True)
+
+    def _workspace_file_inventory_diagnostics_json(self, value: Any) -> str:
+        return json.dumps(bounded_inventory_diagnostics(value), ensure_ascii=True)
+
+    def _workspace_file_inventory_scan_by_id(
+        self,
+        scan_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any] | None:
+        query = "SELECT * FROM workspace_file_inventory_scans WHERE scan_id = ?"
+        if conn is None:
+            row = self.execute_query(query, (scan_id,)).fetchone()
+        else:
+            row = conn.execute(query, (scan_id,)).fetchone()
+        return dict(row) if row else None
+
+    def _workspace_file_inventory_require_scan(
+        self,
+        scan_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+    ) -> dict[str, Any]:
+        scan = self._workspace_file_inventory_scan_by_id(scan_id, conn=conn)
+        if scan is None:
+            raise ConflictError(
+                f"Workspace file inventory scan '{scan_id}' not found.",
+                entity="workspace_file_inventory_scans",
+                entity_id=scan_id,
+            )
+        return scan
+
+    def _workspace_file_inventory_update_root_state(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        workspace_id: str,
+        root_id: str,
+        state: str,
+        updated_at: str,
+    ) -> None:
+        conn.execute(
+            """
+            UPDATE workspace_project_roots
+               SET file_inventory_state = ?,
+                   updated_at = ?
+             WHERE workspace_id = ?
+               AND root_id = ?
+            """,
+            (state, updated_at, workspace_id, root_id),
+        )
+
+    @staticmethod
+    def _workspace_file_inventory_relative_path(value: Any) -> str:
+        try:
+            return sort_inventory_relative_paths([str(value or "")])[0]
+        except ValueError as exc:
+            raise InputError("relative_path must be a safe project-root-relative path.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_prefix(value: Any) -> str | None:
+        if value is None:
+            return None
+        raw = str(value).strip().replace("\\", "/")
+        if not raw:
+            return None
+        if raw.startswith("/") or raw.startswith("~"):
+            raise InputError("prefix must be project-root-relative.")  # noqa: TRY003
+        had_trailing_slash = raw.endswith("/")
+        parts: list[str] = []
+        for part in raw.split("/"):
+            if not part or part == ".":
+                continue
+            if part == "..":
+                raise InputError("prefix must not contain parent directory traversal.")  # noqa: TRY003
+            parts.append(part)
+        if not parts:
+            return None
+        normalized = "/".join(parts)
+        return f"{normalized}/" if had_trailing_slash else normalized
+
+    def begin_workspace_file_inventory_scan(
+        self,
+        workspace_id: str,
+        root_id: str,
+        root_version: int,
+        policy_fingerprint: str,
+        *,
+        requested_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a queued Workspace file inventory scan or reuse an active scan with an attached job."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        normalized_root_id = str(root_id or "").strip()
+        normalized_policy = str(policy_fingerprint or "").strip()
+        normalized_root_version = self._workspace_file_inventory_int(
+            root_version,
+            field_name="root_version",
+            required=True,
+        )
+        if not normalized_workspace_id or not normalized_root_id or not normalized_policy:
+            raise InputError("workspace_id, root_id, and policy_fingerprint are required.")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        scan_id = f"ws-file-scan-{uuid.uuid4().hex}"
+        try:
+            with self.transaction() as conn:
+                root = self._workspace_project_root_row_by_id(conn, normalized_workspace_id, normalized_root_id)
+                if root is None:
+                    raise ConflictError(
+                        f"Workspace project root '{normalized_root_id}' not found.",
+                        entity="workspace_project_roots",
+                        entity_id=normalized_root_id,
+                    )
+                if int(root["version"]) != int(normalized_root_version):
+                    raise ConflictError(
+                        f"Workspace project root '{normalized_root_id}' version mismatch.",
+                        entity="workspace_project_roots",
+                        entity_id=normalized_root_id,
+                    )
+                active = conn.execute(
+                    """
+                    SELECT *
+                      FROM workspace_file_inventory_scans
+                     WHERE workspace_id = ?
+                       AND root_id = ?
+                       AND root_version = ?
+                       AND ignore_policy_fingerprint = ?
+                       AND state IN ('queued', 'scanning')
+                       AND job_id IS NOT NULL
+                     ORDER BY created_at DESC, scan_id DESC
+                     LIMIT 1
+                    """,
+                    (
+                        normalized_workspace_id,
+                        normalized_root_id,
+                        normalized_root_version,
+                        normalized_policy,
+                    ),
+                ).fetchone()
+                if active is not None:
+                    return dict(active)
+
+                conn.execute(
+                    """
+                    INSERT INTO workspace_file_inventory_scans (
+                        scan_id, workspace_id, root_id, root_version, state, requested_by,
+                        ignore_policy_fingerprint, counts_json, diagnostics_json, created_at, updated_at, version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        scan_id,
+                        normalized_workspace_id,
+                        normalized_root_id,
+                        normalized_root_version,
+                        "queued",
+                        str(requested_by).strip() if requested_by is not None else None,
+                        normalized_policy,
+                        self._workspace_file_inventory_counts_json({}),
+                        self._workspace_file_inventory_diagnostics_json([]),
+                        now,
+                        now,
+                    ),
+                )
+                self._workspace_file_inventory_update_root_state(
+                    conn,
+                    workspace_id=normalized_workspace_id,
+                    root_id=normalized_root_id,
+                    state="queued",
+                    updated_at=now,
+                )
+                created = self._workspace_file_inventory_scan_by_id(scan_id, conn=conn)
+                if created is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{scan_id}' after create."
+                    )
+                return created
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory scan create failed: {exc}") from exc  # noqa: TRY003
+
+    def attach_workspace_file_inventory_job(self, scan_id: str, job_row: Mapping[str, Any]) -> dict[str, Any]:
+        """Attach a Jobs row to a queued Workspace file inventory scan idempotently."""
+        normalized_scan_id = str(scan_id or "").strip()
+        if not normalized_scan_id:
+            raise InputError("scan_id is required.")  # noqa: TRY003
+        if not isinstance(job_row, Mapping):
+            raise InputError("job_row must be a mapping.")  # noqa: TRY003
+        job_id = self._workspace_file_inventory_int(
+            job_row.get("job_id", job_row.get("id")),
+            field_name="job_id",
+            required=True,
+        )
+        job_uuid = str(job_row.get("job_uuid") or job_row.get("uuid") or job_id).strip()
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                if scan.get("job_id") is not None:
+                    if int(scan["job_id"]) == int(job_id) and str(scan.get("job_uuid") or "") == job_uuid:
+                        return scan
+                    raise ConflictError(
+                        f"Workspace file inventory scan '{normalized_scan_id}' already has a different job.",
+                        entity="workspace_file_inventory_scans",
+                        entity_id=normalized_scan_id,
+                    )
+                conn.execute(
+                    """
+                    UPDATE workspace_file_inventory_scans
+                       SET job_id = ?,
+                           job_uuid = ?,
+                           updated_at = ?,
+                           version = version + 1
+                     WHERE scan_id = ?
+                    """,
+                    (job_id, job_uuid, now, normalized_scan_id),
+                )
+                updated = self._workspace_file_inventory_scan_by_id(normalized_scan_id, conn=conn)
+                if updated is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{normalized_scan_id}' after job attach."
+                    )
+                return updated
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory job attach failed: {exc}") from exc  # noqa: TRY003
+
+    def mark_workspace_file_inventory_enqueue_failed(
+        self,
+        scan_id: str,
+        diagnostics: Any,
+    ) -> dict[str, Any]:
+        """Mark a queued scan failed when Jobs enqueue fails after scan-row creation."""
+        return self._transition_workspace_file_inventory_scan(
+            scan_id,
+            state="failed",
+            diagnostics=diagnostics,
+            set_completed=True,
+            set_started=False,
+        )
+
+    def mark_workspace_file_inventory_scanning(self, scan_id: str) -> dict[str, Any]:
+        """Mark a Workspace file inventory scan as acquired by a worker."""
+        return self._transition_workspace_file_inventory_scan(
+            scan_id,
+            state="scanning",
+            diagnostics=None,
+            set_completed=False,
+            set_started=True,
+        )
+
+    def _transition_workspace_file_inventory_scan(
+        self,
+        scan_id: str,
+        *,
+        state: str,
+        diagnostics: Any,
+        set_completed: bool,
+        set_started: bool,
+    ) -> dict[str, Any]:
+        normalized_scan_id = str(scan_id or "").strip()
+        normalized_state = normalize_durable_inventory_state(state)
+        if not normalized_scan_id:
+            raise InputError("scan_id is required.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        diagnostics_json = self._workspace_file_inventory_diagnostics_json(diagnostics)
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                set_clauses = ["state = ?", "updated_at = ?", "version = version + 1"]
+                params: list[Any] = [normalized_state, now]
+                if diagnostics is not None:
+                    set_clauses.append("diagnostics_json = ?")
+                    params.append(diagnostics_json)
+                if set_started:
+                    set_clauses.append("started_at = COALESCE(started_at, ?)")
+                    params.append(now)
+                if set_completed:
+                    set_clauses.append("completed_at = ?")
+                    params.append(now)
+                params.append(normalized_scan_id)
+                conn.execute(
+                    f"""
+                    UPDATE workspace_file_inventory_scans
+                       SET {', '.join(set_clauses)}
+                     WHERE scan_id = ?
+                    """,  # nosec B608
+                    tuple(params),
+                )
+                self._workspace_file_inventory_update_root_state(
+                    conn,
+                    workspace_id=str(scan["workspace_id"]),
+                    root_id=str(scan["root_id"]),
+                    state=normalized_state,
+                    updated_at=now,
+                )
+                updated = self._workspace_file_inventory_scan_by_id(normalized_scan_id, conn=conn)
+                if updated is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{normalized_scan_id}' after update."
+                    )
+                return updated
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory scan update failed: {exc}") from exc  # noqa: TRY003
+
+    def complete_workspace_file_inventory_scan(
+        self,
+        scan_id: str,
+        state: str,
+        counts: Any,
+        diagnostics: Any,
+        *,
+        root_snapshot_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Complete a Workspace file inventory scan with durable counts and diagnostics."""
+        normalized_state = str(state or "").strip().lower()
+        if normalized_state not in {"current", "partial", "failed"}:
+            raise InputError("completed inventory state must be current, partial, or failed.")  # noqa: TRY003
+        normalized_scan_id = str(scan_id or "").strip()
+        if not normalized_scan_id:
+            raise InputError("scan_id is required.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        counts_json = self._workspace_file_inventory_counts_json(counts)
+        diagnostics_json = self._workspace_file_inventory_diagnostics_json(diagnostics)
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                conn.execute(
+                    """
+                    UPDATE workspace_file_inventory_scans
+                       SET state = ?,
+                           root_snapshot_token = ?,
+                           completed_at = ?,
+                           counts_json = ?,
+                           diagnostics_json = ?,
+                           updated_at = ?,
+                           version = version + 1
+                     WHERE scan_id = ?
+                    """,
+                    (
+                        normalized_state,
+                        root_snapshot_token,
+                        now,
+                        counts_json,
+                        diagnostics_json,
+                        now,
+                        normalized_scan_id,
+                    ),
+                )
+                self._workspace_file_inventory_update_root_state(
+                    conn,
+                    workspace_id=str(scan["workspace_id"]),
+                    root_id=str(scan["root_id"]),
+                    state=normalized_state,
+                    updated_at=now,
+                )
+                updated = self._workspace_file_inventory_scan_by_id(normalized_scan_id, conn=conn)
+                if updated is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{normalized_scan_id}' after completion."
+                    )
+                return updated
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory scan completion failed: {exc}") from exc  # noqa: TRY003
+
+    def replace_workspace_file_inventory_items(
+        self,
+        workspace_id: str,
+        root_id: str,
+        scan_id: str,
+        items: list[Mapping[str, Any]],
+        *,
+        scan_coverage_complete: bool,
+    ) -> int:
+        """Replace the current item projection for seen paths from one scan."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        normalized_root_id = str(root_id or "").strip()
+        normalized_scan_id = str(scan_id or "").strip()
+        if not normalized_workspace_id or not normalized_root_id or not normalized_scan_id:
+            raise InputError("workspace_id, root_id, and scan_id are required.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        false_value = self._workspace_file_inventory_bool_value(False)
+        true_value = self._workspace_file_inventory_bool_value(True)
+        normalized_items: list[dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, Mapping):
+                raise InputError("inventory items must be mappings.")  # noqa: TRY003
+            relative_path = self._workspace_file_inventory_relative_path(item.get("relative_path"))
+            entry_kind = str(item.get("entry_kind") or "file").strip() or "file"
+            normalized_items.append(
+                {
+                    "relative_path": relative_path,
+                    "entry_kind": entry_kind,
+                    "size_bytes": self._workspace_file_inventory_int(item.get("size_bytes"), field_name="size_bytes"),
+                    "mtime_ns": self._workspace_file_inventory_int(item.get("mtime_ns"), field_name="mtime_ns"),
+                    "mode_bits": self._workspace_file_inventory_int(item.get("mode_bits"), field_name="mode_bits"),
+                    "extension": item.get("extension"),
+                    "mime_hint": item.get("mime_hint"),
+                    "language_hint": item.get("language_hint"),
+                    "ignored": self._workspace_file_inventory_bool_value(bool(item.get("ignored", False))),
+                    "ignore_reason": item.get("ignore_reason"),
+                    "indexing_candidate": self._workspace_file_inventory_bool_value(
+                        bool(item.get("indexing_candidate", False))
+                    ),
+                    "metadata_json": self._workspace_file_inventory_json(item.get("metadata"), default={}),
+                }
+            )
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                if scan["workspace_id"] != normalized_workspace_id or scan["root_id"] != normalized_root_id:
+                    raise ConflictError(
+                        "Workspace file inventory scan does not match workspace/root.",
+                        entity="workspace_file_inventory_scans",
+                        entity_id=normalized_scan_id,
+                    )
+                for item in normalized_items:
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_file_inventory_items (
+                            workspace_id, root_id, relative_path, scan_id, entry_kind, size_bytes,
+                            mtime_ns, mode_bits, extension, mime_hint, language_hint, ignored,
+                            ignore_reason, indexing_candidate, coverage_state, last_seen_at, deleted,
+                            metadata_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'current', ?, ?, ?)
+                        ON CONFLICT(workspace_id, root_id, relative_path) DO UPDATE SET
+                            scan_id = excluded.scan_id,
+                            entry_kind = excluded.entry_kind,
+                            size_bytes = excluded.size_bytes,
+                            mtime_ns = excluded.mtime_ns,
+                            mode_bits = excluded.mode_bits,
+                            extension = excluded.extension,
+                            mime_hint = excluded.mime_hint,
+                            language_hint = excluded.language_hint,
+                            ignored = excluded.ignored,
+                            ignore_reason = excluded.ignore_reason,
+                            indexing_candidate = excluded.indexing_candidate,
+                            coverage_state = 'current',
+                            last_seen_at = excluded.last_seen_at,
+                            deleted = excluded.deleted,
+                            metadata_json = excluded.metadata_json
+                        """,
+                        (
+                            normalized_workspace_id,
+                            normalized_root_id,
+                            item["relative_path"],
+                            normalized_scan_id,
+                            item["entry_kind"],
+                            item["size_bytes"],
+                            item["mtime_ns"],
+                            item["mode_bits"],
+                            item["extension"],
+                            item["mime_hint"],
+                            item["language_hint"],
+                            item["ignored"],
+                            item["ignore_reason"],
+                            item["indexing_candidate"],
+                            now,
+                            false_value,
+                            item["metadata_json"],
+                        ),
+                    )
+                if scan_coverage_complete:
+                    conn.execute(
+                        """
+                        UPDATE workspace_file_inventory_items
+                           SET coverage_state = 'previous',
+                               deleted = ?,
+                               metadata_json = metadata_json
+                         WHERE workspace_id = ?
+                           AND root_id = ?
+                           AND scan_id <> ?
+                        """,
+                        (true_value, normalized_workspace_id, normalized_root_id, normalized_scan_id),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE workspace_file_inventory_items
+                           SET coverage_state = 'previous'
+                         WHERE workspace_id = ?
+                           AND root_id = ?
+                           AND scan_id <> ?
+                           AND deleted = ?
+                        """,
+                        (normalized_workspace_id, normalized_root_id, normalized_scan_id, false_value),
+                    )
+                return len(normalized_items)
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory item replacement failed: {exc}") from exc  # noqa: TRY003
+
+    def get_workspace_file_inventory_status(
+        self,
+        workspace_id: str,
+        *,
+        policy_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the latest Workspace file inventory status projection."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if not normalized_workspace_id:
+            raise InputError("workspace_id is required.")  # noqa: TRY003
+        root = self.get_workspace_primary_root(normalized_workspace_id)
+        zero_counts = normalize_inventory_counts({})
+        if root is None:
+            return {
+                "workspace_id": normalized_workspace_id,
+                "root_id": None,
+                "scan_id": None,
+                "state": "not_started",
+                "durable_state": None,
+                "stale": False,
+                "counts": zero_counts,
+                "diagnostics": [],
+            }
+        cursor = self.execute_query(
+            """
+            SELECT *
+              FROM workspace_file_inventory_scans
+             WHERE workspace_id = ?
+               AND root_id = ?
+             ORDER BY created_at DESC, scan_id DESC
+             LIMIT 1
+            """,
+            (normalized_workspace_id, root["root_id"]),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return {
+                "workspace_id": normalized_workspace_id,
+                "root_id": root["root_id"],
+                "scan_id": None,
+                "state": "not_started",
+                "durable_state": None,
+                "stale": False,
+                "counts": zero_counts,
+                "diagnostics": [],
+            }
+
+        scan = dict(row)
+        latest_diagnostics = bounded_inventory_diagnostics(
+            self._workspace_file_inventory_json_load(scan.get("diagnostics_json"), fallback=[])
+        )
+        if normalize_durable_inventory_state(scan.get("state")) == "failed" and any(
+            diagnostic.get("code") == "root_version_mismatch"
+            for diagnostic in latest_diagnostics
+        ):
+            completed_row = self.execute_query(
+                """
+                SELECT *
+                  FROM workspace_file_inventory_scans
+                 WHERE workspace_id = ?
+                   AND root_id = ?
+                   AND state IN ('current', 'partial')
+                 ORDER BY completed_at DESC, created_at DESC, scan_id DESC
+                 LIMIT 1
+                """,
+                (normalized_workspace_id, root["root_id"]),
+            ).fetchone()
+            if completed_row is not None:
+                scan = dict(completed_row)
+
+        durable_state = normalize_durable_inventory_state(scan.get("state"))
+        counts = normalize_inventory_counts(
+            self._workspace_file_inventory_json_load(scan.get("counts_json"), fallback={})
+        )
+        diagnostics = bounded_inventory_diagnostics(
+            self._workspace_file_inventory_json_load(scan.get("diagnostics_json"), fallback=[])
+        )
+        policy_mismatch = (
+            policy_fingerprint is not None
+            and str(scan.get("ignore_policy_fingerprint") or "") != str(policy_fingerprint)
+        )
+        stale = durable_state in {"current", "partial"} and (
+            int(scan["root_version"]) != int(root["version"]) or policy_mismatch
+        )
+        return {
+            "workspace_id": normalized_workspace_id,
+            "root_id": root["root_id"],
+            "scan_id": scan["scan_id"],
+            "state": "stale" if stale else durable_state,
+            "durable_state": durable_state,
+            "stale": stale,
+            "counts": counts,
+            "diagnostics": diagnostics,
+            "root_version": root["version"],
+            "scan_root_version": scan["root_version"],
+            "ignore_policy_fingerprint": scan.get("ignore_policy_fingerprint"),
+            "job_id": scan.get("job_id"),
+            "job_uuid": scan.get("job_uuid"),
+            "started_at": scan.get("started_at"),
+            "completed_at": scan.get("completed_at"),
+            "updated_at": scan.get("updated_at"),
+        }
+
+    def list_workspace_file_inventory_items(
+        self,
+        workspace_id: str,
+        *,
+        prefix: str | None = None,
+        cursor: str | None = None,
+        limit: int = 100,
+        include_ignored: bool = False,
+    ) -> dict[str, Any]:
+        """List non-deleted inventory items sorted by project-root-relative path."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if not normalized_workspace_id:
+            raise InputError("workspace_id is required.")  # noqa: TRY003
+        bounded_limit = max(1, min(int(limit), 500))
+        root = self.get_workspace_primary_root(normalized_workspace_id)
+        if root is None:
+            return {"items": [], "next_cursor": None}
+
+        normalized_prefix = self._workspace_file_inventory_prefix(prefix)
+        try:
+            cursor_path = decode_inventory_cursor(cursor) if cursor else None
+        except ValueError as exc:
+            raise InputError("cursor must be a valid workspace file inventory cursor.") from exc  # noqa: TRY003
+        false_value = self._workspace_file_inventory_bool_value(False)
+        clauses = ["workspace_id = ?", "root_id = ?", "deleted = ?"]
+        params: list[Any] = [normalized_workspace_id, root["root_id"], false_value]
+        if not include_ignored:
+            clauses.append("ignored = ?")
+            params.append(false_value)
+        if normalized_prefix is not None:
+            clauses.append("relative_path LIKE ?")
+            params.append(f"{normalized_prefix}%")
+        if cursor_path is not None:
+            clauses.append("relative_path > ?")
+            params.append(cursor_path)
+        params.append(bounded_limit + 1)
+        query = f"""
+            SELECT workspace_id, root_id, relative_path, scan_id, entry_kind, size_bytes,
+                   mtime_ns, mode_bits, extension, mime_hint, language_hint, ignored,
+                   ignore_reason, indexing_candidate, coverage_state, last_seen_at, deleted,
+                   metadata_json
+              FROM workspace_file_inventory_items
+             WHERE {' AND '.join(clauses)}
+             ORDER BY relative_path ASC
+             LIMIT ?
+        """  # nosec B608
+        rows = [dict(row) for row in self.execute_query(query, tuple(params)).fetchall()]
+        has_more = len(rows) > bounded_limit
+        visible_rows = rows[:bounded_limit]
+        next_cursor = encode_inventory_cursor(visible_rows[-1]["relative_path"]) if has_more and visible_rows else None
+        for item in visible_rows:
+            item["ignored"] = bool(item.get("ignored"))
+            item["indexing_candidate"] = bool(item.get("indexing_candidate"))
+            item["deleted"] = bool(item.get("deleted"))
+            item["metadata"] = self._workspace_file_inventory_json_load(item.get("metadata_json"), fallback={})
+        return {"items": visible_rows, "next_cursor": next_cursor}
 
     # --- Workspace Migration Methods ---
 
