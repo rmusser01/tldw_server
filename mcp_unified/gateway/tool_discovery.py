@@ -328,23 +328,18 @@ def _recommendation_visible(
 ) -> bool:
     """Return whether recommendation metadata is visible for this profile."""
 
-    tool_result = build_effective_policy_result(profile, tool_name=tool_id)
-    if tool_result.reason_code == "tool_denied":
-        return False
-    if tool_result.reason_code == "workspace_scope_required":
-        return False
+    if build_effective_policy_result(profile, tool_name=tool_id).status == "resolved":
+        return True
 
     for capability in _recommendation_capabilities(recommendation):
         capability_result = build_effective_policy_result(
             profile,
+            tool_name=tool_id,
             capability=capability,
         )
-        if capability_result.reason_code in {
-            "capability_denied",
-            "workspace_scope_required",
-        }:
-            return False
-    return True
+        if capability_result.status == "resolved":
+            return True
+    return False
 
 
 def _tool_name(tool: dict[str, Any]) -> str | None:

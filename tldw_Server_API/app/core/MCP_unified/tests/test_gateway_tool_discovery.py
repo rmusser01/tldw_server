@@ -84,6 +84,7 @@ def test_tool_search_orders_installed_before_unavailable_then_bm25() -> None:
                         "id": "browser.trace",
                         "category": "browser",
                         "description": "Browser trace capture",
+                        "capability": "browser.inspect",
                         "activation": "requires_browser_runtime",
                     }
                 ],
@@ -129,6 +130,7 @@ def test_describe_profile_tool_returns_visible_installed_and_recommended_only() 
                 "id": "code.index",
                 "category": "code",
                 "description": "Build a code index after setup",
+                "capability": "code_search",
                 "activation": "requires_index_runtime",
             }
         ],
@@ -173,6 +175,7 @@ def test_resolve_profile_tool_call_resolves_installed_and_rejects_recommended() 
                 "id": "browser.trace",
                 "category": "browser",
                 "description": "Browser trace capture",
+                "capability": "browser.inspect",
                 "activation": "requires_browser_runtime",
             }
         ],
@@ -210,6 +213,81 @@ def test_resolve_profile_tool_call_resolves_installed_and_rejects_recommended() 
         "reason_code": "tool_not_found",
         "tool_id": "shell.run",
     }
+
+
+def test_ungranted_recommended_tools_are_not_discoverable() -> None:
+    profile = _profile(
+        capabilities=["code_search"],
+        recommended_tools=[
+            {
+                "id": "code.index",
+                "category": "code",
+                "description": "No capability recommendation",
+                "activation": "requires_index_runtime",
+            },
+            {
+                "id": "shell.run",
+                "category": "shell",
+                "description": "Run shell commands",
+                "capability": "process.execute",
+                "activation": "requires_operator_enablement",
+            },
+        ],
+    )
+
+    results = search_profile_tools(profile, [], query="index shell")
+    no_capability_description = describe_profile_tool(profile, [], "code.index")
+    denied_capability_description = describe_profile_tool(profile, [], "shell.run")
+    no_capability_resolution = resolve_profile_tool_call(profile, [], "code.index")
+    denied_capability_resolution = resolve_profile_tool_call(profile, [], "shell.run")
+
+    assert results == []
+    assert no_capability_description is None
+    assert denied_capability_description is None
+    assert no_capability_resolution == {
+        "status": "not_found",
+        "reason_code": "tool_not_found",
+        "tool_id": "code.index",
+    }
+    assert denied_capability_resolution == {
+        "status": "not_found",
+        "reason_code": "tool_not_found",
+        "tool_id": "shell.run",
+    }
+
+
+def test_recommended_tools_preserve_explicit_allowed_tools_semantics() -> None:
+    profile = _profile(
+        allowed_tools=["browser.trace"],
+        recommended_tools=[
+            {
+                "id": "browser.trace",
+                "category": "browser",
+                "description": "Browser trace capture",
+                "activation": "requires_browser_runtime",
+            },
+            {
+                "id": "code.index",
+                "category": "code",
+                "description": "Code index setup",
+                "capability": "code_search",
+                "activation": "requires_index_runtime",
+            },
+        ],
+    )
+
+    results = search_profile_tools(profile, [], query="browser code")
+    allowed = describe_profile_tool(profile, [], "browser.trace")
+    denied = describe_profile_tool(profile, [], "code.index")
+    resolved = resolve_profile_tool_call(profile, [], "browser.trace")
+
+    assert [item["tool_id"] for item in results] == ["browser.trace"]
+    assert allowed is not None
+    assert allowed["installation_status"] == "recommended_unavailable"
+    assert denied is None
+    assert resolved["status"] == "unavailable"
+    assert resolved["reason_code"] == "tool_not_enabled"
+    assert resolved["tool_id"] == "browser.trace"
 
 
 def test_unknown_backend_descriptors_do_not_crash_or_leak() -> None:
