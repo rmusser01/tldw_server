@@ -51,6 +51,13 @@ type ProviderFormValues = {
   model: string;
 };
 
+type ProviderFieldName = "base-url" | "model";
+
+type PendingProviderFocus = {
+  providerKey: string;
+  field: ProviderFieldName;
+};
+
 export type ProviderValidationViewState = {
   fingerprint: string;
   response: SetupProviderValidationResponse;
@@ -87,18 +94,36 @@ const validationCanGate = (
   return Boolean(statusCanGate && (response?.can_gate_first_chat ?? true));
 };
 
+const FAILURE_LOCAL_PROVIDER_UNREACHABLE = "local_provider_unreachable";
+const FAILURE_MODEL_DISCOVERY_UNAVAILABLE = "model_discovery_unavailable";
+
 const validationStatusCopy = (
   response: SetupProviderValidationResponse,
 ): string => {
   if (response.status === "failed") {
-    return [
+    const details = [
       response.failure_category,
       response.message || "Provider validation failed.",
     ]
       .filter(Boolean)
       .join(": ");
+    if (response.failure_category === FAILURE_LOCAL_PROVIDER_UNREACHABLE) {
+      return [
+        details || "Local provider endpoint is unreachable.",
+        "Check that the local service is running, the host and port are correct, and the URL includes /v1.",
+      ].join(" ");
+    }
+    return details;
   }
   if (response.status === "accepted") {
+    if (
+      response.failure_category === FAILURE_MODEL_DISCOVERY_UNAVAILABLE
+    ) {
+      return (
+        response.message ||
+        "Model discovery is unavailable. Enter the model name manually; first chat will verify it."
+      );
+    }
     if (response.message?.toLowerCase().includes("first chat verifies")) {
       return response.message;
     }
@@ -143,6 +168,11 @@ const providerValuesEqual = (
   left?.apiKey === right.apiKey &&
   left?.baseUrl === right.baseUrl &&
   left?.model === right.model;
+
+const providerFieldRefKey = (
+  providerKey: string,
+  field: ProviderFieldName,
+) => `${providerKey}:${field}`;
 
 export function ProviderSetupStep({
   providers,
@@ -218,6 +248,11 @@ export function ProviderSetupStep({
     setInternalProviderEditRevisions,
   ] = React.useState<ProviderEditRevisionState>({});
   const [error, setError] = React.useState<string | null>(null);
+  const providerFieldRefs = React.useRef<Map<string, HTMLInputElement>>(
+    new Map(),
+  );
+  const [pendingProviderFocus, setPendingProviderFocus] =
+    React.useState<PendingProviderFocus | null>(null);
   const savedProviders = controlledSavedProviders ?? internalSavedProviders;
   const savedPayloadFingerprints =
     controlledSavedPayloadFingerprints ?? internalSavedPayloadFingerprints;
@@ -285,6 +320,43 @@ export function ProviderSetupStep({
     },
     [onProviderEditRevisionsChange],
   );
+
+  const registerProviderField = React.useCallback(
+    (providerKey: string, field: ProviderFieldName) =>
+      (element: HTMLInputElement | null) => {
+        const key = providerFieldRefKey(providerKey, field);
+        if (element) {
+          providerFieldRefs.current.set(key, element);
+        } else {
+          providerFieldRefs.current.delete(key);
+        }
+      },
+    [],
+  );
+
+  const focusProviderField = React.useCallback(
+    (providerKey: string, field: ProviderFieldName) => {
+      const element = providerFieldRefs.current.get(
+        providerFieldRefKey(providerKey, field),
+      );
+      if (!element) return false;
+      element.focus();
+      return true;
+    },
+    [],
+  );
+
+  React.useEffect(() => {
+    if (!pendingProviderFocus) return;
+    if (
+      focusProviderField(
+        pendingProviderFocus.providerKey,
+        pendingProviderFocus.field,
+      )
+    ) {
+      setPendingProviderFocus(null);
+    }
+  }, [focusProviderField, pendingProviderFocus]);
 
   const currentValues = values[defaultProvider] ?? emptyValues;
   const defaultProviderConfig = orderedProviders.find(
@@ -552,6 +624,40 @@ export function ProviderSetupStep({
     });
   };
 
+  const switchToHostedProvider = React.useCallback((fromProviderKey: string) => {
+    const hostedProvider =
+      orderedProviders.find((provider) => provider.provider_key === "openai") ??
+      orderedProviders.find(
+        (provider) =>
+          provider.provider_type === "hosted_api_key" &&
+          provider.recommended_for_first_chat,
+      ) ??
+      orderedProviders.find(
+        (provider) => provider.provider_type === "hosted_api_key",
+      );
+    if (!hostedProvider) return;
+    setError(null);
+    setSelectedProviders((current) => {
+      const next = new Set(current);
+      if (fromProviderKey !== hostedProvider.provider_key) {
+        next.delete(fromProviderKey);
+      }
+      next.add(hostedProvider.provider_key);
+      return next;
+    });
+    setDefaultProvider(hostedProvider.provider_key);
+  }, [orderedProviders]);
+
+  const continueWithManualModel = React.useCallback(
+    (providerKey: string) => {
+      setError(null);
+      setDefaultProvider(providerKey);
+      setPendingProviderFocus({ providerKey, field: "model" });
+      focusProviderField(providerKey, "model");
+    },
+    [focusProviderField],
+  );
+
   const saveConfiguredProviders = async () => {
     if (!defaultProvider || !defaultProviderConfig || !selectedDefaultModel) {
       return;
@@ -707,6 +813,19 @@ export function ProviderSetupStep({
             ? validation.response
             : null;
           const discoveredModels = validationResponse?.models ?? [];
+          const localModelDiscoveryFallback = Boolean(
+            provider.provider_type === "local_endpoint" &&
+              !saved &&
+              validationResponse?.status === "accepted" &&
+              validationResponse.failure_category ===
+                FAILURE_MODEL_DISCOVERY_UNAVAILABLE,
+          );
+          const localValidationFailed = Boolean(
+            provider.provider_type === "local_endpoint" &&
+              validationResponse?.status === "failed",
+          );
+          const showLocalRecoveryActions =
+            localModelDiscoveryFallback || localValidationFailed;
           return (
             <div
               key={provider.provider_key}
@@ -769,9 +888,17 @@ export function ProviderSetupStep({
                   </label>
 
                   {provider.provider_type === "local_endpoint" ? (
-                    <label className="block text-sm font-medium text-text">
-                      <span>{provider.label} base URL</span>
+                    <div className="block text-sm font-medium text-text">
+                      <label htmlFor={`provider-${provider.provider_key}-base-url`}>
+                        {provider.label} base URL
+                      </label>
                       <input
+                        id={`provider-${provider.provider_key}-base-url`}
+                        ref={registerProviderField(
+                          provider.provider_key,
+                          "base-url",
+                        )}
+                        aria-describedby={`provider-${provider.provider_key}-base-url-help`}
                         value={
                           providerValues.baseUrl ||
                           provider.default_base_url ||
@@ -789,13 +916,26 @@ export function ProviderSetupStep({
                         className="mt-1 w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
                         placeholder="http://127.0.0.1:11434/v1"
                       />
-                    </label>
+                      <p
+                        id={`provider-${provider.provider_key}-base-url-help`}
+                        className="mt-1 text-xs font-normal text-text-muted"
+                      >
+                        OpenAI-compatible base URL examples:
+                        http://127.0.0.1:11434/v1 for Ollama or
+                        http://127.0.0.1:8080/v1 for llama.cpp.
+                      </p>
+                    </div>
                   ) : null}
 
                   {defaultProvider === provider.provider_key ? (
                     <label className="block text-sm font-medium text-text">
                       <span>Default model</span>
                       <input
+                        id={`provider-${provider.provider_key}-model`}
+                        ref={registerProviderField(
+                          provider.provider_key,
+                          "model",
+                        )}
                         value={providerValues.model}
                         onChange={(event) =>
                           updateValues(
@@ -852,6 +992,68 @@ export function ProviderSetupStep({
                         Validation has not run for this configuration.
                       </p>
                     )}
+                    {showLocalRecoveryActions ? (
+                      <div className="rounded-md border border-border bg-bg px-3 py-3 text-sm text-text">
+                        <p className="text-text-muted">
+                          {localModelDiscoveryFallback
+                            ? "Save this provider with the typed model. First chat will verify the model."
+                            : "Check the endpoint details, retry validation, or switch providers to keep setup moving."}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void validateProvider(provider)}
+                            disabled={
+                              validatingProvider === provider.provider_key
+                            }
+                            className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Retry
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              focusProviderField(
+                                provider.provider_key,
+                                "base-url",
+                              )
+                            }
+                            disabled={
+                              validatingProvider === provider.provider_key
+                            }
+                            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+                          >
+                            Edit endpoint
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              switchToHostedProvider(provider.provider_key)
+                            }
+                            disabled={
+                              validatingProvider === provider.provider_key
+                            }
+                            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+                          >
+                            Switch provider
+                          </button>
+                          {localModelDiscoveryFallback ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                continueWithManualModel(provider.provider_key)
+                              }
+                              disabled={
+                                validatingProvider === provider.provider_key
+                              }
+                              className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+                            >
+                              Continue with manual model
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                     {discoveredModels.length > 0 ? (
                       <div className="space-y-1">
                         <p className="text-xs font-medium uppercase tracking-normal text-text-muted">

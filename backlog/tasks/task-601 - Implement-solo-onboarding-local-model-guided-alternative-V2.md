@@ -8,6 +8,8 @@ documentation:
 - Docs/superpowers/specs/2026-06-02-solo-onboarding-v2-roadmap-design.md
 modified_files:
 - Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
+- apps/packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx
+- apps/packages/ui/src/components/Option/Onboarding/steps/ProviderSetupStep.tsx
 - apps/tldw-frontend/scripts/__tests__/onboarding-uat-runner.test.ts
 - tldw_Server_API/app/core/Setup/provider_validation.py
 - tldw_Server_API/tests/Setup/test_setup_provider_validation.py
@@ -34,6 +36,8 @@ Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 complete. Added backend manual-model fallback for reachable local OpenAI-compatible endpoints when model discovery is unavailable. Red run before implementation: 2 new provider validation tests failed as expected. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q -> 28 passed, 6 warnings.
+
+Stage 3 complete. Added frontend local endpoint guidance, manual model-discovery fallback copy/actions, and endpoint-unreachable retry/edit/switch recovery controls. Red run before implementation: 2 new ProviderSetupStep tests failed as expected. Green verification: bunx vitest run ../packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx --reporter=dot -> 21 passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

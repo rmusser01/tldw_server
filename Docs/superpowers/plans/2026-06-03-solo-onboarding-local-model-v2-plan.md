@@ -71,7 +71,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
   Commit message: `test(onboarding): align UAT hosted fixture contract`
 
@@ -125,7 +125,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   Commit message: `feat(setup): accept manual local model fallback`
 
@@ -144,34 +144,34 @@
 
 **Tests:** `bunx vitest run ../packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx --reporter=dot`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing frontend tests**
+- [x] **Step 1: Write failing frontend tests**
 
   Add tests in `ProviderSetupStep.test.tsx` for:
 
   - Accepted local manual fallback copy enables save/continue after manual model entry.
-  - `models_unavailable` copy offers manual model continuation and retry/edit/switch actions.
+  - `model_discovery_unavailable` copy offers manual model continuation and retry/edit/switch actions.
   - `local_provider_unreachable` copy offers retry and edit endpoint without enabling continue.
   - Switching from local default back to hosted requires current hosted validation/save and does not reuse stale local validation.
 
-- [ ] **Step 2: Run red frontend tests**
+- [x] **Step 2: Run red frontend tests**
 
   Run: `bunx vitest run ../packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx --reporter=dot`
 
   Expected: New tests fail against current generic copy/actions.
 
-- [ ] **Step 3: Implement UI copy/actions**
+- [x] **Step 3: Implement UI copy/actions**
 
   In `ProviderSetupStep.tsx`, keep the existing card structure but add small helper functions for local validation copy and recovery actions. Avoid a large refactor.
 
-- [ ] **Step 4: Verify frontend tests**
+- [x] **Step 4: Verify frontend tests**
 
   Run: `bunx vitest run ../packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx --reporter=dot`
 
   Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   Commit message: `feat(onboarding): improve local provider recovery UI`
 

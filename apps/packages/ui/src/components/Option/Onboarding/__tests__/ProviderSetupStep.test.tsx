@@ -732,4 +732,189 @@ describe("ProviderSetupStep", () => {
     expect(screen.getByText(/validation changed/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
   });
+
+  it("guides manual model entry when local model discovery is unavailable", async () => {
+    const onContinue = vi.fn();
+    const onSaveProvider = vi.fn().mockImplementation(async (payload) => ({
+      provider_key: payload.provider_key,
+      status: "saved",
+      base_url: payload.base_url,
+      model: payload.model,
+      make_default: payload.make_default,
+    }));
+    renderProviderStep({
+      onContinue,
+      onSaveProvider,
+      onValidateProvider: vi.fn().mockResolvedValue({
+        provider_key: "ollama",
+        status: "accepted",
+        failure_category: "model_discovery_unavailable",
+        message:
+          "Model discovery is unavailable. Enter the model name manually; first chat will verify it.",
+        models: [],
+        validation_level: "live_endpoint_shape",
+        can_gate_first_chat: true,
+      }),
+    });
+
+    fireEvent.click(screen.getByLabelText(/ollama/i));
+    fireEvent.click(screen.getByLabelText(/use as first chat default/i));
+    expect(
+      screen.getByText(/openai-compatible base url/i),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+      target: { value: "http://127.0.0.1:11434/v1" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "manual-local-model" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+
+    expect(
+      await screen.findByText(/model discovery is unavailable/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/enter the model name manually/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /continue with manual model/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+    await waitFor(() =>
+      expect(onSaveProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider_key: "ollama",
+          model: "manual-local-model",
+          make_default: true,
+        }),
+      ),
+    );
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(onContinue).toHaveBeenCalledWith({
+      provider: "ollama",
+      model: "manual-local-model",
+      credential_configured: false,
+    });
+  });
+
+  it("shows local endpoint recovery actions when validation cannot reach the endpoint", async () => {
+    const onValidateProvider = vi.fn().mockResolvedValue({
+      provider_key: "ollama",
+      status: "failed",
+      failure_category: "local_provider_unreachable",
+      message: "Local provider endpoint is unreachable.",
+      models: [],
+      can_gate_first_chat: false,
+    });
+    renderProviderStep({ onValidateProvider });
+
+    fireEvent.click(screen.getByLabelText(/ollama/i));
+    fireEvent.click(screen.getByLabelText(/use as first chat default/i));
+    fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+      target: { value: "http://127.0.0.1:65535/v1" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "llama3.2:3b" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+
+    expect(
+      await screen.findByText(/check that the local service is running/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^retry$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /edit endpoint/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /switch provider/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /^retry$/i }));
+    await waitFor(() => expect(onValidateProvider).toHaveBeenCalledTimes(2));
+  });
+
+  it("switches local endpoint recovery to the hosted provider", async () => {
+    renderProviderStep({
+      providerCatalog: [
+        {
+          provider_key: "anthropic",
+          label: "Anthropic",
+          provider_type: "hosted_api_key",
+          supports_preflight: true,
+          recommended_for_first_chat: true,
+        },
+        ...providers,
+      ],
+      onValidateProvider: vi.fn().mockResolvedValue({
+        provider_key: "ollama",
+        status: "failed",
+        failure_category: "local_provider_unreachable",
+        message: "Local provider endpoint is unreachable.",
+        models: [],
+        can_gate_first_chat: false,
+      }),
+    });
+
+    fireEvent.click(screen.getByLabelText(/ollama/i));
+    fireEvent.click(screen.getByLabelText(/use as first chat default/i));
+    fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+      target: { value: "http://127.0.0.1:65535/v1" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "llama3.2:3b" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+    await screen.findByText(/check that the local service is running/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /switch provider/i }));
+
+    expect(screen.getByLabelText(/select openai/i)).toBeChecked();
+    expect(screen.getByLabelText(/select anthropic/i)).not.toBeChecked();
+    expect(screen.getByLabelText(/select ollama/i)).not.toBeChecked();
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("");
+  });
+
+  it("manual model fallback action promotes a non-default local provider", async () => {
+    renderProviderStep({
+      onValidateProvider: vi.fn().mockImplementation(async (payload) => ({
+        provider_key: payload.provider_key,
+        status: "accepted",
+        failure_category:
+          payload.provider_key === "ollama"
+            ? "model_discovery_unavailable"
+            : null,
+        message:
+          payload.provider_key === "ollama"
+            ? "Model discovery is unavailable. Enter the model name manually; first chat will verify it."
+            : "Format accepted; first chat verifies the provider.",
+        models: [],
+        validation_level:
+          payload.provider_key === "ollama"
+            ? "live_endpoint_shape"
+            : "local_syntax",
+        can_gate_first_chat: true,
+      })),
+    });
+
+    fillDefaultOpenAI();
+    fireEvent.click(screen.getByLabelText(/ollama/i));
+    fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+      target: { value: "http://127.0.0.1:11434/v1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+    await screen.findByText(/model discovery is unavailable/i);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /continue with manual model/i }),
+    );
+
+    expect(
+      screen.getAllByLabelText(/use as first chat default/i)[1],
+    ).toBeChecked();
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("");
+    expect(screen.getByLabelText(/default model/i)).toHaveFocus();
+  });
 });
