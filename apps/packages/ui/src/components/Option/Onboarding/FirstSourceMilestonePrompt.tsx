@@ -7,8 +7,10 @@ type FirstSourceMilestonePromptProps = {
   readinessStatus: "idle" | "processing" | "ready" | "error"
   lastSourceLabel?: string | null
   errorMessage?: string | null
+  starterQuestions?: string[]
   onAddSource: (kind: FirstSourceKind) => void
   onAskAboutSource?: () => void
+  onAskStarterQuestion?: (question: string) => void
   onRetry?: () => void
   onDismiss: () => void
 }
@@ -27,8 +29,10 @@ export function FirstSourceMilestonePrompt({
   readinessStatus,
   lastSourceLabel,
   errorMessage,
+  starterQuestions = [],
   onAddSource,
   onAskAboutSource,
+  onAskStarterQuestion,
   onRetry,
   onDismiss
 }: FirstSourceMilestonePromptProps) {
@@ -37,6 +41,14 @@ export function FirstSourceMilestonePrompt({
   const isProcessing = readinessStatus === "processing"
   const isError = readinessStatus === "error"
   const isReady = readinessStatus === "ready"
+  const visibleStarterQuestions =
+    isReady && onAskStarterQuestion
+      ? starterQuestions
+          .map((question) => question.trim())
+          .filter(Boolean)
+          .slice(0, 3)
+      : []
+  const hasStarterQuestions = visibleStarterQuestions.length > 0
 
   return (
     <section
@@ -81,7 +93,7 @@ export function FirstSourceMilestonePrompt({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          {isReady && onAskAboutSource ? (
+          {isReady && onAskAboutSource && !hasStarterQuestions ? (
             <button
               type="button"
               onClick={onAskAboutSource}
@@ -118,6 +130,25 @@ export function FirstSourceMilestonePrompt({
           </button>
         </div>
       </div>
+      {hasStarterQuestions ? (
+        <div className="mt-4 border-t border-border pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Starter questions
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            {visibleStarterQuestions.map((question) => (
+              <button
+                key={question}
+                type="button"
+                onClick={() => onAskStarterQuestion?.(question)}
+                className="min-h-11 rounded-md border border-border bg-bg px-3 py-2 text-left text-sm font-medium text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {!isProcessing && !isReady && !isError ? (
         <div className="mt-4 grid gap-2 sm:grid-cols-3">
           {SOURCE_KIND_OPTIONS.map(({ kind, label, Icon }) => {

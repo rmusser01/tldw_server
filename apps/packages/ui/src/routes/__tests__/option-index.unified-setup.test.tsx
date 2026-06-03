@@ -302,6 +302,9 @@ describe("OptionIndex unified setup resolver", () => {
     expect(
       screen.queryByRole("button", { name: /ask a question about this source/i })
     ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /summarize this source/i })
+    ).not.toBeInTheDocument()
   })
 
   it("ignores unrelated quick ingest success when no first-source session owns it", async () => {
@@ -332,6 +335,9 @@ describe("OptionIndex unified setup resolver", () => {
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /ask a question about this source/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /summarize this source/i })
     ).not.toBeInTheDocument()
   })
 
@@ -376,9 +382,14 @@ describe("OptionIndex unified setup resolver", () => {
         await screen.findByRole("heading", { name: /add your first source/i })
       ).toBeInTheDocument()
 
+      expect(screen.getByText(/starter questions/i)).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /list the key claims/i })
+      ).toBeInTheDocument()
+
       fireEvent.click(
         await screen.findByRole("button", {
-          name: /ask a question about this source/i
+          name: /summarize this source/i
         })
       )
 
@@ -386,7 +397,8 @@ describe("OptionIndex unified setup resolver", () => {
       expect(discussEvents[0]?.detail).toEqual({
         mediaId: "persisted-42",
         title: "Saved PDF",
-        mode: "rag_media"
+        mode: "rag_media",
+        content: "Summarize this source."
       })
     } finally {
       window.removeEventListener("tldw:discuss-media", listener)

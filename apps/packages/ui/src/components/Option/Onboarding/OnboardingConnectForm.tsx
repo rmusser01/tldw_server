@@ -69,16 +69,21 @@ import {
   validateMultiUserAuth,
   validateMagicLinkAuth,
   categorizeConnectionError,
+  isConnectivityErrorKind,
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
+import {
+  buildSetupDiagnostic,
+  type OnboardingDiagnosticActionId,
+} from "./onboarding-diagnostics"
 import { CharacterChatOnboardingLane } from "./CharacterChatOnboardingLane"
 import { ProgressItem, type ProgressStatus } from "./ProgressItem"
 
 type AuthMode = "single-user" | "multi-user"
 type LoginMethod = "magic-link" | "password"
 
-type ConnectionProgress = {
+export type ConnectionProgress = {
   serverReachable: ProgressStatus
   authentication: ProgressStatus
   knowledgeIndex: ProgressStatus
@@ -114,7 +119,7 @@ type ConnectionUiAction =
       hasRunConnectionTest: boolean
     }
 
-const initialConnectionUiState: ConnectionUiState = {
+export const initialConnectionUiState: ConnectionUiState = {
   isConnecting: false,
   progress: {
     serverReachable: "idle",
@@ -127,7 +132,20 @@ const initialConnectionUiState: ConnectionUiState = {
   hasRunConnectionTest: false,
 }
 
-function connectionUiReducer(
+export function buildAuthValidationFailureProgress(
+  previous: ConnectionProgress,
+  errorKind: ConnectionErrorKind
+): ConnectionProgress {
+  return {
+    ...previous,
+    serverReachable: isConnectivityErrorKind(errorKind)
+      ? "error"
+      : previous.serverReachable,
+    authentication: "error",
+  }
+}
+
+export function connectionUiReducer(
   state: ConnectionUiState,
   action: ConnectionUiAction
 ): ConnectionUiState {
@@ -135,7 +153,7 @@ function connectionUiReducer(
     case "START_CONNECT":
       return {
         ...state,
-        hasRunConnectionTest: true,
+        hasRunConnectionTest: false,
         isConnecting: true,
         errorKind: null,
         errorMessage: null,
@@ -303,7 +321,6 @@ export function OnboardingConnectForm({
     isConnecting,
     progress,
     errorKind,
-    errorMessage,
     showSuccess,
     hasRunConnectionTest,
   } = uiState
@@ -417,6 +434,9 @@ export function OnboardingConnectForm({
   ])
 
   const urlInputRef = useRef<InputRef | null>(null)
+  const apiKeyInputRef = useRef<InputRef | null>(null)
+  const usernameInputRef = useRef<InputRef | null>(null)
+  const magicEmailInputRef = useRef<InputRef | null>(null)
   const hasLoadedInitialConfigRef = useRef(false)
 
   // Load initial config
@@ -533,59 +553,6 @@ export function OnboardingConnectForm({
     setAuthTouched(false)
   }, [authMode, loginMethod])
 
-  // Derive a health-check URL from the user-entered server URL
-  const healthCheckUrl = useMemo(() => {
-    try {
-      const parsed = new URL(serverUrl.trim())
-      return `${parsed.origin}/health`
-    } catch {
-      return "http://localhost:8000/health"
-    }
-  }, [serverUrl])
-
-  // Derive error messages from errorKind
-  const errorHint = useMemo(() => {
-    switch (errorKind) {
-      case "dns_failed":
-        return t(
-          "settings:onboarding.errors.dns",
-          "Could not find server. Check the URL for typos and make sure the hostname is correct."
-        )
-      case "refused":
-        return t(
-          "settings:onboarding.errors.refused",
-          `The server is not accepting connections. Is it running? Try: curl ${healthCheckUrl}`
-        )
-      case "timeout":
-        return t(
-          "settings:onboarding.errors.timeout",
-          "The server did not respond in time. If using Docker, check containers are running: docker ps"
-        )
-      case "cors_blocked":
-        return t(
-          "settings:onboarding.errors.cors",
-          "Your browser can't reach the server due to security settings. If you manage the server, add your browser's origin to ALLOWED_ORIGINS in the server's .env file. Otherwise, ask your server administrator for help."
-        )
-      case "ssl_error":
-        return t(
-          "settings:onboarding.errors.ssl",
-          "SSL certificate error. For local development, try http:// instead of https://"
-        )
-      case "auth_invalid":
-        return t(
-          "settings:onboarding.errors.auth",
-          "API key not accepted. Check your key. Docker users: run make show-api-key in terminal"
-        )
-      case "server_error":
-        return t(
-          "settings:onboarding.errors.server",
-          "The server returned an error. Check server logs for details: docker compose logs --tail=50"
-        )
-      default:
-        return null
-    }
-  }, [errorKind, healthCheckUrl, t])
-
   const handleSendMagicLink = useCallback(async () => {
     if (!magicEmail.trim()) {
       dispatchUi({
@@ -676,10 +643,11 @@ export function OnboardingConnectForm({
       if (authResult && !authResult.success) {
         dispatchUi({
           type: "UPDATE_PROGRESS",
-          updater: (p) => ({
-            ...p,
-            authentication: "error",
-          }),
+          updater: (p) =>
+            buildAuthValidationFailureProgress(
+              p,
+              authResult.errorKind ?? null
+            ),
         })
         if (authResult.errorKind || authResult.error) {
           dispatchUi({
@@ -710,6 +678,7 @@ export function OnboardingConnectForm({
 
       try {
         await actions.testConnectionFromOnboarding()
+        dispatchUi({ type: "SET_HAS_RUN_TEST", hasRunConnectionTest: true })
         const latestConnection = useConnectionStore.getState().state
         emitSplashAfterSingleUserAuthSuccess(authMode, latestConnection.isConnected)
       } catch (error) {
@@ -778,6 +747,50 @@ export function OnboardingConnectForm({
     actions,
     dispatchUi,
   ])
+
+  const setupDiagnostic = useMemo(
+    () =>
+      buildSetupDiagnostic(errorKind, t, {
+        authMode:
+          authMode === "single-user" ||
+          (authMode === "multi-user" && isExtensionRuntime())
+            ? "api_key"
+            : loginMethod === "magic-link"
+              ? "magic_link"
+              : "multi_user",
+      }),
+    [authMode, errorKind, loginMethod, t]
+  )
+
+  const handleDiagnosticAction = useCallback(
+    (actionId: OnboardingDiagnosticActionId) => {
+      if (actionId === "edit_api_key") {
+        apiKeyInputRef.current?.focus()
+        return
+      }
+      if (actionId === "edit_credentials") {
+        usernameInputRef.current?.focus()
+        return
+      }
+      if (actionId === "send_magic_link") {
+        magicEmailInputRef.current?.focus()
+        void handleSendMagicLink()
+        return
+      }
+      if (actionId === "edit_server_url") {
+        urlInputRef.current?.focus()
+        return
+      }
+      if (actionId === "retry") {
+        void handleConnect()
+        return
+      }
+      if (actionId === "open_setup") {
+        navigate("/setup")
+      }
+    },
+    [handleConnect, handleSendMagicLink, navigate]
+  )
 
   // React to connection test results using hook state
   useEffect(() => {
@@ -1715,6 +1728,7 @@ export function OnboardingConnectForm({
               {t("settings:onboarding.apiKey.label", "Paste your API key")}
             </label>
             <Input.Password
+              ref={apiKeyInputRef}
               data-testid="onboarding-api-key"
               placeholder={t(
                 "settings:onboarding.apiKey.placeholder",
@@ -1795,6 +1809,7 @@ export function OnboardingConnectForm({
                     {t("settings:onboarding.magicLink.email.label", "Email")}
                   </label>
                   <Input
+                    ref={magicEmailInputRef}
                     placeholder={t(
                       "settings:onboarding.magicLink.email.placeholder",
                       "you@company.com"
@@ -1893,6 +1908,7 @@ export function OnboardingConnectForm({
                     {t("settings:onboarding.username.label", "Username")}
                   </label>
                   <Input
+                    ref={usernameInputRef}
                     placeholder={t(
                       "settings:onboarding.username.placeholder",
                       "Enter username"
@@ -2016,30 +2032,67 @@ export function OnboardingConnectForm({
         )}
 
         {/* Error display */}
-        {errorKind && (
-          <div className="rounded-2xl border border-danger/30 bg-danger/10 p-4">
+        {errorKind && setupDiagnostic && (
+          <div
+            className="rounded-2xl border border-danger/30 bg-danger/10 p-4"
+            data-testid="onboarding-diagnostic-panel"
+            role="alert"
+          >
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="mb-1 inline-flex rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">
                   {activeErrorState.label}
                 </div>
-                <div className="text-sm font-medium text-danger">
-                  {t("settings:onboarding.connectionFailed", "Connection failed")}
+                <div
+                  className="text-sm font-medium text-danger"
+                  data-testid="onboarding-diagnostic-title"
+                >
+                  {setupDiagnostic.title}
                 </div>
-                {errorHint && (
-                  <p className="mt-1 text-xs text-danger">
-                    {errorHint}
-                  </p>
-                )}
-                {errorMessage && errorMessage !== errorHint && (
-                  <p className="mt-1 font-mono text-xs text-danger">
-                    {errorMessage}
-                  </p>
-                )}
+                <p
+                  className="mt-1 text-xs text-danger"
+                  data-testid="onboarding-diagnostic-cause"
+                >
+                  {setupDiagnostic.cause}
+                </p>
+                <p className="mt-1 text-xs text-danger/80">
+                  {setupDiagnostic.whyItMatters}
+                </p>
               </div>
             </div>
-            {/* B4: Troubleshooting docs link */}
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => handleDiagnosticAction(setupDiagnostic.primaryAction.id)}
+                data-testid="onboarding-diagnostic-primary-action"
+                disabled={isConnecting}
+                className="rounded-full"
+              >
+                {setupDiagnostic.primaryAction.label}
+              </Button>
+              {setupDiagnostic.secondaryActions.map((diagnosticAction) => (
+                <Button
+                  key={diagnosticAction.id}
+                  type="default"
+                  size="small"
+                  onClick={() => handleDiagnosticAction(diagnosticAction.id)}
+                  data-testid={`onboarding-diagnostic-secondary-action-${diagnosticAction.id}`}
+                  disabled={isConnecting}
+                  className="rounded-full"
+                  icon={
+                    diagnosticAction.id === "retry" ? (
+                      <RefreshCw className="size-3.5" />
+                    ) : undefined
+                  }
+                >
+                  {diagnosticAction.label}
+                </Button>
+              ))}
+            </div>
+
             <a
               href={TROUBLESHOOTING_URL}
               target="_blank"
@@ -2073,18 +2126,6 @@ export function OnboardingConnectForm({
             : t("settings:onboarding.buttons.connect", "Connect")}
         </Button>
 
-        {/* Retry if error */}
-        {errorKind && !isConnecting && (
-          <Button
-            type="default"
-            block
-            onClick={handleConnect}
-            icon={<RefreshCw className="size-4" />}
-            className="!h-11 rounded-full"
-          >
-            {t("common:retry", "Retry")}
-          </Button>
-        )}
       </div>
 
       {/* Advanced: Server commands */}

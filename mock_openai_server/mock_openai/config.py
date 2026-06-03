@@ -73,6 +73,7 @@ class ServerConfig:
     log_requests: bool = True
     simulate_errors: bool = False
     error_rate: float = 0.0  # Percentage of requests that should error
+    require_auth: bool = True
 
 
 @dataclass
@@ -100,6 +101,10 @@ class MockConfig:
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
     responses: Dict[str, ResponseConfig] = field(default_factory=dict)
     models: List[Dict[str, Any]] = field(default_factory=list)
+    response_base_dir: Optional[str] = None
+    scenario_failures: Dict[str, List[Dict[str, Any]]] = field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_file(cls, config_path: Union[str, Path]) -> "MockConfig":
@@ -115,7 +120,14 @@ class MockConfig:
             else:
                 data = json.load(f)
 
-        return cls.from_dict(data)
+        config = cls.from_dict(data)
+        if config.response_base_dir:
+            response_base_dir = Path(config.response_base_dir)
+            if not response_base_dir.is_absolute():
+                config.response_base_dir = str(
+                    (config_path.parent / response_base_dir).resolve()
+                )
+        return config
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MockConfig":
@@ -131,7 +143,8 @@ class MockConfig:
                 cors_origins=server_data.get("cors_origins", ["*"]),
                 log_requests=server_data.get("log_requests", True),
                 simulate_errors=server_data.get("simulate_errors", False),
-                error_rate=server_data.get("error_rate", 0.0)
+                error_rate=server_data.get("error_rate", 0.0),
+                require_auth=server_data.get("require_auth", True),
             )
 
         # Parse streaming config
@@ -144,6 +157,9 @@ class MockConfig:
             )
 
         # Parse response configs
+        if "response_base_dir" in data:
+            config.response_base_dir = data["response_base_dir"]
+
         if "responses" in data:
             for endpoint, resp_data in data["responses"].items():
                 patterns = []
@@ -163,6 +179,9 @@ class MockConfig:
         # Parse models list
         if "models" in data:
             config.models = data["models"]
+
+        if "scenario_failures" in data:
+            config.scenario_failures = data["scenario_failures"]
 
         return config
 

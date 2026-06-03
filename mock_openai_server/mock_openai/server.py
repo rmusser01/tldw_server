@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
-from .config import MockConfig, load_config, get_config
+from .config import MockConfig, ResponsePattern, load_config, get_config
 from .models import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -37,6 +37,7 @@ from .streaming import StreamingResponseGenerator
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+_scenario_failure_counts: dict[str, int] = {}
 
 # Create FastAPI app
 app = FastAPI(
@@ -56,9 +57,16 @@ def get_config_instance() -> MockConfig:
     return get_config()
 
 
-def get_response_manager() -> ResponseManager:
+def get_response_manager(
+    config: MockConfig = Depends(get_config_instance),
+) -> ResponseManager:
     """Get the response manager instance."""
-    return ResponseManager()
+    responses_dir = (
+        Path(config.response_base_dir)
+        if config.response_base_dir
+        else None
+    )
+    return ResponseManager(responses_dir=responses_dir)
 
 
 def get_streaming_generator(config: MockConfig = Depends(get_config_instance)) -> StreamingResponseGenerator:
@@ -90,8 +98,14 @@ async def startup_event():
     logger.info(f"CORS origins: {config.server.cors_origins}")
 
 
-def validate_api_key(authorization: Optional[str] = Header(None)) -> bool:
+def validate_api_key(
+    authorization: Optional[str] = Header(None),
+    config: Optional[MockConfig] = None,
+) -> bool:
     """Validate the API key (mock validation, always returns True)."""
+    if config and not config.server.require_auth:
+        return True
+
     if not authorization:
         return False
 
@@ -112,7 +126,43 @@ def should_simulate_error(config: MockConfig) -> bool:
     if not config.server.simulate_errors:
         return False
 
-    return random.random() < config.server.error_rate
+    return random.random() < config.server.error_rate  # nosec B311
+
+
+def scenario_failure_response(
+    endpoint: str,
+    request_data: dict,
+    config: MockConfig,
+) -> Optional[JSONResponse]:
+    """Return a configured scenario failure response, if one still applies."""
+    failures = config.scenario_failures.get(endpoint, [])
+    for index, failure in enumerate(failures):
+        matcher = ResponsePattern(
+            match=failure.get("match", {}),
+            response_file="",
+        )
+        if not matcher.matches(request_data):
+            continue
+
+        times = int(failure.get("times", 1))
+        counter_key = f"{endpoint}:{index}"
+        count = _scenario_failure_counts.get(counter_key, 0)
+        if times >= 0 and count >= times:
+            continue
+
+        _scenario_failure_counts[counter_key] = count + 1
+        return JSONResponse(
+            status_code=int(failure.get("status_code", 500)),
+            content={
+                "error": {
+                    "message": failure.get("message", "Configured scenario failure"),
+                    "type": failure.get("type", "server_error"),
+                    "code": failure.get("code", "scenario_failure"),
+                }
+            },
+        )
+
+    return None
 
 
 @app.middleware("http")
@@ -179,7 +229,7 @@ async def chat_completions(
 ):
     """Chat completions endpoint."""
     # Validate API key
-    if not validate_api_key(authorization):
+    if not validate_api_key(authorization, config):
         raise HTTPException(
             status_code=401,
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
@@ -196,6 +246,13 @@ async def chat_completions(
 
     # Convert request to dict for pattern matching
     request_data = request.model_dump()
+    scenario_failure = scenario_failure_response(
+        "chat_completions",
+        request_data,
+        config,
+    )
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Find matching response file
     response_file = None
@@ -237,7 +294,7 @@ async def embeddings(
 ):
     """Embeddings endpoint."""
     # Validate API key
-    if not validate_api_key(authorization):
+    if not validate_api_key(authorization, config):
         raise HTTPException(
             status_code=401,
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
@@ -254,6 +311,13 @@ async def embeddings(
 
     # Convert request to dict for pattern matching
     request_data = request.model_dump()
+    scenario_failure = scenario_failure_response(
+        "embeddings",
+        request_data,
+        config,
+    )
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Find matching response file
     response_file = None
@@ -274,7 +338,7 @@ async def completions(
 ):
     """Legacy completions endpoint."""
     # Validate API key
-    if not validate_api_key(authorization):
+    if not validate_api_key(authorization, config):
         raise HTTPException(
             status_code=401,
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
@@ -291,6 +355,13 @@ async def completions(
 
     # Convert request to dict for pattern matching
     request_data = request.model_dump()
+    scenario_failure = scenario_failure_response(
+        "completions",
+        request_data,
+        config,
+    )
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Find matching response file
     response_file = None
@@ -309,11 +380,15 @@ async def list_models(
 ):
     """List available models endpoint."""
     # Validate API key
-    if not validate_api_key(authorization):
+    if not validate_api_key(authorization, config):
         raise HTTPException(
             status_code=401,
             detail={"error": {"message": "Invalid API key", "type": "authentication_error"}}
         )
+
+    scenario_failure = scenario_failure_response("models", {}, config)
+    if scenario_failure is not None:
+        return scenario_failure
 
     # Return configured models or defaults
     models = config.models if config.models else [
@@ -387,14 +462,19 @@ def main():
         config = load_config(args.config)
     else:
         config = load_config()
+    get_config_instance.cache_clear()
+    config = get_config_instance()
 
     # Override with command line arguments
     host = args.host or config.server.host
     port = args.port or config.server.port
 
     # Run the server
+    app_target: Union[str, FastAPI] = (
+        "mock_openai.server:app" if args.reload else app
+    )
     uvicorn.run(
-        "mock_openai.server:app",
+        app_target,
         host=host,
         port=port,
         reload=args.reload,

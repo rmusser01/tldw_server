@@ -174,6 +174,81 @@ describe("FirstSourceMilestonePrompt", () => {
     expect(onAskAboutSource).toHaveBeenCalled()
   })
 
+  it("shows starter questions only when a ready source handler is provided", async () => {
+    const onAskStarterQuestion = vi.fn()
+    const { FirstSourceMilestonePrompt } = await import(
+      "../FirstSourceMilestonePrompt"
+    )
+
+    const starterQuestions = [
+      "Summarize this source.",
+      "List the key claims.",
+      "What should I remember?",
+    ]
+
+    const { rerender } = render(
+      <FirstSourceMilestonePrompt
+        readinessStatus="idle"
+        starterQuestions={starterQuestions}
+        onAskStarterQuestion={onAskStarterQuestion}
+        onAddSource={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText(/starter questions/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /summarize this source/i })
+    ).not.toBeInTheDocument()
+
+    rerender(
+      <FirstSourceMilestonePrompt
+        readinessStatus="processing"
+        starterQuestions={starterQuestions}
+        onAskStarterQuestion={onAskStarterQuestion}
+        onAddSource={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText(/starter questions/i)).not.toBeInTheDocument()
+
+    rerender(
+      <FirstSourceMilestonePrompt
+        readinessStatus="error"
+        starterQuestions={starterQuestions}
+        onAskStarterQuestion={onAskStarterQuestion}
+        onAddSource={vi.fn()}
+        onRetry={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText(/starter questions/i)).not.toBeInTheDocument()
+
+    rerender(
+      <FirstSourceMilestonePrompt
+        readinessStatus="ready"
+        starterQuestions={starterQuestions}
+        onAskStarterQuestion={onAskStarterQuestion}
+        onAddSource={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText(/starter questions/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /ask a question about this source/i })
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: /summarize this source/i })
+    )
+
+    expect(onAskStarterQuestion).toHaveBeenCalledWith(
+      "Summarize this source."
+    )
+  })
+
   it("lets users dismiss the post-onboarding source milestone", async () => {
     const onDismiss = vi.fn()
     const { FirstSourceMilestonePrompt } = await import(

@@ -42,6 +42,13 @@ _LOCAL_PATH_TEXT_RE = re.compile(
     r"[A-Za-z]:\\[^\s,;\"']+"
     r")"
 )
+_MODEL_UNAVAILABLE_TEXT_RE = re.compile(
+    r"(?i)(?:"
+    r"\bmodel[_\s-]?not[_\s-]?found\b|"
+    r"\bmodel\b.{0,80}\b(?:not\s+available|not\s+found|does\s+not\s+exist|unavailable)\b|"
+    r"\b(?:not\s+available|not\s+found|does\s+not\s+exist)\b.{0,80}\bmodel\b"
+    r")"
+)
 
 
 @dataclass(frozen=True)
@@ -179,6 +186,8 @@ def _classify_failure(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, ChatConfigurationError):
         return "configuration_error", "Provider configuration is incomplete or invalid."
     if isinstance(exc, ChatBadRequestError):
+        if _looks_like_model_unavailable(exc):
+            return "model_unavailable", "The selected model is unavailable. Switch model or provider."
         return "request_invalid", "The provider rejected the first-chat request."
     if isinstance(exc, ChatRateLimitError):
         return "rate_limited", "The provider rate limit was reached. Try again later."
@@ -198,3 +207,9 @@ def _classify_failure(exc: Exception) -> tuple[str, str]:
             return "rate_limited", "The provider rate limit was reached. Try again later."
         return "provider_error", "The provider returned an error."
     return "provider_error", "First-chat verification failed."
+
+
+def _looks_like_model_unavailable(exc: Exception) -> bool:
+    """Infer model-unavailable errors from sanitized provider bad-request text."""
+    message = str(getattr(exc, "message", "") or exc)
+    return bool(_MODEL_UNAVAILABLE_TEXT_RE.search(message))

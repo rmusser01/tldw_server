@@ -61,6 +61,7 @@ const OptionSetup = () => {
           initialState={state}
           initialMetadata={metadata}
           onStateChange={adoptState}
+          onComplete={() => navigate("/")}
         />
       ) : null}
     </OptionLayout>

@@ -33,6 +33,11 @@ const LazyOptionHostedHome = React.lazy(() => import("./option-hosted-home"))
 
 const FIRST_SOURCE_MILESTONE_DISMISSED_KEY =
   "tldw:first-source-milestone-dismissed"
+const FIRST_SOURCE_STARTER_QUESTIONS = [
+  "Summarize this source.",
+  "List the key claims.",
+  "What should I remember?"
+] as const
 
 const readFirstSourceDismissed = () => {
   if (typeof window === "undefined") return false
@@ -60,15 +65,26 @@ const openFirstSourceQuickIngest = (kind: FirstSourceKind) => {
 const discussFirstSource = (payload: {
   mediaId: string
   title: string | null
+  question?: string | null
 }) => {
   if (typeof window === "undefined") return
+  const detail: {
+    mediaId: string
+    title: string
+    mode: "rag_media"
+    content?: string
+  } = {
+    mediaId: payload.mediaId,
+    title: payload.title || "First source",
+    mode: "rag_media"
+  }
+  const question = payload.question?.trim()
+  if (question) {
+    detail.content = question
+  }
   window.dispatchEvent(
     new CustomEvent("tldw:discuss-media", {
-      detail: {
-        mediaId: payload.mediaId,
-        title: payload.title || "First source",
-        mode: "rag_media"
-      }
+      detail
     })
   )
 }
@@ -236,6 +252,21 @@ const OptionIndex = () => {
                   discussFirstSource({
                     mediaId: firstSourceMediaId,
                     title: firstSourceRunSummary?.primarySourceLabel ?? null
+                  })
+              : undefined
+          }
+          starterQuestions={
+            firstSourceAskReady
+              ? [...FIRST_SOURCE_STARTER_QUESTIONS]
+              : []
+          }
+          onAskStarterQuestion={
+            firstSourceMediaId && firstSourceAskReady
+              ? (question) =>
+                  discussFirstSource({
+                    mediaId: firstSourceMediaId,
+                    title: firstSourceRunSummary?.primarySourceLabel ?? null,
+                    question
                   })
               : undefined
           }
