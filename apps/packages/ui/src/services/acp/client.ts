@@ -160,6 +160,7 @@ export class ACPRestClient {
   async listSessions(params?: {
     status?: string
     agent_type?: string
+    workspace_id?: string
     limit?: number
     offset?: number
   }): Promise<ACPSessionListResponse> {

@@ -345,6 +345,27 @@ export interface ACPTokenUsage {
 
 export type ACPBackendSessionStatus = "active" | "closed" | "error"
 
+export interface ACPSessionWorkspaceContext {
+  workspace_id?: string | null
+  workspace_group_id?: string | null
+  scope_snapshot_id?: string | null
+  mcp_server_count: number
+  mcp_server_names: string[]
+  sandbox_session_id?: string | null
+  sandbox_run_id?: string | null
+  policy_snapshot_version?: string | null
+  policy_snapshot_fingerprint?: string | null
+  policy_refresh_error?: string | null
+  agent_type?: string | null
+  runtime_backend?: string | null
+  entrypoint_strategy?: string | null
+  adapter_source?: string | null
+  adapter_package?: string | null
+  adapter_version?: string | null
+  support_state?: string | null
+  verification_level?: string | null
+}
+
 export interface ACPSessionListItem {
   session_id: string
   user_id: number
@@ -361,6 +382,9 @@ export interface ACPSessionListItem {
   workspace_id?: string | null
   workspace_group_id?: string | null
   scope_snapshot_id?: string | null
+  sandbox_session_id?: string | null
+  sandbox_run_id?: string | null
+  workspace_context?: ACPSessionWorkspaceContext | null
   policy_snapshot_version?: string | null
   policy_snapshot_fingerprint?: string | null
   policy_snapshot_refreshed_at?: string | null

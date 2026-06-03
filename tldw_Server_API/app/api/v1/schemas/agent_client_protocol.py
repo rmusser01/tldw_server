@@ -606,6 +606,36 @@ class ACPSessionStatus(str, Enum):
     ERROR = "error"
 
 
+class ACPSessionWorkspaceContext(BaseModel):
+    """Bounded workspace/runtime context for support-safe ACP session diagnostics."""
+    workspace_id: str | None = Field(default=None, description="Workspace identifier bound to this ACP session")
+    workspace_group_id: str | None = Field(
+        default=None, description="Workspace group identifier bound to this ACP session"
+    )
+    scope_snapshot_id: str | None = Field(
+        default=None, description="Scope snapshot identifier bound to this ACP session"
+    )
+    mcp_server_count: int = Field(default=0, ge=0, description="Number of MCP servers configured")
+    mcp_server_names: list[str] = Field(default_factory=list, description="Bounded MCP server display names")
+    sandbox_session_id: str | None = Field(default=None, description="Sandbox session backing this ACP session")
+    sandbox_run_id: str | None = Field(default=None, description="Sandbox run backing this ACP session")
+    policy_snapshot_version: str | None = Field(
+        default=None, description="Version identifier for the current ACP policy snapshot"
+    )
+    policy_snapshot_fingerprint: str | None = Field(
+        default=None, description="Fingerprint of the current ACP policy snapshot"
+    )
+    policy_refresh_error: str | None = Field(default=None, description="Last policy refresh error, if any")
+    agent_type: str | None = Field(default=None, description="ACP agent type")
+    runtime_backend: str | None = Field(default=None, description="Agent runtime backend")
+    entrypoint_strategy: str | None = Field(default=None, description="Agent ACP entrypoint strategy")
+    adapter_source: str | None = Field(default=None, description="External ACP adapter source")
+    adapter_package: str | None = Field(default=None, description="External ACP adapter package")
+    adapter_version: str | None = Field(default=None, description="External ACP adapter version")
+    support_state: str | None = Field(default=None, description="Compatibility support state")
+    verification_level: str | None = Field(default=None, description="Compatibility verification level")
+
+
 class ACPSessionInfo(BaseModel):
     """Summary information about an ACP session."""
     session_id: str = Field(..., description="Unique session identifier")
@@ -626,6 +656,12 @@ class ACPSessionInfo(BaseModel):
     )
     scope_snapshot_id: str | None = Field(
         default=None, description="Scope snapshot identifier bound to this ACP session"
+    )
+    sandbox_session_id: str | None = Field(default=None, description="Sandbox session backing this ACP session")
+    sandbox_run_id: str | None = Field(default=None, description="Sandbox run backing this ACP session")
+    workspace_context: ACPSessionWorkspaceContext | None = Field(
+        default=None,
+        description="Bounded workspace/runtime context safe for diagnostics and UI history",
     )
     policy_snapshot_version: str | None = Field(
         default=None, description="Version identifier for the current ACP policy snapshot"

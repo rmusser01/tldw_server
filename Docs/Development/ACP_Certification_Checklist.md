@@ -11,6 +11,7 @@ so release notes do not overclaim compatibility.
 | --- | --- | --- |
 | `stub-smoke` | Proving the in-repo server, runner, mocked browser, and support-view paths still work. | `stub_smoke_tested` |
 | `live-e2e` | Proving a named downstream agent binary works on a named host/runtime profile. | `live_e2e_tested` |
+| `workspace-live-e2e` | Proving a named downstream agent can run through backend ACP with Research Workspace context and non-empty MCP injection evidence. | `live_e2e_tested` with workspace-scoped capability details |
 | `sandbox` | Proving Docker, Lima, VZ, or another configured sandbox runtime works for the agent/profile. | `sandbox_tested` |
 
 The `stub-smoke` mode is CI-friendly and useful for release health. It does not
@@ -63,6 +64,35 @@ detail/events/artifacts, diagnostics, cancel, and close. The manifest also runs
 the Go runner verification script so runner/profile changes are covered by the
 same evidence record.
 
+Workspace live E2E uses the same required backend variables and also requires a
+real Research Workspace id. The remaining workspace-specific controls are
+optional:
+
+```bash
+export ACP_E2E_WORKSPACE_ID=<research-workspace-id>
+export ACP_E2E_MCP_SERVER_NAME=tldw-workspace-certification
+# Optional override; defaults to this helper's built-in minimal stdio MCP server.
+export ACP_E2E_MCP_SERVER_COMMAND=<mcp-server-command>
+export ACP_E2E_MCP_SERVER_ARGS_JSON='["arg1","arg2"]'
+# Optional strict gates for release claims that require these capabilities.
+export ACP_E2E_EXPECT_ARTIFACTS=1
+export ACP_E2E_EXPECT_SANDBOX=1
+export ACP_E2E_EXPECT_REVIEWER_LOOP=1
+
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --format json
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --run
+```
+
+`workspace-live-e2e` creates a backend ACP session with `workspace_id` and a
+non-empty `mcp_servers` payload, prompts for an artifact-like markdown result,
+then queries redacted detail/events/artifacts, diagnostics, and
+`/api/v1/acp/sessions?workspace_id=...`. `workspace_env`, `mcp_injection`,
+diagnostics, redacted support views, and cleanup must pass. Artifacts, sandbox
+IDs, and reviewer-loop evidence are reported as `pass` or `skip` unless the
+matching `ACP_E2E_EXPECT_*` flag makes them required. A run without
+`ACP_E2E_WORKSPACE_ID` must refuse to run and cannot be used as Research
+Workspace evidence.
+
 ## Stub-Smoke Checklist
 
 Run this when updating the stub row or when validating release health without a
@@ -108,6 +138,9 @@ Run this when changing a candidate agent row from `documented_unverified` to
   and close/teardown.
 - Exercise artifacts, review loop, workspace env, MCP server injection, and
   redacted support views when those capabilities are part of the claim.
+- Use `workspace-live-e2e` rather than plain `live-e2e` when claiming Research
+  Workspace, MCP injection, artifact, reviewer-loop, or sandbox evidence for a
+  live downstream agent.
 - Record unsupported or skipped capabilities with caveat taxonomy labels from
   `ACP_Compatibility_Matrix.md`.
 

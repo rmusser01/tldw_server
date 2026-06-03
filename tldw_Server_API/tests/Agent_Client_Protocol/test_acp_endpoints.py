@@ -2,6 +2,7 @@ import importlib.machinery
 import json
 import sys
 import types
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -59,6 +60,7 @@ class StubRunnerClient:
         self.prompt_calls = []
         self.create_session_calls = []
         self.denied_sessions = set()
+        self.session_metadata = {}
         self._updates = {
             "session-123": [
                 {"sessionId": "session-123", "event": "message", "content": "hello"}
@@ -90,6 +92,10 @@ class StubRunnerClient:
         )
         return "session-123"
 
+    async def get_session_metadata(self, session_id: str, user_id: int | None = None) -> dict[str, Any]:
+        del user_id
+        return self.session_metadata.get(session_id, {})
+
     async def verify_session_access(self, session_id: str, user_id: int) -> bool:
         return session_id not in self.denied_sessions
 
@@ -106,6 +112,9 @@ class StubRunnerClient:
     def pop_updates(self, session_id: str, limit: int = 100):
         updates = list(self._updates.get(session_id, []))
         return updates[:limit]
+
+    def has_websocket_connections(self, session_id: str) -> bool:
+        return False
 
 
 @pytest.fixture()
@@ -219,6 +228,166 @@ def test_acp_session_new_forwards_tenancy_fields(client_user_only, stub_runner_c
     assert call["workspace_group_id"] == "wsg-2"
     assert call["scope_snapshot_id"] == "scope-3"
     assert isinstance(call["user_id"], int) and call["user_id"] > 0
+
+
+def test_acp_session_new_persists_sandbox_metadata_for_session_detail(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    stub_runner_client.session_metadata["session-123"] = {
+        "sandbox_session_id": "sandbox-session-123",
+        "sandbox_run_id": "sandbox-run-456",
+        "workspace_id": "workspace-alpha",
+        "workspace_group_id": "group-alpha",
+        "scope_snapshot_id": "scope-alpha",
+    }
+
+    create_resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path),
+            "agent_type": "codex",
+            "workspace_id": "workspace-alpha",
+        },
+    )
+
+    assert create_resp.status_code == 200
+    create_payload = create_resp.json()
+    assert create_payload["sandbox_session_id"] == "sandbox-session-123"
+    assert create_payload["sandbox_run_id"] == "sandbox-run-456"
+
+    detail_resp = client_user_only.get("/api/v1/acp/sessions/session-123/detail")
+    assert detail_resp.status_code == 200
+    detail_payload = detail_resp.json()
+    assert detail_payload["sandbox_session_id"] == "sandbox-session-123"
+    assert detail_payload["sandbox_run_id"] == "sandbox-run-456"
+    assert detail_payload["workspace_context"]["workspace_id"] == "workspace-alpha"
+    assert detail_payload["workspace_context"]["sandbox_session_id"] == "sandbox-session-123"
+
+
+def test_acp_list_sessions_filters_by_workspace_id(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    import asyncio
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    async def _seed_sessions() -> None:
+        store = await acp_endpoints.get_acp_session_store()
+        await store.register_session(
+            session_id="workspace-session",
+            user_id=1,
+            agent_type="codex",
+            name="Workspace Session",
+            cwd=str(tmp_path),
+            workspace_id="workspace-alpha",
+        )
+        await store.register_session(
+            session_id="other-session",
+            user_id=1,
+            agent_type="codex",
+            name="Other Session",
+            cwd=str(tmp_path),
+            workspace_id="workspace-beta",
+        )
+
+    asyncio.run(_seed_sessions())
+
+    resp = client_user_only.get(
+        "/api/v1/acp/sessions",
+        params={"workspace_id": "workspace-alpha"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 1
+    assert [session["session_id"] for session in payload["sessions"]] == ["workspace-session"]
+    assert payload["sessions"][0]["workspace_context"]["workspace_id"] == "workspace-alpha"
+
+
+def test_acp_session_diagnostics_includes_bounded_workspace_context(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    import asyncio
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    async def _seed_session() -> None:
+        store = await acp_endpoints.get_acp_session_store()
+        await store.register_session(
+            session_id="workspace-diagnostics-session",
+            user_id=1,
+            agent_type="codex",
+            name="Workspace Diagnostics",
+            cwd=str(tmp_path / "private-project"),
+            mcp_servers=[
+                {
+                    "name": "filesystem",
+                    "type": "stdio",
+                    "command": "/private/bin/mcp-filesystem",
+                    "args": ["--token", "sk-should-not-leak"],
+                    "env": {"OPENAI_API_KEY": "sk-should-not-leak"},
+                }
+            ],
+            workspace_id="workspace-alpha",
+            workspace_group_id="group-alpha",
+            scope_snapshot_id="scope-alpha",
+            sandbox_session_id="sandbox-session-123",
+            sandbox_run_id="sandbox-run-456",
+            policy_snapshot_version="policy-v1",
+            policy_snapshot_fingerprint="policy-fingerprint-abc",
+            policy_refresh_error="policy refresh failed",
+        )
+
+    asyncio.run(_seed_session())
+
+    resp = client_user_only.get(
+        "/api/v1/acp/sessions/workspace-diagnostics-session/diagnostics"
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    context = payload["workspace_context"]
+    assert context["workspace_id"] == "workspace-alpha"
+    assert context["workspace_group_id"] == "group-alpha"
+    assert context["scope_snapshot_id"] == "scope-alpha"
+    assert context["mcp_server_count"] == 1
+    assert context["mcp_server_names"] == ["filesystem"]
+    assert context["sandbox_session_id"] == "sandbox-session-123"
+    assert context["sandbox_run_id"] == "sandbox-run-456"
+    assert context["policy_snapshot_version"] == "policy-v1"
+    assert context["policy_snapshot_fingerprint"] == "policy-fingerprint-abc"
+    assert context["policy_refresh_error"] == "policy refresh failed"
+    assert context["agent_type"] == "codex"
+    assert context["runtime_backend"] == "acp_downstream"
+    assert context["entrypoint_strategy"] == "external_acp_adapter"
+    assert context["adapter_source"] == "zed-industries/codex-acp"
+    assert context["adapter_package"] == "@zed-industries/codex-acp"
+    assert context["adapter_version"] == "0.15.0"
+    assert context["support_state"] == "supported_with_caveats"
+    assert context["verification_level"] == "live_e2e_tested"
+
+    serialized_payload = json.dumps(payload)
+    assert "sk-should-not-leak" not in serialized_payload
+    assert "OPENAI_API_KEY" not in serialized_payload
+    assert "/private/bin/mcp-filesystem" not in serialized_payload
+
+
+def test_acp_workspace_context_adapter_source_redacts_local_paths():
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    assert acp_endpoints._redact_acp_adapter_source(
+        "zed-industries/codex-acp"
+    ) == "zed-industries/codex-acp"
+    assert acp_endpoints._redact_acp_adapter_source(
+        "/Users/example/.local/bin/codex-acp"
+    ) == "[redacted]"
+    assert acp_endpoints._redact_acp_adapter_source(
+        "C:\\Users\\example\\codex-acp"
+    ) == "[redacted]"
 
 
 def test_acp_session_new_preserves_explicit_empty_mcp_servers(

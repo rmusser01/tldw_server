@@ -76,6 +76,55 @@ class TestSessionCRUD:
         assert rec["tags"] == ["workflow", "test"]
         assert rec["mcp_servers"] == [{"name": "fs", "type": "stdio"}]
 
+    def test_register_session_persists_sandbox_context_and_filters_by_workspace(self, db):
+        db.register_session(
+            session_id="s-workspace",
+            user_id=1,
+            agent_type="codex",
+            workspace_id="workspace-1",
+            sandbox_session_id="sandbox-session-1",
+            sandbox_run_id="sandbox-run-1",
+        )
+        db.register_session(
+            session_id="s-other",
+            user_id=1,
+            agent_type="codex",
+            workspace_id="workspace-2",
+        )
+
+        row = db.get_session("s-workspace")
+        assert row["sandbox_session_id"] == "sandbox-session-1"
+        assert row["sandbox_run_id"] == "sandbox-run-1"
+
+        rows, total = db.list_sessions(user_id=1, workspace_id="workspace-1")
+        assert total == 1
+        assert rows[0]["session_id"] == "s-workspace"
+
+    def test_list_sessions_workspace_filter_uses_direct_predicate(self, db):
+        db.register_session(
+            session_id="s-workspace",
+            user_id=1,
+            agent_type="codex",
+            workspace_id="workspace-1",
+        )
+
+        statements: list[str] = []
+        conn = db._get_conn()
+        conn.set_trace_callback(statements.append)
+        try:
+            db.list_sessions(workspace_id="workspace-1")
+        finally:
+            conn.set_trace_callback(None)
+
+        session_queries = [
+            statement
+            for statement in statements
+            if "FROM sessions" in statement and "workspace_id" in statement
+        ]
+        assert session_queries
+        assert all("IS NULL OR" not in statement for statement in session_queries)
+        assert all("workspace_id =" in statement for statement in session_queries)
+
     def test_register_session_with_policy_snapshot_fields(self, db):
         row = db.register_session(
             session_id="s1",

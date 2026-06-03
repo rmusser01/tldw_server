@@ -567,6 +567,161 @@ def _redact_acp_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     ]
 
 
+def _bounded_acp_context_label(
+    value: Any,
+    *,
+    max_length: int = 120,
+    redact_paths: bool = False,
+) -> str | None:
+    """Return a bounded non-secret label for workspace context metadata."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if any(marker in lowered for marker in _ACP_REDACTION_MARKERS):
+        return _ACP_REDACTED_VALUE
+    if redact_paths and (
+        text.startswith("/")
+        or text.startswith(".")
+        or text.startswith("~")
+        or text.startswith("\\\\")
+        or "/" in text
+        or ":\\" in text
+        or ":/" in text
+    ):
+        return _ACP_REDACTED_VALUE
+    if len(text) > max_length:
+        return f"{text[:max_length]}..."
+    return text
+
+
+def _redact_acp_adapter_source(value: Any) -> str | None:
+    """Return adapter source metadata with local filesystem paths redacted."""
+    text = _bounded_acp_context_label(value)
+    if text is None:
+        return None
+    lowered = text.lower()
+    if (
+        text.startswith(("/", ".", "~", "\\\\"))
+        or ":\\" in text
+        or (":/" in text and not lowered.startswith(("http://", "https://")))
+    ):
+        return _ACP_REDACTED_VALUE
+    return text
+
+
+def _bounded_acp_context_error(value: Any) -> str | None:
+    """Return a redacted, bounded diagnostic error summary for context metadata."""
+    if value is None:
+        return None
+    text = _redact_acp_string(str(value).strip())
+    if not text:
+        return None
+    if len(text) > 300:
+        return f"{text[:300]}..."
+    return text
+
+
+def _acp_mcp_server_names(mcp_servers: Any, *, limit: int = 20) -> list[str]:
+    """Extract bounded MCP server names without exposing commands, args, env, or paths."""
+    if not isinstance(mcp_servers, list):
+        return []
+    names: list[str] = []
+    for server in mcp_servers:
+        if len(names) >= limit:
+            break
+        raw_name: Any = None
+        if isinstance(server, dict):
+            raw_name = server.get("name") or server.get("id")
+        else:
+            raw_name = getattr(server, "name", None) or getattr(server, "id", None)
+        name = _redact_acp_string(str(raw_name).strip()) if raw_name is not None else None
+        if name:
+            names.append(name)
+    return names
+
+
+def _build_acp_workspace_context(rec: Any) -> dict[str, Any] | None:
+    """Build a bounded workspace/runtime context envelope for an ACP session."""
+    mcp_servers = getattr(rec, "mcp_servers", None)
+    mcp_server_count = len(mcp_servers) if isinstance(mcp_servers, list) else 0
+    context: dict[str, Any] = {
+        "workspace_id": _bounded_acp_context_label(
+            getattr(rec, "workspace_id", None),
+            redact_paths=True,
+        ),
+        "workspace_group_id": _bounded_acp_context_label(
+            getattr(rec, "workspace_group_id", None),
+            redact_paths=True,
+        ),
+        "scope_snapshot_id": _bounded_acp_context_label(
+            getattr(rec, "scope_snapshot_id", None),
+            redact_paths=True,
+        ),
+        "mcp_server_count": mcp_server_count,
+        "mcp_server_names": _acp_mcp_server_names(mcp_servers),
+        "sandbox_session_id": _bounded_acp_context_label(
+            getattr(rec, "sandbox_session_id", None),
+            redact_paths=True,
+        ),
+        "sandbox_run_id": _bounded_acp_context_label(
+            getattr(rec, "sandbox_run_id", None),
+            redact_paths=True,
+        ),
+        "policy_snapshot_version": _bounded_acp_context_label(
+            getattr(rec, "policy_snapshot_version", None)
+        ),
+        "policy_snapshot_fingerprint": _bounded_acp_context_label(
+            getattr(rec, "policy_snapshot_fingerprint", None)
+        ),
+        "policy_refresh_error": _bounded_acp_context_error(
+            getattr(rec, "policy_refresh_error", None)
+        ),
+        "agent_type": _bounded_acp_context_label(getattr(rec, "agent_type", None)),
+        "runtime_backend": None,
+        "entrypoint_strategy": None,
+        "adapter_source": None,
+        "adapter_package": None,
+        "adapter_version": None,
+        "support_state": None,
+        "verification_level": None,
+    }
+
+    try:
+        from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import get_agent_registry
+
+        entry = get_agent_registry().get_entry(str(getattr(rec, "agent_type", "") or ""))
+        if entry is not None:
+            context.update(
+                {
+                    "runtime_backend": _bounded_acp_context_label(entry.runtime_backend),
+                    "entrypoint_strategy": _bounded_acp_context_label(entry.entrypoint_strategy),
+                    "adapter_source": _redact_acp_adapter_source(entry.adapter_source),
+                    "adapter_package": _bounded_acp_context_label(entry.adapter_package),
+                    "adapter_version": _bounded_acp_context_label(entry.adapter_version),
+                    "support_state": _bounded_acp_context_label(entry.support_state),
+                    "verification_level": _bounded_acp_context_label(entry.verification_level),
+                }
+            )
+    except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Unable to enrich ACP workspace context from agent registry for session_id={} agent_type={}: {}",
+            _bounded_acp_context_label(getattr(rec, "session_id", None), redact_paths=True),
+            context["agent_type"],
+            _bounded_acp_context_error(exc) or exc.__class__.__name__,
+        )
+
+    if (
+        mcp_server_count > 0
+        or context["mcp_server_names"]
+        or any(value for key, value in context.items() if key not in {"mcp_server_count", "mcp_server_names"})
+    ):
+        return context
+    return None
+
+
 def _normalize_reason_code(raw_reason: Any, raw_message: Any) -> str:
     candidate = str(raw_reason or "").strip().lower()
     if candidate in _ACP_DIAGNOSTIC_REASON_MAP:
@@ -2516,11 +2671,15 @@ async def acp_session_new(
     resolved_workspace_id = payload.workspace_id
     resolved_workspace_group_id = payload.workspace_group_id
     resolved_scope_snapshot_id = payload.scope_snapshot_id
+    resolved_sandbox_session_id = None
+    resolved_sandbox_run_id = None
     if sandbox_meta:
         resolved_persona_id = resolved_persona_id or sandbox_meta.get("persona_id")
         resolved_workspace_id = resolved_workspace_id or sandbox_meta.get("workspace_id")
         resolved_workspace_group_id = resolved_workspace_group_id or sandbox_meta.get("workspace_group_id")
         resolved_scope_snapshot_id = resolved_scope_snapshot_id or sandbox_meta.get("scope_snapshot_id")
+        resolved_sandbox_session_id = sandbox_meta.get("sandbox_session_id")
+        resolved_sandbox_run_id = sandbox_meta.get("sandbox_run_id")
 
     # Resolve model from agent registry for cost tracking
     resolved_model: str | None = None
@@ -2549,6 +2708,8 @@ async def acp_session_new(
             workspace_id=resolved_workspace_id,
             workspace_group_id=resolved_workspace_group_id,
             scope_snapshot_id=resolved_scope_snapshot_id,
+            sandbox_session_id=resolved_sandbox_session_id,
+            sandbox_run_id=resolved_sandbox_run_id,
             model=resolved_model,
         )
         if persisted_record is not None:
@@ -2608,8 +2769,8 @@ async def acp_session_new(
         name=session_name,
         agent_type=resolved_agent_type,
         agent_capabilities=client.agent_capabilities,
-        sandbox_session_id=(sandbox_meta or {}).get("sandbox_session_id") if sandbox_meta else None,
-        sandbox_run_id=(sandbox_meta or {}).get("sandbox_run_id") if sandbox_meta else None,
+        sandbox_session_id=resolved_sandbox_session_id,
+        sandbox_run_id=resolved_sandbox_run_id,
         ssh_ws_url=(sandbox_meta or {}).get("ssh_ws_url") if sandbox_meta else None,
         ssh_user=(sandbox_meta or {}).get("ssh_user") if sandbox_meta else None,
         persona_id=resolved_persona_id,
@@ -2950,6 +3111,7 @@ async def acp_session_updates(
 async def acp_list_sessions(
     status_filter: str | None = Query(default=None, alias="status"),
     agent_type: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     user: User = Depends(get_request_user),
@@ -2962,15 +3124,17 @@ async def acp_list_sessions(
         user_id=int(user.id),
         status=status_filter,
         agent_type=agent_type,
+        workspace_id=workspace_id,
         limit=limit,
         offset=offset,
     )
-    sessions = [
-        ACPSessionInfo(**rec.to_info_dict(
+    sessions = []
+    for rec in records:
+        info = rec.to_info_dict(
             has_websocket=client.has_websocket_connections(rec.session_id),
-        ))
-        for rec in records
-    ]
+        )
+        info["workspace_context"] = _build_acp_workspace_context(rec)
+        sessions.append(ACPSessionInfo(**info))
     return ACPSessionListResponse(
         sessions=sessions,
         total=total,
@@ -3009,6 +3173,7 @@ async def acp_session_detail(
         has_websocket=client.has_websocket_connections(session_id),
         fork_lineage=fork_lineage,
     )
+    detail["workspace_context"] = _build_acp_workspace_context(rec)
     if redacted:
         detail["messages"] = _redact_acp_messages(detail.get("messages") or [])
         detail["cwd"] = _ACP_REDACTED_VALUE if detail.get("cwd") else detail.get("cwd")
@@ -3296,6 +3461,7 @@ async def acp_session_diagnostics(
         "total": len(diagnostics),
         "diagnostics": diagnostics,
         "reconciliation": reconciliation,
+        "workspace_context": _build_acp_workspace_context(rec),
     }
 
 

@@ -65,6 +65,8 @@ class SessionRecord:
     workspace_id: str | None = None
     workspace_group_id: str | None = None
     scope_snapshot_id: str | None = None
+    sandbox_session_id: str | None = None
+    sandbox_run_id: str | None = None
     policy_snapshot_version: str | None = None
     policy_snapshot_fingerprint: str | None = None
     policy_snapshot_refreshed_at: str | None = None
@@ -100,6 +102,8 @@ class SessionRecord:
             "workspace_id": self.workspace_id,
             "workspace_group_id": self.workspace_group_id,
             "scope_snapshot_id": self.scope_snapshot_id,
+            "sandbox_session_id": self.sandbox_session_id,
+            "sandbox_run_id": self.sandbox_run_id,
             "policy_snapshot_version": self.policy_snapshot_version,
             "policy_snapshot_fingerprint": self.policy_snapshot_fingerprint,
             "policy_snapshot_refreshed_at": self.policy_snapshot_refreshed_at,
@@ -350,6 +354,8 @@ class ACPSessionStore:
             workspace_id=d.get("workspace_id"),
             workspace_group_id=d.get("workspace_group_id"),
             scope_snapshot_id=d.get("scope_snapshot_id"),
+            sandbox_session_id=d.get("sandbox_session_id"),
+            sandbox_run_id=d.get("sandbox_run_id"),
             policy_snapshot_version=d.get("policy_snapshot_version"),
             policy_snapshot_fingerprint=d.get("policy_snapshot_fingerprint"),
             policy_snapshot_refreshed_at=d.get("policy_snapshot_refreshed_at"),
@@ -475,6 +481,8 @@ class ACPSessionStore:
         workspace_id: str | None = None,
         workspace_group_id: str | None = None,
         scope_snapshot_id: str | None = None,
+        sandbox_session_id: str | None = None,
+        sandbox_run_id: str | None = None,
         policy_snapshot_version: str | None = None,
         policy_snapshot_fingerprint: str | None = None,
         policy_snapshot_refreshed_at: str | None = None,
@@ -498,6 +506,8 @@ class ACPSessionStore:
             workspace_id=workspace_id,
             workspace_group_id=workspace_group_id,
             scope_snapshot_id=scope_snapshot_id,
+            sandbox_session_id=sandbox_session_id,
+            sandbox_run_id=sandbox_run_id,
             policy_snapshot_version=policy_snapshot_version,
             policy_snapshot_fingerprint=policy_snapshot_fingerprint,
             policy_snapshot_refreshed_at=policy_snapshot_refreshed_at,
@@ -629,12 +639,14 @@ class ACPSessionStore:
         user_id: int | None = None,
         status: str | None = None,
         agent_type: str | None = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[SessionRecord], int]:
         """List sessions with optional filters. Returns (records, total_count)."""
         rows, total = self._db.list_sessions(
             user_id=user_id, status=status, agent_type=agent_type,
+            workspace_id=workspace_id,
             limit=limit, offset=offset,
         )
         records = [self._dict_to_record(d) for d in rows]
