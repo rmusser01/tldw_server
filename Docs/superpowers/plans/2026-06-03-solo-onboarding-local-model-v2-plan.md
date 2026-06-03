@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI setup endpoints, Python provider validation tests, React setup wizard in `apps/packages/ui`, Vitest, Playwright onboarding UAT harness, repo `mock_openai_server`.
 
-**Backlog:** `TASK-601`
+**Backlog:** `TASK-605`
 
 ---
 
@@ -32,11 +32,15 @@
   - Add explicit PR4 local scenarios.
 - Modify/Create: `apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/*.json`
   - Add static mock configs for models unsupported and local model unavailable.
+- Modify: `apps/tldw-frontend/e2e/onboarding-uat/playwright.config.ts`
+  - Keep Playwright output outside the runner artifact root so cleanup remains safe.
 - Modify: `apps/tldw-frontend/e2e/onboarding-uat/setup-happy-path.spec.ts`
   - Split/strengthen discovered-model and manual-model local happy paths.
 - Modify: `apps/tldw-frontend/e2e/onboarding-uat/recovery.spec.ts`
   - Add local endpoint unreachable, model unavailable, and switch-back recovery assertions as needed.
-- Modify: `backlog/tasks/task-601 - Implement-solo-onboarding-local-model-guided-alternative-V2.md`
+- Modify: `apps/tldw-frontend/scripts/onboarding-uat/run.mjs`
+  - Resolve mock config from the registered scenario when `--mock-config` is omitted.
+- Modify: `backlog/tasks/task-605 - Implement-solo-onboarding-local-model-guided-alternative-V2.md`
   - Keep plan, touched files, verification, and final summary current.
 
 ## Stage 1: Baseline Harness Cleanup
@@ -83,7 +87,7 @@
 
 - `ready` + `live_non_generative` + discovered models when `/models` returns OpenAI shape.
 - `accepted` + a non-generative/manual fallback validation level when the endpoint is reachable but `/models` shape is unsupported.
-- `failed` for unreachable endpoint, auth failure, disallowed target, invalid JSON, or HTTP error.
+- `accepted` manual fallback for reachable `/models` discovery HTTP/shape/empty-list failures, while preserving `failed` for unreachable endpoint, auth failure, disallowed target, and invalid JSON.
 
 **Tests:** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q`
 
@@ -188,11 +192,11 @@
 - UAT scenario exists for local default switched back to hosted without stale state.
 - Mobile local setup is covered.
 
-**Tests:** `bun run e2e:onboarding:uat --scenario <scenario-id> --viewport <desktop|mobile>`
+**Tests:** `bun run e2e:onboarding:uat -- --scenario <scenario-id> --viewport <desktop|mobile>`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Add failing/expanded UAT scenario declarations**
+- [x] **Step 1: Add failing/expanded UAT scenario declarations**
 
   Update `apps/tldw-frontend/e2e/onboarding-uat/scenarios.ts` with explicit PR4 scenario IDs, for example:
 
@@ -202,7 +206,7 @@
   - `local-to-hosted-switch-state-isolated`
   - mobile coverage for local setup
 
-- [ ] **Step 2: Add static mock configs**
+- [x] **Step 2: Add static mock configs**
 
   Add configs under `apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/` for:
 
@@ -210,11 +214,11 @@
   - Chat failure for a selected local model.
   - Any provider-switch path that needs deterministic behavior.
 
-- [ ] **Step 3: Write/extend Playwright UAT tests**
+- [x] **Step 3: Write/extend Playwright UAT tests**
 
   Update `setup-happy-path.spec.ts` and `recovery.spec.ts` using existing helpers. Do not use Playwright route mocks for provider behavior.
 
-- [ ] **Step 4: Verify targeted UAT scenarios**
+- [x] **Step 4: Verify targeted UAT scenarios**
 
   Run each new scenario manually with the harness. Preserve artifact paths in the Backlog task.
 
@@ -237,9 +241,11 @@
 - Targeted `bun run e2e:onboarding:uat` scenarios from Stage 4.
 - `git diff --check`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Run all focused verification**
-- [ ] **Step 2: Update `TASK-601` with touched files, verification results, known skips, and final summary**
-- [ ] **Step 3: Review diff for secrets, raw paths, and unrelated churn**
-- [ ] **Step 4: Push branch and prepare PR summary**
+- [x] **Step 1: Run all focused verification**
+- [x] **Step 2: Update `TASK-605` with touched files, verification results, known skips, and final summary**
+- [x] **Step 3: Review diff for secrets, raw paths, and unrelated churn**
+- [x] **Step 4: Push branch and prepare PR summary**
+
+  Draft PR: https://github.com/rmusser01/tldw_server/pull/2236

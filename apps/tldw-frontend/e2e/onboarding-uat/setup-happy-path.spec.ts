@@ -77,4 +77,74 @@ test.describe("Onboarding UAT setup to first chat", () => {
 
     assertNoCriticalDiagnostics(diagnostics)
   })
+
+  test("local-openai-discovered-model-first-chat completes setup with a discovered model", async ({
+    firstRunPage: page,
+    artifact,
+    diagnostics,
+  }) => {
+    const scenarioId = "local-openai-discovered-model-first-chat"
+
+    await openFirstRunSetup(page)
+    await captureStep(page, artifact, scenarioId, "01-local-setup-open")
+
+    await prepareLocalOllamaFirstChat(page, {
+      baseUrl: mockOpenAiUrl,
+      model: DEFAULT_LOCAL_PROVIDER_MODEL,
+      expectedDiscoveredModel: DEFAULT_LOCAL_PROVIDER_MODEL,
+    })
+    await captureStep(page, artifact, scenarioId, "02-discovered-model-first-chat-ready", {
+      provider: "ollama",
+      model: DEFAULT_LOCAL_PROVIDER_MODEL,
+      base_url_origin: new URL(mockOpenAiUrl).origin,
+    })
+
+    const firstChat = await sendWizardFirstChatAndWaitForMilestone(
+      page,
+      'Say "onboarding UAT ready" from the discovered local model path.'
+    )
+    const responseText = firstChat.response_text ?? ""
+    expect(responseText).toContain("onboarding UAT ready")
+    await captureStep(page, artifact, scenarioId, "03-discovered-model-first-chat-success", {
+      response_text: responseText,
+    })
+
+    assertNoCriticalDiagnostics(diagnostics)
+  })
+
+  test("local-openai-manual-model-first-chat completes setup when model discovery is unavailable", async ({
+    firstRunPage: page,
+    artifact,
+    diagnostics,
+  }) => {
+    const scenarioId = "local-openai-manual-model-first-chat"
+    const manualModel = "manual-local-uat-chat"
+
+    await openFirstRunSetup(page)
+    await captureStep(page, artifact, scenarioId, "01-local-setup-open")
+
+    await prepareLocalOllamaFirstChat(page, {
+      baseUrl: mockOpenAiUrl,
+      model: manualModel,
+      expectedDiscoveredModel: null,
+      expectManualModelFallback: true,
+    })
+    await captureStep(page, artifact, scenarioId, "02-manual-model-first-chat-ready", {
+      provider: "ollama",
+      model: manualModel,
+      base_url_origin: new URL(mockOpenAiUrl).origin,
+    })
+
+    const firstChat = await sendWizardFirstChatAndWaitForMilestone(
+      page,
+      'Say "onboarding UAT ready" from the manual local model path.'
+    )
+    const responseText = firstChat.response_text ?? ""
+    expect(responseText).toContain("onboarding UAT ready")
+    await captureStep(page, artifact, scenarioId, "03-manual-model-first-chat-success", {
+      response_text: responseText,
+    })
+
+    assertNoCriticalDiagnostics(diagnostics)
+  })
 })

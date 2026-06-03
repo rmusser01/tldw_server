@@ -27,8 +27,10 @@ import {
   copyReviewedEvidence,
   formatUsage,
   parseArgs,
+  resolveEffectiveMockConfig,
   runOnboardingUat,
 } from "../onboarding-uat/run.mjs"
+import { tierAScenarios } from "../../e2e/onboarding-uat/scenarios"
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(testDir, "../..")
@@ -38,8 +40,10 @@ const mockOpenAiRoot = path.join(frontendRoot, "e2e/onboarding-uat/mock-openai")
 const configFiles = [
   "hosted-success.json",
   "local-success.json",
+  "local-models-unavailable.json",
   "chat-fail-once.json",
   "model-unavailable.json",
+  "local-model-unavailable.json",
 ]
 
 const responseFiles = [
@@ -86,6 +90,16 @@ describe("onboarding UAT static fixtures", () => {
     )
     expect(configs["local-success.json"].server?.require_auth).toBe(false)
 
+    const localModelsUnavailable = configs["local-models-unavailable.json"]
+    expect(modelIds(localModelsUnavailable)).toContain("llama3.2:3b")
+    expect(
+      localModelsUnavailable.scenario_failures?.models?.[0]
+    ).toMatchObject({
+      status_code: 404,
+      code: "models_unavailable",
+      times: 999,
+    })
+
     expect(
       configs["chat-fail-once.json"].scenario_failures?.chat_completions?.[0]
     ).toMatchObject({
@@ -110,6 +124,50 @@ describe("onboarding UAT static fixtures", () => {
 
     expect(modelIds(unavailable)).toContain("gpt-4.1-mini")
     expect(failsSelectedChatModel).toBe(true)
+
+    const localUnavailable = configs["local-model-unavailable.json"]
+    const failsSelectedLocalChatModel = (
+      localUnavailable.scenario_failures?.chat_completions ?? []
+    ).some(
+      (failure: {
+        match?: { model?: string }
+        status_code?: number
+        code?: string
+      }) =>
+        failure.match?.model === "llama3.2:3b" &&
+        failure.status_code === 404 &&
+        failure.code === "model_not_found"
+    )
+
+    expect(modelIds(localUnavailable)).toContain("llama3.2:3b")
+    expect(failsSelectedLocalChatModel).toBe(true)
+  })
+
+  it("registers explicit local-provider PR4 scenarios", () => {
+    const scenarioIds = tierAScenarios.map((scenario) => scenario.id)
+
+    expect(scenarioIds).toEqual(
+      expect.arrayContaining([
+        "local-openai-discovered-model-first-chat",
+        "local-openai-manual-model-first-chat",
+        "local-openai-model-unavailable-recovery",
+        "local-to-hosted-switch-state-isolated",
+      ])
+    )
+    expect(
+      tierAScenarios.find(
+        (scenario) =>
+          scenario.id === "local-openai-discovered-model-first-chat"
+      )?.viewports
+    ).toEqual(expect.arrayContaining(["desktop", "mobile"]))
+  })
+
+  it("keeps Playwright output outside the runner artifact root", () => {
+    const config = readText("e2e/onboarding-uat/playwright.config.ts")
+
+    expect(config).toContain(
+      'outputDir: "test-results/playwright-onboarding-uat"'
+    )
   })
 
   it("keeps mock response paths resolvable from each config file", () => {
@@ -724,6 +782,27 @@ describe("onboarding UAT runner command assembly", () => {
     })
     expect(formatUsage()).toContain("e2e:onboarding:uat")
     expect(formatUsage()).toContain("--scenario")
+  })
+
+  it("uses the registered scenario mock config when no override is provided", () => {
+    for (const scenario of tierAScenarios) {
+      expect(
+        resolveEffectiveMockConfig({
+          scenario: scenario.id,
+          mockConfig: null,
+        })
+      ).toBe(scenario.mockConfig)
+    }
+
+    expect(
+      resolveEffectiveMockConfig({
+        scenario: "local-openai-manual-model-first-chat",
+        mockConfig: "hosted-success.json",
+      })
+    ).toBe("hosted-success.json")
+    expect(resolveEffectiveMockConfig({ scenario: null, mockConfig: null })).toBe(
+      "hosted-success.json"
+    )
   })
 
   it("returns help without allocating ports or starting services", async () => {

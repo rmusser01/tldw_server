@@ -30,6 +30,17 @@ export const tierAScenarios = [
     grep: "hosted-openai-first-chat",
   },
   {
+    id: "local-openai-discovered-model-first-chat",
+    tier: "A",
+    title: "Local OpenAI-compatible discovered model to first chat",
+    description:
+      "Complete the peer local-provider path when the OpenAI-compatible /models endpoint returns a selectable local model.",
+    specFile: "e2e/onboarding-uat/setup-happy-path.spec.ts",
+    mockConfig: "local-success.json",
+    viewports: ["desktop", "mobile"],
+    grep: "local-openai-discovered-model-first-chat",
+  },
+  {
     id: "local-openai-first-chat",
     tier: "A",
     title: "Local OpenAI-compatible setup to first chat",
@@ -39,6 +50,17 @@ export const tierAScenarios = [
     mockConfig: "local-success.json",
     viewports: ["desktop"],
     grep: "local-openai-first-chat",
+  },
+  {
+    id: "local-openai-manual-model-first-chat",
+    tier: "A",
+    title: "Local OpenAI-compatible manual model to first chat",
+    description:
+      "Complete the local-provider path when model discovery is unavailable and the user enters a model manually.",
+    specFile: "e2e/onboarding-uat/setup-happy-path.spec.ts",
+    mockConfig: "local-models-unavailable.json",
+    viewports: ["desktop"],
+    grep: "local-openai-manual-model-first-chat",
   },
   {
     id: "first-source-after-chat",
@@ -74,6 +96,17 @@ export const tierAScenarios = [
     grep: "model-unavailable-recovery",
   },
   {
+    id: "local-openai-model-unavailable-recovery",
+    tier: "A",
+    title: "Local model unavailable recovery",
+    description:
+      "Exercise first-chat recovery when the selected local OpenAI-compatible model is unavailable.",
+    specFile: "e2e/onboarding-uat/recovery.spec.ts",
+    mockConfig: "local-model-unavailable.json",
+    viewports: ["desktop"],
+    grep: "local-openai-model-unavailable-recovery",
+  },
+  {
     id: "setup-endpoint-recovery",
     tier: "A",
     title: "Local provider endpoint recovery",
@@ -83,6 +116,17 @@ export const tierAScenarios = [
     mockConfig: "local-success.json",
     viewports: ["desktop"],
     grep: "setup-endpoint-recovery",
+  },
+  {
+    id: "local-to-hosted-switch-state-isolated",
+    tier: "A",
+    title: "Switch from local recovery to hosted provider",
+    description:
+      "Verify a failed local setup validation does not block switching to hosted setup and completing first chat.",
+    specFile: "e2e/onboarding-uat/recovery.spec.ts",
+    mockConfig: "hosted-success.json",
+    viewports: ["desktop"],
+    grep: "local-to-hosted-switch-state-isolated",
   },
 ] as const satisfies readonly OnboardingUatScenario[]
 

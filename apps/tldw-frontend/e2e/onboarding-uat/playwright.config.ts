@@ -10,6 +10,7 @@ export default defineConfig({
   },
   retries: 0,
   workers: 1,
+  outputDir: "test-results/playwright-onboarding-uat",
   use: {
     baseURL,
     trace: "retain-on-failure",

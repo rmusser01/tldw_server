@@ -29,6 +29,18 @@ const apiKey = "THIS-IS-A-SECURE-KEY-123-UAT"
 const validViewports = new Set(["desktop", "mobile", "all"])
 const mockConfigDir = "e2e/onboarding-uat/mock-openai/configs"
 const playwrightConfig = "e2e/onboarding-uat/playwright.config.ts"
+const scenarioMockConfigs = Object.freeze({
+  "hosted-openai-first-chat": "hosted-success.json",
+  "local-openai-discovered-model-first-chat": "local-success.json",
+  "local-openai-first-chat": "local-success.json",
+  "local-openai-manual-model-first-chat": "local-models-unavailable.json",
+  "first-source-after-chat": "hosted-success.json",
+  "provider-retry-recovery": "chat-fail-once.json",
+  "model-unavailable-recovery": "model-unavailable.json",
+  "local-openai-model-unavailable-recovery": "local-model-unavailable.json",
+  "setup-endpoint-recovery": "local-success.json",
+  "local-to-hosted-switch-state-isolated": "hosted-success.json",
+})
 
 export function formatUsage() {
   return [
@@ -37,7 +49,7 @@ export function formatUsage() {
     "Options:",
     "  --scenario <id>          Run one onboarding UAT scenario.",
     "  --viewport <mode>        desktop, mobile, or all. Default: all.",
-    "  --mock-config <name>     Mock config file name or path. Default: hosted-success.json.",
+    "  --mock-config <name>     Mock config file name or path. Default: scenario config, otherwise hosted-success.json.",
     "  --preserve-runtime       Keep the isolated runtime profile after the run.",
     "  --preserve-artifacts     Keep artifacts after the run. Default: true.",
     "  --no-preserve-artifacts  Delete artifacts after the run if the run completes cleanup.",
@@ -50,7 +62,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   const options = {
     scenario: null,
     viewport: "all",
-    mockConfig: "hosted-success.json",
+    mockConfig: null,
     preserveRuntime: false,
     preserveArtifacts: true,
     reviewedEvidence: false,
@@ -100,6 +112,16 @@ function resolveMockConfig(frontendRoot, mockConfig) {
     return mockConfig
   }
   return path.join(frontendRoot, mockConfigDir, mockConfig)
+}
+
+export function resolveEffectiveMockConfig({ scenario = null, mockConfig = null } = {}) {
+  if (mockConfig) {
+    return mockConfig
+  }
+  if (scenario && scenarioMockConfigs[scenario]) {
+    return scenarioMockConfigs[scenario]
+  }
+  return "hosted-success.json"
 }
 
 function projectForViewport(viewport) {
@@ -388,12 +410,13 @@ export async function runOnboardingUat({
     `${createRedactedProfileManifest(profile)}\n`,
     "utf8"
   )
+  const effectiveMockConfig = resolveEffectiveMockConfig(options)
   const commands = buildCommands({
     repoRoot,
     frontendRoot,
     ports,
     profile,
-    mockConfig: options.mockConfig,
+    mockConfig: effectiveMockConfig,
     scenario: options.scenario,
     viewport: options.viewport,
     runId: artifacts.runId,
@@ -403,8 +426,8 @@ export async function runOnboardingUat({
 
   const processes = []
   try {
-    if (!existsSync(resolveMockConfig(frontendRoot, options.mockConfig))) {
-      throw new Error(`Mock config not found: ${options.mockConfig}`)
+    if (!existsSync(resolveMockConfig(frontendRoot, effectiveMockConfig))) {
+      throw new Error(`Mock config not found: ${effectiveMockConfig}`)
     }
 
     processes.push(
@@ -446,6 +469,7 @@ export async function runOnboardingUat({
           run_id: artifacts.runId,
           status,
           ports,
+          mock_config: effectiveMockConfig,
           reviewed_evidence_root: reviewedEvidenceRoot,
         },
         null,

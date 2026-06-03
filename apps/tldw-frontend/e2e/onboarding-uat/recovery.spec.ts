@@ -4,12 +4,14 @@ import {
   assertNoCriticalDiagnostics,
   captureStep,
   configureWizardProvider,
+  DEFAULT_HOSTED_PROVIDER_API_KEY,
   DEFAULT_HOSTED_PROVIDER_MODEL,
   DEFAULT_LOCAL_PROVIDER_MODEL,
   openWizardProviderStep,
   expectNoUnsafePrimaryDetails,
   openFirstRunSetup,
   prepareHostedOpenAiFirstChat,
+  prepareLocalOllamaFirstChat,
   saveWizardProviderAndContinue,
   sendWizardFirstChat,
   sendWizardFirstChatAndWaitForMilestone,
@@ -158,5 +160,102 @@ test.describe("Onboarding UAT recovery", () => {
     })
 
     assertNoCriticalDiagnostics(diagnostics)
+  })
+
+  test("local-openai-model-unavailable-recovery shows local model/provider actions without raw provider detail", async ({
+    firstRunPage: page,
+    artifact,
+    diagnostics,
+  }) => {
+    const scenarioId = "local-openai-model-unavailable-recovery"
+
+    await openFirstRunSetup(page)
+    await prepareLocalOllamaFirstChat(page, {
+      baseUrl: mockOpenAiUrl,
+      model: DEFAULT_LOCAL_PROVIDER_MODEL,
+      expectedDiscoveredModel: DEFAULT_LOCAL_PROVIDER_MODEL,
+    })
+    await captureStep(page, artifact, scenarioId, "01-local-first-chat-ready", {
+      provider: "ollama",
+      model: DEFAULT_LOCAL_PROVIDER_MODEL,
+    })
+
+    const failedFirstChat = await sendWizardFirstChat(
+      page,
+      "Trigger the selected local model unavailable recovery state."
+    )
+    expect(failedFirstChat.status).toBe("failed")
+    expect(failedFirstChat.failure_category).toBe("model_unavailable")
+    const banner = await waitForWizardFirstChatRecovery(page)
+    await expect(banner).toContainText(/model/i)
+    await expect(banner.getByRole("button", { name: /^retry$/i })).toBeVisible()
+    await expect(banner.getByRole("button", { name: /edit provider/i })).toBeVisible()
+    await expect(banner.getByRole("button", { name: /switch provider/i })).toBeVisible()
+    await expect(banner.getByRole("button", { name: /skip setup/i })).toBeVisible()
+    await captureStep(page, artifact, scenarioId, "02-local-model-diagnostic-visible", {
+      failure_category: failedFirstChat.failure_category,
+      visible_actions: await banner.getByRole("button").allTextContents(),
+    })
+
+    assertNoCriticalDiagnostics(diagnostics)
+  })
+
+  test("local-to-hosted-switch-state-isolated completes hosted setup after local endpoint failure", async ({
+    firstRunPage: page,
+    artifact,
+    diagnostics,
+  }) => {
+    const scenarioId = "local-to-hosted-switch-state-isolated"
+
+    await openFirstRunSetup(page)
+    await captureStep(page, artifact, scenarioId, "01-setup-open")
+
+    await openWizardProviderStep(page, "local")
+    await configureWizardProvider(page, {
+      label: "Ollama",
+      baseUrl: UNREACHABLE_LOCAL_PROVIDER_ENDPOINT,
+      model: DEFAULT_LOCAL_PROVIDER_MODEL,
+    })
+    const providerStep = page.locator(
+      'section[aria-labelledby="provider-setup-title"]'
+    )
+    const retrySetupButton = providerStep.getByRole("button", {
+      name: /^retry$/i,
+    })
+    const switchProviderButton = providerStep.getByRole("button", {
+      name: /switch provider/i,
+    })
+    await expect(retrySetupButton).toBeVisible({ timeout: 30_000 })
+    await expect(switchProviderButton).toBeVisible({ timeout: 30_000 })
+    await captureStep(page, artifact, scenarioId, "02-local-validation-recovery-visible", {
+      failure_category: "local_provider_unreachable",
+    })
+
+    await switchProviderButton.click()
+    await expect(page.getByLabel(/^select openai$/i)).toBeChecked()
+    await configureWizardProvider(page, {
+      label: "OpenAI",
+      apiKey: DEFAULT_HOSTED_PROVIDER_API_KEY,
+      model: DEFAULT_HOSTED_PROVIDER_MODEL,
+    })
+    await saveWizardProviderAndContinue(page)
+    await advanceWizardDefaultsToFirstChat(page)
+    await captureStep(page, artifact, scenarioId, "03-hosted-first-chat-ready", {
+      provider: "openai",
+      model: DEFAULT_HOSTED_PROVIDER_MODEL,
+    })
+
+    const firstChat = await sendWizardFirstChatAndWaitForMilestone(
+      page,
+      'Say "onboarding UAT ready" after switching provider.'
+    )
+    expect(firstChat.response_text ?? "").toContain("onboarding UAT ready")
+    await captureStep(page, artifact, scenarioId, "04-hosted-first-chat-succeeded", {
+      response_text: firstChat.response_text,
+    })
+
+    assertNoCriticalDiagnostics(diagnostics, {
+      expectedEndpointOrigins: [UNREACHABLE_LOCAL_PROVIDER_ENDPOINT],
+    })
   })
 })
