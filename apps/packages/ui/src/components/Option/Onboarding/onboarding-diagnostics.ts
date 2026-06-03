@@ -480,5 +480,27 @@ export function buildReadinessDiagnostic(
         ],
       }
     }
+    default:
+      return {
+        title: t(
+          "settings:onboarding.readiness.generic.title",
+          "System readiness issue"
+        ),
+        cause: t(
+          "settings:onboarding.readiness.generic.cause",
+          "An unexpected readiness issue was detected."
+        ),
+        whyItMatters: t(
+          "settings:onboarding.readiness.generic.why",
+          "This may affect some features during first use."
+        ),
+        severity: "warning",
+        blockingFirstChat: false,
+        primaryAction: action(
+          "open_setup",
+          t("settings:onboarding.diagnostics.actions.openSetup", "Open setup recovery")
+        ),
+        secondaryActions: [],
+      }
   }
 }

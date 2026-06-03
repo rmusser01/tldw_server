@@ -137,4 +137,19 @@ describe("buildReadinessDiagnostic", () => {
       expect(copy).not.toMatch(unsafePattern)
     }
   })
+
+  it("returns a safe fallback for unknown readiness issue kinds", () => {
+    const diagnostic = buildReadinessDiagnostic(
+      "unexpected_issue" as never,
+      t
+    )
+
+    expect(diagnostic).toMatchObject({
+      title: "System readiness issue",
+      severity: "warning",
+      blockingFirstChat: false,
+      primaryAction: { id: "open_setup", label: "Open setup recovery" },
+      secondaryActions: [],
+    })
+  })
 })

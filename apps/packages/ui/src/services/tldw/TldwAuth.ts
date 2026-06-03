@@ -318,13 +318,13 @@ export class TldwAuthService {
   async testApiKey(serverUrl: string, apiKey: string): Promise<boolean> {
     // Validate against the candidate setup endpoint, not the currently
     // persisted config. First-run setup may be correcting a bad saved URL.
-    const validationUrl = buildApiKeyValidationUrl(serverUrl)
     const controller = new AbortController()
     const timeoutId = setTimeout(
       () => controller.abort(),
       API_KEY_VALIDATION_TIMEOUT_MS
     )
     try {
+      const validationUrl = buildApiKeyValidationUrl(serverUrl)
       const response = await fetch(validationUrl, {
         method: 'GET',
         headers: { 'X-API-KEY': apiKey },

@@ -2860,10 +2860,15 @@ export const PlaygroundForm = ({
   });
 
   const handleRetryChatError = React.useCallback(() => {
-    const lastUserMessage = [...messages].reverse().find((entry: any) => {
+    let lastUserMessage: any = null
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const entry = messages[i]
       const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
-      return role === "user" || entry?.isBot === false
-    }) as any
+      if (role === "user" || entry?.isBot === false) {
+        lastUserMessage = entry
+        break
+      }
+    }
     const retryText =
       typeof lastUserMessage?.message === "string"
         ? lastUserMessage.message
