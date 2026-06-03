@@ -19,6 +19,10 @@ import {
 } from "../../utils/fixtures"
 import { AdminPage } from "../../utils/page-objects"
 import { seedAuth } from "../../utils/helpers"
+import type {
+  LlamacppAsset,
+  LlamacppAssetsResponse,
+} from "../../../../packages/ui/src/types/llamacpp-admin"
 
 const fulfillJson = async (
   route: Route,
@@ -115,7 +119,7 @@ const mockHardware = {
   warnings: ["GPU probe unavailable."],
 }
 
-const mockGgufAsset = {
+const mockGgufAsset: LlamacppAsset = {
   asset_id: "gguf:toy-model-id",
   kind: "gguf",
   identity_basis: "resolved_path",
@@ -137,7 +141,7 @@ const mockGgufAsset = {
   warnings: [],
 }
 
-const mockMmprojAsset = {
+const mockMmprojAsset: LlamacppAsset = {
   asset_id: "mmproj:toy-vision",
   kind: "mmproj",
   identity_basis: "resolved_path",
@@ -156,7 +160,7 @@ const mockMmprojAsset = {
   warnings: [],
 }
 
-const mockImportedFolderAsset = {
+const mockImportedFolderAsset: LlamacppAsset = {
   asset_id: "folder:imported",
   kind: "folder",
   identity_basis: "resolved_path",
@@ -173,7 +177,7 @@ const mockImportedFolderAsset = {
   warnings: [],
 }
 
-const mockImportedGgufAsset = {
+const mockImportedGgufAsset: LlamacppAsset = {
   asset_id: "gguf:imported-toy",
   kind: "gguf",
   identity_basis: "resolved_path",
@@ -193,7 +197,7 @@ const mockImportedGgufAsset = {
   warnings: [],
 }
 
-const mockDownloadedAsset = {
+const mockDownloadedAsset: LlamacppAsset = {
   asset_id: "gguf:downloaded-toy",
   kind: "gguf",
   identity_basis: "resolved_path",
@@ -237,7 +241,7 @@ const mockCompletedDownloadJob = {
 
 async function mockLlamacppAdminFlow(page: Page) {
   let currentStatus = stoppedStatus
-  let currentAssets = {
+  let currentAssets: LlamacppAssetsResponse = {
     assets: [mockGgufAsset, mockMmprojAsset],
     warnings: [],
     scan_limited: false,
