@@ -47,13 +47,14 @@ Use the [Feature Map](Feature_Map.md) for the full task-oriented matrix.
 
 Common workflows:
 
-- **Chat with models and characters**: use [Chat pages](WebUI_Extension/Chat_Pages.md), [Chat API documentation](../API-related/Chat_API_Documentation.md), and [Character roleplay quickstart](WebUI_Extension/Character_Roleplay_Quickstart.md).
-- **Add sources and media**: use [Media to RAG evals workflow](Server/Media_to_RAG_Evals_Workflow.md), [Web scraping and ingestion](Server/Web_Scraping_Ingestion_Guide.md), and [Media ingest jobs API](../API-related/Media_Ingest_Jobs_API.md).
+- **Chat with models and characters**: use [Chat pages](WebUI_Extension/Chat_Pages.md), [Chat API documentation](../API-related/Chat_API_Documentation.md), [Character roleplay quickstart](WebUI_Extension/Character_Roleplay_Quickstart.md), [Character cards and character chat](Server/Character_Cards_User_Guide.md), and [Personas](Server/Personas_User_Guide.md).
+- **Add sources and media**: use [Media to RAG evals workflow](Server/Media_to_RAG_Evals_Workflow.md), [Web scraping and ingestion](Server/Web_Scraping_Ingestion_Guide.md), [Media ingest jobs API](../API-related/Media_Ingest_Jobs_API.md), and [Bulk conference playlist ingest](Bulk_Conference_Playlist_Ingest.md).
 - **Search and ask questions over knowledge**: use [RAG API guide](../API-related/RAG-API-Guide.md), [RAG production configuration](Server/RAG_Production_Configuration_Guide.md), and [Quick Chat Docs Assistant](WebUI_Extension/Quick_Chat_Docs_Assistant_Guide.md).
 - **Transcribe and generate speech**: use [Getting started with STT and TTS](WebUI_Extension/Getting-Started-STT_and_TTS.md), [Audio transcription API](../API-related/Audio_Transcription_API.md), and [TTS getting started](WebUI_Extension/TTS_Getting_Started.md).
 - **Study, evaluate, and review outputs**: use [Evaluations user guide](Server/Evaluations_User_Guide.md), [Evaluations API unified reference](../API-related/Evaluations_API_Unified_Reference.md), and [Flashcards study guide](WebUI_Extension/Flashcards_Study_Guide.md).
 - **Create and manage knowledge artifacts**: use [Chatbook user guide](WebUI_Extension/Chatbook_User_Guide.md), [Prompt Studio API](../API-related/Prompt_Studio_API.md), and [Reading list API](../API-related/Reading_List_API.md).
 - **Automate and integrate**: use [Workflows examples](WebUI_Extension/Workflows_Examples.md), [Collections feeds API](../API-related/Collections_Feeds_API.md), and [Getting started with ACP](Integrations_Experiments/Getting_Started_with_ACP.md).
+- **Prototype workspace flows**: use [Prototype Workspaces User Guide](Prototype_Workspaces.md) to run isolated workspace experiments.
 - **Administer a shared server**: use [Organizations and sharing](Server/Organizations_and_Sharing.md), [BYOK user guide](Server/BYOK_User_Guide.md), [Usage module](Server/Usage_Module.md), and [Metrics cheatsheet](https://rmusser01.github.io/tldw_server/Monitoring/Metrics_Cheatsheet/).
 
 ## Troubleshooting

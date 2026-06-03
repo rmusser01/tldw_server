@@ -56,7 +56,7 @@ Quick reference for the most common problems users encounter with tldw\_server. 
    ```bash
    uvicorn tldw_Server_API.app.main:app --port 8001
    ```
-3. For Docker, change the port mapping in `docker-compose.yml` (e.g., `"8001:8000"`).
+3. For Docker quickstarts, change the host port mapping in the compose file passed with `-f`, such as `Dockerfiles/docker-compose.yml`, `Dockerfiles/docker-compose.single-user.yml`, or `Dockerfiles/docker-compose.multi-user-postgres.yml`. If you maintain your own root-level `docker-compose.yml`, edit that file instead.
 
 ---
 
@@ -237,7 +237,7 @@ pip install "numpy<2"
 
 **Fix:**
 1. Ensure the `Databases/` directory is writable: `chmod -R 755 Databases/`
-2. In Docker, check volume mount ownership. Add `user: "1000:1000"` in `docker-compose.yml` if needed.
+2. In Docker, check volume mount ownership. Add `user: "1000:1000"` in the compose file passed with `-f` for your stack, such as `Dockerfiles/docker-compose.yml`, or in your own root-level `docker-compose.yml` if you maintain one.
 
 ### 20. Docker build fails on chromadb
 
@@ -254,8 +254,8 @@ pip install "numpy<2"
 
 **Fix:** Use WSL2 or Git Bash. Alternatively, run the Docker commands directly:
 ```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env ^
-  -f Dockerfiles/docker-compose.yml ^
+docker compose --env-file tldw_Server_API/Config_Files/.env \
+  -f Dockerfiles/docker-compose.yml \
   -f Dockerfiles/docker-compose.webui.yml up -d --build
 ```
 
@@ -302,12 +302,12 @@ The server auto-creates per-user subdirectories on first use.
 **Fix:**
 1. Run the `create_admin` CLI to create (or reset) the admin user:
    ```bash
-   python -m tldw_Server_API.app.core.AuthNZ.create_admin --username tldw-admin --password <new-password>
+   python -m tldw_Server_API.app.core.AuthNZ.create_admin --username tldw-admin --password "YOUR_NEW_PASSWORD"
    ```
 2. Or in Docker:
    ```bash
    docker compose exec app python -m tldw_Server_API.app.core.AuthNZ.create_admin \
-     --username tldw-admin --password <new-password>
+     --username tldw-admin --password "YOUR_NEW_PASSWORD"
    ```
 
 ### 26. JWT tokens rejected after server restart

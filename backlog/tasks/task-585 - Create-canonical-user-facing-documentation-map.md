@@ -4,7 +4,7 @@ title: Create canonical user-facing documentation map
 status: Done
 assignee: []
 created_date: '2026-06-01 05:24'
-updated_date: '2026-06-01 19:38'
+updated_date: '2026-06-02 20:48'
 labels: []
 dependencies: []
 documentation:
@@ -40,7 +40,7 @@ Design review before implementation planning tightened the spec around public li
 
 Implementation plan written to Docs/superpowers/plans/2026-06-01-user-docs-map.md. The plan creates a separate Feature_Map.md, rewrites Docs/User_Guides/index.md as the hub, updates MkDocs/README/extension entry points, refreshes Docs/Published, and records docs-only verification.
 
-Task 4 verification: refreshed curated docs with Helper_Scripts/refresh_docs_published.sh. Kept generated Docs/Published/User_Guides/index.md, Docs/Published/User_Guides/Feature_Map.md, and Docs/Published/Getting_Started/TROUBLESHOOTING.md because the generated user guide hub links to the troubleshooting guide. Changed Markdown link check passed across README.md, source hub/map, published hub/map, the published troubleshooting target, and extension docs. git diff --check passed. MkDocs build was attempted with the project virtualenv from the main worktree and failed because mkdocs is not installed: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python: No module named mkdocs. Bandit is not applicable for this docs-only slice because no Python or executable code was changed.
+Task 4 verification: refreshed curated docs with Helper_Scripts/refresh_docs_published.sh. Kept generated Docs/Published/User_Guides/index.md, Docs/Published/User_Guides/Feature_Map.md, and Docs/Published/Getting_Started/TROUBLESHOOTING.md because the generated user guide hub links to the troubleshooting guide. Changed Markdown link check passed across README.md, source hub/map, published hub/map, the published troubleshooting target, and extension docs. git diff --check passed. MkDocs build was attempted with the project virtualenv and failed because mkdocs is not installed: python -m mkdocs build -f Docs/mkdocs.yml: No module named mkdocs. Bandit is not applicable for this docs-only slice because no Python or executable code was changed.
 
 Final review follow-up: softened README and extension docs wording from exhaustive/complete phrasing to task-oriented/shared map phrasing, matching the selective workflow-map scope.
 <!-- SECTION:NOTES:END -->

@@ -56,7 +56,7 @@ Quick reference for the most common problems users encounter with tldw\_server. 
    ```bash
    uvicorn tldw_Server_API.app.main:app --port 8001
    ```
-3. For Docker, change the port mapping in `docker-compose.yml` (e.g., `"8001:8000"`).
+3. For Docker quickstarts, change the host port mapping in the compose file passed with `-f`, such as `Dockerfiles/docker-compose.yml`, `Dockerfiles/docker-compose.single-user.yml`, or `Dockerfiles/docker-compose.multi-user-postgres.yml`. If you maintain your own root-level `docker-compose.yml`, edit that file instead.
 
 ---
 
@@ -192,7 +192,7 @@ Verify: `ffmpeg -version`
 
 **Fix:**
 1. Use a smaller/faster model (e.g., `tiny.en` or `base.en` instead of `large-v3`).
-2. If you have an NVIDIA GPU, enable CUDA acceleration (see [GPU Audio Setup](../../Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md)).
+2. If you have an NVIDIA GPU, enable CUDA acceleration (see [GPU Audio Setup](./First_Time_Audio_Setup_GPU_Accelerated.md)).
 3. For long files, the system chunks automatically, but total wall time scales with file length.
 
 ### 16. CUDA / torch mismatch
@@ -237,7 +237,7 @@ pip install "numpy<2"
 
 **Fix:**
 1. Ensure the `Databases/` directory is writable: `chmod -R 755 Databases/`
-2. In Docker, check volume mount ownership. Add `user: "1000:1000"` in `docker-compose.yml` if needed.
+2. In Docker, check volume mount ownership. Add `user: "1000:1000"` in the compose file passed with `-f` for your stack, such as `Dockerfiles/docker-compose.yml`, or in your own root-level `docker-compose.yml` if you maintain one.
 
 ### 20. Docker build fails on chromadb
 
@@ -302,12 +302,12 @@ The server auto-creates per-user subdirectories on first use.
 **Fix:**
 1. Run the `create_admin` CLI to create (or reset) the admin user:
    ```bash
-   python -m tldw_Server_API.app.core.AuthNZ.create_admin --username tldw-admin --password "your-new-password"
+   python -m tldw_Server_API.app.core.AuthNZ.create_admin --username tldw-admin --password "YOUR_NEW_PASSWORD"
    ```
 2. Or in Docker:
    ```bash
    docker compose exec app python -m tldw_Server_API.app.core.AuthNZ.create_admin \
-     --username tldw-admin --password "your-new-password"
+     --username tldw-admin --password "YOUR_NEW_PASSWORD"
    ```
 
 ### 26. JWT tokens rejected after server restart
