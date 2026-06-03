@@ -192,7 +192,7 @@ Verify: `ffmpeg -version`
 
 **Fix:**
 1. Use a smaller/faster model (e.g., `tiny.en` or `base.en` instead of `large-v3`).
-2. If you have an NVIDIA GPU, enable CUDA acceleration (see [GPU Audio Setup](./First_Time_Audio_Setup_GPU_Accelerated.md)).
+2. If you have an NVIDIA GPU, enable CUDA acceleration (see [GPU Audio Setup](../../Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md)).
 3. For long files, the system chunks automatically, but total wall time scales with file length.
 
 ### 16. CUDA / torch mismatch
