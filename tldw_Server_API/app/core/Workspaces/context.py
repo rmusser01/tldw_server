@@ -313,6 +313,10 @@ def _project_root_ready(profile: str, project_root: Mapping[str, Any]) -> tuple[
         return False, f"project_root_{project_root.get('state') or 'not_configured'}"
     if not project_root.get("root_id") or not project_root.get("backend"):
         return False, "project_root_unresolved"
+    if project_root.get("backend") == "sandbox_volume":
+        mount_state = str(project_root.get("sandbox_mount_state") or "not_configured").strip().lower()
+        if mount_state not in {"ready", "mounted"}:
+            return False, f"sandbox_mount_{mount_state or 'not_configured'}"
     return True, ""
 
 

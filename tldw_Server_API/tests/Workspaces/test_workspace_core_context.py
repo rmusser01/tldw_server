@@ -74,6 +74,44 @@ def test_project_workspace_context_represents_sandbox_root() -> None:
     assert context["allowed_actions"]["use_mcp_tools"]["allowed"] is True
 
 
+def test_sandbox_volume_root_fails_closed_until_mount_ready() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root={
+            "root_id": "primary",
+            "backend": "sandbox_volume",
+            "root_state": "attached",
+            "sandbox_volume_id": "volume-1",
+            "sandbox_mount_state": "not_configured",
+        },
+        source_summary={},
+        service_capabilities={
+            "workspace_services": {
+                "sandbox": {"state": "available", "reason_code": None},
+                "acp": {"state": "available", "reason_code": None},
+            },
+            "allowed_actions": {
+                "use_sandbox": {"allowed": True, "reason_code": None},
+                "use_acp_agents": {"allowed": True, "reason_code": None},
+            },
+        },
+        partial_errors=[],
+    )
+
+    assert context["allowed_actions"]["write_files"] == {
+        "allowed": False,
+        "reason_code": "sandbox_mount_not_configured",
+    }
+    assert context["allowed_actions"]["run_sandbox"] == {
+        "allowed": False,
+        "reason_code": "sandbox_mount_not_configured",
+    }
+    assert context["allowed_actions"]["use_acp_agents"] == {
+        "allowed": False,
+        "reason_code": "sandbox_mount_not_configured",
+    }
+
+
 def test_context_resolution_becomes_partial_for_dependency_failures() -> None:
     context = build_workspace_core_context(
         workspace={"id": "ws-1", "workspace_profile": "project"},
