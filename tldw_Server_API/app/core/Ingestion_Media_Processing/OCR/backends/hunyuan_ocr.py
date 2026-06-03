@@ -11,6 +11,9 @@ import threading
 from typing import Any
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.hunyuan_llamacpp_runtime import (
+    HunyuanLlamaCppRuntime,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     OCRBlock,
     OCRResult,
@@ -38,6 +41,112 @@ def _resolve_mode() -> str:
     if mode not in ("auto", "vllm", "transformers"):
         mode = "auto"
     return mode
+
+
+def _resolve_runtime_family() -> str:
+    family = (os.getenv("HUNYUAN_RUNTIME_FAMILY") or "auto").strip().lower() or "auto"
+    if family in {"auto", "native", "llamacpp"}:
+        return family
+    return "auto"
+
+
+def _native_vllm_configured() -> bool:
+    return bool((os.getenv("HUNYUAN_VLLM_URL") or "").strip())
+
+
+def _native_transformers_intended() -> bool:
+    mode = _resolve_mode()
+    if mode == "transformers":
+        return True
+    return bool((os.getenv("HUNYUAN_MODEL_PATH") or "").strip())
+
+
+def _native_transformers_available() -> bool:
+    mode = _resolve_mode()
+    if mode not in ("auto", "transformers"):
+        return False
+    if not _native_transformers_intended():
+        return False
+    try:
+        has_tf = importlib.util.find_spec("transformers") is not None
+        has_torch = importlib.util.find_spec("torch") is not None
+        has_pil = importlib.util.find_spec("PIL") is not None
+        return bool(has_tf and has_torch and has_pil)
+    except _HUNYUAN_NONCRITICAL_EXCEPTIONS:
+        return False
+
+
+def _native_family_available() -> bool:
+    return _native_vllm_configured() or _native_transformers_available()
+
+
+def _native_effective_mode() -> str:
+    mode = _resolve_mode()
+    if mode == "vllm":
+        return "vllm"
+    if mode == "transformers":
+        return "transformers"
+    if _native_vllm_configured():
+        return "vllm"
+    if _native_transformers_available():
+        return "transformers"
+    return "auto"
+
+
+def _effective_runtime_family() -> str:
+    family = _resolve_runtime_family()
+    if family == "native":
+        return "native"
+    if family == "llamacpp":
+        return "llamacpp"
+    if _native_family_available():
+        return "native"
+    if HunyuanLlamaCppRuntime.available():
+        return "llamacpp"
+    return "native"
+
+
+def _native_describe() -> dict[str, Any]:
+    mode = _native_effective_mode()
+    model = (
+        os.getenv("HUNYUAN_VLLM_MODEL", "HunyuanOCR")
+        if mode == "vllm"
+        else (os.getenv("HUNYUAN_MODEL_PATH") or "tencent/HunyuanOCR")
+    )
+    return {
+        "mode": mode,
+        "configured": _native_vllm_configured() or _native_transformers_intended(),
+        "available": _native_family_available(),
+        "url": os.getenv("HUNYUAN_VLLM_URL"),
+        "model": model,
+        "model_path": os.getenv("HUNYUAN_MODEL_PATH") or "tencent/HunyuanOCR",
+        "device": os.getenv("HUNYUAN_DEVICE"),
+        "vllm_configured": _native_vllm_configured(),
+        "transformers_intended": _native_transformers_intended(),
+    }
+
+
+def _ocr_via_native_family(image_bytes: bytes, prompt: str) -> tuple[str, str, str | None]:
+    mode = _native_effective_mode()
+    if mode == "vllm" and _native_vllm_configured():
+        try:
+            return (
+                _ocr_via_vllm(image_bytes, prompt),
+                "vllm",
+                os.getenv("HUNYUAN_VLLM_MODEL", "HunyuanOCR"),
+            )
+        except _HUNYUAN_NONCRITICAL_EXCEPTIONS as exc:
+            logging.error(f"Hunyuan vLLM path failed: {exc}", exc_info=True)
+    if _native_transformers_available():
+        try:
+            return (
+                _ocr_via_transformers(image_bytes, prompt),
+                "transformers",
+                os.getenv("HUNYUAN_MODEL_PATH") or "tencent/HunyuanOCR",
+            )
+        except _HUNYUAN_NONCRITICAL_EXCEPTIONS as exc:
+            logging.error(f"Hunyuan transformers path failed: {exc}", exc_info=True)
+    return "", mode, None
 
 
 _PROMPT_PRESETS: dict[str, str] = {
@@ -72,40 +181,79 @@ class HunyuanOCRBackend(OCRBackend):
     name = "hunyuan"
 
     @classmethod
-    def available(cls) -> bool:
-        mode = _resolve_mode()
-        if mode in ("auto", "vllm") and os.getenv("HUNYUAN_VLLM_URL"):
+    def auto_eligible(cls, high_quality: bool) -> bool:
+        family = _resolve_runtime_family()
+        if family == "native":
+            return _native_family_available()
+        if family == "llamacpp":
+            return HunyuanLlamaCppRuntime.available() and HunyuanLlamaCppRuntime.auto_eligible(
+                high_quality
+            )
+        if _native_family_available():
             return True
-        if mode in ("auto", "transformers"):
-            try:
-                has_tf = importlib.util.find_spec("transformers") is not None
-                has_torch = importlib.util.find_spec("torch") is not None
-                has_pil = importlib.util.find_spec("PIL") is not None
-                return bool(has_tf and has_torch and has_pil)
-            except _HUNYUAN_NONCRITICAL_EXCEPTIONS:
-                return False
+        if HunyuanLlamaCppRuntime.available():
+            return HunyuanLlamaCppRuntime.auto_eligible(high_quality)
         return False
 
+    @classmethod
+    def available(cls) -> bool:
+        family = _resolve_runtime_family()
+        if family == "native":
+            return _native_family_available()
+        if family == "llamacpp":
+            return HunyuanLlamaCppRuntime.available()
+        return _native_family_available() or HunyuanLlamaCppRuntime.available()
+
     def describe(self) -> dict:
-        mode = _resolve_mode()
+        configured_family = _resolve_runtime_family()
+        effective_family = _effective_runtime_family()
+        native_desc = _native_describe()
+        llamacpp_desc = HunyuanLlamaCppRuntime.describe()
+        active_mode = (
+            llamacpp_desc.get("mode")
+            if effective_family == "llamacpp"
+            else native_desc.get("mode")
+        )
+        active_model = (
+            llamacpp_desc.get("model")
+            if effective_family == "llamacpp"
+            else native_desc.get("model")
+        )
         info: dict[str, Any] = {
-            "mode": mode,
+            "mode": active_mode,
+            "runtime_family": effective_family,
+            "configured_family": configured_family,
             "prompt": os.getenv("HUNYUAN_PROMPT"),
             "prompt_preset": os.getenv("HUNYUAN_PROMPT_PRESET"),
+            "model": active_model,
+            "configured": bool(
+                native_desc.get("configured") or llamacpp_desc.get("configured")
+            ),
+            "supports_structured_output": True,
+            "supports_json": True,
+            "auto_eligible": type(self).auto_eligible(False),
+            "auto_high_quality_eligible": type(self).auto_eligible(True),
+            "backend_concurrency_cap": (
+                llamacpp_desc.get("backend_concurrency_cap")
+                if effective_family == "llamacpp"
+                else None
+            ),
+            "native": native_desc,
+            "llamacpp": llamacpp_desc,
         }
-        if mode == "vllm" or (mode == "auto" and os.getenv("HUNYUAN_VLLM_URL")):
+        if effective_family == "native" and active_mode == "vllm":
             info.update(
                 {
-                    "url": os.getenv("HUNYUAN_VLLM_URL"),
-                    "model": os.getenv("HUNYUAN_VLLM_MODEL", "HunyuanOCR"),
+                    "url": native_desc.get("url"),
+                    "model": native_desc.get("model"),
                     "timeout": int(os.getenv("HUNYUAN_VLLM_TIMEOUT", "60")),
                     "use_data_url": os.getenv("HUNYUAN_VLLM_USE_DATA_URL", "true"),
                 }
             )
-        else:
+        elif effective_family == "native":
             info.update(
                 {
-                    "model_path": os.getenv("HUNYUAN_MODEL_PATH", "tencent/HunyuanOCR"),
+                    "model_path": native_desc.get("model_path"),
                     "device": os.getenv("HUNYUAN_DEVICE"),
                 }
             )
@@ -123,25 +271,44 @@ class HunyuanOCRBackend(OCRBackend):
         prompt_preset: str | None = None,
     ) -> OCRResult:
         if not self.available():
-            logging.warning("HunyuanOCRBackend not available: set HUNYUAN_VLLM_URL or install transformers+torch+Pillow.")
+            logging.warning(
+                "HunyuanOCRBackend not available: configure native Hunyuan or "
+                "HUNYUAN_LLAMACPP_* runtime settings."
+            )
             return OCRResult(text="", format="text")
 
         prompt = _resolve_prompt(prompt_preset, output_format)
-        mode = _resolve_mode()
+        configured_family = _resolve_runtime_family()
+        runtime_family = _effective_runtime_family()
 
         raw_text = ""
-        if mode == "vllm" or (mode == "auto" and os.getenv("HUNYUAN_VLLM_URL")):
-            try:
-                raw_text = _ocr_via_vllm(image_bytes, prompt)
-            except _HUNYUAN_NONCRITICAL_EXCEPTIONS as exc:
-                logging.error(f"Hunyuan vLLM path failed: {exc}", exc_info=True)
-                # fall through to transformers if available
+        mode: str | None = None
+        model: str | None = None
+        backend_concurrency_cap: int | None = None
 
-        if not raw_text:
+        if runtime_family == "native":
+            raw_text, mode, model = _ocr_via_native_family(image_bytes, prompt)
+            if (
+                not raw_text
+                and configured_family == "auto"
+                and HunyuanLlamaCppRuntime.available()
+            ):
+                runtime_family = "llamacpp"
+
+        if runtime_family == "llamacpp":
             try:
-                raw_text = _ocr_via_transformers(image_bytes, prompt)
+                raw_text = HunyuanLlamaCppRuntime.ocr_image(image_bytes, prompt)
+                llamacpp_desc = HunyuanLlamaCppRuntime.describe()
+                mode = str(llamacpp_desc.get("mode") or "")
+                model = (
+                    None
+                    if llamacpp_desc.get("model") is None
+                    else str(llamacpp_desc.get("model"))
+                )
+                raw_cap = llamacpp_desc.get("backend_concurrency_cap")
+                backend_concurrency_cap = raw_cap if isinstance(raw_cap, int) else None
             except _HUNYUAN_NONCRITICAL_EXCEPTIONS as exc:
-                logging.error(f"Hunyuan transformers path failed: {exc}", exc_info=True)
+                logging.error(f"Hunyuan llama.cpp path failed: {exc}", exc_info=True)
                 raw_text = ""
 
         if _should_clean_repeats():
@@ -150,10 +317,13 @@ class HunyuanOCRBackend(OCRBackend):
         meta = {
             "backend": self.name,
             "mode": mode,
+            "runtime_family": runtime_family,
             "prompt_preset": prompt_preset or os.getenv("HUNYUAN_PROMPT_PRESET"),
             "output_format": output_format,
-            "model": os.getenv("HUNYUAN_VLLM_MODEL") if os.getenv("HUNYUAN_VLLM_URL") else os.getenv("HUNYUAN_MODEL_PATH"),
+            "model": model,
         }
+        if backend_concurrency_cap is not None:
+            meta["backend_concurrency_cap"] = backend_concurrency_cap
         return _build_result_from_output(raw_text, output_format, prompt_preset, meta)
 
 

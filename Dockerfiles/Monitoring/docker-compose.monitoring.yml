@@ -7,7 +7,7 @@
 
 services:
   prometheus:
-    image: ${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE to a pinned image reference such as prom/prometheus:v2.55.1}
+    image: ${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE to a pinned image reference such as prom/prometheus:v3.11.2}
     container_name: tldw_prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -43,7 +43,7 @@ services:
       retries: 3
 
   grafana:
-    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE to a pinned image reference such as grafana/grafana:11.5.2}
+    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE to a pinned image reference such as grafana/grafana:13.0.1}
     container_name: tldw_grafana
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}

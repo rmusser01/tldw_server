@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest"
 import {
   getExportedArtifactDir,
   getExportedZipName,
+  getWxtBinary,
+  resolveProfileBranch,
 } from "../../scripts/build-with-profile.mjs"
 import {
   finalizeZipArtifact,
@@ -35,6 +37,45 @@ describe("extension build profile wrapper", () => {
 
   it("suffixes dev archives", () => {
     expect(getExportedZipName("chrome", "development")).toContain("-dev")
+  })
+
+  it("resolves the workspace-local WXT binary before falling back to PATH", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-wxt-bin-"))
+    const binaryName = process.platform === "win32" ? "wxt.cmd" : "wxt"
+    const binaryPath = path.join(tempRoot, "node_modules", ".bin", binaryName)
+
+    try {
+      fs.mkdirSync(path.dirname(binaryPath), { recursive: true })
+      fs.writeFileSync(binaryPath, "")
+
+      expect(getWxtBinary(tempRoot)).toBe(binaryPath)
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("uses GitHub branch metadata when detached HEAD hides the current branch", () => {
+    expect(
+      resolveProfileBranch({
+        detectedBranch: "",
+        env: { GITHUB_REF_NAME: "main" },
+      })
+    ).toBe("main")
+    expect(
+      resolveProfileBranch({
+        detectedBranch: "",
+        env: { GITHUB_HEAD_REF: "feature/branch" },
+      })
+    ).toBe("feature/branch")
+  })
+
+  it("keeps detached HEAD without CI metadata explicit for fail-fast profile resolution", () => {
+    expect(
+      resolveProfileBranch({
+        detectedBranch: "",
+        env: {},
+      })
+    ).toBe("")
   })
 
   it("renames dev archives instead of leaving an unsuffixed copy behind", () => {

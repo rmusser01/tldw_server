@@ -3,6 +3,83 @@ from __future__ import annotations
 import pytest
 
 
+def _disable_non_hunyuan_backends(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.tesseract_cli.TesseractCLIBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.nemotron_parse.NemotronParseBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.dots_ocr.DotsOCRBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.points_reader.PointsReaderBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.deepseek_ocr.DeepSeekOCRBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.dolphin_ocr.DolphinOCRBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.llamacpp_ocr.LlamaCppOCRBackend.available",
+        classmethod(lambda cls: False),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.chatllm_ocr.ChatLLMOCRBackend.available",
+        classmethod(lambda cls: False),
+    )
+
+
+@pytest.mark.unit
+def test_registry_auto_uses_backend_auto_eligible_hook(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import get_backend
+
+    _disable_non_hunyuan_backends(monkeypatch)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.hunyuan_ocr.HunyuanOCRBackend.available",
+        classmethod(lambda cls: True),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.hunyuan_ocr.HunyuanOCRBackend.auto_eligible",
+        classmethod(lambda cls, high_quality: False),
+        raising=False,
+    )
+
+    assert get_backend("auto") is None  # nosec B101
+
+
+@pytest.mark.unit
+def test_registry_auto_high_quality_passes_true_to_backend_auto_eligible(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import get_backend
+
+    calls: list[bool] = []
+
+    _disable_non_hunyuan_backends(monkeypatch)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.hunyuan_ocr.HunyuanOCRBackend.available",
+        classmethod(lambda cls: True),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.hunyuan_ocr.HunyuanOCRBackend.auto_eligible",
+        classmethod(lambda cls, high_quality: calls.append(high_quality) or high_quality),
+        raising=False,
+    )
+
+    backend = get_backend("auto_high_quality")
+
+    assert backend is not None  # nosec B101
+    assert getattr(backend, "name", None) == "hunyuan"  # nosec B101
+    assert calls == [True]  # nosec B101
+
+
 @pytest.mark.unit
 def test_registry_auto_requires_llamacpp_auto_eligible(monkeypatch):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import get_backend

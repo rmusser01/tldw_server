@@ -24,6 +24,11 @@ class OCRBackend(ABC):
         """Return True if this backend is usable on this system (e.g. binary/library available)."""
         raise NotImplementedError
 
+    @classmethod
+    def auto_eligible(cls, high_quality: bool) -> bool:
+        """Return True when this backend may participate in generic auto selection."""
+        return True
+
     @abstractmethod
     def ocr_image(self, image_bytes: bytes, lang: str | None = None) -> str:
         """Run OCR on an image (bytes) and return extracted text (UTF-8)."""

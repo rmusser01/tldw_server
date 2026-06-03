@@ -36,8 +36,22 @@ function hasBrowserConfig(browser) {
   return Object.hasOwn(browserConfigs, browser)
 }
 
-function getWxtBinary() {
-  return process.platform === "win32" ? "wxt.cmd" : "wxt"
+export function getWxtBinary(root = projectRoot) {
+  const binaryName = process.platform === "win32" ? "wxt.cmd" : "wxt"
+  const candidates = [
+    path.join(root, "node_modules", ".bin", binaryName),
+    path.join(root, "..", "node_modules", ".bin", binaryName),
+  ]
+  const localBinary = candidates.find((candidate) => fs.existsSync(candidate))
+  return localBinary || binaryName
+}
+
+export function resolveProfileBranch({ detectedBranch, env = process.env } = {}) {
+  return (
+    String(detectedBranch || "").trim()
+    || String(env.GITHUB_REF_NAME || "").trim()
+    || String(env.GITHUB_HEAD_REF || "").trim()
+  )
 }
 
 function parseBrowser(argv = process.argv.slice(2)) {
@@ -127,9 +141,18 @@ export function buildWithProfile({
 } = {}) {
   const browser = parseBrowser(argv)
   const browserConfig = resolveBrowserConfig(browser)
+  const profileBranch = resolveProfileBranch({
+    detectedBranch: getCurrentGitBranch(cwd),
+    env,
+  })
+  if (!env.TLDW_BUILD_PROFILE && !profileBranch) {
+    throw new Error(
+      "Unable to determine extension build profile from git state. Set TLDW_BUILD_PROFILE explicitly."
+    )
+  }
   const profile = resolveBuildProfile({
     override: env.TLDW_BUILD_PROFILE,
-    branch: getCurrentGitBranch(cwd),
+    branch: profileBranch,
   })
   const wxtArgs = ["build"]
 
@@ -137,7 +160,7 @@ export function buildWithProfile({
     wxtArgs.push("-b", browserConfig.browserArg)
   }
 
-  runCommand(getWxtBinary(), wxtArgs, {
+  runCommand(getWxtBinary(projectRoot), wxtArgs, {
     cwd,
     env: {
       ...env,

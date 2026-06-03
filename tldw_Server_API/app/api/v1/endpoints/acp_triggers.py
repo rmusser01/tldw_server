@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
@@ -124,7 +125,7 @@ def _get_trigger_manager():
     try:
         secret_mgr = TriggerSecretManager()
     except (ImportError, ValueError) as exc:
-        from fastapi import HTTPException
+        logger.opt(exception=True).warning("Webhook trigger encryption is not configured")
         raise HTTPException(
             status_code=503,
             detail="Webhook trigger encryption not configured",

@@ -72,25 +72,11 @@ def _resolve_priority_from_config() -> list[str] | None:
         return None
     except Exception:
         return None
-
-
-def _env_flag(name: str) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _is_auto_eligible(backend_name: str, *, high_quality: bool) -> bool:
-    if backend_name == "llamacpp":
-        if high_quality:
-            return _env_flag("LLAMACPP_OCR_AUTO_HIGH_QUALITY_ELIGIBLE")
-        return _env_flag("LLAMACPP_OCR_AUTO_ELIGIBLE")
-    if backend_name == "chatllm":
-        if high_quality:
-            return _env_flag("CHATLLM_OCR_AUTO_HIGH_QUALITY_ELIGIBLE")
-        return _env_flag("CHATLLM_OCR_AUTO_ELIGIBLE")
-    return True
+def _is_auto_eligible(cls: type[OCRBackend], *, high_quality: bool) -> bool:
+    try:
+        return bool(cls.auto_eligible(high_quality))
+    except AttributeError:
+        return True
 
 
 def get_backend(name: str | None = None) -> OCRBackend | None:
@@ -150,7 +136,7 @@ def get_backend(name: str | None = None) -> OCRBackend | None:
             if (
                 cls
                 and _is_auto_eligible(
-                    key,
+                    cls,
                     high_quality=name == "auto_high_quality",
                 )
                 and cls.available()
@@ -163,7 +149,7 @@ def get_backend(name: str | None = None) -> OCRBackend | None:
         if getattr(cls, "name", None) in _AUTO_EXCLUDE:
             continue
         if not _is_auto_eligible(
-            getattr(cls, "name", ""),
+            cls,
             high_quality=name == "auto_high_quality",
         ):
             continue

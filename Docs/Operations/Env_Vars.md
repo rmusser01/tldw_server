@@ -65,6 +65,28 @@ Operational notes:
 - Managed: `CHATLLM_OCR_SERVER_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_HOST`, `CHATLLM_OCR_PORT`, `CHATLLM_OCR_STARTUP_TIMEOUT_SEC`, `CHATLLM_OCR_SERVER_ARGS_JSON`, `CHATLLM_OCR_HEALTHCHECK_URL`.
 - CLI: `CHATLLM_OCR_CLI_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_CLI_ARGS_JSON`.
 
+### Hunyuan OCR
+- `HUNYUAN_RUNTIME_FAMILY`: `auto|native|llamacpp`. `auto` prefers a configured native Hunyuan runtime before falling back to Hunyuan GGUF through llama.cpp.
+- `HUNYUAN_MODE`: `auto|vllm|transformers`. Native Transformers availability now requires explicit operator intent such as `HUNYUAN_MODE=transformers` or `HUNYUAN_MODEL_PATH`; importable Python packages alone are no longer enough.
+- `HUNYUAN_PROMPT`, `HUNYUAN_PROMPT_PRESET`.
+- Native vLLM: `HUNYUAN_VLLM_URL`, `HUNYUAN_VLLM_MODEL`, `HUNYUAN_VLLM_TIMEOUT`, `HUNYUAN_VLLM_USE_DATA_URL`.
+- Native Transformers: `HUNYUAN_MODEL_PATH`, `HUNYUAN_DEVICE`.
+- Native generation: `HUNYUAN_MAX_NEW_TOKENS`, `HUNYUAN_TEMPERATURE`, `HUNYUAN_DO_SAMPLE`.
+- Post-processing: `HUNYUAN_CLEAN_REPEATS`.
+
+Hunyuan GGUF via llama.cpp
+- `HUNYUAN_LLAMACPP_MODE`: `auto|remote|managed|cli`.
+- `HUNYUAN_LLAMACPP_AUTO_ELIGIBLE`: Enables participation in generic OCR `auto` when the GGUF family is configured and locally available.
+- `HUNYUAN_LLAMACPP_AUTO_HIGH_QUALITY_ELIGIBLE`: Enables participation in `auto_high_quality` when the GGUF family is configured and locally available.
+- `HUNYUAN_LLAMACPP_MAX_PAGE_CONCURRENCY`: Backend-local per-page cap; the PDF pipeline still applies `min(OCR_PAGE_CONCURRENCY, backend_local_cap)`.
+- Remote: `HUNYUAN_LLAMACPP_HOST`, `HUNYUAN_LLAMACPP_PORT`, `HUNYUAN_LLAMACPP_MODEL`, `HUNYUAN_LLAMACPP_USE_DATA_URL`, `HUNYUAN_LLAMACPP_TIMEOUT`, `HUNYUAN_LLAMACPP_TEMPERATURE`, `HUNYUAN_LLAMACPP_MAX_TOKENS`.
+- Managed: `HUNYUAN_LLAMACPP_ALLOW_MANAGED_START`, `HUNYUAN_LLAMACPP_HOST`, `HUNYUAN_LLAMACPP_PORT`, `HUNYUAN_LLAMACPP_MODEL_PATH`, `HUNYUAN_LLAMACPP_SERVER_ARGV`, `HUNYUAN_LLAMACPP_STARTUP_TIMEOUT_SEC`.
+- CLI: `HUNYUAN_LLAMACPP_MODEL_PATH`, `HUNYUAN_LLAMACPP_CLI_ARGV`.
+
+Notes
+- `ocr_backend=hunyuan` is the only public Hunyuan selector for both native and GGUF deployments.
+- `ocr_backend=llamacpp` remains the generic llama.cpp OCR backend and should not be treated as an alias for Hunyuan.
+
 ### MinerU OCR
 - `MINERU_CMD`: Command used to launch MinerU for document-level PDF OCR. Defaults to `mineru`. The command is tokenized safely and executed without a shell.
 - `MINERU_TIMEOUT_SEC`: Whole-document MinerU timeout in seconds (default `120`).

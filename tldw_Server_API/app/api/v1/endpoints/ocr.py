@@ -108,13 +108,64 @@ def list_ocr_backends() -> dict[str, Any]:
             HunyuanOCRBackend,
         )
         hun_desc = HunyuanOCRBackend().describe()
+        native_desc = hun_desc.get("native") if isinstance(hun_desc.get("native"), dict) else {}
+        llamacpp_desc = (
+            hun_desc.get("llamacpp") if isinstance(hun_desc.get("llamacpp"), dict) else {}
+        )
         out.setdefault("hunyuan", {}).update(
             {
                 "mode": hun_desc.get("mode"),
+                "runtime_family": hun_desc.get("runtime_family"),
+                "configured_family": hun_desc.get("configured_family"),
+                "configured": hun_desc.get("configured"),
+                "supports_structured_output": hun_desc.get("supports_structured_output"),
+                "supports_json": hun_desc.get("supports_json"),
+                "auto_eligible": hun_desc.get("auto_eligible"),
+                "auto_high_quality_eligible": hun_desc.get("auto_high_quality_eligible"),
+                "backend_concurrency_cap": hun_desc.get("backend_concurrency_cap"),
                 "prompt_preset": hun_desc.get("prompt_preset"),
+                "native": (
+                    {
+                        "mode": native_desc.get("mode"),
+                        "configured": native_desc.get("configured"),
+                        "available": native_desc.get("available"),
+                        "model": native_desc.get("model"),
+                        "device": native_desc.get("device"),
+                        "vllm_configured": native_desc.get("vllm_configured"),
+                        "transformers_intended": native_desc.get("transformers_intended"),
+                    }
+                    if native_desc
+                    else None
+                ),
+                "llamacpp": (
+                    {
+                        "mode": llamacpp_desc.get("mode"),
+                        "configured_mode": llamacpp_desc.get("configured_mode"),
+                        "configured": llamacpp_desc.get("configured"),
+                        "model": llamacpp_desc.get("model"),
+                        "supports_structured_output": llamacpp_desc.get(
+                            "supports_structured_output"
+                        ),
+                        "supports_json": llamacpp_desc.get("supports_json"),
+                        "auto_eligible": llamacpp_desc.get("auto_eligible"),
+                        "auto_high_quality_eligible": llamacpp_desc.get(
+                            "auto_high_quality_eligible"
+                        ),
+                        "url_configured": llamacpp_desc.get("url_configured"),
+                        "managed_configured": llamacpp_desc.get("managed_configured"),
+                        "managed_running": llamacpp_desc.get("managed_running"),
+                        "allow_managed_start": llamacpp_desc.get("allow_managed_start"),
+                        "cli_configured": llamacpp_desc.get("cli_configured"),
+                        "backend_concurrency_cap": llamacpp_desc.get(
+                            "backend_concurrency_cap"
+                        ),
+                    }
+                    if llamacpp_desc
+                    else None
+                ),
             }
         )
-        vllm = hun_desc.get("url")
+        vllm = hun_desc.get("url") or native_desc.get("url")
         if vllm:
             try:
                 from tldw_Server_API.app.core.http_client import create_client as _create_client

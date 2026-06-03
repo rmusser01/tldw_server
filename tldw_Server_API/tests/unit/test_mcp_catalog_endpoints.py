@@ -166,7 +166,7 @@ async def test_connection_uses_api_key_header(monkeypatch: pytest.MonkeyPatch):
     req = MCPConnectionTestRequest(
         url="https://api.github.com",
         auth_type="api_key",
-        secret="secret-token",
+        secret="secret-token",  # nosec B106
     )
 
     resp = await check_mcp_connection(req)
@@ -180,7 +180,7 @@ async def test_connection_rejects_unsupported_auth_type():
     req = MCPConnectionTestRequest(
         url="https://api.github.com",
         auth_type="digest",
-        secret="secret-token",
+        secret="secret-token",  # nosec B106
     )
 
     with pytest.raises(HTTPException) as excinfo:
@@ -236,3 +236,26 @@ async def test_connection_rejects_uncurated_url(monkeypatch: pytest.MonkeyPatch)
 
     assert resp.reachable is False
     assert resp.error == "URL must match a curated MCP catalog entry"
+
+
+@pytest.mark.asyncio
+async def test_connection_rejects_private_url_before_catalog_lookup(monkeypatch: pytest.MonkeyPatch):
+    def _unexpected_catalog_lookup(_url: str) -> str | None:  # pragma: no cover - defensive
+        raise AssertionError("_resolve_catalog_probe_url should not run for private URLs")
+
+    async def _unexpected_probe(_url: str, _headers: dict[str, str]) -> None:  # pragma: no cover - defensive
+        raise AssertionError("_probe_mcp_connection should not run for private URLs")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._resolve_catalog_probe_url",
+        _unexpected_catalog_lookup,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._probe_mcp_connection",
+        _unexpected_probe,
+    )
+
+    resp = await check_mcp_connection(MCPConnectionTestRequest(url="http://127.0.0.1:8000/mcp"))
+
+    assert resp.reachable is False
+    assert resp.error == "Cannot connect to private or reserved addresses"

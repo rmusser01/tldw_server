@@ -23,7 +23,7 @@ compatibility identifiers; user-facing routes and labels should use
 `/research-studio` and Research Studio.
 
 Plan reference:
-- `IMPLEMENTATION_PLAN_research_studio_trust_status.md`
+- `2026-05-23-research-workspace-trust-panel-api-wiring-plan.md`
 
 ## Capability-Aware Health Contract
 
@@ -391,16 +391,16 @@ CSV columns:
 ## Rollout and Rollback
 
 Active rollout flags:
-- `research_studio_provenance_v1`
-- `research_studio_status_guardrails_v1`
+- `research_workspace_provenance_v1`
+- `research_workspace_status_guardrails_v1`
 
 Flag surface map:
-- `research_studio_provenance_v1` controls provenance-facing trust surfaces:
+- `research_workspace_provenance_v1` controls provenance-facing trust surfaces:
   - citation-to-source navigation,
   - retrieval diagnostics panel visibility,
   - model badge/model picker visibility,
   - provenance telemetry summary access in workspace menu.
-- `research_studio_status_guardrails_v1` controls status/recovery guardrails:
+- `research_workspace_status_guardrails_v1` controls status/recovery guardrails:
   - storage quota and cross-tab conflict warning surfaces,
   - source status polling loop,
   - global activity rail and connectivity/storage indicators,
@@ -410,18 +410,18 @@ Cohort assignment controls:
 - Rollout assignment is deterministic per client via local subject key:
   - `tldw:feature-rollout:subject-id:v1`
 - Percentage resolution precedence for each rollout flag:
-  1. Runtime window override (`window.__TLDW_RESEARCH_STUDIO_ROLLOUT__`)
+  1. Runtime window override (`window.__TLDW_RESEARCH_WORKSPACE_ROLLOUT__`)
   2. Local storage percentage override
   3. Build/runtime env percentage
   4. Default `100`
 - Local storage percentage keys:
-  - `tldw:feature-rollout:research_studio_provenance_v1:percentage`
-  - `tldw:feature-rollout:research_studio_status_guardrails_v1:percentage`
+  - `tldw:feature-rollout:research_workspace_provenance_v1:percentage`
+  - `tldw:feature-rollout:research_workspace_status_guardrails_v1:percentage`
 - Environment percentage keys:
-  - `VITE_RESEARCH_STUDIO_PROVENANCE_V1_ROLLOUT_PERCENTAGE`
-  - `VITE_RESEARCH_STUDIO_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE`
-  - `NEXT_PUBLIC_RESEARCH_STUDIO_PROVENANCE_V1_ROLLOUT_PERCENTAGE`
-  - `NEXT_PUBLIC_RESEARCH_STUDIO_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE`
+  - `VITE_RESEARCH_WORKSPACE_PROVENANCE_V1_ROLLOUT_PERCENTAGE`
+  - `VITE_RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE`
+  - `NEXT_PUBLIC_RESEARCH_WORKSPACE_PROVENANCE_V1_ROLLOUT_PERCENTAGE`
+  - `NEXT_PUBLIC_RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE`
 
 In-product execution controls (preferred for ops):
 1. Open `Workspaces -> Telemetry summary`.
@@ -436,8 +436,8 @@ Operational note:
 
 Ops quick controls (browser console):
 - Set 10% cohort:
-  - `localStorage.setItem("tldw:feature-rollout:research_studio_provenance_v1:percentage", "10")`
-  - `localStorage.setItem("tldw:feature-rollout:research_studio_status_guardrails_v1:percentage", "10")`
+  - `localStorage.setItem("tldw:feature-rollout:research_workspace_provenance_v1:percentage", "10")`
+  - `localStorage.setItem("tldw:feature-rollout:research_workspace_status_guardrails_v1:percentage", "10")`
 - Expand to 50%:
   - same keys with `"50"`.
 - Full rollout:

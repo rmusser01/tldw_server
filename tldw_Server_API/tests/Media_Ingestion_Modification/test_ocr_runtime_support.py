@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support imp
     get_managed_process,
     is_profile_available,
     load_ocr_runtime_profiles,
+    load_ocr_runtime_profiles_from_keys,
     register_managed_process,
     render_argv_template,
     reset_managed_process_registry,
@@ -164,6 +165,41 @@ def test_load_ocr_runtime_profiles_defaults_page_concurrency_to_one():
     )
 
     assert profiles.active.max_page_concurrency == 1  # nosec B101
+
+
+@pytest.mark.unit
+def test_load_ocr_runtime_profiles_from_keys_parses_mode_specific_hunyuan_env():
+    env = {
+        "HUNYUAN_LLAMACPP_MODE": "managed",
+        "HUNYUAN_LLAMACPP_ALLOW_MANAGED_START": "true",
+        "HUNYUAN_LLAMACPP_MAX_PAGE_CONCURRENCY": "2",
+        "HUNYUAN_LLAMACPP_HOST": "127.0.0.1",
+        "HUNYUAN_LLAMACPP_PORT": "19092",
+        "HUNYUAN_LLAMACPP_MODEL": "ggml-org/HunyuanOCR-GGUF:Q8_0",
+        "HUNYUAN_LLAMACPP_MODEL_PATH": "/models/HunyuanOCR-GGUF-Q8_0.gguf",
+        "HUNYUAN_LLAMACPP_SERVER_ARGV": '["llama-server", "-hf", "{model_path}", "--port", "{port}"]',
+        "HUNYUAN_LLAMACPP_CLI_ARGV": '["llama-ocr", "--model", "{model_path}", "--file", "{image_path}"]',
+    }
+
+    profiles = load_ocr_runtime_profiles_from_keys(
+        env=env,
+        mode_key="HUNYUAN_LLAMACPP_MODE",
+        allow_managed_start_key="HUNYUAN_LLAMACPP_ALLOW_MANAGED_START",
+        max_page_concurrency_key="HUNYUAN_LLAMACPP_MAX_PAGE_CONCURRENCY",
+        host_key="HUNYUAN_LLAMACPP_HOST",
+        port_key="HUNYUAN_LLAMACPP_PORT",
+        remote_model_key="HUNYUAN_LLAMACPP_MODEL",
+        model_path_key="HUNYUAN_LLAMACPP_MODEL_PATH",
+        managed_argv_key="HUNYUAN_LLAMACPP_SERVER_ARGV",
+        cli_argv_key="HUNYUAN_LLAMACPP_CLI_ARGV",
+    )
+
+    assert isinstance(profiles.active, ManagedOCRProfile)  # nosec B101
+    assert profiles.active.max_page_concurrency == 2  # nosec B101
+    assert profiles.remote.model == "ggml-org/HunyuanOCR-GGUF:Q8_0"  # nosec B101
+    assert profiles.managed.model_path == "/models/HunyuanOCR-GGUF-Q8_0.gguf"  # nosec B101
+    assert profiles.managed.argv == ("llama-server", "-hf", "{model_path}", "--port", "{port}")  # nosec B101
+    assert profiles.cli.argv == ("llama-ocr", "--model", "{model_path}", "--file", "{image_path}")  # nosec B101
 
 
 @pytest.mark.unit

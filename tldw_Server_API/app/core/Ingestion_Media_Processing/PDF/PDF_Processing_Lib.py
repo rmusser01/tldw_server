@@ -104,11 +104,23 @@ def _should_replace_ocr_content(
 
 
 def _sanitize_ocr_backend_details_for_output(details: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in details.items()
-        if key not in _OCR_BACKEND_OUTPUT_DENYLIST
-    }
+    sanitized: dict[str, Any] = {}
+    for key, value in details.items():
+        if key in _OCR_BACKEND_OUTPUT_DENYLIST:
+            continue
+        if isinstance(value, dict):
+            sanitized[key] = _sanitize_ocr_backend_details_for_output(value)
+            continue
+        if isinstance(value, list):
+            sanitized[key] = [
+                _sanitize_ocr_backend_details_for_output(item)
+                if isinstance(item, dict)
+                else item
+                for item in value
+            ]
+            continue
+        sanitized[key] = value
+    return sanitized
 
 
 def _is_usable_torch_module_for_docling() -> bool:

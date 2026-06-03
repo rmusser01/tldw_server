@@ -17,6 +17,7 @@ The OCR module integrates with media ingestion to extract text from scanned PDFs
    - Lists available OCR backends with basic health info.
    - Returns a map keyed by backend name (e.g., `mineru`, `points`, `dots`, `llamacpp`, `chatllm`) including lightweight backend-specific configuration details.
    - Field shape varies by backend. Today `llamacpp` exposes `mode`, `configured_mode`, `configured`, `supports_structured_output`, `supports_json`, `model`, `configured_flags`, auto-eligibility flags, `backend_concurrency_cap`, and mode-specific flags such as `url_configured`, `managed_configured`, `managed_running`, `allow_managed_start`, and `cli_configured`; `chatllm` exposes a similar capability set with its own mode-specific details, but not every field is identical.
+   - `hunyuan` exposes top-level `mode`, `runtime_family`, `configured_family`, auto-eligibility flags, `backend_concurrency_cap`, and namespaced `native` / `llamacpp` sub-objects so callers can distinguish native Hunyuan from Hunyuan GGUF runtime state.
    - Code: `tldw_Server_API/app/api/v1/endpoints/ocr.py:router.get("/backends")`
 
 2) POST `/api/v1/ocr/points/preload`
@@ -55,6 +56,13 @@ Reference (code): `tldw_Server_API/app/api/v1/schemas/media_request_models.py`.
 - Both backends use explicit auto-eligibility flags. They only participate in `auto` / `auto_high_quality` when the flag is enabled and the backend is locally available.
 - Managed mode is single-process only in v1. For multi-worker deployments, use `remote` or `cli`.
 - The PDF pipeline records the effective page concurrency it actually used, not just the global cap.
+
+### Hunyuan family behavior
+
+- `ocr_backend=hunyuan` remains the only public Hunyuan selector.
+- `HUNYUAN_RUNTIME_FAMILY=auto|native|llamacpp` controls whether the backend uses native Hunyuan execution or Hunyuan GGUF through llama.cpp.
+- In `auto`, native Hunyuan is preferred only when it is explicitly configured. Importable Transformers dependencies alone no longer make Hunyuan eligible.
+- The PDF pipeline stores Hunyuan family metadata such as `runtime_family`, `configured_family`, and sanitized namespaced `native` / `llamacpp` sub-objects under `analysis_details.ocr`.
 
 ## Quick Examples
 
@@ -103,8 +111,14 @@ Example response excerpt (truncated)
       "analysis_details": {
         "ocr": {
           "backend": "hunyuan",
+          "runtime_family": "llamacpp",
+          "configured_family": "auto",
           "output_format": "json",
           "prompt_preset": "json",
+          "llamacpp": {
+            "mode": "remote",
+            "configured_mode": "auto"
+          },
           "structured": {
             "format": "json",
             "text": "...",
@@ -135,6 +149,26 @@ Example MinerU discovery response excerpt (truncated)
 
 ```json
 {
+  "hunyuan": {
+    "available": true,
+    "mode": "remote",
+    "runtime_family": "llamacpp",
+    "configured_family": "auto",
+    "backend_concurrency_cap": 2,
+    "native": {
+      "mode": "transformers",
+      "configured": false,
+      "available": false
+    },
+    "llamacpp": {
+      "mode": "remote",
+      "configured_mode": "auto",
+      "configured": true,
+      "url_configured": true,
+      "managed_configured": true,
+      "cli_configured": true
+    }
+  },
   "mineru": {
     "available": true,
     "pdf_only": true,

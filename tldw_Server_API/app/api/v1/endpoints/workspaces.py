@@ -922,6 +922,75 @@ async def get_source_preview(
     return WorkspaceSourcePreviewResponse(**payload)
 
 
+@router.get(
+    "/{workspace_id}/sources/status",
+    response_model=WorkspaceSourceStatusListResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace source ingestion and indexing status",
+)
+async def get_sources_status(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourceStatusListResponse:
+    """Return read-computed ingestion, extraction, chunking, and indexing status."""
+    _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _map_chacha_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace source status",
+        ) from exc
+    payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=_list_recent_media_ingest_jobs(jm, current_user),
+    )
+    return WorkspaceSourceStatusListResponse(**payload)
+
+
+@router.get(
+    "/{workspace_id}/capabilities",
+    response_model=WorkspaceCapabilitiesResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace capability gates",
+)
+async def get_workspace_capabilities(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceCapabilitiesResponse:
+    """Return conservative UI capability gates for the workspace model."""
+    workspace = _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _map_chacha_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace capabilities",
+        ) from exc
+    status_payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=_list_recent_media_ingest_jobs(jm, current_user),
+    )
+    payload = build_workspace_capability_projection(
+        workspace={
+            **workspace,
+            "access_level": _workspace_access_level(workspace, current_user),
+        },
+        status_projection=status_payload,
+    )
+    return WorkspaceCapabilitiesResponse(**payload)
+
+
 @router.post(
     "/{workspace_id}/sources",
     response_model=WorkspaceSourceResponse,

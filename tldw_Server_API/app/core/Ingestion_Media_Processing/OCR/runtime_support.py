@@ -135,6 +135,7 @@ class _BaseOCRProfile:
 class RemoteOCRProfile(_BaseOCRProfile):
     host: str | None = None
     port: int | None = None
+    model: str | None = None
     model_path: str | None = None
     prompt: str | None = None
 
@@ -386,32 +387,86 @@ def load_ocr_runtime_profiles(
     def key(suffix: str) -> str:
         return f"{normalized_prefix}_OCR_{suffix}"
 
-    mode = str(source.get(key("MODE"), "cli")).strip().lower() or "cli"
-    allow_managed_start = _parse_bool(source.get(key("ALLOW_MANAGED_START")), False)
-    max_page_concurrency = _parse_int(source.get(key("MAX_PAGE_CONCURRENCY")))
+    return load_ocr_runtime_profiles_from_keys(
+        env=source,
+        mode_key=key("MODE"),
+        allow_managed_start_key=key("ALLOW_MANAGED_START"),
+        max_page_concurrency_key=key("MAX_PAGE_CONCURRENCY"),
+        host_key=key("HOST"),
+        port_key=key("PORT"),
+        remote_model_key=key("MODEL_PATH"),
+        remote_model_path_key=key("MODEL_PATH"),
+        model_path_key=key("MODEL_PATH"),
+        prompt_key=key("PROMPT"),
+        argv_key=key("ARGV"),
+    )
+
+
+def load_ocr_runtime_profiles_from_keys(
+    *,
+    env: Mapping[str, Any] | None = None,
+    mode_key: str,
+    allow_managed_start_key: str | None = None,
+    max_page_concurrency_key: str | None = None,
+    host_key: str | None = None,
+    port_key: str | None = None,
+    remote_model_key: str | None = None,
+    remote_model_path_key: str | None = None,
+    model_path_key: str | None = None,
+    prompt_key: str | None = None,
+    argv_key: str | None = None,
+    remote_argv_key: str | None = None,
+    managed_argv_key: str | None = None,
+    cli_argv_key: str | None = None,
+) -> OCRRuntimeProfiles:
+    """
+    Parse OCR runtime configuration from explicit env keys.
+
+    This supports backends that do not use the shared ``<PREFIX>_OCR_*`` naming
+    convention and lets them keep separate argv surfaces per runtime mode.
+    """
+
+    source = os.environ if env is None else env
+
+    mode = str(source.get(mode_key, "cli")).strip().lower() or "cli"
+    allow_managed_start = _parse_bool(
+        source.get(allow_managed_start_key) if allow_managed_start_key else None,
+        False,
+    )
+    max_page_concurrency = _parse_int(
+        source.get(max_page_concurrency_key) if max_page_concurrency_key else None,
+    )
     if max_page_concurrency is None or max_page_concurrency < 1:
         max_page_concurrency = 1
-    argv = _parse_argv_json(source.get(key("ARGV")))
-    host = source.get(key("HOST"))
-    port = _parse_int(source.get(key("PORT")))
-    model_path = source.get(key("MODEL_PATH"))
-    prompt = source.get(key("PROMPT"))
+
+    shared_argv = _parse_argv_json(source.get(argv_key)) if argv_key else ()
+    remote_argv = _parse_argv_json(source.get(remote_argv_key)) if remote_argv_key else shared_argv
+    managed_argv = _parse_argv_json(source.get(managed_argv_key)) if managed_argv_key else shared_argv
+    cli_argv = _parse_argv_json(source.get(cli_argv_key)) if cli_argv_key else shared_argv
+
+    host = source.get(host_key) if host_key else None
+    port = _parse_int(source.get(port_key)) if port_key else None
+    remote_model = source.get(remote_model_key) if remote_model_key else None
+    remote_model_path = source.get(remote_model_path_key) if remote_model_path_key else None
+    model_path = source.get(model_path_key) if model_path_key else None
+    prompt = source.get(prompt_key) if prompt_key else None
 
     remote = RemoteOCRProfile(
         mode=mode,
         allow_managed_start=allow_managed_start,
         max_page_concurrency=max_page_concurrency,
-        argv=argv,
+        argv=remote_argv,
         host=None if host is None else str(host),
         port=port,
-        model_path=None if model_path is None else str(model_path),
+        model=None if remote_model is None else str(remote_model),
+        model_path=None if remote_model_path is None else str(remote_model_path),
         prompt=None if prompt is None else str(prompt),
     )
     managed = ManagedOCRProfile(
         mode=mode,
         allow_managed_start=allow_managed_start,
         max_page_concurrency=max_page_concurrency,
-        argv=argv,
+        argv=managed_argv,
         host=None if host is None else str(host),
         port=port,
         model_path=None if model_path is None else str(model_path),
@@ -421,7 +476,7 @@ def load_ocr_runtime_profiles(
         mode=mode,
         allow_managed_start=allow_managed_start,
         max_page_concurrency=max_page_concurrency,
-        argv=argv,
+        argv=cli_argv,
         model_path=None if model_path is None else str(model_path),
         prompt=None if prompt is None else str(prompt),
     )

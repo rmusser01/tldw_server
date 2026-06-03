@@ -155,7 +155,7 @@ const SUPPRESSED_WARNING_PATTERNS = [
   /Instance created by `useForm` is not connected to any Form element/i,
   /Not implemented:\s*navigation to another Document/i,
   /Failed to load seen stats:\s*Network error/i,
-  /WorkspacePlayground render error.*chat pane crash/i,
+  /ResearchWorkspace render error.*chat pane crash/i,
   /Failed to create thread:\s*Default character unavailable/i,
   /Failed to persist chat message:\s*save failed/i,
   /Streaming search failed, falling back to standard search:\s*stream endpoint unavailable/i,

@@ -65,8 +65,9 @@ jobs:
         working-directory: apps/packages/ui
         env:
           CI: "true"
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: |
-          bunx vitest run \
+          bunx vitest run --maxWorkers=1 --no-file-parallelism \
             src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability-followup.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage11.search-filtering.test.tsx \

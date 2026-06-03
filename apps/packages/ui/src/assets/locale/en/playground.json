@@ -339,7 +339,7 @@
     "ingestHint": "Upload URLs or files with advanced options.",
     "ingestSub": "Use URLs/files; download or store.",
     "streamErrorTitle": "Live captions unavailable",
-    "workspacePlayground": "Multi-model compare"
+    "compareModels": "Multi-model compare"
   },
   "composer": {
     "toolsButton": "+Tools",

@@ -477,6 +477,12 @@ class LlamaCppOCRBackend(OCRBackend):
     name = "llamacpp"
 
     @classmethod
+    def auto_eligible(cls, high_quality: bool) -> bool:
+        if high_quality:
+            return _env_bool("LLAMACPP_OCR_AUTO_HIGH_QUALITY_ELIGIBLE", False)
+        return _env_bool("LLAMACPP_OCR_AUTO_ELIGIBLE", False)
+
+    @classmethod
     def available(cls) -> bool:
         try:
             active = _active_profile()

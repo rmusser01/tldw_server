@@ -61,6 +61,7 @@ import { WorkspaceBanner } from "./WorkspaceBanner"
 import { SharedWorkspaceBanner } from "./SharedWorkspaceBanner"
 import { SharedWorkspaceProvider } from "./SharedWorkspaceContext"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
+import { WorkspaceTrustPanel } from "./WorkspaceTrustPanel"
 import { ChatPane } from "./ChatPane"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import {
@@ -3560,6 +3561,14 @@ const ResearchWorkspaceBody: React.FC = () => {
           <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
 
+          <WorkspaceTrustPanel
+            sourceStatus={workspaceSourceStatus}
+            capabilities={workspaceCapabilities}
+            loading={workspaceTrustLoading}
+            errorMessage={workspaceTrustError}
+            statusGuardrailsEnabled={statusGuardrailsEnabled}
+          />
+
           {tutorialPromptBanner}
 
           <WorkspaceStatusBar
@@ -3611,6 +3620,14 @@ const ResearchWorkspaceBody: React.FC = () => {
           />
           <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
+
+          <WorkspaceTrustPanel
+            sourceStatus={workspaceSourceStatus}
+            capabilities={workspaceCapabilities}
+            loading={workspaceTrustLoading}
+            errorMessage={workspaceTrustError}
+            statusGuardrailsEnabled={statusGuardrailsEnabled}
+          />
 
           {tutorialPromptBanner}
 

@@ -27,7 +27,7 @@ This document is for contributors working on the browser extension codebase.
   - Force production zip bundle: `bun run zip:prod`
   - Docs: `bun run docs:dev`, `docs:build`, `docs:preview`
 
-Default artifact profile follows the checked-out branch: `main` builds production artifacts, every other branch builds development artifacts. Exported unpacked installs live under `build/<browser>-mv3` for production and `build/<browser>-mv3-dev` for development. WXT’s internal `.output/<browser>-mv3` roots stay stable for tooling and automated tests.
+Default artifact profile follows the checked-out branch: `main` builds production artifacts, every other branch builds development artifacts. Exported unpacked installs live under `build/chrome-mv3` and `build/edge-mv3` for production Chrome/Edge builds, `build/firefox-mv2` for production Firefox builds, and the corresponding `-dev` suffixed directory for development builds. WXT’s internal `.output/<target>` roots stay stable for tooling and automated tests.
 
 ## Configuring tldw_server for Development
 

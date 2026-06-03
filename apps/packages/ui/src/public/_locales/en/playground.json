@@ -1778,7 +1778,7 @@
   "imageBackend_menuLabel": {
     "message": "Default image provider"
   },
-  "actions_workspacePlayground": {
+  "actions_compareModels": {
     "message": "Multi-model compare"
   },
   "presets_title": {
