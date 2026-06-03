@@ -107,7 +107,9 @@ const {
       async (_payload?: Record<string, unknown>) =>
         ({ id: "char-1" }) as { id: string | number }
     ),
-    updateCharacter: vi.fn(async () => ({})),
+    updateCharacter: vi.fn(
+      async (_id: string | number, _payload?: unknown) => ({})
+    ),
     deleteCharacter: vi.fn(async () => ({})),
     deleteChat: vi.fn(async () => undefined),
     restoreCharacter: vi.fn(async () => ({})),

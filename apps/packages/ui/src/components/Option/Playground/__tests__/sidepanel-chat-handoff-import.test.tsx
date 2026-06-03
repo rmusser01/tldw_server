@@ -400,6 +400,36 @@ describe("sidepanel chat handoff import", () => {
     )
   })
 
+  it("merges OpenUI request mode with imported page context request overrides", async () => {
+    const user = userEvent.setup()
+    const clearOpenUIRequestMode = vi.fn()
+    renderWithRoute(
+      <SubmitImportHarness
+        submitOverrides={{
+          openUIRequestMode: true,
+          clearOpenUIRequestMode,
+        }}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
+    )
+    await user.click(screen.getByRole("button", { name: "Send" }))
+
+    expect(submitHarnessSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Imported draft",
+        requestOverrides: {
+          messageForModel:
+            "MODEL MESSAGE\nTitle: Imported article\nUser draft: Imported draft",
+          dynamicUIRequest: { renderer: "openui" },
+        },
+      }),
+    )
+    expect(clearOpenUIRequestMode).toHaveBeenCalledTimes(1)
+  })
+
   it("sends a context-only handoff with a visible fallback prompt", async () => {
     const user = userEvent.setup()
     serviceMocks.readSidepanelChatHandoff.mockResolvedValue(
@@ -456,6 +486,40 @@ describe("sidepanel chat handoff import", () => {
     expect(
       screen.queryByRole("region", { name: "Imported sidepanel context" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("queues OpenUI request mode with imported page context and clears the one-shot mode", async () => {
+    const user = userEvent.setup()
+    const queueSubmission = vi.fn(() => ({ id: "queued-1" }))
+    const clearOpenUIRequestMode = vi.fn()
+    renderWithRoute(
+      <SubmitImportHarness
+        submitOverrides={{
+          isSending: true,
+          openUIRequestMode: true,
+          clearOpenUIRequestMode,
+          queueSubmission,
+        }}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"),
+    )
+    await user.click(screen.getByRole("button", { name: "Send" }))
+
+    expect(queueSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptText: "Imported draft",
+        requestOverrides: {
+          messageForModel:
+            "MODEL MESSAGE\nTitle: Imported article\nUser draft: Imported draft",
+          dynamicUIRequest: { renderer: "openui" },
+        },
+      }),
+    )
+    expect(clearOpenUIRequestMode).toHaveBeenCalledTimes(1)
+    expect(submitHarnessSendMessage).not.toHaveBeenCalled()
   })
 
   it("keeps imported page context when a resolved submit reports failure", async () => {

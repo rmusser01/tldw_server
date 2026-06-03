@@ -18,6 +18,7 @@ import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import {
+  isFirstSourceQuickIngestKind,
   isFirstSourceOpenDetail,
   requestQuickIngestOpen
 } from "@/utils/quick-ingest-open"
@@ -190,9 +191,12 @@ const OptionIndex = () => {
 
   const showFirstSourcePrompt =
     shouldCheckPostOnboardingMedia && mediaReadiness.status === "ready"
-  const firstSourceSession = isFirstSourceOpenDetail(
+  const firstSourceOpenDetail = isFirstSourceOpenDetail(
     quickIngestSession?.openDetail
   )
+    ? quickIngestSession?.openDetail
+    : null
+  const firstSourceSession = firstSourceOpenDetail
     ? quickIngestSession
     : null
   const firstSourceRunSummary = firstSourceSession?.resultSummary ?? null
@@ -242,7 +246,9 @@ const OptionIndex = () => {
           onRetry={() =>
             openFirstSourceQuickIngest(
               firstSourceSession?.firstSourceAddMode ??
-                firstSourceSession?.openDetail?.firstSourceKind ??
+                (isFirstSourceQuickIngestKind(firstSourceOpenDetail?.firstSourceKind)
+                  ? firstSourceOpenDetail.firstSourceKind
+                  : null) ??
                 lastFirstSourceKind
             )
           }

@@ -180,7 +180,9 @@ describe("useStudySuggestions", () => {
   })
 
   it("keeps the old snapshot visible while a refresh resolves a replacement snapshot", async () => {
-    let resolveReplacementSnapshot: ((value: ReturnType<typeof buildSnapshot>) => void) | null = null
+    let resolveReplacementSnapshot:
+      | ((value: StudySuggestionSnapshotResponse) => void)
+      | null = null
 
     vi.mocked(getStudySuggestionAnchorStatus)
       .mockResolvedValueOnce({
@@ -205,17 +207,19 @@ describe("useStudySuggestions", () => {
         snapshot_id: 99
       })
 
-    vi.mocked(getStudySuggestionSnapshot).mockImplementation(async (snapshotId: number) => {
-      if (snapshotId === 88) {
-        return buildSnapshot(88, "Initial topic")
+    vi.mocked(getStudySuggestionSnapshot).mockImplementation(
+      async (snapshotId: number): Promise<StudySuggestionSnapshotResponse> => {
+        if (snapshotId === 88) {
+          return buildSnapshot(88, "Initial topic")
+        }
+        if (snapshotId === 99) {
+          return await new Promise<StudySuggestionSnapshotResponse>((resolve) => {
+            resolveReplacementSnapshot = resolve
+          })
+        }
+        throw new Error(`Unexpected snapshot id: ${snapshotId}`)
       }
-      if (snapshotId === 99) {
-        return await new Promise((resolve) => {
-          resolveReplacementSnapshot = resolve
-        })
-      }
-      throw new Error(`Unexpected snapshot id: ${snapshotId}`)
-    })
+    )
 
     vi.mocked(refreshStudySuggestionSnapshot).mockResolvedValue({
       job: {

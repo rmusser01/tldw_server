@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test, expect, seedAuth } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
 import {
+  getRouteMetadata,
   getRoutesForSmokeInventory,
   ROUTE_METADATA
 } from '../../../packages/ui/src/routes/route-metadata';

@@ -7,9 +7,7 @@ const EXPLICIT_API_KEY_ENV_KEYS = [
   "SINGLE_USER_API_KEY",
 ] as const;
 
-type E2eAuthEnvironment = Partial<
-  Record<(typeof EXPLICIT_API_KEY_ENV_KEYS)[number], string | undefined>
->;
+type E2eAuthEnvironment = Record<string, string | undefined>;
 
 export const resolveExplicitE2eApiKey = (
   env: E2eAuthEnvironment = process.env

@@ -103,8 +103,8 @@ const decks = [
     deleted: false,
     client_id: "1",
     version: 1,
-    scheduler_type: "sm2_plus" as const,
     review_prompt_side: "front" as const,
+    scheduler_type: "sm2_plus" as const,
     scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
   }
 ]

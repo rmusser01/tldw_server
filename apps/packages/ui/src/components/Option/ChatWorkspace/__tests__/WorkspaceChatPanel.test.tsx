@@ -1,12 +1,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { useMessageOption as useMessageOptionHook } from "@/hooks/useMessageOption"
 import { WorkspaceChatPanel } from "../WorkspaceChatPanel"
 import type { StagedWorkspaceSource } from "../types"
 
+type UseMessageOptionHook = typeof useMessageOptionHook
+type UseMessageOptionState = ReturnType<UseMessageOptionHook>
+type SubmitPayload = Parameters<UseMessageOptionState["onSubmit"]>[0]
+
 const chatHookState = vi.hoisted(() => {
-  const onSubmit = vi.fn(async (_input?: any): Promise<any> => ({ status: "submitted" }))
+  const onSubmit = vi.fn<UseMessageOptionState["onSubmit"]>(
+    async (): Promise<any> => ({ status: "submitted" })
+  )
   const stopStreamingRequest = vi.fn()
-  const value: any = {
+  const value = {
     messages: [],
     onSubmit,
     streaming: false,
@@ -15,14 +22,15 @@ const chatHookState = vi.hoisted(() => {
     stopStreamingRequest,
     selectedModel: "gpt-test",
     selectedAssistant: { kind: "persona", id: "p1", name: "Analyst" }
-  }
-  const useMessageOption = vi.fn((..._args: unknown[]) => value)
+  } as unknown as UseMessageOptionState
+  const useMessageOption = vi.fn<UseMessageOptionHook>(() => value)
 
   return { onSubmit, stopStreamingRequest, useMessageOption, value }
 })
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: (...args: unknown[]) => chatHookState.useMessageOption(...args)
+  useMessageOption: (...args: Parameters<UseMessageOptionHook>) =>
+    chatHookState.useMessageOption(...args)
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({
@@ -69,6 +77,14 @@ const stagedWithMixedAvailability: StagedWorkspaceSource[] = [
     availability: "processing"
   }
 ]
+
+const getSubmitPayload = (): SubmitPayload => {
+  const payload = chatHookState.onSubmit.mock.calls[0]?.[0]
+  if (!payload) {
+    throw new Error("Expected workspace chat submit payload")
+  }
+  return payload
+}
 
 describe("WorkspaceChatPanel", () => {
   beforeEach(() => {
@@ -151,7 +167,7 @@ describe("WorkspaceChatPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
 
     await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
-    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+    expect(getSubmitPayload()).toMatchObject({
       message: expect.stringContaining("Summarize this"),
       image: "",
       requestOverrides: expect.objectContaining({
@@ -179,7 +195,7 @@ describe("WorkspaceChatPanel", () => {
     fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true })
 
     await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
-    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+    expect(getSubmitPayload()).toMatchObject({
       message: "Keyboard send",
       requestOverrides: expect.objectContaining({
         ragMediaIds: [],
@@ -207,7 +223,7 @@ describe("WorkspaceChatPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
 
     await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
-    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+    expect(getSubmitPayload()).toMatchObject({
       message: expect.stringContaining("Draft instruction"),
       requestOverrides: expect.objectContaining({
         ragMediaIds: [],
@@ -215,7 +231,7 @@ describe("WorkspaceChatPanel", () => {
         chatMode: "normal"
       })
     })
-    expect(chatHookState.onSubmit.mock.calls[0][0].message).toEqual(
+    expect(getSubmitPayload().message).toEqual(
       expect.stringContaining("Indexing Notes")
     )
     expect(onClearStagedSources).toHaveBeenCalledTimes(1)
@@ -239,17 +255,17 @@ describe("WorkspaceChatPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
 
     await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
-    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+    expect(getSubmitPayload()).toMatchObject({
       requestOverrides: expect.objectContaining({
         ragMediaIds: [101],
         fileRetrievalEnabled: true,
         chatMode: "rag"
       })
     })
-    expect(chatHookState.onSubmit.mock.calls[0][0].message).toEqual(
+    expect(getSubmitPayload().message).toEqual(
       expect.stringContaining("Draft instruction")
     )
-    expect(chatHookState.onSubmit.mock.calls[0][0].message).toEqual(
+    expect(getSubmitPayload().message).toEqual(
       expect.stringContaining("Indexing Notes")
     )
     expect(onClearStagedSources).toHaveBeenCalledTimes(1)
@@ -270,7 +286,7 @@ describe("WorkspaceChatPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
 
     await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
-    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+    expect(getSubmitPayload()).toMatchObject({
       message: expect.stringContaining("Operator Notes"),
       requestOverrides: expect.objectContaining({
         ragMediaIds: [101],
@@ -332,8 +348,11 @@ describe("WorkspaceChatPanel", () => {
     chatHookState.value.messages = [
       {
         id: "message-1",
+        isBot: true,
+        name: "Analyst",
         role: "assistant",
-        message: "Hydrating"
+        message: "Hydrating",
+        sources: []
       }
     ]
     const onClearStagedSources = vi.fn()

@@ -99,11 +99,16 @@ function writeEnvFile(envPath, profileRoot, mockPort, fixtureRoot) {
   writeFileSync(envPath, lines.join("\n"), "utf8")
 }
 
+/**
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} baseEnv
+ * @returns {Record<string, string>}
+ */
 function safeBaseEnv(baseEnv) {
-  const env = {}
+  const env = /** @type {Record<string, string>} */ ({})
   for (const key of safeBaseEnvKeys) {
-    if (baseEnv[key] !== undefined) {
-      env[key] = baseEnv[key]
+    const value = baseEnv[key]
+    if (typeof value === "string") {
+      env[key] = value
     }
   }
   return env
@@ -189,6 +194,20 @@ export function createRuntimeProfile({
   }
 }
 
+/**
+ * @param {{
+ *   profile: {
+ *     configPath: string,
+ *     envPath: string,
+ *     usersDbPath: string,
+ *     databaseDir: string,
+ *     fixtureRoot?: string,
+ *   },
+ *   mockPort: number,
+ *   baseEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>,
+ * }} options
+ * @returns {Record<string, string>}
+ */
 export function buildBackendEnv({ profile, mockPort, baseEnv = process.env }) {
   if (!profile) {
     throw new Error("buildBackendEnv requires profile")

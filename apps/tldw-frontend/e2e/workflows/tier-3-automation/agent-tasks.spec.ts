@@ -625,9 +625,10 @@ test.describe("Agent Tasks", () => {
       skipIfServerUnavailable(serverInfo)
 
       const fixture = await tryCreateWorkspaceScopedAcpRun()
-      if (!fixture.created) {
+      if (fixture.created === false) {
+        const skipReason = fixture.reason
         await fixture.cleanup()
-        test.skip(true, fixture.reason)
+        test.skip(true, skipReason)
         return
       }
 

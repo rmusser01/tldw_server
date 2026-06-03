@@ -127,18 +127,26 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       const plan = planRevisionApply(editorText, proposal)
       if (plan.type === "apply" || plan.type === "retarget") {
         const result = applyEditorText(plan.nextText)
-        const failureReason = "reason" in result ? result.reason : null
+        if (result.applied === false) {
+          const failedReason = result.reason || "unknown reason"
+          updateRevisions((current) =>
+            current.map((revision) => {
+              if (revision.id !== proposalId) return revision
+              return appendNote(
+                { ...revision, status: "conflict" },
+                `Manual apply required: ${failedReason}`
+              )
+            })
+          )
+          return
+        }
+
         updateRevisions((current) =>
-          current.map((revision) => {
-            if (revision.id !== proposalId) return revision
-            if (result.applied) {
-              return { ...revision, status: "applied" }
-            }
-            return appendNote(
-              { ...revision, status: "conflict" },
-              `Manual apply required: ${failureReason ?? "unknown reason"}`
-            )
-          })
+          current.map((revision) =>
+            revision.id === proposalId
+              ? { ...revision, status: "applied" }
+              : revision
+          )
         )
         return
       }
@@ -195,20 +203,20 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       }
 
       updateRevisions((current) => [
-        ...current.map((proposal) =>
+        ...current.map((proposal): WritingRevisionProposal =>
           proposal.id === source.id
             ? { ...proposal, status: "rejected" as const }
             : proposal
         ),
-        {
+        ({
           ...replacement,
           regeneratedFromId: source.id,
           target: source.target,
           instruction: source.instruction,
           presetId: source.presetId,
           presetInstruction: source.presetInstruction,
-          status: "pending" as const
-        }
+          status: "pending"
+        } satisfies WritingRevisionProposal)
       ])
     },
     [updateRevisions]

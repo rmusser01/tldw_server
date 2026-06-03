@@ -24,6 +24,7 @@ import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   parseImageGenerationEventMirrorContent
 } from "@/utils/image-generation-chat"
+import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 import {
   characterToAssistantSelection,
   personaToAssistantSelection
@@ -226,9 +227,6 @@ export const fetchAllServerChatMessages = async (
     .map((entry) => entry.message)
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value)
-
 const resolveAssistantId = (value: unknown): string | null => {
   if (typeof value === "string") {
     const trimmed = value.trim()
@@ -348,9 +346,7 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
     const metadataExtraCandidate =
       (m as unknown as { metadata_extra?: unknown }).metadata_extra ??
       (meta?.metadata_extra as unknown)
-    const metadataExtra = isRecord(metadataExtraCandidate)
-      ? metadataExtraCandidate
-      : undefined
+    const metadataExtra = normalizeMessageMetadataExtra(metadataExtraCandidate)
     const speakerCharacterIdRaw = metadataExtra?.speaker_character_id
     const speakerCharacterId =
       typeof speakerCharacterIdRaw === "number" &&
@@ -1042,6 +1038,7 @@ export const useServerChatLoader = ({
                         modelName: m.modelName || assistantName,
                         modelImage: m.modelImage,
                         parent_message_id: m.parentMessageId ?? null,
+                        metadataExtra: m.metadataExtra,
                         createdAt: resolvedCreatedAt
                       })
                     })

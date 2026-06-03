@@ -241,7 +241,8 @@ export const isFirstSourceOpenDetail = (
 ): detail is FirstSourceOpenDetail =>
   Boolean(
     detail &&
-    (detail.source === "first_source_milestone" || detail.firstSource === true)
+    (detail.source === "first_source_milestone" ||
+      ("firstSource" in detail && detail.firstSource === true))
   )
 
 const getFirstSourceAddMode = (

@@ -2,7 +2,12 @@ import {
   systemPromptForNonRagOption,
   getWebSearchPrompt
 } from "~/services/tldw-server"
-import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
+import {
+  type ChatHistory,
+  type Message,
+  type MessageMetadataExtra,
+  type ToolChoice
+} from "~/store/option"
 import { getPromptById } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
 import { humanMessageFormatter } from "@/utils/human-message"
@@ -23,6 +28,7 @@ import type {
   ImageGenerationPromptMode,
   ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
+import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   runChatPipeline,
@@ -128,6 +134,8 @@ type NormalChatModeParams = {
   imageGenerationRefine?: ImageGenerationRefineMetadata
   imageGenerationPromptMode?: ImageGenerationPromptMode
   imageGenerationSource?: "slash-command" | "generate-modal" | "message-regen"
+  dynamicUIRequest?: DynamicUIRequest
+  userMetadataExtra?: MessageMetadataExtra
   toolChoice?: ToolChoice
   setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void
   saveMessageOnSuccess: (data: SaveMessageData) => Promise<string | null>

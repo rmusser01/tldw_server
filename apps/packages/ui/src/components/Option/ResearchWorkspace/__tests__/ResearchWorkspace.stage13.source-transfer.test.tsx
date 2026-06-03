@@ -241,7 +241,9 @@ vi.mock("react-i18next", () => ({
       }
     ) => {
       const options =
-        typeof defaultValueOrOptions === "string" ? null : defaultValueOrOptions
+        typeof defaultValueOrOptions === "string"
+          ? undefined
+          : defaultValueOrOptions
       const template =
         typeof defaultValueOrOptions === "string"
           ? defaultValueOrOptions
@@ -249,9 +251,7 @@ vi.mock("react-i18next", () => ({
       return template
         .replace(
           "{{count}}",
-          String(
-            interpolationValues?.count ?? options?.count ?? ""
-          )
+          String(interpolationValues?.count ?? options?.count ?? "")
         )
         .replace(
           "{{workspaceName}}",

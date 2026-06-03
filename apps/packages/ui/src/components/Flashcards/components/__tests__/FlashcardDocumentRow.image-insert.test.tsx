@@ -61,8 +61,8 @@ const decks: Deck[] = [
     deleted: false,
     client_id: "test",
     version: 1,
-    scheduler_type: "sm2_plus",
     review_prompt_side: "front",
+    scheduler_type: "sm2_plus",
     scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
   }
 ]

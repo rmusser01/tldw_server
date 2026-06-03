@@ -10,6 +10,7 @@ export type MessageVariant = {
   createdAt?: number
   serverMessageId?: string
   serverMessageVersion?: number
+  metadataExtra?: Message["metadataExtra"]
 }
 
 const normalizeId = (value: unknown): string | undefined => {
@@ -37,7 +38,8 @@ export const buildMessageVariant = (message: Message): MessageVariant => ({
   reasoning_time_taken: message.reasoning_time_taken,
   createdAt: message.createdAt,
   serverMessageId: message.serverMessageId,
-  serverMessageVersion: message.serverMessageVersion
+  serverMessageVersion: message.serverMessageVersion,
+  metadataExtra: message.metadataExtra
 })
 
 export const mergeMessageVariants = (
@@ -73,6 +75,7 @@ export const applyVariantToMessage = (
     serverMessageId: variant.serverMessageId ?? message.serverMessageId,
     serverMessageVersion:
       variant.serverMessageVersion ?? message.serverMessageVersion,
+    metadataExtra: variant.metadataExtra,
     id: variant.id ?? message.id
   }
 }
@@ -100,7 +103,13 @@ export const updateActiveVariant = (
     createdAt: updates.createdAt ?? message.createdAt,
     serverMessageId: updates.serverMessageId ?? message.serverMessageId,
     serverMessageVersion:
-      updates.serverMessageVersion ?? message.serverMessageVersion
+      updates.serverMessageVersion ?? message.serverMessageVersion,
+    metadataExtra: Object.prototype.hasOwnProperty.call(
+      updates,
+      "metadataExtra"
+    )
+      ? updates.metadataExtra
+      : message.metadataExtra
   }
   const variants = [...message.variants]
   variants[idx] = { ...variants[idx], ...nextVariant }

@@ -46,10 +46,12 @@ export type UsePlaygroundSubmitDeps = {
   pinnedSourceTokenEstimate: number
   resolvedMaxContext: number
   jsonMode: boolean
+  openUIRequestMode: boolean
   researchContext?: ChatResearchContext
   importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   clearImportedSidepanelContext?: () => void
   sendMessage: (args: any) => Promise<any>
+  clearOpenUIRequestMode: () => void
   clearSelectedDocuments: () => void
   clearUploadedFiles: () => void
   textAreaFocus: () => void
@@ -82,10 +84,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     pinnedSourceTokenEstimate,
     resolvedMaxContext,
     jsonMode,
+    openUIRequestMode,
     researchContext,
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
+    clearOpenUIRequestMode,
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
@@ -163,6 +167,17 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       const requestOverrides = messageForModel
         ? { messageForModel }
         : undefined
+      const openUIRequestOverrides =
+        openUIRequestMode && !intent.isImageCommand
+          ? { dynamicUIRequest: { renderer: "openui" } }
+          : undefined
+      const mergedRequestOverrides =
+        requestOverrides || openUIRequestOverrides
+          ? {
+              ...(requestOverrides ?? {}),
+              ...(openUIRequestOverrides ?? {})
+            }
+          : undefined
       if (
         !intent.isImageCommand &&
         visiblePrompt.length === 0 &&
@@ -232,10 +247,13 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           promptText: visiblePrompt,
           image: value.image,
           intent,
-          requestOverrides
+          ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
         })
         if (queuedItem && messageForModel) {
           clearImportedSidepanelContext?.()
+        }
+        if (queuedItem && openUIRequestMode) {
+          clearOpenUIRequestMode()
         }
         return
       }
@@ -304,7 +322,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           intent.isImageCommand || compareModeActive
             ? undefined
             : researchContext,
-        ...(requestOverrides ? { requestOverrides } : {})
+        ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
       }
 
       await dispatch(payload, {
@@ -317,6 +335,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
         }
       })
+      if (openUIRequestMode) {
+        clearOpenUIRequestMode()
+      }
     })()
   }
 

@@ -2,6 +2,7 @@ import React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { useDynamicUIActionBridge } from "@/hooks/chat/useDynamicUIActionBridge"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { PlaygroundEmpty } from "./PlaygroundEmpty"
 import {
@@ -91,6 +92,7 @@ type PlaygroundChatProps = {
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void
   returnedResearchRunId?: string | null
   onDismissReturnedResearchRun?: () => void
+  onDynamicUIAction?: (payload: unknown) => void
 }
 
 const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
@@ -143,7 +145,8 @@ export const PlaygroundChat = ({
   onAttachResearchContext,
   onPrepareResearchFollowUp,
   returnedResearchRunId = null,
-  onDismissReturnedResearchRun
+  onDismissReturnedResearchRun,
+  onDynamicUIAction
 }: PlaygroundChatProps) => {
   const { t } = useTranslation(["playground", "common"])
   const notification = useAntdNotification()
@@ -194,6 +197,23 @@ export const PlaygroundChat = ({
     setCompareSplitChat,
     compareMaxModels
   } = useMessageOption()
+  const confirmSensitiveValues = React.useCallback(async () => {
+    if (typeof window === "undefined" || typeof window.confirm !== "function") {
+      return false
+    }
+    return window.confirm(
+      t(
+        "playground:dynamicUI.confirmSensitiveValues",
+        "This OpenUI action includes fields that look like credentials or secrets. Submit it anyway?"
+      ) as string
+    )
+  }, [t])
+  const bridgedDynamicUIAction = useDynamicUIActionBridge({
+    messages,
+    onSubmit,
+    confirmSensitiveValues
+  })
+  const resolvedDynamicUIAction = onDynamicUIAction ?? bridgedDynamicUIAction
   const [openReasoning] = useStorage("openReasoning", false)
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
   const isConnected = useIsConnected()
@@ -1290,6 +1310,8 @@ export const PlaygroundChat = ({
                 messageId={message.id}
                 pinned={Boolean(message.pinned)}
                 metadataExtra={message.metadataExtra}
+                dynamicUISurface="web-chat"
+                onDynamicUIAction={resolvedDynamicUIAction}
                 researchActions={buildMessageResearchActions(message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
@@ -1363,6 +1385,8 @@ export const PlaygroundChat = ({
                 compareContinuationModeByCluster={compareContinuationModeByCluster}
                 compareSplitChats={compareSplitChats}
                 compareMaxModels={compareMaxModels}
+                dynamicUISurface="web-chat"
+                onDynamicUIAction={resolvedDynamicUIAction}
                 modelMetaById={modelMetaById}
                 getTokenCount={getTokenCount}
                 getPreviousUserMessage={getPreviousUserMessage}

@@ -62,7 +62,11 @@ describe("OptionLayout shell overrides", () => {
 
   it("does not clear another shell override if this render never applied one", () => {
     vi.useFakeTimers()
-    const externalShell = {
+    const externalShell: {
+      mounted: boolean
+      ownerId: string
+      setOverrides?: (overrides: unknown) => void
+    } = {
       mounted: true,
       ownerId: "root-shell"
     }

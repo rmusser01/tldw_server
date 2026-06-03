@@ -57,6 +57,7 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useArtifactsStore } from "@/store/artifacts"
 import { normalizeConversationState } from "@/utils/conversation-state"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 import { restoreQueuedRequests } from "@/utils/chat-request-queue"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
@@ -196,12 +197,7 @@ const mapServerChatMessages = (
     const createdAt = Date.parse(m.created_at)
     const normalizedRole = normalizeRole(m.role)
     const normalizedId = normalizeServerChatMessageId(m.id)
-    const metadataExtra =
-      m.metadata_extra &&
-      typeof m.metadata_extra === "object" &&
-      !Array.isArray(m.metadata_extra)
-        ? (m.metadata_extra as Record<string, unknown>)
-        : undefined
+    const metadataExtra = normalizeMessageMetadataExtra(m.metadata_extra)
     const speakerCharacterIdRaw = metadataExtra?.speaker_character_id
     const speakerCharacterId =
       typeof speakerCharacterIdRaw === "number" &&

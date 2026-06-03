@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { NavLink, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useShortcut } from "@/hooks/useKeyboardShortcuts"
 import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { useSetting } from "@/hooks/useSetting"
@@ -486,10 +486,9 @@ export function HeaderShortcuts({
                       )
 
                       return (
-                        <NavLink
+                        <Link
                           key={ri.item.id}
                           to={ri.item.to}
-                          end
                           onClick={(e) => {
                             e.preventDefault()
                             navigateTo(ri.item.to)
@@ -498,6 +497,7 @@ export function HeaderShortcuts({
                           data-selected={isSelected}
                           role="option"
                           aria-selected={isSelected}
+                          aria-current={isCurrentRoute ? "page" : undefined}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
                             isCurrentRoute && "border-l-2 border-primary bg-primary/5",
@@ -529,7 +529,7 @@ export function HeaderShortcuts({
                               {META_LABEL}{ri.item.shortcutIndex}
                             </kbd>
                           )}
-                        </NavLink>
+                        </Link>
                       )
                     })}
                   </div>
@@ -570,10 +570,9 @@ export function HeaderShortcuts({
                         )
 
                         return (
-                          <NavLink
+                          <Link
                             key={ri.item.id}
                             to={ri.item.to}
-                            end
                             onClick={(e) => {
                               e.preventDefault()
                               navigateTo(ri.item.to)
@@ -582,6 +581,7 @@ export function HeaderShortcuts({
                             data-selected={isSelected}
                             role="option"
                             aria-selected={isSelected}
+                            aria-current={isCurrentRoute ? "page" : undefined}
                             className={cn(
                               "flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors sm:w-auto sm:text-sm",
                               isCurrentRoute
@@ -606,7 +606,7 @@ export function HeaderShortcuts({
                                 {ri.item.shortcutIndex}
                               </kbd>
                             )}
-                          </NavLink>
+                          </Link>
                         )
                       })}
                     </div>

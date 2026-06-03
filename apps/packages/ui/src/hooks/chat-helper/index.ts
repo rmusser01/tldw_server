@@ -76,8 +76,12 @@ export const saveMessageOnError = async ({
   assistantMessageId,
   userParentMessageId,
   assistantParentMessageId,
+  generationInfo,
+  userMetadataExtra,
+  assistantMetadataExtra,
   prompt_content,
   prompt_id,
+  reasoning_time_taken,
   isContinue,
   documents = []
 }: {
@@ -105,8 +109,12 @@ export const saveMessageOnError = async ({
   assistantMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
+  generationInfo?: any
+  userMetadataExtra?: Record<string, unknown>
+  assistantMetadataExtra?: Record<string, unknown>
   prompt_id?: string
   prompt_content?: string
+  reasoning_time_taken?: number
   isContinue?: boolean
   documents?: ChatDocuments
 }) => {
@@ -150,6 +158,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -171,7 +182,10 @@ export const saveMessageOnError = async ({
           message_type: assistantMessageType ?? message_type,
           clusterId,
           modelId,
-          parent_message_id: assistantParentMessageId ?? null
+          parent_message_id: assistantParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: assistantMetadataExtra,
+          reasoning_time_taken
         })
       }
       await setLastUsedChatModel(historyId, selectedModel)
@@ -200,6 +214,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -216,7 +233,10 @@ export const saveMessageOnError = async ({
         message_type: assistantMessageType ?? message_type,
         clusterId,
         modelId,
-        parent_message_id: assistantParentMessageId ?? null
+        parent_message_id: assistantParentMessageId ?? null,
+        generationInfo,
+        metadataExtra: assistantMetadataExtra,
+        reasoning_time_taken
       })
       setHistoryId(newHistoryId.id)
       await setLastUsedChatModel(newHistoryId.id, selectedModel)
@@ -263,6 +283,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -279,9 +302,19 @@ export const saveMessageOnError = async ({
         message_type: assistantMessageType ?? message_type,
         clusterId,
         modelId,
-        parent_message_id: assistantParentMessageId ?? null
+        parent_message_id: assistantParentMessageId ?? null,
+        generationInfo,
+        metadataExtra: assistantMetadataExtra,
+        reasoning_time_taken
       })
     } catch {}
+    await setLastUsedChatModel(historyId, selectedModel)
+    if (prompt_id || prompt_content) {
+      await setLastUsedChatSystemPrompt(historyId, {
+        prompt_content,
+        prompt_id
+      })
+    }
     return historyId
   } else {
     // Create new history on error
@@ -302,6 +335,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -317,10 +353,20 @@ export const saveMessageOnError = async ({
         message_type: assistantMessageType ?? message_type,
         clusterId,
         modelId,
-        parent_message_id: assistantParentMessageId ?? null
+        parent_message_id: assistantParentMessageId ?? null,
+        generationInfo,
+        metadataExtra: assistantMetadataExtra,
+        reasoning_time_taken
       })
     } catch {}
     setHistoryId(newHistoryId.id)
+    await setLastUsedChatModel(newHistoryId.id, selectedModel)
+    if (prompt_id || prompt_content) {
+      await setLastUsedChatSystemPrompt(newHistoryId.id, {
+        prompt_content,
+        prompt_id
+      })
+    }
     return newHistoryId.id
   }
 }
@@ -347,6 +393,8 @@ export const saveMessageOnSuccess = async ({
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
+  userMetadataExtra,
+  assistantMetadataExtra,
   prompt_id,
   prompt_content,
   reasoning_time_taken = 0,
@@ -377,6 +425,8 @@ export const saveMessageOnSuccess = async ({
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   generationInfo?: any
+  userMetadataExtra?: Record<string, unknown>
+  assistantMetadataExtra?: Record<string, unknown>
   prompt_id?: string
   prompt_content?: string
   reasoning_time_taken?: number
@@ -398,6 +448,7 @@ export const saveMessageOnSuccess = async ({
         modelId: userModelId,
         parent_message_id: userParentMessageId ?? null,
         generationInfo,
+        metadataExtra: userMetadataExtra,
         reasoning_time_taken,
         documents
       })
@@ -424,6 +475,7 @@ export const saveMessageOnSuccess = async ({
           modelId,
           parent_message_id: assistantParentMessageId ?? null,
           generationInfo,
+          metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
         }
         // historyId,
@@ -469,6 +521,7 @@ export const saveMessageOnSuccess = async ({
         modelId: userModelId,
         parent_message_id: userParentMessageId ?? null,
         generationInfo,
+        metadataExtra: userMetadataExtra,
         reasoning_time_taken,
         documents
       }
@@ -499,6 +552,7 @@ export const saveMessageOnSuccess = async ({
         modelId,
         parent_message_id: assistantParentMessageId ?? null,
         generationInfo,
+        metadataExtra: assistantMetadataExtra,
         reasoning_time_taken
       }
       // newHistoryId.id,

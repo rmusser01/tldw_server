@@ -38,6 +38,11 @@ export type RouteSmokePolicy = "include" | "exclude" | "manual"
 export type RouteNavPolicy = "primary" | "secondary" | "hidden"
 export type HostedOptionVisibility = "visible" | "hidden"
 
+export type RouteHeadingPolicy = {
+  requiresH1: boolean
+  exceptionReason?: string
+}
+
 export type RouteMetadata = {
   path: string
   canonicalPath: string
@@ -51,6 +56,8 @@ export type RouteMetadata = {
   commandPalette: "show" | "hide" | "alias_only"
   nav: RouteNavPolicy
   hostedOptionVisibility: HostedOptionVisibility
+  requiresH1?: boolean
+  h1ExceptionReason?: string
   requiresAuth?: boolean
   requiresBackend?: boolean
   rationale: string
@@ -74,6 +81,15 @@ type RouteMetadataInput = Omit<
 const web = ["web"] as const
 const webAndExtension = ["web", "extension_options"] as const
 const sidepanel = ["extension_sidepanel"] as const
+
+const headingExceptionSurfaces = new Set<RouteSurface>([
+  "hosted_only",
+  "extension_sidepanel",
+  "internal_qa_debug",
+  "legacy_alias",
+  "redirect",
+  "deprecated"
+])
 
 const defineRoute = ({
   canonicalPath,
@@ -970,6 +986,26 @@ for (const metadata of ROUTE_METADATA) {
 
 export function getRouteMetadata(path: string): RouteMetadata | undefined {
   return metadataByPath.get(normalizeRoutePath(path))
+}
+
+export function getRouteHeadingPolicy(
+  metadata: RouteMetadata
+): RouteHeadingPolicy {
+  if (typeof metadata.requiresH1 === "boolean") {
+    return {
+      requiresH1: metadata.requiresH1,
+      exceptionReason: metadata.h1ExceptionReason
+    }
+  }
+
+  if (metadata.smoke !== "include" || headingExceptionSurfaces.has(metadata.surface)) {
+    return {
+      requiresH1: false,
+      exceptionReason: metadata.h1ExceptionReason ?? metadata.rationale
+    }
+  }
+
+  return { requiresH1: true }
 }
 
 export function getCanonicalRoutePath(path: string): string | undefined {

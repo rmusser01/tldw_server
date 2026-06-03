@@ -76,6 +76,9 @@ export function redactText(value) {
   return out
 }
 
+/**
+ * @param {{ frontendRoot?: string, runId?: string, preserve?: boolean }} [options]
+ */
 export function createRunArtifacts({ frontendRoot = defaultFrontendRoot, runId, preserve = false } = {}) {
   const resolvedRunId = runId ?? createRunId()
   const root = path.join(frontendRoot, "test-results/onboarding-uat", resolvedRunId)

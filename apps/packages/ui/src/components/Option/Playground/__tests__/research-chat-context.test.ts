@@ -138,7 +138,7 @@ describe("research-chat-context", () => {
   })
 
   it("sanitizes and applies attached research context edits without mutating identity fields", () => {
-    const active = {
+    const active: AttachedResearchContext = {
       attached_at: "2026-03-08T20:00:00Z",
       run_id: "run_123",
       query: "Battery recycling supply chain",
@@ -182,7 +182,7 @@ describe("research-chat-context", () => {
   })
 
   it("sanitizes a draft and resets back to the run-derived baseline", () => {
-    const baseline = {
+    const baseline: AttachedResearchContext = {
       attached_at: "2026-03-08T20:00:00Z",
       run_id: "run_123",
       query: "Battery recycling supply chain",
