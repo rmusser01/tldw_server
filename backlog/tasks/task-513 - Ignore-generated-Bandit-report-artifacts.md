@@ -10,7 +10,7 @@ labels:
 modified_files:
 - .gitignore
 - Docs/ADR/006-bandit-report-path-portability.md
-- backlog/tasks/task-513 - Ignore-generated-Bandit-report-artifacts.md
+- backlog/tasks/task-513-ignore-generated-bandit-report-artifacts.md
 ---
 
 ## Description
