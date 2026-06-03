@@ -1196,6 +1196,68 @@ class PersonaStateStore:
                 item["salience"] = 0.0
         return item
 
+    def _build_persona_memory_where_clause(
+        self,
+        *,
+        user_id: str,
+        entry_id: str | None = None,
+        persona_id: str | None = None,
+        memory_type: str | None = None,
+        scope_snapshot_id: str | None = None,
+        session_id: str | None = None,
+        require_missing_scope_snapshot_id: bool = False,
+        require_missing_session_id: bool = False,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+    ) -> tuple[str, list[Any]]:
+        """Build normalized persona-memory predicates for read and write queries.
+
+        The helper centralizes the shared persona_memory_entries filtering policy:
+        ID and string filter values are stripped before binding, archived/deleted
+        rows are excluded unless explicitly included, and missing-scope/session
+        predicates are mutually exclusive with exact scope/session matches.
+        """
+        user_id_value = str(user_id).strip()
+        if not user_id_value:
+            raise InputError("user_id is required for persona memory filtering.")  # noqa: TRY003
+        if scope_snapshot_id is not None and require_missing_scope_snapshot_id:
+            raise ValueError(  # noqa: TRY003
+                "Cannot require missing scope_snapshot_id when a specific scope_snapshot_id is provided."
+            )
+        if session_id is not None and require_missing_session_id:
+            raise ValueError(  # noqa: TRY003
+                "Cannot require missing session_id when a specific session_id is provided."
+            )
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        if entry_id is not None:
+            clauses.append("id = ?")
+            params.append(str(entry_id).strip())
+        clauses.append("user_id = ?")
+        params.append(user_id_value)
+        if persona_id is not None:
+            clauses.append("persona_id = ?")
+            params.append(str(persona_id).strip())
+        if memory_type is not None:
+            clauses.append("memory_type = ?")
+            params.append(str(memory_type).strip())
+        if scope_snapshot_id is not None:
+            clauses.append("scope_snapshot_id = ?")
+            params.append(str(scope_snapshot_id).strip())
+        if session_id is not None:
+            clauses.append("session_id = ?")
+            params.append(str(session_id).strip())
+        if require_missing_scope_snapshot_id:
+            clauses.append("(scope_snapshot_id IS NULL OR scope_snapshot_id = '')")
+        if require_missing_session_id:
+            clauses.append("(session_id IS NULL OR session_id = '')")
+        if not include_archived:
+            clauses.append("archived = 0")
+        if not include_deleted:
+            clauses.append("deleted = 0")
+        return " AND ".join(clauses), params
+
     def _persona_exemplar_row_to_dict(self, row: Any) -> dict[str, Any] | None:
         if not row:
             return None
@@ -3987,25 +4049,15 @@ class PersonaStateStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        clauses = ["user_id = ?"]
-        params: list[Any] = [user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if memory_type is not None:
-            clauses.append("memory_type = ?")
-            params.append(str(memory_type).strip())
-        if scope_snapshot_id is not None:
-            clauses.append("scope_snapshot_id = ?")
-            params.append(str(scope_snapshot_id).strip())
-        if session_id is not None:
-            clauses.append("session_id = ?")
-            params.append(str(session_id).strip())
-        if not include_archived:
-            clauses.append("archived = 0")
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        where_sql = " AND ".join(clauses)
+        where_sql, params = self._build_persona_memory_where_clause(
+            user_id=user_id,
+            persona_id=persona_id,
+            memory_type=memory_type,
+            scope_snapshot_id=scope_snapshot_id,
+            session_id=session_id,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
         query = (
             "SELECT * FROM persona_memory_entries "  # nosec B608
             f"WHERE {where_sql} "
@@ -4023,14 +4075,14 @@ class PersonaStateStore:
         persona_id: str | None = None,
         include_deleted: bool = False,
     ) -> dict[str, Any] | None:
-        clauses = ["id = ?", "user_id = ?"]
-        params: list[Any] = [entry_id, user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        query = f"SELECT * FROM persona_memory_entries WHERE {' AND '.join(clauses)}"  # nosec B608
+        where_sql, params = self._build_persona_memory_where_clause(
+            user_id=user_id,
+            entry_id=entry_id,
+            persona_id=persona_id,
+            include_archived=True,
+            include_deleted=include_deleted,
+        )
+        query = f"SELECT * FROM persona_memory_entries WHERE {where_sql}"  # nosec B608
         cursor = self.execute_query(query, tuple(params))
         return self._persona_memory_row_to_dict(cursor.fetchone())
 
@@ -4043,19 +4095,14 @@ class PersonaStateStore:
         include_archived: bool = False,
         include_deleted: bool = False,
     ) -> int:
-        clauses = ["user_id = ?"]
-        params: list[Any] = [user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if memory_type is not None:
-            clauses.append("memory_type = ?")
-            params.append(str(memory_type).strip())
-        if not include_archived:
-            clauses.append("archived = 0")
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        query = f"SELECT COUNT(*) FROM persona_memory_entries WHERE {' AND '.join(clauses)}"  # nosec B608
+        where_sql, params = self._build_persona_memory_where_clause(
+            user_id=user_id,
+            persona_id=persona_id,
+            memory_type=memory_type,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
+        query = f"SELECT COUNT(*) FROM persona_memory_entries WHERE {where_sql}"  # nosec B608
         cursor = self.execute_query(query, tuple(params))
         row = cursor.fetchone()
         return row[0] if row else 0
@@ -4070,12 +4117,13 @@ class PersonaStateStore:
     ) -> bool:
         bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
         now = self._get_current_utc_timestamp_iso()
-        clauses = ["id = ?", "user_id = ?", "deleted = 0"]
-        params: list[Any] = [entry_id, user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        where_sql = " AND ".join(clauses)
+        where_sql, params = self._build_persona_memory_where_clause(
+            user_id=user_id,
+            entry_id=entry_id,
+            persona_id=persona_id,
+            include_archived=True,
+            include_deleted=False,
+        )
         query = (
             "UPDATE persona_memory_entries "
             "SET archived = ?, last_modified = ?, version = version + 1 "
@@ -4148,12 +4196,19 @@ class PersonaStateStore:
 
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            where_sql, where_params = self._build_persona_memory_where_clause(
+                user_id=user_id,
+                entry_id=entry_id,
+                persona_id=persona_id,
+                include_archived=True,
+                include_deleted=False,
+            )
             query = (
                 "UPDATE persona_memory_entries "
                 f"SET {', '.join(set_parts)} "
-                "WHERE id = ? AND persona_id = ? AND user_id = ? AND deleted = 0"  # nosec B608
+                f"WHERE {where_sql}"  # nosec B608
             )
-            params.extend([entry_id, persona_id, user_id])
+            params.extend(where_params)
             prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
             cursor = conn.execute(prepared_query, prepared_params or ())
             return cursor.rowcount > 0
@@ -4173,19 +4228,14 @@ class PersonaStateStore:
             raise InputError("scope_snapshot_id is required for namespace backfill.")  # noqa: TRY003
 
         now = self._get_current_utc_timestamp_iso()
-        clauses = [
-            "user_id = ?",
-            "persona_id = ?",
-            "(scope_snapshot_id IS NULL OR scope_snapshot_id = '')",
-        ]
-        params: list[Any] = [user_id, persona_id]
-        if require_missing_session_id:
-            clauses.append("(session_id IS NULL OR session_id = '')")
-        if not include_archived:
-            clauses.append("archived = 0")
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        where_sql = " AND ".join(clauses)
+        where_sql, params = self._build_persona_memory_where_clause(
+            user_id=user_id,
+            persona_id=persona_id,
+            require_missing_scope_snapshot_id=True,
+            require_missing_session_id=require_missing_session_id,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
         query = (
             "UPDATE persona_memory_entries "
             "SET scope_snapshot_id = ?, last_modified = ?, version = version + 1 "
@@ -4204,12 +4254,13 @@ class PersonaStateStore:
     ) -> bool:
         bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
         now = self._get_current_utc_timestamp_iso()
-        clauses = ["id = ?", "user_id = ?", "deleted = 0"]
-        params: list[Any] = [entry_id, user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        where_sql = " AND ".join(clauses)
+        where_sql, params = self._build_persona_memory_where_clause(
+            user_id=user_id,
+            entry_id=entry_id,
+            persona_id=persona_id,
+            include_archived=True,
+            include_deleted=False,
+        )
         query = (
             "UPDATE persona_memory_entries "
             "SET deleted = ?, archived = ?, last_modified = ?, version = version + 1 "
