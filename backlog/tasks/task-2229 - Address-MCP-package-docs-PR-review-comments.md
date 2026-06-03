@@ -2,10 +2,14 @@
 id: TASK-2229
 title: Address MCP package docs PR review comments
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-03 04:54
 labels:
 - mcp-unified
 - review
 - docs
+dependencies: []
 priority: medium
 modified_files:
 - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
@@ -24,9 +28,11 @@ Verify PR review comments after rebasing the MCP package docs PR on latest dev. 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -36,10 +42,10 @@ Rebased PR branch on latest dev; branch was already up to date. Fixed the still-
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
