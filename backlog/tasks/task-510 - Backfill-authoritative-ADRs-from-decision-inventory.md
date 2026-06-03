@@ -29,7 +29,7 @@ Plan and coordinate bounded module/domain ADR backfill child tasks from the owne
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Plan created: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md. Depends on owner-reviewed output from TASK-509 before bounded backfill slices are created.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

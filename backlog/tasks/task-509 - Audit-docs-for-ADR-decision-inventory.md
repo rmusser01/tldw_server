@@ -24,7 +24,7 @@ Audit existing decision sources and produce Docs/ADR/inventory/YYYY-MM-DD-decisi
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Plan created: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md. Execution order starts here; complete TASK-509 before TASK-510/TASK-511.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -24,7 +24,7 @@ After repo-local ADR workflow validation, decide whether to update global Superp
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Plan created: Docs/superpowers/plans/2026-06-03-adr-follow-up-sprint-implementation-plan.md. Depends on repo-local ADR workflow outcomes from TASK-509/TASK-510 before global Superpowers edits are proposed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
