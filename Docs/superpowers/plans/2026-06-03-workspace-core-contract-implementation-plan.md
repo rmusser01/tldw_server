@@ -793,7 +793,7 @@ Workspace subset -> 97 passed, 6 warnings; compile smoke passed; `git diff
 - Modify only if needed: `Docs/superpowers/specs/2026-06-03-canonical-workspace-core-project-model-design.md`
 - Modify Backlog task for implementation, not this plan task.
 
-- [ ] **Step 1: Update Workspace Core README**
+- [x] **Step 1: Update Workspace Core README**
 
 Document:
 
@@ -804,7 +804,7 @@ Document:
 - `GET /roots`, `/capabilities`, and `/context` are read contract surfaces.
 - Sandbox volume creation, root attach UX, file inventory Jobs, and indexing policy are follow-up slices.
 
-- [ ] **Step 2: Run focused backend tests**
+- [x] **Step 2: Run focused backend tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -819,7 +819,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run import/compile smoke**
+- [x] **Step 3: Run import/compile smoke**
 
 ```bash
 source .venv/bin/activate && python -m compileall \
@@ -830,7 +830,7 @@ source .venv/bin/activate && python -m compileall \
 
 Expected: exit code 0.
 
-- [ ] **Step 4: Run Bandit on touched backend scope**
+- [x] **Step 4: Run Bandit on touched backend scope**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -843,7 +843,7 @@ source .venv/bin/activate && python -m bandit \
 
 Expected: no new findings in touched code. Existing baseline findings in large legacy files must be documented with exact issue IDs and why they are unrelated.
 
-- [ ] **Step 5: Run diff hygiene**
+- [x] **Step 5: Run diff hygiene**
 
 ```bash
 git diff --check
@@ -852,7 +852,7 @@ git status --short
 
 Expected: no whitespace errors; only intended files changed.
 
-- [ ] **Step 6: Commit closeout docs**
+- [x] **Step 6: Commit closeout docs**
 
 ```bash
 git add tldw_Server_API/app/core/Workspaces/README.md
@@ -860,6 +860,12 @@ git commit -m "docs: document workspace core contract slice"
 ```
 
 Skip this commit if README changes were included in an earlier task commit.
+
+Status note: Task 6 documented the canonical Workspace Core contract, read-only
+API surfaces, privacy boundaries for project roots, and follow-up slices. Local
+verification: focused backend suite -> 119 passed, 6 warnings; compile smoke
+passed; Bandit full touched backend scope -> 0 findings with legacy `nosec`
+skips in `ChaChaNotes_DB.py`; `git diff --check` passed.
 
 ---
 
