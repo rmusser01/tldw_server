@@ -1,5 +1,7 @@
 # Workspace Canonical Model Decision - May 2026
 
+**Covered by:** `Docs/ADR/007-research-workspace-canonical-first-slice-shell.md`
+
 ## Decision
 
 `ResearchWorkspace` is the canonical shell for the roadmap first slice.

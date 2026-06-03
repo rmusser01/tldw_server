@@ -38,3 +38,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-004](004-ai-generated-pr-change-summary-gate.md) | Accepted | Require human-written change summaries for materially AI-authored PRs. |
 | [ADR-005](005-bandit-touched-scope-security-gate.md) | Superseded by ADR-006 | Run Bandit on touched Python/code scope before completion. |
 | [ADR-006](006-bandit-report-path-portability.md) | Accepted | Keep the Bandit touched-scope gate but require portable report output paths. |
+| [ADR-007](007-research-workspace-canonical-first-slice-shell.md) | Accepted | Use `ResearchWorkspace` as the canonical first-slice workspace shell while preserving specialized routes. |
+| [ADR-008](008-workspace-split-key-persistence-and-indexeddb-offload.md) | Accepted | Use split localStorage workspace persistence with optional IndexedDB offload for heavy payloads. |
+| [ADR-009](009-quick-chat-docs-assistant-modes.md) | Accepted | Keep Quick Chat split into `Chat`, `Docs Q&A`, and `Browse Guides` modes. |

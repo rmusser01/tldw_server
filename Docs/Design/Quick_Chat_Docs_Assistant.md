@@ -1,5 +1,7 @@
 # Quick Chat Docs Assistant Design
 
+**Covered by:** `Docs/ADR/009-quick-chat-docs-assistant-modes.md`
+
 ## Feature Goals And Scope
 
 ### Goals
