@@ -35,12 +35,13 @@ Resolve PR #1982 review comments, inspect checks, and address merge conflicts fo
 - 2026-06-03: Fixed MCP catalog connection validation ordering so private/reserved hosts are rejected before catalog lookup and catalog probes use the canonical catalog URL without request query/fragment secrets.
 - 2026-06-03: Reproduced and fixed the failing `onboarding-docs-gate` docs discoverability tests by restoring user-guide index entries for benchmark creation, OpenWebUI import/hydration, and Flashcards Study Guide.
 - 2026-06-03: Updated PR title/body to address metadata warnings.
+- 2026-06-03: After pushing the merge/review fix commit, newly started frontend jobs failed at `bun install --frozen-lockfile`; regenerated `apps/bun.lock` and verified the frozen install passes locally.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved PR #1982 merge conflicts and review feedback. `dev` was kept for overlapping conflict hunks, non-conflicting `main` changes were retained, review-targeted workflow/docs/design/compose fixes were applied, MCP catalog connection validation was corrected, and validation passed locally.
+Resolved PR #1982 merge conflicts and review feedback. `dev` was kept for overlapping conflict hunks, non-conflicting `main` changes were retained, review-targeted workflow/docs/design/compose fixes were applied, MCP catalog connection validation was corrected, the frontend workspace lockfile was refreshed after the merge, and validation passed locally.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

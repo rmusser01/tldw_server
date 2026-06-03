@@ -37,7 +37,7 @@
 **Goal:** Address still-valid CodeRabbit comments.
 **Success Criteria:** Workflow/comment guidance issues are fixed in the touched files.
 **Tests:** YAML parse checks where practical; JSON parse check for `.impeccable/design.json`.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Prefer `pyproject.toml` before requirements in `.github/workflows/sbom.yml`.
 - [x] Set `persist-credentials: false` on the self-hosted checkout in `.github/workflows/vz-linux-host-gated.yml`.
@@ -69,3 +69,4 @@ Validation completed:
 - Bandit all touched Python files with pytest `assert` warning `B101` suppressed: zero findings.
 - Focused pytest slice for OCR runtime/backend tests and MCP catalog endpoint tests: `51 passed`.
 - Onboarding docs-gate reproduction for benchmark/OpenWebUI/flashcards discoverability tests: `9 passed`.
+- Post-push frontend install failure reproduction: `bun install --frozen-lockfile` initially failed because `apps/bun.lock` was stale after the merge; regenerated `apps/bun.lock` and reran successfully with no changes.
