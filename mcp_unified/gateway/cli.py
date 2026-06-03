@@ -1528,12 +1528,16 @@ def _preset_tooling_summary(preset: ProfilePreset) -> dict[str, Any]:
     if not isinstance(progressive, dict):
         progressive = {}
 
+    recommended_servers = tooling.get("recommended_servers")
+    if not isinstance(recommended_servers, (list, tuple)):
+        recommended_servers = []
+
     return {
-        "direct_categories": list(progressive.get("direct_categories") or []),
-        "deferred_categories": list(progressive.get("deferred_categories") or []),
+        "direct_categories": _string_list(progressive.get("direct_categories")),
+        "deferred_categories": _string_list(progressive.get("deferred_categories")),
         "recommended_server_categories": [
             server.get("category")
-            for server in tooling.get("recommended_servers", [])
+            for server in recommended_servers
             if isinstance(server, dict) and isinstance(server.get("category"), str)
         ],
         "recommendation_catalog_patchable": tooling.get(
@@ -1541,6 +1545,14 @@ def _preset_tooling_summary(preset: ProfilePreset) -> dict[str, Any]:
         )
         is True,
     }
+
+
+def _string_list(value: Any) -> list[str]:
+    """Return only string items from list-like metadata values."""
+
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def _handle_list_presets(_args: argparse.Namespace) -> int:

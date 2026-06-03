@@ -38,9 +38,11 @@ RED: extended the gateway CLI list-presets package test to run `python -m mcp_un
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Task 5. Added a subprocess-based CLI regression test for `python -m mcp_unified.gateway.cli list-presets` that asserts compact tooling metadata for the `product-owner` preset. Updated `list-presets` output to include direct/deferred tooling categories, recommended server categories, and recommendation catalog patchability while leaving `show-preset` as the full metadata inspection command. Updated package README and user guide documentation for role preset tooling discovery, progressive disclosure bridge tools, recommendation catalog authority limits, and the CDP-first browser inspection target `ChromeDevTools/chrome-devtools-mcp`.
+Implemented Task 5 and follow-up review hardening. Added a subprocess-based CLI regression test for `python -m mcp_unified.gateway.cli list-presets` that asserts compact tooling metadata for the `product-owner` preset. Updated `list-presets` output to include direct/deferred tooling categories, recommended server categories, and recommendation catalog patchability while leaving `show-preset` as the full metadata inspection command. Updated package README and user guide documentation for role preset tooling discovery, progressive disclosure bridge tools, recommendation catalog authority limits, and the CDP-first browser inspection target `ChromeDevTools/chrome-devtools-mcp`.
 
-Verification recorded: RED focused CLI test failed with `KeyError: 'tooling'`; focused GREEN test passed; required pytest command passed with 103 tests; Bandit on `mcp_unified/gateway/cli.py` exited 0 and wrote `/tmp/bandit_mcp_profile_tooling_cli.json`; `git diff --check` passed. Known skips or blockers: none.
+Follow-up review fix: added a focused helper regression test for malformed tooling metadata and hardened `_preset_tooling_summary()` so category values are accepted only from list/tuple sources, only strings are emitted, and `recommended_servers` is ignored unless it is list/tuple metadata.
+
+Verification recorded: original RED focused CLI test failed with `KeyError: 'tooling'`; review RED focused helper test failed with `TypeError: 'NoneType' object is not iterable`; focused GREEN tests passed; required pytest, Bandit, and `git diff --check` verification run for the review fix. Known skips or blockers: none.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
