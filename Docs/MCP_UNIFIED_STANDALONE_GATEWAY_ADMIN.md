@@ -39,6 +39,7 @@ python -m pytest \
 ```
 
 That gate builds the package-local wheel and sdist with `python -m build
+--no-isolation`, then checks the wheel metadata, console script entry point,
 optional extras, dependency boundary, and sdist contents. The `PyPI Package
 Check` GitHub Actions workflow runs the same focused non-host test path for
 `mcp_unified/**` changes before it builds the root `tldw-server` distribution.
