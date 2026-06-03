@@ -1,7 +1,7 @@
 ---
 id: TASK-491
 title: Design OpenUI dynamic chat rendering support
-status: In Progress
+status: Done
 references:
 - https://github.com/pewdiepie-archdaemon/odysseus/pull/151
 documentation:
@@ -24,21 +24,21 @@ Create an approved design spec for supporting OpenUI as the first renderer in a 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Closed after the approved implementation plan and merged implementation PR completed the design follow-through. This closeout is Backlog metadata only; no application code changed, so Bandit is not applicable.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and reviewed for OpenUI as the first renderer in a shared dynamic UI chat rendering layer. V1 decisions: temporary /chat composer/request mode, frontend-tagged metadata preserved through existing persistence after OpenUI source preflight, final render before streaming preview, source fallback outside enabled surfaces, runtime/CSP feasibility gate before adapter enablement, and validated OpenUI action round-trips as normal user messages with provenance metadata and sensitive-field safeguards.
+Design spec written, reviewed, and followed through by the approved OpenUI implementation plan and merged implementation PR. Dynamic UI support is now tracked by the completed implementation task; this design task is closed as accepted.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
