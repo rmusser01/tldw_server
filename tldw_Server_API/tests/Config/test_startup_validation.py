@@ -89,3 +89,56 @@ def test_get_ingestion_source_allowed_roots_resolves_relative_paths_from_project
 
     assert roots == (config.ACTUAL_PROJECT_ROOT / "fixtures" / "input",)
     assert all(isinstance(root, Path) and root.is_absolute() for root in roots)
+
+
+def test_get_workspace_project_root_allowed_roots_prefers_workspace_specific_config(monkeypatch):
+    workspace_root = config.ACTUAL_PROJECT_ROOT / "workspace-projects"
+    acp_root = config.ACTUAL_PROJECT_ROOT / "legacy-acp"
+
+    def _fake_get_config_value(section: str, key: str, default=None, *, reload: bool = False):
+        values = {
+            ("WORKSPACES", "project_root_allowed_base_paths"): "workspace-projects",
+            ("ACP-WORKSPACE", "allowed_base_paths"): "legacy-acp",
+        }
+        return values.get((section, key), default)
+
+    monkeypatch.setattr(config, "get_config_value", _fake_get_config_value, raising=True)
+    monkeypatch.delenv("WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS", raising=False)
+    monkeypatch.delenv("TLDW_WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS", raising=False)
+    monkeypatch.delenv("ACP_WORKSPACE_ALLOWED_BASE_PATHS", raising=False)
+
+    assert config.get_workspace_project_root_allowed_roots() == (workspace_root,)
+    assert acp_root not in config.get_workspace_project_root_allowed_roots()
+
+
+def test_get_workspace_project_root_allowed_roots_uses_acp_fallback_only_when_workspace_empty(monkeypatch):
+    def _fake_get_config_value(section: str, key: str, default=None, *, reload: bool = False):
+        values = {
+            ("WORKSPACES", "project_root_allowed_base_paths"): "",
+            ("ACP-WORKSPACE", "allowed_base_paths"): "legacy-acp",
+        }
+        return values.get((section, key), default)
+
+    monkeypatch.setattr(config, "get_config_value", _fake_get_config_value, raising=True)
+    monkeypatch.delenv("WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS", raising=False)
+    monkeypatch.delenv("TLDW_WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS", raising=False)
+    monkeypatch.delenv("ACP_WORKSPACE_ALLOWED_BASE_PATHS", raising=False)
+
+    assert config.get_workspace_project_root_allowed_roots() == (
+        config.ACTUAL_PROJECT_ROOT / "legacy-acp",
+    )
+
+
+def test_get_workspace_project_root_allowed_roots_dedupes_config_and_env(monkeypatch):
+    def _fake_get_config_value(section: str, key: str, default=None, *, reload: bool = False):
+        if (section, key) == ("WORKSPACES", "project_root_allowed_base_paths"):
+            return "projects,projects"
+        return default
+
+    monkeypatch.setattr(config, "get_config_value", _fake_get_config_value, raising=True)
+    monkeypatch.setenv("WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS", "projects")
+    monkeypatch.delenv("TLDW_WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS", raising=False)
+
+    assert config.get_workspace_project_root_allowed_roots() == (
+        config.ACTUAL_PROJECT_ROOT / "projects",
+    )
