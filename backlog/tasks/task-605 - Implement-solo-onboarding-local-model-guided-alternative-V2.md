@@ -1,28 +1,37 @@
 ---
 id: TASK-605
 title: Implement solo onboarding local model guided alternative V2
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-06-03 04:21'
+labels: []
+dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/pull/2227
-- https://github.com/rmusser01/tldw_server/pull/2236
+  - 'https://github.com/rmusser01/tldw_server/pull/2227'
+  - 'https://github.com/rmusser01/tldw_server/pull/2236'
 documentation:
-- Docs/superpowers/specs/2026-06-02-solo-onboarding-v2-roadmap-design.md
+  - Docs/superpowers/specs/2026-06-02-solo-onboarding-v2-roadmap-design.md
 modified_files:
-- Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
-- apps/packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx
-- apps/packages/ui/src/components/Option/Onboarding/steps/ProviderSetupStep.tsx
-- apps/tldw-frontend/e2e/onboarding-uat/helpers.ts
-- apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/local-model-unavailable.json
-- apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/local-models-unavailable.json
-- apps/tldw-frontend/e2e/onboarding-uat/playwright.config.ts
-- apps/tldw-frontend/e2e/onboarding-uat/recovery.spec.ts
-- apps/tldw-frontend/e2e/onboarding-uat/scenarios.ts
-- apps/tldw-frontend/e2e/onboarding-uat/setup-happy-path.spec.ts
-- apps/tldw-frontend/scripts/__tests__/onboarding-uat-runner.test.ts
-- apps/tldw-frontend/scripts/onboarding-uat/run.mjs
-- tldw_Server_API/app/core/Setup/provider_validation.py
-- tldw_Server_API/tests/Setup/test_setup_provider_validation.py
-- backlog/tasks/task-605 - Implement-solo-onboarding-local-model-guided-alternative-V2.md
+  - Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
+  - >-
+    apps/packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx
+  - apps/packages/ui/src/components/Option/Onboarding/steps/ProviderSetupStep.tsx
+  - apps/tldw-frontend/e2e/onboarding-uat/helpers.ts
+  - >-
+    apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/local-model-unavailable.json
+  - >-
+    apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/local-models-unavailable.json
+  - apps/tldw-frontend/e2e/onboarding-uat/playwright.config.ts
+  - apps/tldw-frontend/e2e/onboarding-uat/recovery.spec.ts
+  - apps/tldw-frontend/e2e/onboarding-uat/scenarios.ts
+  - apps/tldw-frontend/e2e/onboarding-uat/setup-happy-path.spec.ts
+  - apps/tldw-frontend/scripts/__tests__/onboarding-uat-runner.test.ts
+  - apps/tldw-frontend/scripts/onboarding-uat/run.mjs
+  - tldw_Server_API/app/core/Setup/provider_validation.py
+  - tldw_Server_API/tests/Setup/test_setup_provider_validation.py
+  - >-
+    backlog/tasks/task-605 - Implement-solo-onboarding-local-model-guided-alternative-V2.md
 ---
 
 ## Description
@@ -43,6 +52,7 @@ Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 complete. Added backend manual-model fallback for reachable local OpenAI-compatible endpoints when model discovery is unavailable. Red run before implementation: 2 new provider validation tests failed as expected. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q -> 28 passed, 6 warnings.
 
@@ -52,6 +62,9 @@ Stage 4 complete. Added explicit local-provider UAT scenarios for discovered mod
 
 Stage 5 verification complete. Focused verification: bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts --reporter=dot -> 27 passed; bunx vitest run ../packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx --reporter=dot -> 22 passed; source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q -> 28 passed, 6 warnings; Bandit touched setup scope -> 0 findings in /tmp/bandit_onboarding_local_model_v2.json; git diff --check -> clean. Draft PR opened at https://github.com/rmusser01/tldw_server/pull/2236. Worktree status has two unrelated untracked watchlist template files left untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Closeout: PR #2236 merged into dev at c26155476aed188c4fbd7870287a740451c27e59. The review follow-up rebased the PR onto latest dev, addressed local OpenAI-compatible /v1/models validation parity and non-default manual-model recovery, preserved the four-commit structure, and verified focused backend/frontend/UAT checks before merge.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
