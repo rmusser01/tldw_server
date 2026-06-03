@@ -7,6 +7,7 @@ documentation:
 - Docs/superpowers/specs/2026-06-03-canonical-workspace-core-project-model-design.md
 - Docs/superpowers/plans/2026-06-03-workspace-core-contract-implementation-plan.md
 - Docs/superpowers/specs/2026-06-03-workspace-primary-root-attach-api-design.md
+- Docs/superpowers/plans/2026-06-03-workspace-primary-root-attach-api-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-06-03-workspace-primary-root-attach-api-design.md
 - Docs/superpowers/plans/2026-06-03-workspace-primary-root-attach-api-implementation-plan.md
@@ -33,6 +34,7 @@ Add the next Workspace Core slice for attaching/replacing a Workspace-owned prim
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec drafted for the Workspace primary root attach/write API slice at `Docs/superpowers/specs/2026-06-03-workspace-primary-root-attach-api-design.md`. The spec selects a reusable Workspace Core root-binding service plus thin `PUT /api/v1/workspaces/{workspace_id}/roots/primary` endpoint, with host-local allowlist/path validation, sandbox-volume wrapper validation, one-primary-root replacement semantics, redacted read responses, and explicit follow-up boundaries.
 Spec review follow-up applied: hardened `root_id` omission/idempotency semantics, added field bounds for `root_id` and `display_name`, required DB-transactional `expected_workspace_version` enforcement, clarified same-binding operational-state repair, made default Sandbox resolver behavior fail-closed, and added config docs/test coverage requirements for Workspace project-root allowlists.
+Implementation plan written at `Docs/superpowers/plans/2026-06-03-workspace-primary-root-attach-api-implementation-plan.md`. The plan decomposes the slice into config allowlists, DB write semantics, root-binding service, fail-closed sandbox capabilities, API schema/endpoint, read-contract regression tests, and final verification/Backlog closeout. Self-review tightened the plan so DB conflicts from the attach write are wrapped into stable Workspace-root `{code,message}` API payloads.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
