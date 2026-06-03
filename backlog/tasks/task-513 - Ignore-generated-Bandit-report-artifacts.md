@@ -1,7 +1,7 @@
 ---
 id: TASK-513
 title: Ignore generated Bandit report artifacts
-status: In Progress
+status: Done
 labels:
 - docs
 - process
@@ -43,7 +43,7 @@ Add an explicit bandit_*.json ignore rule near generated report artifacts, updat
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Final summary: Added an explicit .gitignore rule for generated bandit_*.json reports and updated ADR-006 to document that generated Bandit JSON report artifacts are ignored and should not be committed unless explicitly requested. Verification passed: git check-ignore confirms bandit_TASK-513.json is ignored; targeted rg checks found the ignore rule, ADR guidance, and AGENTS.md command; git diff --check passed. Bandit not applicable for docs/process-only changes. Draft PR: https://github.com/rmusser01/tldw_server/pull/2234
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
