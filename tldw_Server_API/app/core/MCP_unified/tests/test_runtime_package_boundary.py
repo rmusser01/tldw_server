@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import ast
+import configparser
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import zipfile
 from datetime import datetime
+from email.message import Message
+from email.parser import Parser
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 
@@ -22,6 +28,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
 
 PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
 STANDALONE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
+REQUIRES_DIST_NAME_PATTERN = re.compile(r"^\s*([A-Za-z0-9_.-]+)")
+REQUIRES_DIST_EXTRA_PATTERN = re.compile(r"extra\s*==\s*['\"]([^'\"]+)['\"]")
 
 
 def _dependency_package_name(dependency: str) -> str:
@@ -132,6 +140,125 @@ def _assert_subprocess_succeeded(
             f"STDOUT:\n{result.stdout}\n"
             f"STDERR:\n{result.stderr}"
         )
+
+
+def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
+    """Build standalone MCP Unified wheel and sdist into a temporary directory."""
+
+    _require_offline_build_tools()
+    if importlib.util.find_spec("build") is None:
+        pytest.skip("Standalone distribution gate requires the 'build' package.")
+
+    package_source = tmp_path / "mcp_unified_source"
+    shutil.copytree(
+        PACKAGE_ROOT,
+        package_source,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "build",
+            "dist",
+            "*.egg-info",
+        ),
+    )
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+
+    result = subprocess.run(  # nosec B603
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--wheel",
+            "--sdist",
+            "--no-isolation",
+            "--outdir",
+            str(dist_dir),
+            str(package_source),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_INDEX": "1",
+        },
+    )
+    _assert_subprocess_succeeded(result, "python -m build")
+
+    wheels = sorted(dist_dir.glob("mcp_unified-*.whl"))
+    sdists = sorted(dist_dir.glob("mcp_unified-*.tar.gz"))
+    assert len(wheels) == 1  # nosec B101
+    assert len(sdists) == 1  # nosec B101
+    return wheels[0], sdists[0]
+
+
+def _read_wheel_metadata(wheel: Path) -> Message:
+    """Read the wheel distribution metadata."""
+
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_members = [
+            name
+            for name in archive.namelist()
+            if name.endswith(".dist-info/METADATA")
+        ]
+        assert len(metadata_members) == 1  # nosec B101
+        raw_metadata = archive.read(metadata_members[0]).decode("utf-8")
+
+    return Parser().parsestr(raw_metadata)
+
+
+def _read_wheel_entry_points(wheel: Path) -> configparser.ConfigParser:
+    """Read wheel entry points as a ConfigParser document."""
+
+    parser = configparser.ConfigParser()
+    with zipfile.ZipFile(wheel) as archive:
+        entry_point_members = [
+            name
+            for name in archive.namelist()
+            if name.endswith(".dist-info/entry_points.txt")
+        ]
+        assert len(entry_point_members) == 1  # nosec B101
+        parser.read_string(archive.read(entry_point_members[0]).decode("utf-8"))
+    return parser
+
+
+def _wheel_declared_dependency_names(distribution_metadata: Message) -> set[str]:
+    """Return normalized dependency names declared by wheel metadata."""
+
+    dependencies = distribution_metadata.get_all("Requires-Dist") or []
+    names: set[str] = set()
+    for dependency in dependencies:
+        match = REQUIRES_DIST_NAME_PATTERN.match(dependency)
+        assert match is not None  # nosec B101
+        names.add(match.group(1).lower().replace("_", "-"))
+    return names
+
+
+def _wheel_extra_dependency_names(
+    distribution_metadata: Message,
+) -> dict[str, set[str]]:
+    """Return normalized dependency names grouped by wheel extra marker."""
+
+    dependencies = distribution_metadata.get_all("Requires-Dist") or []
+    grouped: dict[str, set[str]] = {}
+    for dependency in dependencies:
+        extra_match = REQUIRES_DIST_EXTRA_PATTERN.search(dependency)
+        if extra_match is None:
+            continue
+        name_match = REQUIRES_DIST_NAME_PATTERN.match(dependency)
+        assert name_match is not None  # nosec B101
+        grouped.setdefault(extra_match.group(1), set()).add(
+            name_match.group(1).lower().replace("_", "-")
+        )
+    return grouped
+
+
+def _read_sdist_members(sdist: Path) -> set[str]:
+    """Return normalized member names from a standalone source distribution."""
+
+    with tarfile.open(sdist, "r:gz") as archive:
+        return {member.name for member in archive.getmembers()}
 
 
 def test_subprocess_failure_assertion_includes_captured_output() -> None:
@@ -278,6 +405,81 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
         standalone_dependency_names.update(_dependency_names(dependencies))
 
     assert forbidden_dependency_names.isdisjoint(standalone_dependency_names)
+
+
+def test_mcp_unified_standalone_distribution_metadata_matches_extras(
+    tmp_path: Path,
+) -> None:
+    """Built standalone artifacts must preserve the package-local extras contract."""
+
+    metadata = importlib.import_module("mcp_unified.package_metadata")
+    wheel, _sdist = _build_standalone_distributions(tmp_path)
+    distribution_metadata = _read_wheel_metadata(wheel)
+    entry_points = _read_wheel_entry_points(wheel)
+
+    assert distribution_metadata["Name"] == metadata.PACKAGE_NAME  # nosec B101
+    assert distribution_metadata["Version"] == mcp_unified.__version__  # nosec B101
+    assert set(distribution_metadata.get_all("Provides-Extra")) == set(
+        metadata.OPTIONAL_EXTRAS
+    )  # nosec B101
+    assert _wheel_extra_dependency_names(distribution_metadata) == {
+        extra: set(dependencies)
+        for extra, dependencies in metadata.OPTIONAL_EXTRAS.items()
+    }  # nosec B101
+    assert (
+        entry_points["console_scripts"]["mcp-unified-gateway"]
+        == "mcp_unified.gateway.cli:main"
+    )  # nosec B101
+
+    forbidden_dependency_names = {
+        "chromadb",
+        "docling",
+        "faster-whisper",
+        "gradio",
+        "llama-cpp-python",
+        "nemo-toolkit",
+        "next",
+        "qwen",
+        "torch",
+        "tts",
+        "yt-dlp",
+    }
+    assert forbidden_dependency_names.isdisjoint(
+        _wheel_declared_dependency_names(distribution_metadata)
+    )  # nosec B101
+
+
+def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
+    tmp_path: Path,
+) -> None:
+    """Built standalone sdist must not include the host server package tree."""
+
+    _wheel, sdist = _build_standalone_distributions(tmp_path)
+    members = _read_sdist_members(sdist)
+
+    assert any(member.endswith("/pyproject.toml") for member in members)  # nosec B101
+    assert any(member.endswith("/__init__.py") for member in members)  # nosec B101
+    assert any(member.endswith("/gateway/cli.py") for member in members)  # nosec B101
+    assert not any("/tldw_Server_API/" in member for member in members)  # nosec B101
+    assert not any("/apps/tldw-frontend/" in member for member in members)  # nosec B101
+
+
+def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
+    """PyPI validation workflow must also gate package-local mcp_unified changes."""
+
+    workflow = (
+        PACKAGE_ROOT.parent / ".github" / "workflows" / "pypi-package.yml"
+    ).read_text(encoding="utf-8")
+
+    expected_fragments = (
+        "mcp_unified/**",
+        "make pypi-check",
+        "Upload dist artifacts",
+        "test_mcp_unified_standalone_distribution_metadata_matches_extras",
+        "test_mcp_unified_standalone_sdist_contains_only_package_boundary",
+    )
+    for fragment in expected_fragments:
+        assert fragment in workflow  # nosec B101
 
 
 @pytest.mark.smoke
