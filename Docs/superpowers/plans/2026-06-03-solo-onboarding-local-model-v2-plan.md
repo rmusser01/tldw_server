@@ -87,9 +87,9 @@
 
 **Tests:** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing backend tests**
+- [x] **Step 1: Write failing backend tests**
 
   Add tests in `tldw_Server_API/tests/Setup/test_setup_provider_validation.py`:
 
@@ -107,19 +107,19 @@
   assert response.failure_category == "models_unavailable"
   ```
 
-- [ ] **Step 2: Run red tests**
+- [x] **Step 2: Run red tests**
 
   Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q`
 
   Expected: New fallback tests fail against current hard-failed unsupported shape.
 
-- [ ] **Step 3: Implement minimal backend fallback**
+- [x] **Step 3: Implement minimal backend fallback**
 
   In `tldw_Server_API/app/core/Setup/provider_validation.py`, add a small accepted response helper for reachable local endpoints whose `/models` response cannot be used for discovery.
 
   Keep auth, transport, invalid JSON, disallowed target, and HTTP error behavior failed/sanitized.
 
-- [ ] **Step 4: Verify backend tests**
+- [x] **Step 4: Verify backend tests**
 
   Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q`
 

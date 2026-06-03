@@ -9,6 +9,8 @@ documentation:
 modified_files:
 - Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
 - apps/tldw-frontend/scripts/__tests__/onboarding-uat-runner.test.ts
+- tldw_Server_API/app/core/Setup/provider_validation.py
+- tldw_Server_API/tests/Setup/test_setup_provider_validation.py
 - backlog/tasks/task-601 - Implement-solo-onboarding-local-model-guided-alternative-V2.md
 ---
 
@@ -31,7 +33,7 @@ Docs/superpowers/plans/2026-06-03-solo-onboarding-local-model-v2-plan.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Stage 1 complete. Fixed stale hosted-success auth assertion in onboarding UAT runner unit test. Verification: bunx vitest run scripts/__tests__/onboarding-uat-runner.test.ts --reporter=dot -> 1 file passed, 24 tests passed.
+Stage 2 complete. Added backend manual-model fallback for reachable local OpenAI-compatible endpoints when model discovery is unavailable. Red run before implementation: 2 new provider validation tests failed as expected. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup/test_setup_provider_validation.py -q -> 28 passed, 6 warnings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
