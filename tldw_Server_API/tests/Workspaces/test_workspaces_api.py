@@ -790,6 +790,82 @@ def test_attached_host_local_primary_root_is_redacted_across_read_contracts(
 
 
 @pytest.mark.integration
+def test_workspace_capabilities_and_context_include_file_inventory_summary(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed-project-roots"
+    project = allowed / "public-project"
+    project.mkdir(parents=True)
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+
+    attach_response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(project)},
+    )
+    assert attach_response.status_code == 200, attach_response.text
+    root = db.get_workspace_primary_root("ws-root")
+    assert root is not None
+    scan = db.begin_workspace_file_inventory_scan(
+        "ws-root",
+        str(root["root_id"]),
+        int(root["version"]),
+        "policy-fingerprint",
+        requested_by="test-user",
+    )
+    db.complete_workspace_file_inventory_scan(
+        str(scan["scan_id"]),
+        "current",
+        {
+            "files": 7,
+            "directories": 2,
+            "symlinks": 1,
+            "ignored": 3,
+            "indexing_candidates": 5,
+            "diagnostics": 0,
+            "total_entries": 10,
+        },
+        [],
+        root_snapshot_token="snapshot-1",
+    )
+
+    capabilities_response = _get_workspace_capabilities_response(workspace_fastapi_app, db)
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert capabilities_response.status_code == 200, capabilities_response.text
+    assert context_response.status_code == 200, context_response.text
+    capabilities = capabilities_response.json()
+    context = context_response.json()
+    for payload in (capabilities, context, context["capabilities"]):
+        inventory = payload["project_root"]["file_inventory"]
+        assert inventory["state"] == "current"
+        assert inventory["total_file_count"] == 7
+        assert inventory["indexed_file_count"] == 0
+        assert isinstance(inventory["updated_at"], str)
+        assert payload["allowed_actions"]["scan_files"] == {
+            "allowed": True,
+            "reason_code": None,
+        }
+        assert payload["allowed_actions"]["view_file_inventory"] == {
+            "allowed": True,
+            "reason_code": None,
+        }
+        assert payload["allowed_actions"]["index_file_content"] == {
+            "allowed": False,
+            "reason_code": "file_indexing_disabled",
+        }
+
+
+@pytest.mark.integration
 def test_sandbox_volume_primary_root_fails_closed_across_read_contracts(
     workspace_fastapi_app,
     db,

@@ -43,6 +43,8 @@ class PrimaryJobsPollerHandles:
     data_tables_jobs_task: Any | None = None
     prompt_studio_jobs_stop_event: Any | None = None
     prompt_studio_jobs_task: Any | None = None
+    workspace_file_inventory_jobs_stop_event: Any | None = None
+    workspace_file_inventory_jobs_task: Any | None = None
 
 
 def provide_primary_jobs_worker_specs(
@@ -88,6 +90,16 @@ def provide_primary_jobs_worker_specs(
             enabled=route_enabled_predicate(
                 "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
                 "prompt-studio",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="workspace_file_inventory_jobs_task",
+            worker_service=_run_workspace_file_inventory_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED",
+                "workspaces",
             ),
         ),
     )
@@ -146,6 +158,15 @@ async def start_primary_jobs_pollers(
         should_start_worker=should_start_worker,
         worker_inventory=worker_inventory,
     )
+    workspace_file_inventory_jobs_stop_event, workspace_file_inventory_jobs_task = (
+        await _start_workspace_file_inventory_jobs_worker(
+            app=app,
+            owned_job_pollers=owned_job_pollers,
+            register_owned_job_poller=register_owned_job_poller,
+            should_start_worker=should_start_worker,
+            worker_inventory=worker_inventory,
+        )
+    )
     return PrimaryJobsPollerHandles(
         core_jobs_stop_event=core_jobs_stop_event,
         core_jobs_task=core_jobs_task,
@@ -155,6 +176,8 @@ async def start_primary_jobs_pollers(
         data_tables_jobs_task=data_tables_jobs_task,
         prompt_studio_jobs_stop_event=prompt_studio_jobs_stop_event,
         prompt_studio_jobs_task=prompt_studio_jobs_task,
+        workspace_file_inventory_jobs_stop_event=workspace_file_inventory_jobs_stop_event,
+        workspace_file_inventory_jobs_task=workspace_file_inventory_jobs_task,
     )
 
 
@@ -344,6 +367,53 @@ async def _start_prompt_studio_jobs_worker(
         return None, None
 
 
+async def _start_workspace_file_inventory_jobs_worker(
+    *,
+    app: Any,
+    owned_job_pollers: list[Any],
+    register_owned_job_poller: Callable[..., None],
+    should_start_worker: Callable[[str, str], bool],
+    worker_inventory: WorkerRegistry | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start the Workspace file inventory jobs poller and return its shutdown handles."""
+
+    try:
+        enabled = should_start_worker("WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED", "workspaces")
+        if not enabled:
+            logger.info(
+                "Workspace file inventory Jobs worker disabled by flag "
+                "(WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED)"
+            )
+            return None, None
+
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="workspace_file_inventory_jobs_task",
+                task_name="workspace_file_inventory_jobs_task",
+                coroutine_factory=_run_workspace_file_inventory_jobs_worker_service,
+                timeout_sec=5.0,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            )
+            logger.info("Workspace file inventory Jobs worker started with explicit stop_event signal")
+            return stop_event, task
+
+        stop_event = _make_event()
+        task = _create_task(_run_workspace_file_inventory_jobs_worker_service(stop_event))
+        logger.info("Workspace file inventory Jobs worker started with explicit stop_event signal")
+        register_owned_job_poller(
+            app,
+            owned_job_pollers,
+            name="workspace_file_inventory_jobs_task",
+            task=task,
+            stop_event=stop_event,
+        )
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Workspace file inventory Jobs worker: {exc}")
+        return None, None
+
+
 def _run_chatbooks_core_jobs_worker_service(stop_event: Any) -> Any:
     from tldw_Server_API.app.services.core_jobs_worker import (
         run_chatbooks_core_jobs_worker as _run_chatbooks_core_jobs_worker,
@@ -374,3 +444,11 @@ def _run_prompt_studio_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_prompt_studio_jobs_worker(stop_event)
+
+
+def _run_workspace_file_inventory_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.workspace_file_inventory_jobs_worker import (
+        run_workspace_file_inventory_jobs_worker as _run_workspace_file_inventory_jobs_worker,
+    )
+
+    return _run_workspace_file_inventory_jobs_worker(stop_event)

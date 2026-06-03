@@ -13,6 +13,9 @@ holds focused core helpers used by those flows.
 - `service_capabilities.py` derives workspace service readiness/capability information.
 - `source_jobs.py` builds and enqueues workspace source ingestion jobs.
 - `status_projection.py` projects source status from Jobs, Media, and RAG state.
+- `file_inventory_models.py`, `file_inventory_ignore.py`, `file_inventory_scanner.py`,
+  and `file_inventory_jobs.py` implement metadata-only project-root inventory
+  scanning and Jobs enqueue helpers.
 - `workspace_artifact_exports.py` prepares traceable workspace artifact exports.
 - Related API surface: `app/api/v1/endpoints/workspaces.py` and `app/api/v1/endpoints/workspace_migrations.py`.
 - Related tests: `tests/Workspaces/`.
@@ -23,6 +26,8 @@ holds focused core helpers used by those flows.
 - Report service capabilities and readiness for workspace-dependent features.
 - Queue ingestion jobs for workspace sources.
 - Project workspace source status by combining job, media, and retrieval/indexing state.
+- Queue and project metadata-only file inventory scans for Workspace-owned
+  primary project roots.
 - Export promoted workspace artifacts with traceability metadata.
 - Keep feature-specific helper logic out of the large workspace endpoint module.
 
@@ -33,6 +38,8 @@ holds focused core helpers used by those flows.
 - `service_capabilities.py` - readiness and capability projection.
 - `source_jobs.py` - workspace source job payload and enqueue helpers.
 - `status_projection.py` - source status derivation.
+- `file_inventory_*` - ignore policy, metadata scanner, durable status models,
+  and Jobs enqueue helpers for project-root file inventory.
 - `workspace_artifact_exports.py` - artifact export helpers and traceability checks.
 
 ## How It Connects
@@ -81,6 +88,18 @@ holds focused core helpers used by those flows.
 - `status_projection.py` builds read-computed source status by merging
   workspace source rows, active/failed Jobs, Media DB chunk/vector state, and
   readiness summaries.
+- File inventory scans are Jobs-backed and metadata-only. They enumerate
+  project-root-relative paths, entry kinds, size/mtime/mode metadata, extension
+  and MIME/language hints, ignore decisions, bounded diagnostics, and aggregate
+  counts. They do not read ordinary file contents, extract symbols, create
+  embeddings, or add files to source/RAG indexes.
+- Public inventory responses and Workspace Core context use redacted
+  `path_hint` and project-root-relative paths. They must not expose
+  `absolute_root` through normal workspace read contracts.
+- The primary in-process worker is controlled by
+  `WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED` and the `workspaces` route
+  gate. The worker consumes the workspace file inventory Jobs queue; disabling
+  it leaves scan requests queued or inactive depending on Jobs backend behavior.
 - `workspace_artifact_exports.py` renders accepted artifact versions to export
   payloads with identity, lineage, review metadata, and redaction metadata.
 
@@ -102,9 +121,9 @@ holds focused core helpers used by those flows.
 - Public root attach/update API with host-local validation and Sandbox-managed
   root wrappers.
 - Sandbox volume creation and mount lifecycle.
-- File inventory Jobs worker with ignore policy, scan state, partial success,
-  and bounded diagnostics.
-- Explicit file-content indexing policy and indexing Jobs.
+- Explicit file-content indexing policy and indexing Jobs. This is intentionally
+  separate from metadata-only inventory so users can inspect files before any
+  content extraction or embedding work is permitted.
 - MCP trusted-root binding and ACP/harness runtime consumption.
 - Project Workspace UI for root health, file tree metadata, Git state, and
   remediation actions.

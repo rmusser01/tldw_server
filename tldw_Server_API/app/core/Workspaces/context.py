@@ -93,6 +93,7 @@ def _project_root_projection(
     root = dict(primary_root)
     state = normalize_project_root_state(root.get("root_state", root.get("state")))
     backend = _normalized_backend(root.get("backend"))
+    file_inventory = _file_inventory_projection(root)
     return {
         "state": state,
         "root_id": root.get("root_id") or root.get("id"),
@@ -100,10 +101,11 @@ def _project_root_projection(
         "display_name": root.get("display_name") or root.get("name"),
         "path_hint": _path_hint(root),
         "git_state": root.get("git_state"),
-        "file_inventory_state": root.get("file_inventory_state"),
+        "file_inventory_state": file_inventory["state"] or root.get("file_inventory_state"),
         "indexing_state": root.get("indexing_state"),
         "sandbox_mount_state": root.get("sandbox_mount_state"),
         "mcp_trust_state": root.get("mcp_trust_state"),
+        "file_inventory": file_inventory,
     }
 
 
@@ -119,6 +121,7 @@ def _empty_project_root() -> dict[str, Any]:
         "indexing_state": None,
         "sandbox_mount_state": None,
         "mcp_trust_state": None,
+        "file_inventory": _empty_file_inventory(),
     }
 
 
@@ -149,6 +152,39 @@ def _redacted_path_hint(value: Any) -> str:
             return windows_path.name or "project_root"
         return PurePath(raw_value).name or "project_root"
     return raw_value
+
+
+def _empty_file_inventory() -> dict[str, Any]:
+    return {
+        "state": "not_started",
+        "indexed_file_count": 0,
+        "total_file_count": 0,
+        "updated_at": None,
+    }
+
+
+def _file_inventory_projection(root: Mapping[str, Any]) -> dict[str, Any]:
+    raw_inventory = root.get("file_inventory")
+    inventory = dict(raw_inventory) if isinstance(raw_inventory, Mapping) else {}
+    state = str(
+        inventory.get("state")
+        or root.get("file_inventory_state")
+        or "not_started"
+    ).strip().lower()
+    return {
+        "state": state or "not_started",
+        "indexed_file_count": _non_negative_int(inventory.get("indexed_file_count"), default=0),
+        "total_file_count": _non_negative_int(inventory.get("total_file_count"), default=0),
+        "updated_at": str(inventory["updated_at"]) if inventory.get("updated_at") else None,
+    }
+
+
+def _non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, coerced)
 
 
 def _partial_errors(partial_errors: Any) -> list[dict[str, Any]]:
@@ -244,6 +280,19 @@ def _allowed_actions(
         partial_reason_by_scope=partial_reason_by_scope,
         project_root=project_root,
     )
+    actions["scan_files"] = _file_inventory_scan_action(
+        root_ready=root_ready,
+        root_reason=root_reason,
+        resolution_status=resolution_status,
+        partial_reason_by_scope=partial_reason_by_scope,
+        project_root=project_root,
+    )
+    actions["view_file_inventory"] = _file_inventory_view_action(
+        profile=profile,
+        project_root=project_root,
+        resolution_status=resolution_status,
+        partial_reason_by_scope=partial_reason_by_scope,
+    )
     actions["run_sandbox"] = _service_project_action(
         service_name="sandbox",
         service_action=actions.get("use_sandbox"),
@@ -320,6 +369,16 @@ def _project_root_ready(profile: str, project_root: Mapping[str, Any]) -> tuple[
     return True, ""
 
 
+def _project_root_exists(profile: str, project_root: Mapping[str, Any]) -> tuple[bool, str]:
+    if profile != "project":
+        return False, "project_root_not_configured"
+    if project_root.get("state") == "not_configured":
+        return False, "project_root_not_configured"
+    if not project_root.get("root_id") or not project_root.get("backend"):
+        return False, "project_root_unresolved"
+    return True, ""
+
+
 def _partial_reason_by_scope(resolution: Mapping[str, Any]) -> dict[str, str]:
     if resolution.get("status") != "partial":
         return {}
@@ -389,6 +448,43 @@ def _file_indexing_action(
         return fail_closed_action(
             "file_indexing_disabled" if indexing_state == "disabled" else "file_indexing_not_ready"
         )
+    return allowed_action()
+
+
+def _file_inventory_scan_action(
+    *,
+    root_ready: bool,
+    root_reason: str,
+    resolution_status: str,
+    partial_reason_by_scope: Mapping[str, str],
+    project_root: Mapping[str, Any],
+) -> dict[str, Any]:
+    if resolution_status == "failed":
+        return fail_closed_action("workspace_identity_unresolved")
+    if resolution_status != "complete":
+        return fail_closed_action(partial_reason_by_scope.get("file_inventory") or _PARTIAL_REASON)
+    if not root_ready:
+        return fail_closed_action(root_reason)
+    inventory_state = str(project_root.get("file_inventory_state") or "").strip().lower()
+    if inventory_state == "disabled":
+        return fail_closed_action("file_inventory_disabled")
+    return allowed_action()
+
+
+def _file_inventory_view_action(
+    *,
+    profile: str,
+    project_root: Mapping[str, Any],
+    resolution_status: str,
+    partial_reason_by_scope: Mapping[str, str],
+) -> dict[str, Any]:
+    if resolution_status == "failed":
+        return fail_closed_action("workspace_identity_unresolved")
+    if resolution_status != "complete":
+        return fail_closed_action(partial_reason_by_scope.get("file_inventory") or _PARTIAL_REASON)
+    root_exists, root_reason = _project_root_exists(profile, project_root)
+    if not root_exists:
+        return fail_closed_action(root_reason)
     return allowed_action()
 
 

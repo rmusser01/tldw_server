@@ -143,6 +143,7 @@ def _root_to_response(root: dict[str, Any]) -> WorkspaceRootResponse:
         path_hint=_root_path_hint(root),
         git_state=root.get("git_state"),
         file_inventory_state=root.get("file_inventory_state"),
+        file_inventory=_workspace_file_inventory_summary(root),
         indexing_state=root.get("indexing_state"),
         sandbox_mount_state=root.get("sandbox_mount_state"),
         mcp_trust_state=root.get("mcp_trust_state"),
@@ -448,8 +449,59 @@ def _workspace_with_primary_root(
     if primary_root is None:
         return workspace
     enriched = dict(workspace)
-    enriched["primary_root"] = primary_root
+    enriched["primary_root"] = _workspace_primary_root_with_file_inventory_status(
+        db,
+        workspace_id,
+        primary_root,
+    )
     return enriched
+
+
+def _workspace_primary_root_with_file_inventory_status(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    primary_root: dict[str, Any],
+) -> dict[str, Any]:
+    enriched_root = dict(primary_root)
+    status_payload = db.get_workspace_file_inventory_status(workspace_id)
+    enriched_root["file_inventory"] = _workspace_file_inventory_summary(status_payload)
+    enriched_root["file_inventory_state"] = status_payload.get("state") or primary_root.get("file_inventory_state")
+    return enriched_root
+
+
+def _workspace_file_inventory_summary(source: dict[str, Any]) -> dict[str, Any]:
+    raw_inventory = source.get("file_inventory")
+    if isinstance(raw_inventory, dict):
+        return {
+            "state": raw_inventory.get("state") or source.get("file_inventory_state") or "not_started",
+            "indexed_file_count": _non_negative_int(raw_inventory.get("indexed_file_count"), default=0),
+            "total_file_count": _non_negative_int(raw_inventory.get("total_file_count"), default=0),
+            "updated_at": str(raw_inventory["updated_at"]) if raw_inventory.get("updated_at") else None,
+        }
+
+    counts = source.get("counts") if isinstance(source.get("counts"), dict) else {}
+    return {
+        "state": source.get("state") or source.get("file_inventory_state") or "not_started",
+        "indexed_file_count": 0,
+        "total_file_count": _non_negative_int(counts.get("files"), default=0),
+        "updated_at": _workspace_file_inventory_updated_at(source),
+    }
+
+
+def _workspace_file_inventory_updated_at(source: dict[str, Any]) -> str | None:
+    for key in ("updated_at", "completed_at", "last_scan_completed_at", "started_at", "last_scan_started_at"):
+        value = source.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, coerced)
 
 
 def try_get_workspace_job_manager() -> JobManager | None:

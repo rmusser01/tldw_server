@@ -237,6 +237,13 @@ class WorkspaceResolution(BaseModel):
     partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
 
 
+class WorkspaceFileInventory(BaseModel):
+    state: str | None = None
+    indexed_file_count: int | None = None
+    total_file_count: int | None = None
+    updated_at: str | None = None
+
+
 class WorkspaceProjectRoot(BaseModel):
     state: WorkspaceProjectRootState = "not_configured"
     root_id: str | None = None
@@ -245,6 +252,7 @@ class WorkspaceProjectRoot(BaseModel):
     path_hint: str | None = None
     git_state: str | None = None
     file_inventory_state: str | None = None
+    file_inventory: WorkspaceFileInventory = Field(default_factory=WorkspaceFileInventory)
     indexing_state: str | None = None
     sandbox_mount_state: str | None = None
     mcp_trust_state: str | None = None
@@ -261,13 +269,6 @@ class WorkspacePrimaryRootAttachRequest(BaseModel):
     replace_existing: StrictBool = False
     expected_workspace_version: int | None = Field(default=None, ge=1)
     strict_sandbox_validation: StrictBool = False
-
-
-class WorkspaceFileInventory(BaseModel):
-    state: str | None = None
-    indexed_file_count: int | None = None
-    total_file_count: int | None = None
-    updated_at: str | None = None
 
 
 WorkspaceFileInventoryState = Literal[

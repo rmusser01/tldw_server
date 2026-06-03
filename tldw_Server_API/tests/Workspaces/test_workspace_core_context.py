@@ -67,6 +67,12 @@ def test_project_workspace_context_represents_sandbox_root() -> None:
         "indexing_state": "disabled",
         "sandbox_mount_state": "mounted",
         "mcp_trust_state": "trusted",
+        "file_inventory": {
+            "state": "not_started",
+            "indexed_file_count": 0,
+            "total_file_count": 0,
+            "updated_at": None,
+        },
     }
     assert context["allowed_actions"]["write_files"]["allowed"] is True
     assert context["allowed_actions"]["run_sandbox"]["allowed"] is True
@@ -171,6 +177,102 @@ def test_project_workspace_preview_and_file_indexing_fail_closed_until_ready() -
     assert context["allowed_actions"]["index_file_content"] == {
         "allowed": False,
         "reason_code": "file_indexing_disabled",
+    }
+
+
+def test_project_workspace_context_includes_file_inventory_summary_and_actions() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root={
+            "root_id": "root-1",
+            "backend": "host_local",
+            "root_state": "attached",
+            "file_inventory_state": "current",
+            "file_inventory": {
+                "state": "current",
+                "total_file_count": 12,
+                "indexed_file_count": 0,
+                "updated_at": "2026-06-03T12:00:00Z",
+            },
+            "indexing_state": "disabled",
+        },
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[],
+    )
+
+    assert context["project_root"]["file_inventory"] == {
+        "state": "current",
+        "indexed_file_count": 0,
+        "total_file_count": 12,
+        "updated_at": "2026-06-03T12:00:00Z",
+    }
+    assert context["allowed_actions"]["scan_files"] == {
+        "allowed": True,
+        "reason_code": None,
+    }
+    assert context["allowed_actions"]["view_file_inventory"] == {
+        "allowed": True,
+        "reason_code": None,
+    }
+    assert context["allowed_actions"]["index_file_content"] == {
+        "allowed": False,
+        "reason_code": "file_indexing_disabled",
+    }
+
+
+def test_file_inventory_scan_fails_closed_when_inventory_disabled() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root={
+            "root_id": "root-1",
+            "backend": "host_local",
+            "root_state": "attached",
+            "file_inventory_state": "disabled",
+        },
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[],
+    )
+
+    assert context["allowed_actions"]["scan_files"] == {
+        "allowed": False,
+        "reason_code": "file_inventory_disabled",
+    }
+    assert context["allowed_actions"]["view_file_inventory"] == {
+        "allowed": True,
+        "reason_code": None,
+    }
+
+
+def test_failed_file_inventory_scan_remains_viewable_and_rescannable() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root={
+            "root_id": "root-1",
+            "backend": "host_local",
+            "root_state": "attached",
+            "file_inventory_state": "failed",
+            "file_inventory": {
+                "state": "failed",
+                "total_file_count": 0,
+                "indexed_file_count": 0,
+                "updated_at": "2026-06-03T12:00:00Z",
+            },
+        },
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[],
+    )
+
+    assert context["project_root"]["file_inventory"]["state"] == "failed"
+    assert context["allowed_actions"]["view_file_inventory"] == {
+        "allowed": True,
+        "reason_code": None,
+    }
+    assert context["allowed_actions"]["scan_files"] == {
+        "allowed": True,
+        "reason_code": None,
     }
 
 
