@@ -296,6 +296,14 @@ def test_workspace_capabilities_block_grounded_questions_when_provider_is_unavai
         "allowed": False,
         "reason_code": "provider_not_configured",
     }
+    assert capability_projection["workspace_profile"] == "research"
+    assert capability_projection["workspace_kind"] == "research_workspace"
+    assert capability_projection["project_root"]["state"] == "not_configured"
+    assert capability_projection["resolution"]["status"] == "complete"
+    assert capability_projection["allowed_actions"]["write_files"] == {
+        "allowed": False,
+        "reason_code": "project_root_not_configured",
+    }
 
 
 def test_workspace_capabilities_require_selected_queryable_sources() -> None:
@@ -339,3 +347,44 @@ def test_workspace_capabilities_require_selected_queryable_sources() -> None:
         "allowed": False,
         "reason_code": "no_queryable_sources",
     }
+
+
+def test_workspace_capabilities_include_project_root_when_service_capabilities_allow_it() -> None:
+    capability_projection = build_workspace_capability_projection(
+        workspace={
+            "id": "ws-project",
+            "workspace_profile": "project",
+            "primary_root": {
+                "root_id": "root-1",
+                "backend": "sandbox_volume",
+                "display_name": "Sandbox project",
+                "root_state": "attached",
+                "sandbox_volume_id": "volume-1",
+                "git_state": "clean",
+                "file_inventory_state": "ready",
+                "indexing_state": "ready",
+                "sandbox_mount_state": "mounted",
+                "mcp_trust_state": "trusted",
+            },
+        },
+        status_projection={"summary": {"total": 0, "queryable": 0}},
+        service_capabilities={
+            "workspace_services": {
+                "sandbox": {"state": "available", "reason_code": None},
+                "mcp": {"state": "available", "reason_code": None},
+                "acp": {"state": "available", "reason_code": None},
+            },
+            "allowed_actions": {
+                "use_sandbox": {"allowed": True, "reason_code": None},
+                "run_mcp_tools": {"allowed": True, "reason_code": None},
+                "use_acp_agents": {"allowed": True, "reason_code": None},
+            },
+        },
+    )
+
+    assert capability_projection["workspace_profile"] == "project"
+    assert capability_projection["workspace_kind"] == "project_workspace"
+    assert capability_projection["project_root"]["backend"] == "sandbox_volume"
+    assert capability_projection["project_root"]["path_hint"] == "volume-1"
+    assert capability_projection["allowed_actions"]["write_files"]["allowed"] is True
+    assert capability_projection["allowed_actions"]["run_sandbox"]["allowed"] is True

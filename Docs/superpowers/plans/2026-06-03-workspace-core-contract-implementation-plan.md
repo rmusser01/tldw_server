@@ -432,7 +432,7 @@ git commit -m "feat: persist workspace profiles and primary roots"
 - Test: `tldw_Server_API/tests/Workspaces/test_workspace_core_context.py`
 - Modify: `tldw_Server_API/tests/Workspaces/test_workspace_service_capabilities.py`
 
-- [ ] **Step 1: Write failing context resolver tests**
+- [x] **Step 1: Write failing context resolver tests**
 
 Create `test_workspace_core_context.py`.
 
@@ -518,7 +518,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL because `context.py` does not exist.
 
-- [ ] **Step 2: Implement `build_workspace_core_context`**
+- [x] **Step 2: Implement `build_workspace_core_context`**
 
 In `context.py`:
 
@@ -541,7 +541,7 @@ In `context.py`:
   - `index_file_content`
 - Preserve existing research actions from `status_projection` where available.
 
-- [ ] **Step 3: Update capability projection to consume Workspace Core context**
+- [x] **Step 3: Update capability projection to consume Workspace Core context**
 
 In `status_projection.py`, keep `build_source_status_projection` unchanged. Update `build_workspace_capability_projection` to:
 
@@ -553,7 +553,7 @@ In `status_projection.py`, keep `build_source_status_projection` unchanged. Upda
 - keep `ask_grounded_questions` behavior unchanged
 - never allow `write_files`, `run_sandbox`, `use_mcp_tools`, `use_acp_agents`, `create_preview`, or `index_file_content` when resolution is `failed` or the required subsystem state is unknown
 
-- [ ] **Step 4: Run context and capability tests**
+- [x] **Step 4: Run context and capability tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -564,7 +564,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Workspaces/context.py tldw_Server_API/app/core/Workspaces/status_projection.py tldw_Server_API/tests/Workspaces/test_workspace_core_context.py tldw_Server_API/tests/Workspaces/test_workspace_service_capabilities.py
@@ -579,7 +579,7 @@ git commit -m "feat: add workspace core context resolver"
 - Modify: `tldw_Server_API/app/api/v1/schemas/workspace_schemas.py`
 - Test: `tldw_Server_API/tests/Workspaces/test_workspaces_api.py`
 
-- [ ] **Step 1: Write failing API schema assertions**
+- [x] **Step 1: Write failing API schema assertions**
 
 Extend existing API tests to verify:
 
@@ -609,7 +609,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL because schemas do not expose the new fields.
 
-- [ ] **Step 2: Add schema models**
+- [x] **Step 2: Add schema models**
 
 In `workspace_schemas.py`, add:
 
@@ -646,7 +646,7 @@ project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
 resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
 ```
 
-- [ ] **Step 3: Run schema/API tests**
+- [x] **Step 3: Run schema/API tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspaces_api.py -k "profile_contract or workspace_context" -q
@@ -655,6 +655,11 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 Expected: PASS after endpoint wiring in Task 5; it may still fail at this step if endpoint mappings are not updated yet.
 
 - [ ] **Step 4: Commit only if tests pass independently**
+
+Status note: the additive request/response schema bridge was pulled forward into
+the Task 3 review-fix commit because the capability/context endpoints already
+validated project workspace payloads through `WorkspaceCapabilitiesResponse`.
+The read-only roots endpoint and remaining endpoint wiring stay in Task 5.
 
 If endpoint wiring is needed, do not commit half-wired schemas. Continue to Task 5 and commit both tasks together.
 

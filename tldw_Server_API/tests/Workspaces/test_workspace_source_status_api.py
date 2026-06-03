@@ -300,6 +300,92 @@ def test_workspace_capabilities_fail_closed_without_queryable_sources(
 
 
 @pytest.mark.integration
+def test_workspace_capabilities_accept_project_workspace_profile(
+    workspace_status_app,
+    tmp_path,
+    monkeypatch,
+):
+    db = CharactersRAGDB(db_path=str(tmp_path / "project-chacha.db"), client_id="user-1")
+    db.upsert_workspace("ws-project", "Project Workspace", workspace_profile="project")
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _empty_service_capabilities,
+        raising=False,
+    )
+    _install_overrides(workspace_status_app, db, _MediaStatusDB({}))
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-project/capabilities")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_profile"] == "project"
+    assert payload["workspace_kind"] == "project_workspace"
+    assert payload["project_root"]["state"] == "not_configured"
+    assert payload["resolution"]["status"] == "complete"
+
+
+@pytest.mark.integration
+def test_workspace_capabilities_include_attached_primary_root(
+    workspace_status_app,
+    tmp_path,
+    monkeypatch,
+):
+    db = CharactersRAGDB(db_path=str(tmp_path / "project-root-chacha.db"), client_id="user-1")
+    db.upsert_workspace("ws-project-root", "Project Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-project-root",
+        {
+            "root_id": "root-1",
+            "backend": "sandbox_volume",
+            "display_name": "Sandbox project",
+            "sandbox_volume_id": "volume-1",
+            "root_state": "attached",
+            "indexing_state": "ready",
+            "mcp_trust_state": "trusted",
+        },
+    )
+
+    async def _service_capabilities(*, workspace_id: str, user_id: int | str | None) -> dict[str, Any]:
+        _ = (workspace_id, user_id)
+        return {
+            "workspace_services": {
+                "sandbox": {"state": "available", "reason_code": None},
+                "preview": {"state": "available", "reason_code": None},
+            },
+            "allowed_actions": {
+                "use_sandbox": {"allowed": True, "reason_code": None},
+            },
+        }
+
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _service_capabilities,
+        raising=False,
+    )
+    _install_overrides(workspace_status_app, db, _MediaStatusDB({}))
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-project-root/capabilities")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_profile"] == "project"
+    assert payload["workspace_kind"] == "project_workspace"
+    assert payload["project_root"]["state"] == "attached"
+    assert payload["project_root"]["backend"] == "sandbox_volume"
+    assert payload["project_root"]["path_hint"] == "volume-1"
+    assert payload["allowed_actions"]["write_files"]["allowed"] is True
+    assert payload["allowed_actions"]["run_sandbox"]["allowed"] is True
+
+
+@pytest.mark.integration
 def test_workspace_capabilities_reflect_service_capability_projection(
     workspace_status_app,
     workspace_status_db,
@@ -397,7 +483,7 @@ def test_workspace_capabilities_reflect_service_capability_projection(
     }
     assert payload["allowed_actions"]["use_acp_agents"] == {
         "allowed": False,
-        "reason_code": "acp_approval_required",
+        "reason_code": "project_root_not_configured",
     }
     assert payload["workspace_services"]["sandbox"] == {
         "state": "blocked",

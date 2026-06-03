@@ -15,6 +15,19 @@ WORKSPACE_MIGRATION_MAX_CHUNK_BYTES = 2 * 1024 * 1024
 WORKSPACE_MIGRATION_MAX_DECLARED_CHUNKS = 512
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
+WorkspaceProfile = Literal["research", "project"]
+WorkspaceKind = Literal["research_workspace", "project_workspace"]
+WorkspaceResolutionStatus = Literal["complete", "partial", "failed"]
+WorkspaceProjectRootBackend = Literal["host_local", "sandbox_volume"]
+WorkspaceProjectRootState = Literal[
+    "not_configured",
+    "attached",
+    "missing",
+    "detached",
+    "failed",
+    "archived",
+]
+
 
 def _json_size_bytes(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8"))
@@ -40,12 +53,14 @@ class WorkspaceUpsertRequest(BaseModel):
     name: str
     archived: bool = False
     study_materials_policy: Literal["general", "workspace"] = "general"
+    workspace_profile: WorkspaceProfile = "research"
 
 
 class WorkspacePatchRequest(BaseModel):
     name: str | None = None
     archived: bool | None = None
     study_materials_policy: Literal["general", "workspace"] | None = None
+    workspace_profile: WorkspaceProfile | None = None
     banner_title: str | None = None
     banner_subtitle: str | None = None
     banner_color: str | None = None
@@ -61,6 +76,7 @@ class WorkspaceResponse(BaseModel):
     name: str | None = None
     archived: bool = False
     study_materials_policy: Literal["general", "workspace"] = "general"
+    workspace_profile: WorkspaceProfile = "research"
     deleted: bool = False
     banner_title: str | None = None
     banner_subtitle: str | None = None
@@ -210,10 +226,63 @@ class WorkspaceAllowedAction(BaseModel):
     reason_code: str | None = None
 
 
+class WorkspaceContextPartialError(BaseModel):
+    scope: str = "workspace"
+    code: str = "dependency_resolution_partial"
+    message: str = ""
+
+
+class WorkspaceResolution(BaseModel):
+    status: WorkspaceResolutionStatus = "complete"
+    partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
+
+
+class WorkspaceProjectRoot(BaseModel):
+    state: WorkspaceProjectRootState = "not_configured"
+    root_id: str | None = None
+    backend: WorkspaceProjectRootBackend | None = None
+    display_name: str | None = None
+    path_hint: str | None = None
+    git_state: str | None = None
+    file_inventory_state: str | None = None
+    indexing_state: str | None = None
+    sandbox_mount_state: str | None = None
+    mcp_trust_state: str | None = None
+
+
+class WorkspaceFileInventory(BaseModel):
+    state: str | None = None
+    indexed_file_count: int | None = None
+    total_file_count: int | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceRuntimeBinding(BaseModel):
+    service: str
+    state: WorkspaceCapabilityServiceState
+    reason_code: str | None = None
+    management_surface: str | None = None
+
+
+class WorkspaceRootResponse(WorkspaceProjectRoot):
+    workspace_id: str | None = None
+    is_primary: bool = True
+    version: int | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceRootsResponse(BaseModel):
+    workspace_id: str
+    roots: list[WorkspaceRootResponse] = Field(default_factory=list)
+
+
 class WorkspaceCapabilitiesResponse(BaseModel):
     workspace_id: str
-    workspace_kind: Literal["research_workspace"]
+    workspace_profile: WorkspaceProfile = "research"
+    workspace_kind: WorkspaceKind = "research_workspace"
     access_level: Literal["owner", "editor", "viewer"] = "owner"
+    resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
+    project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
     source_summary: WorkspaceSourceStatusSummary
     workspace_services: dict[str, WorkspaceCapabilityService]
     allowed_actions: dict[str, WorkspaceAllowedAction]
@@ -253,18 +322,15 @@ class WorkspaceContextSources(BaseModel):
     summary: WorkspaceSourceStatusSummary
 
 
-class WorkspaceContextPartialError(BaseModel):
-    scope: str
-    code: str
-    message: str
-
-
 class WorkspaceContextResponse(BaseModel):
     workspace_id: str
-    workspace_kind: Literal["research_workspace"]
-    schema_version: int = 1
+    workspace_profile: WorkspaceProfile = "research"
+    workspace_kind: WorkspaceKind = "research_workspace"
+    schema_version: int = 2
     generated_at: str
     workspace: WorkspaceResponse
+    resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
+    project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
     sources: WorkspaceContextSources
     capabilities: WorkspaceCapabilitiesResponse
     services: dict[str, WorkspaceCapabilityService]

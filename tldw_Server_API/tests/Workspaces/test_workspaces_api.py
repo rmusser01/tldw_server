@@ -157,20 +157,29 @@ def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fast
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
             create_response = client.put(
                 "/api/v1/workspaces/ws-api",
-                json={"name": "API Workspace", "study_materials_policy": "workspace"},
+                json={
+                    "name": "API Workspace",
+                    "study_materials_policy": "workspace",
+                    "workspace_profile": "project",
+                },
             )
             assert create_response.status_code == 200, create_response.text
             created = create_response.json()
             assert created["study_materials_policy"] == "workspace"
+            assert created["workspace_profile"] == "project"
 
             upsert_response = client.put(
                 "/api/v1/workspaces/ws-api",
-                json={"name": "API Workspace Renamed", "study_materials_policy": "general"},
+                json={
+                    "name": "API Workspace Renamed",
+                    "study_materials_policy": "general",
+                },
             )
             assert upsert_response.status_code == 200, upsert_response.text
             upserted = upsert_response.json()
             assert upserted["name"] == "API Workspace Renamed"
             assert upserted["study_materials_policy"] == "general"
+            assert upserted["workspace_profile"] == "project"
 
             patch_response = client.patch(
                 f"/api/v1/workspaces/{created['id']}",
@@ -291,8 +300,15 @@ def test_get_workspace_maps_database_error_to_contextual_500(workspace_fastapi_a
 @pytest.mark.integration
 def test_upsert_workspace_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
-        def upsert_workspace(self, workspace_id: str, name: str, *, study_materials_policy: str):
-            _ = (workspace_id, name, study_materials_policy)
+        def upsert_workspace(
+            self,
+            workspace_id: str,
+            name: str,
+            *,
+            study_materials_policy: str,
+            workspace_profile: str,
+        ):
+            _ = (workspace_id, name, study_materials_policy, workspace_profile)
             raise InputError("invalid workspace create")
 
     async def _allow_rate_limit() -> None:
@@ -319,8 +335,15 @@ def test_upsert_workspace_maps_input_error_to_400(workspace_fastapi_app):
 @pytest.mark.integration
 def test_upsert_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
-        def upsert_workspace(self, workspace_id: str, name: str, *, study_materials_policy: str):
-            _ = (workspace_id, name, study_materials_policy)
+        def upsert_workspace(
+            self,
+            workspace_id: str,
+            name: str,
+            *,
+            study_materials_policy: str,
+            workspace_profile: str,
+        ):
+            _ = (workspace_id, name, study_materials_policy, workspace_profile)
             raise CharactersRAGDBError("sqlite backend unavailable")
 
     async def _allow_rate_limit() -> None:

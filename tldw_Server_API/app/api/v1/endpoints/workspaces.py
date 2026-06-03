@@ -82,6 +82,7 @@ def _ws_to_response(ws: dict) -> WorkspaceResponse:
         name=ws.get("name"),
         archived=bool(ws.get("archived", False)),
         study_materials_policy=str(ws.get("study_materials_policy") or "general"),
+        workspace_profile=str(ws.get("workspace_profile") or "research"),
         deleted=bool(ws.get("deleted", False)),
         banner_title=ws.get("banner_title"),
         banner_subtitle=ws.get("banner_subtitle"),
@@ -278,6 +279,20 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
+
+
+def _workspace_with_primary_root(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    workspace: dict,
+) -> dict:
+    """Attach the primary project root to a workspace row for read-model projection."""
+    primary_root = db.get_workspace_primary_root(workspace_id)
+    if primary_root is None:
+        return workspace
+    enriched = dict(workspace)
+    enriched["primary_root"] = primary_root
+    return enriched
 
 
 def try_get_workspace_job_manager() -> JobManager | None:
@@ -649,10 +664,16 @@ async def upsert_workspace(
 ):
     """Create or update a workspace (idempotent)."""
     try:
+        workspace_profile = (
+            body.workspace_profile
+            if "workspace_profile" in body.model_fields_set
+            else None
+        )
         ws = db.upsert_workspace(
             workspace_id,
             body.name,
             study_materials_policy=body.study_materials_policy,
+            workspace_profile=workspace_profile,
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to create or update workspace") from exc
@@ -772,6 +793,7 @@ async def get_workspace_capabilities(
     workspace = _require_workspace(db, workspace_id)
     try:
         sources = db.list_workspace_sources(workspace_id)
+        workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace capabilities") from exc
     status_payload = build_source_status_projection(
@@ -781,7 +803,7 @@ async def get_workspace_capabilities(
         jobs=_list_recent_media_ingest_jobs(jm, current_user),
     )
     payload = build_workspace_capability_projection(
-        workspace=workspace,
+        workspace=workspace_projection,
         status_projection=status_payload,
         service_capabilities=await collect_workspace_service_capabilities(
             workspace_id=workspace_id,
@@ -808,6 +830,7 @@ async def get_workspace_context(
     workspace = _require_workspace(db, workspace_id)
     try:
         sources = db.list_workspace_sources(workspace_id)
+        workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace context") from exc
 
@@ -819,7 +842,7 @@ async def get_workspace_context(
         jobs=jobs,
     )
     capability_payload = build_workspace_capability_projection(
-        workspace=workspace,
+        workspace=workspace_projection,
         status_projection=status_payload,
         service_capabilities=await collect_workspace_service_capabilities(
             workspace_id=workspace_id,
@@ -862,10 +885,13 @@ async def get_workspace_context(
     ]
     return WorkspaceContextResponse(
         workspace_id=workspace_id,
-        workspace_kind="research_workspace",
-        schema_version=1,
+        workspace_profile=str(capability_payload.get("workspace_profile") or "research"),
+        workspace_kind=str(capability_payload.get("workspace_kind") or "research_workspace"),
+        schema_version=2,
         generated_at=_utc_now_iso(),
         workspace=_ws_to_response(workspace),
+        resolution=capability_payload.get("resolution") or {},
+        project_root=capability_payload.get("project_root") or {},
         sources={
             "items": context_sources,
             "summary": status_payload.get("summary") or {},
