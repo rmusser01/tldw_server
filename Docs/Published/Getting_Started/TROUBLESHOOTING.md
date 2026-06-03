@@ -254,8 +254,8 @@ pip install "numpy<2"
 
 **Fix:** Use WSL2 or Git Bash. Alternatively, run the Docker commands directly:
 ```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env ^
-  -f Dockerfiles/docker-compose.yml ^
+docker compose --env-file tldw_Server_API/Config_Files/.env \
+  -f Dockerfiles/docker-compose.yml \
   -f Dockerfiles/docker-compose.webui.yml up -d --build
 ```
 
