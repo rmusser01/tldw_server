@@ -54,6 +54,26 @@ def workspace_fastapi_app():
     return app
 
 
+def _get_workspace_roots_response(
+    workspace_fastapi_app: FastAPI,
+    db_like: Any,
+    workspace_id: str = "ws-root",
+):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            return client.get(f"/api/v1/workspaces/{workspace_id}/roots")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+
 class TestWorkspaceLifecycle:
     def test_upsert_then_get(self, db):
         ws = db.upsert_workspace("ws-1", "My Workspace", study_materials_policy="workspace")
@@ -246,6 +266,164 @@ def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db):
         workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_roots_endpoint_returns_primary_root_contract(workspace_fastapi_app, db):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-root",
+        {
+            "root_id": "root-1",
+            "backend": "host_local",
+            "display_name": "Local root",
+            "absolute_root": "/Users/example/project",
+            "root_state": "attached",
+            "indexing_state": "ready",
+        },
+    )
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-root/roots")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_id"] == "ws-root"
+    assert payload["workspace_profile"] == "project"
+    assert payload["primary_root"]["root_id"] == "root-1"
+    assert payload["primary_root"]["backend"] == "host_local"
+    assert payload["primary_root"]["state"] == "attached"
+    assert payload["primary_root"]["path_hint"] == "Local root"
+    assert "absolute_root" not in payload["primary_root"]
+    assert [root["root_id"] for root in payload["roots"]] == ["root-1"]
+
+
+@pytest.mark.integration
+def test_list_workspace_roots_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "workspace_profile": "project"}
+
+        def list_workspace_project_roots(self, workspace_id: str):
+            _ = workspace_id
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-root/roots")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspace roots"
+
+
+@pytest.mark.integration
+def test_list_workspace_roots_maps_workspace_lookup_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            _ = workspace_id
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+        def list_workspace_project_roots(self, workspace_id: str):
+            _ = workspace_id
+            pytest.fail("roots should not be listed when workspace lookup fails")
+
+    response = _get_workspace_roots_response(workspace_fastapi_app, _DatabaseErrorDB())
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspace roots"
+
+
+@pytest.mark.integration
+def test_workspace_roots_endpoint_fails_closed_for_unknown_root_state_and_backend(workspace_fastapi_app):
+    class _InvalidRootDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "workspace_profile": "project"}
+
+        def list_workspace_project_roots(self, workspace_id: str):
+            return [
+                {
+                    "workspace_id": workspace_id,
+                    "root_id": "root-1",
+                    "backend": "legacy_backend",
+                    "root_state": "ready",
+                    "display_name": "Legacy root",
+                    "is_primary": True,
+                    "version": 1,
+                }
+            ]
+
+    response = _get_workspace_roots_response(workspace_fastapi_app, _InvalidRootDB())
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["primary_root"]["state"] == "failed"
+    assert payload["primary_root"]["backend"] is None
+    assert payload["roots"][0]["state"] == "failed"
+    assert payload["roots"][0]["backend"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("absolute_root", "expected_hint"),
+    [
+        ("/Users/example/project", "project"),
+        (r"C:\Users\example\project", "project"),
+        ("C:\\", "project_root"),
+        (r"\\server\share\project", "project"),
+        (r"\\server\share", "project_root"),
+        (r"\Users\example\project", "project"),
+        ("relative/secret/project", "project"),
+    ],
+)
+def test_workspace_roots_endpoint_redacts_absolute_root_fallback(
+    workspace_fastapi_app,
+    absolute_root,
+    expected_hint,
+):
+    class _RootPathDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "workspace_profile": "project"}
+
+        def list_workspace_project_roots(self, workspace_id: str):
+            return [
+                {
+                    "workspace_id": workspace_id,
+                    "root_id": "root-1",
+                    "backend": "host_local",
+                    "root_state": "attached",
+                    "absolute_root": absolute_root,
+                    "is_primary": True,
+                    "version": 1,
+                }
+            ]
+
+    response = _get_workspace_roots_response(workspace_fastapi_app, _RootPathDB())
+
+    assert response.status_code == 200, response.text
+    root = response.json()["primary_root"]
+    assert root["path_hint"] == expected_hint
+    assert "absolute_root" not in root
 
 
 @pytest.mark.integration

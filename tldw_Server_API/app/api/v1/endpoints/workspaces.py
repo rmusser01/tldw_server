@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import PurePath, PureWindowsPath
 from typing import Any
 from urllib.parse import quote
 
@@ -34,6 +35,8 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspacePatchRequest,
     WorkspaceCapabilitiesResponse,
     WorkspaceResponse,
+    WorkspaceRootResponse,
+    WorkspaceRootsResponse,
     WorkspaceSourceCreateRequest,
     WorkspaceSourcePreviewResponse,
     WorkspaceSourceReorderRequest,
@@ -61,6 +64,7 @@ from tldw_Server_API.app.core.Workspaces.source_jobs import (
 from tldw_Server_API.app.core.Workspaces.service_capabilities import (
     collect_workspace_service_capabilities,
 )
+from tldw_Server_API.app.core.Workspaces.models import normalize_project_root_state
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
     build_workspace_capability_projection,
@@ -111,6 +115,73 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
         added_at=str(src.get("added_at", "")),
         version=src.get("version", 1),
     )
+
+
+def _root_to_response(root: dict[str, Any]) -> WorkspaceRootResponse:
+    """Convert a project root DB row to a redacted public response."""
+    return WorkspaceRootResponse(
+        workspace_id=root.get("workspace_id"),
+        root_id=root.get("root_id") or root.get("id"),
+        backend=_root_backend(root.get("backend")),
+        state=normalize_project_root_state(root.get("root_state") or root.get("state")),
+        display_name=root.get("display_name"),
+        path_hint=_root_path_hint(root),
+        git_state=root.get("git_state"),
+        file_inventory_state=root.get("file_inventory_state"),
+        indexing_state=root.get("indexing_state"),
+        sandbox_mount_state=root.get("sandbox_mount_state"),
+        mcp_trust_state=root.get("mcp_trust_state"),
+        is_primary=bool(root.get("is_primary", True)),
+        version=root.get("version"),
+        updated_at=str(root["updated_at"]) if root.get("updated_at") else None,
+    )
+
+
+def _root_path_hint(root: dict[str, Any]) -> str | None:
+    explicit_hint = root.get("path_hint")
+    if explicit_hint:
+        return _redacted_path_hint(explicit_hint)
+    if root.get("sandbox_volume_id"):
+        return str(root["sandbox_volume_id"])
+    if root.get("display_name"):
+        return _redacted_path_hint(root["display_name"])
+    absolute_root = root.get("absolute_root")
+    if absolute_root:
+        return _basename_path_hint(absolute_root)
+    return None
+
+
+def _root_backend(value: Any) -> str | None:
+    backend = str(value or "").strip().lower()
+    if backend in {"host_local", "sandbox_volume"}:
+        return backend
+    return None
+
+
+def _redacted_path_hint(value: Any) -> str:
+    raw_value = str(value)
+    windows_path = PureWindowsPath(raw_value)
+    if raw_value.startswith(("/", "~", "\\\\")) or windows_path.is_absolute():
+        if windows_path.is_absolute() or raw_value.startswith("\\\\"):
+            return windows_path.name or "project_root"
+        return PurePath(raw_value).name or "project_root"
+    return raw_value
+
+
+def _basename_path_hint(value: Any) -> str:
+    raw_value = str(value).strip()
+    if not raw_value:
+        return "project_root"
+    windows_path = PureWindowsPath(raw_value)
+    windows_name = windows_path.name
+    if windows_name and windows_name not in {".", "..", "/", "\\"}:
+        return windows_name
+    if windows_path.drive or windows_path.root:
+        return "project_root"
+    posix_name = PurePath(raw_value).name
+    if posix_name and posix_name not in {".", "..", "/", "\\"}:
+        return posix_name
+    return "project_root"
 
 
 def _utc_now_iso() -> str:
@@ -901,6 +972,36 @@ async def get_workspace_context(
         allowed_actions=capability_payload.get("allowed_actions") or {},
         active_jobs=active_jobs,
         partial_errors=partial_errors,
+    )
+
+
+@router.get(
+    "/{workspace_id}/roots",
+    response_model=WorkspaceRootsResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace project roots",
+)
+async def list_workspace_roots(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRootsResponse:
+    """Return the read-only project root contract for a workspace."""
+    _ = current_user
+    try:
+        workspace = _require_workspace(db, workspace_id)
+        roots = db.list_workspace_project_roots(workspace_id)
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace roots") from exc
+
+    primary_root = next((root for root in roots if bool(root.get("is_primary"))), None)
+    return WorkspaceRootsResponse(
+        workspace_id=workspace_id,
+        workspace_profile=str(workspace.get("workspace_profile") or "research"),
+        primary_root=_root_to_response(primary_root) if primary_root else None,
+        roots=[_root_to_response(root) for root in roots],
     )
 
 

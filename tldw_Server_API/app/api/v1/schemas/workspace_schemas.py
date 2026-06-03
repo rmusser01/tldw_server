@@ -273,6 +273,8 @@ class WorkspaceRootResponse(WorkspaceProjectRoot):
 
 class WorkspaceRootsResponse(BaseModel):
     workspace_id: str
+    workspace_profile: WorkspaceProfile = "research"
+    primary_root: WorkspaceRootResponse | None = None
     roots: list[WorkspaceRootResponse] = Field(default_factory=list)
 
 

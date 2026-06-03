@@ -654,7 +654,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS after endpoint wiring in Task 5; it may still fail at this step if endpoint mappings are not updated yet.
 
-- [ ] **Step 4: Commit only if tests pass independently**
+- [x] **Step 4: Commit only if tests pass independently**
 
 Status note: the additive request/response schema bridge was pulled forward into
 the Task 3 review-fix commit because the capability/context endpoints already
@@ -672,7 +672,7 @@ If endpoint wiring is needed, do not commit half-wired schemas. Continue to Task
 - Modify: `tldw_Server_API/app/api/v1/schemas/workspace_schemas.py`
 - Test: `tldw_Server_API/tests/Workspaces/test_workspaces_api.py`
 
-- [ ] **Step 1: Write failing read-only roots endpoint test**
+- [x] **Step 1: Write failing read-only roots endpoint test**
 
 Add to `test_workspaces_api.py`:
 
@@ -711,7 +711,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: FAIL because endpoint mapping is not implemented.
 
-- [ ] **Step 2: Update response mapping helpers**
+- [x] **Step 2: Update response mapping helpers**
 
 In `workspaces.py`:
 
@@ -721,7 +721,7 @@ In `workspaces.py`:
 - In `upsert_workspace`, pass `body.workspace_profile`.
 - In `patch_workspace`, allow `workspace_profile`.
 
-- [ ] **Step 3: Extend `/capabilities` and `/context`**
+- [x] **Step 3: Extend `/capabilities` and `/context`**
 
 - Fetch `primary_root = db.get_workspace_primary_root(workspace_id)`.
 - Pass `primary_root` into capability/context projection.
@@ -729,7 +729,7 @@ In `workspaces.py`:
 - Keep existing `sources`, `services`, `allowed_actions`, and `active_jobs` keys unchanged.
 - Partial failures from Media DB and Jobs should feed `resolution.status: partial`.
 
-- [ ] **Step 4: Add read-only roots route**
+- [x] **Step 4: Add read-only roots route**
 
 Add:
 
@@ -754,7 +754,7 @@ async def list_workspace_roots(...):
 
 Do not add `POST /roots/primary` in this task. Root mutation requires the next root-attach/Sandbox-wrapper implementation plan.
 
-- [ ] **Step 5: Run focused API tests**
+- [x] **Step 5: Run focused API tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspaces_api.py -k "roots_endpoint or profile_contract or workspace_context" -q
@@ -762,7 +762,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS.
 
-- [ ] **Step 6: Run workspace API regression tests**
+- [x] **Step 6: Run workspace API regression tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q
@@ -770,12 +770,19 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/t
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py
-git commit -m "feat: expose workspace core context contracts"
+git commit -m "feat: expose workspace project roots contract"
 ```
+
+Status note: Task 5 added the read-only `/api/v1/workspaces/{workspace_id}/roots`
+contract, `WorkspaceRootsResponse.workspace_profile`, and `primary_root`.
+Code review found mapped-error, response-validation, and path-redaction edge
+cases; all were fixed with regressions before commit. Local verification: focused
+Workspace subset -> 97 passed, 6 warnings; compile smoke passed; `git diff
+--check` passed; Bandit on touched API/schema files -> 0 findings.
 
 ---
 
