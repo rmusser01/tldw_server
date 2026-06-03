@@ -83,6 +83,57 @@ def test_primary_root_upsert_replaces_existing_primary_root(db):
     assert root["root_id"] == "root-2"
 
 
+def test_upsert_primary_root_enforces_expected_workspace_version(db):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(ConflictError):
+        db.upsert_workspace_primary_root(
+            "ws-1",
+            {
+                "root_id": "primary",
+                "backend": "host_local",
+                "absolute_root": "/Users/example/project",
+                "expected_workspace_version": 999,
+            },
+        )
+
+
+def test_upsert_primary_root_rejects_malformed_expected_workspace_version(db):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(InputError):
+        db.upsert_workspace_primary_root(
+            "ws-1",
+            {
+                "root_id": "primary",
+                "backend": "host_local",
+                "expected_workspace_version": "not-an-int",
+            },
+        )
+
+
+def test_upsert_primary_root_replaces_same_root_id_when_replace_existing_true(db):
+    db.upsert_workspace("ws-1", "Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-1",
+        {"root_id": "primary", "backend": "host_local", "absolute_root": "/old"},
+    )
+
+    root = db.upsert_workspace_primary_root(
+        "ws-1",
+        {
+            "root_id": "primary",
+            "backend": "sandbox_volume",
+            "sandbox_volume_id": "volume-1",
+            "replace_existing": True,
+        },
+    )
+
+    assert root["backend"] == "sandbox_volume"
+    assert root["sandbox_volume_id"] == "volume-1"
+    assert root["absolute_root"] is None
+
+
 def test_invalid_root_backend_raises_input_error(db):
     db.upsert_workspace("ws-1", "Workspace")
     with pytest.raises(InputError):
@@ -147,8 +198,39 @@ def test_retrying_same_primary_root_upsert_preserves_operational_state(db):
         expected_version=root["version"],
     )
 
-    retried = db.upsert_workspace_primary_root("ws-1", payload)
+    retried = db.upsert_workspace_primary_root(
+        "ws-1",
+        {"root_id": "root-1", "backend": "host_local"},
+    )
 
     assert retried["root_state"] == "attached"
     assert retried["git_state"] == "clean"
     assert retried["version"] == updated["version"]
+
+
+def test_retrying_same_primary_root_upsert_repairs_operational_state_when_provided(db):
+    db.upsert_workspace("ws-1", "Workspace")
+    root = db.upsert_workspace_primary_root(
+        "ws-1",
+        {
+            "root_id": "primary",
+            "backend": "sandbox_volume",
+            "sandbox_volume_id": "volume-1",
+            "root_state": "attached",
+            "sandbox_mount_state": "unavailable",
+        },
+    )
+
+    repaired = db.upsert_workspace_primary_root(
+        "ws-1",
+        {
+            "root_id": "primary",
+            "backend": "sandbox_volume",
+            "sandbox_volume_id": "volume-1",
+            "root_state": "attached",
+            "sandbox_mount_state": "ready",
+        },
+    )
+
+    assert repaired["sandbox_mount_state"] == "ready"
+    assert repaired["version"] == root["version"] + 1

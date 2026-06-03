@@ -15536,6 +15536,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not root_id:
             raise InputError("root_id is required.")  # noqa: TRY003
         backend = self._validate_workspace_project_root_backend(data.get("backend"))
+        expected_workspace_version_raw = data.get("expected_workspace_version")
+        expected_workspace_version: int | None = None
+        if expected_workspace_version_raw is not None:
+            try:
+                expected_workspace_version = int(expected_workspace_version_raw)
+            except (TypeError, ValueError) as exc:
+                raise InputError("expected_workspace_version must be an integer when provided.") from exc  # noqa: TRY003
+        replace_existing = bool(data.get("replace_existing", False))
         metadata_json = (
             self._serialize_workspace_project_root_metadata(data.get("metadata_json"))
             if "metadata_json" in data
@@ -15578,6 +15586,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         entity_id=workspace_id,
                     )
                 workspace = dict(workspace_row)
+                if (
+                    expected_workspace_version is not None
+                    and int(workspace["version"]) != expected_workspace_version
+                ):
+                    raise ConflictError(
+                        f"Workspace '{workspace_id}' version mismatch "
+                        f"(db={workspace['version']}, expected={expected_workspace_version}).",
+                        entity="workspaces",
+                        entity_id=workspace_id,
+                    )
                 existing_primary_row = conn.execute(
                     """
                     SELECT *
@@ -15592,42 +15610,76 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
                 if existing_primary is not None and existing_primary.get("root_id") == root_id:
                     if existing_primary.get("backend") != backend:
-                        raise ConflictError(
-                            f"Workspace project root '{root_id}' backend mismatch.",
-                            entity="workspace_project_roots",
-                            entity_id=root_id,
-                        )
-                    binding_columns = (
-                        "absolute_root",
-                        "sandbox_volume_id",
-                        "display_name",
-                        "metadata_json",
-                    )
-                    root_updates: dict[str, Any] = {}
-                    for column in binding_columns:
-                        if column not in data:
-                            continue
-                        new_value = metadata_json if column == "metadata_json" else values[column]
-                        if existing_primary.get(column) != new_value:
-                            root_updates[column] = new_value
-                    if root_updates:
+                        if not replace_existing:
+                            raise ConflictError(
+                                f"Workspace project root '{root_id}' backend mismatch.",
+                                entity="workspace_project_roots",
+                                entity_id=root_id,
+                            )
                         root_binding_changed = True
-                        set_clauses = ["updated_at = ?", "version = ?"]
-                        params: list[Any] = [now, int(existing_primary["version"]) + 1]
-                        for column, value in root_updates.items():
-                            set_clauses.append(f"{column} = ?")
-                            params.append(value)
-                        params.extend([workspace_id, root_id])
-                        conn.execute(
-                            f"""
-                            UPDATE workspace_project_roots
-                               SET {', '.join(set_clauses)}
-                             WHERE workspace_id = ?
-                               AND root_id = ?
-                            """,  # nosec B608
-                            tuple(params),
+                    else:
+                        binding_columns = (
+                            "absolute_root",
+                            "sandbox_volume_id",
+                            "display_name",
+                            "metadata_json",
                         )
-                else:
+                        operational_columns = (
+                            "root_state",
+                            "git_state",
+                            "file_inventory_state",
+                            "indexing_state",
+                            "sandbox_mount_state",
+                            "mcp_trust_state",
+                        )
+                        root_updates: dict[str, Any] = {}
+                        for column in binding_columns:
+                            if column not in data:
+                                continue
+                            new_value = metadata_json if column == "metadata_json" else values[column]
+                            if existing_primary.get(column) != new_value:
+                                root_updates[column] = new_value
+                        for column in operational_columns:
+                            if column not in data:
+                                continue
+                            new_value = values[column]
+                            if existing_primary.get(column) != new_value:
+                                root_updates[column] = new_value
+                        if root_updates:
+                            root_binding_changed = True
+                            set_clauses = ["updated_at = ?", "version = ?"]
+                            params: list[Any] = [now, int(existing_primary["version"]) + 1]
+                            for column, value in root_updates.items():
+                                set_clauses.append(f"{column} = ?")
+                                params.append(value)
+                            params.extend([workspace_id, root_id])
+                            conn.execute(
+                                f"""
+                                UPDATE workspace_project_roots
+                                   SET {', '.join(set_clauses)}
+                                 WHERE workspace_id = ?
+                                   AND root_id = ?
+                                """,  # nosec B608
+                                tuple(params),
+                            )
+                        root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
+                        if root is None:
+                            raise CharactersRAGDBError(  # noqa: TRY003
+                                f"Failed to reload workspace project root '{root_id}'."
+                            )
+                        if root_binding_changed or workspace.get("workspace_profile") != "project":
+                            conn.execute(
+                                """
+                                UPDATE workspaces
+                                   SET workspace_profile = 'project',
+                                       last_modified = ?,
+                                       version = version + 1
+                                 WHERE id = ? AND deleted = ?
+                                """,
+                                (now, workspace_id, deleted_value),
+                            )
+                        return root
+                if existing_primary is None or existing_primary.get("root_id") != root_id or replace_existing:
                     conn.execute(
                         "DELETE FROM workspace_project_roots WHERE workspace_id = ? AND is_primary = ?",
                         (workspace_id, primary_value),
