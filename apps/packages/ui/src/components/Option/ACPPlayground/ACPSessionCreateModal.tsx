@@ -263,7 +263,10 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
     }
 
     const configuredAgent = agents.find(isACPAgentReadyToStart)
-    form.setFieldValue("agentType", configuredAgent?.type ?? defaultAgent)
+    const targetAgentType = configuredAgent?.type ?? defaultAgent
+    if (currentAgentType !== targetAgentType) {
+      form.setFieldValue("agentType", targetAgentType)
+    }
   }, [open, agents, defaultAgent, form])
 
   // Create session mutation

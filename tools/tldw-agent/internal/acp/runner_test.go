@@ -258,6 +258,21 @@ func TestRunnerAgentListBlocksMutableNpxLatestWithoutSpawning(t *testing.T) {
 	}
 }
 
+func TestPassiveBlockedStatusUsesActionableMessages(t *testing.T) {
+	cases := map[string]string{
+		"live_certification_required": "Run live ACP certification before claiming this agent is supported.",
+		"entrypoint_strategy_missing": "Identify and configure a concrete ACP stdio entrypoint before live certification.",
+	}
+
+	for blocker, want := range cases {
+		t.Run(blocker, func(t *testing.T) {
+			if got := passiveBlockedStatus(blocker); got != want {
+				t.Fatalf("status = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *stubAgent {
 	agent := &stubAgent{
 		conn:         conn,

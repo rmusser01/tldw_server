@@ -54,4 +54,12 @@ describe("ACPSessionCreateModal modal prop guard", () => {
     expect(source).toContain("currentAgent && isACPAgentReadyToStart(currentAgent)")
     expect(source).toContain("agents.find(isACPAgentReadyToStart)")
   })
+
+  it("does not rewrite agentType when the structured-ready target is already selected", () => {
+    const source = readFileSync(sourcePath, "utf8")
+
+    expect(source).toContain("const targetAgentType = configuredAgent?.type ?? defaultAgent")
+    expect(source).toContain("if (currentAgentType !== targetAgentType)")
+    expect(source).toContain('form.setFieldValue("agentType", targetAgentType)')
+  })
 })
