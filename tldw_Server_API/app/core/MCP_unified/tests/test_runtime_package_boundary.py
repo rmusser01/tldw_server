@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 
 import mcp_unified
@@ -47,6 +48,109 @@ def _dependency_names(dependencies: list[str] | tuple[str, ...]) -> set[str]:
         _dependency_package_name(dependency)
         for dependency in dependencies
     }
+
+
+def _version_release_parts(version: str) -> tuple[int, ...] | None:
+    """Return leading numeric release parts from a version string."""
+
+    parts: list[int] = []
+    for part in version.split("+", 1)[0].split("-", 1)[0].split("."):
+        if not part.isdigit():
+            break
+        parts.append(int(part))
+    if not parts:
+        return None
+    return tuple(parts)
+
+
+def _minimum_version(requirement: str) -> tuple[int, ...] | None:
+    """Return a simple >= minimum version tuple from a requirement string."""
+
+    if ">=" not in requirement:
+        return None
+    minimum = requirement.split(">=", 1)[1].split(",", 1)[0].strip()
+    return _version_release_parts(minimum)
+
+
+def _version_satisfies_minimum(
+    installed_version: str,
+    minimum_version: tuple[int, ...] | None,
+) -> bool:
+    """Return whether an installed version satisfies a simple minimum tuple."""
+
+    if minimum_version is None:
+        return True
+    installed_parts = _version_release_parts(installed_version)
+    if installed_parts is None:
+        return False
+    width = max(len(installed_parts), len(minimum_version))
+    return installed_parts + (0,) * (width - len(installed_parts)) >= (
+        minimum_version + (0,) * (width - len(minimum_version))
+    )
+
+
+def _require_offline_build_tools() -> None:
+    """Skip the offline build smoke when local build tools are unavailable."""
+
+    pyproject = _load_standalone_pyproject()
+    build_requires = pyproject["build-system"]["requires"]
+    missing: list[str] = []
+    incompatible: list[str] = []
+    for requirement in build_requires:
+        package_name = _dependency_package_name(requirement)
+        try:
+            installed_version = importlib_metadata.version(package_name)
+        except importlib_metadata.PackageNotFoundError:
+            missing.append(requirement)
+            continue
+        minimum = _minimum_version(requirement)
+        if not _version_satisfies_minimum(installed_version, minimum):
+            incompatible.append(f"{requirement} (found {installed_version})")
+
+    if missing or incompatible:
+        details = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if incompatible:
+            details.append(f"incompatible: {', '.join(incompatible)}")
+        pytest.skip(
+            "Offline standalone package smoke requires preinstalled build-system "
+            "requirements because it uses PIP_NO_INDEX=1 and "
+            f"--no-build-isolation; {'; '.join(details)}."
+        )
+
+
+def _assert_subprocess_succeeded(
+    result: subprocess.CompletedProcess[str],
+    command_label: str,
+) -> None:
+    """Assert a captured subprocess succeeded while preserving diagnostics."""
+
+    if result.returncode != 0:
+        raise AssertionError(
+            f"{command_label} failed with exit code {result.returncode}:\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+
+
+def test_subprocess_failure_assertion_includes_captured_output() -> None:
+    """Subprocess smoke failures should expose captured stdout and stderr."""
+
+    result = subprocess.CompletedProcess(
+        args=["python", "-m", "pip", "wheel"],
+        returncode=2,
+        stdout="build stdout",
+        stderr="build stderr",
+    )
+
+    with pytest.raises(AssertionError) as exc_info:
+        _assert_subprocess_succeeded(result, "pip wheel")
+
+    message = str(exc_info.value)
+    assert "pip wheel failed with exit code 2" in message
+    assert "STDOUT:\nbuild stdout" in message
+    assert "STDERR:\nbuild stderr" in message
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -138,6 +242,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     pyproject = _load_standalone_pyproject()
     project = pyproject["project"]
 
+    assert pyproject["build-system"]["requires"] == ["setuptools>=61.0"]
     assert project["name"] == metadata.PACKAGE_NAME
     assert project["version"] == mcp_unified.__version__
     assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
@@ -182,6 +287,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
     """Install the standalone package into an isolated target without root deps."""
 
     _load_standalone_pyproject()
+    _require_offline_build_tools()
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
         PACKAGE_ROOT,
@@ -193,6 +299,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
         ),
     )
     wheel_dir = tmp_path / "dist"
+    wheel_dir.mkdir()
     build_env = {
         **os.environ,
         "PIP_DISABLE_PIP_VERSION_CHECK": "1",
@@ -210,18 +317,19 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
             str(wheel_dir),
             str(package_source),
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=build_env,
     )
+    _assert_subprocess_succeeded(build_result, "pip wheel")
 
     wheels = sorted(wheel_dir.glob("mcp_unified-*.whl"))
-    assert wheels, build_result.stdout + build_result.stderr
+    assert wheels, "No mcp_unified wheel found after pip wheel completed."
 
     install_dir = tmp_path / "install"
 
-    subprocess.run(
+    install_result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -233,11 +341,12 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
             str(install_dir),
             str(wheels[-1]),
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=build_env,
     )
+    _assert_subprocess_succeeded(install_result, "pip install")
     import_result = subprocess.run(
         [
             sys.executable,
@@ -261,7 +370,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
                 "}))"
             ),
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         cwd=tmp_path,
@@ -271,6 +380,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
             "PYTHONPATH": "",
         },
     )
+    _assert_subprocess_succeeded(import_result, "standalone package import")
 
     assert json.loads(import_result.stdout) == {
         "version": mcp_unified.__version__,
@@ -296,6 +406,38 @@ def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
                 "'yt_dlp', 'next'"
                 ") if name in sys.modules"
                 "]; "
+                "print(json.dumps(blocked))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == []
+
+
+@pytest.mark.parametrize(
+    ("module_name", "blocked_modules"),
+    [
+        ("mcp_unified.storage", ("mcp_unified.storage.sqlite", "sqlalchemy")),
+        ("mcp_unified.federation", ("mcp_unified.storage.sqlite", "sqlalchemy")),
+    ],
+)
+def test_package_imports_do_not_eagerly_load_sqlite_backend(
+    module_name: str,
+    blocked_modules: tuple[str, ...],
+) -> None:
+    """Core and federation imports must not require SQLite storage dependencies."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib, json, sys; "
+                f"importlib.import_module({module_name!r}); "
+                f"blocked = [name for name in {blocked_modules!r} if name in sys.modules]; "
                 "print(json.dumps(blocked))"
             ),
         ],
