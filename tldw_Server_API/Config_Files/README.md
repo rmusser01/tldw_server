@@ -49,6 +49,12 @@ How to apply changes
 ## [Audit]
 - `export_stream_auto_max_rows` (int): Auto-switch audit exports to streaming when `max_rows` is above this value (env: `AUDIT_EXPORT_STREAM_AUTO_MAX_ROWS`). Keeps large CSV/JSON/JSONL exports from buffering entirely in memory.
 
+## Workspace Project Roots
+Project Workspace host-local roots are gated by `[WORKSPACES].project_root_allowed_base_paths`,
+`WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS`, or `TLDW_WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS`.
+If unset, the Workspace API falls back to ACP workspace roots for compatibility. Ingestion source
+roots are not used for project-root writes.
+
 ## [Processing]
 - `processing_choice` (str): Hardware backend, e.g., `cuda|cpu` for ML pipelines.
 

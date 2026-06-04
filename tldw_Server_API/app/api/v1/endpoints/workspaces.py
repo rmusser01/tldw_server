@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import PurePath, PureWindowsPath
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
@@ -27,13 +28,20 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceArtifactResponse,
     WorkspaceArtifactUpdateRequest,
     WorkspaceContextResponse,
+    WorkspaceFileInventoryEntryKind,
+    WorkspaceFileInventoryItemsResponse,
+    WorkspaceFileInventoryScanRequest,
+    WorkspaceFileInventoryStatusResponse,
     WorkspaceListResponse,
     WorkspaceNoteCreateRequest,
     WorkspaceNoteResponse,
     WorkspaceNoteUpdateRequest,
     WorkspacePatchRequest,
+    WorkspacePrimaryRootAttachRequest,
     WorkspaceCapabilitiesResponse,
     WorkspaceResponse,
+    WorkspaceRootResponse,
+    WorkspaceRootsResponse,
     WorkspaceSourceCreateRequest,
     WorkspaceSourcePreviewResponse,
     WorkspaceSourceReorderRequest,
@@ -52,6 +60,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Workspaces.file_inventory_ignore import build_inventory_ignore_policy
+from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
+    WorkspaceFileInventoryEnqueueError,
+    enqueue_workspace_file_inventory_scan_job,
+)
 from tldw_Server_API.app.core.Workspaces.source_jobs import (
     WORKSPACE_SOURCE_JOB_DOMAIN,
     WORKSPACE_SOURCE_JOB_QUEUE,
@@ -61,6 +74,12 @@ from tldw_Server_API.app.core.Workspaces.source_jobs import (
 from tldw_Server_API.app.core.Workspaces.service_capabilities import (
     collect_workspace_service_capabilities,
 )
+from tldw_Server_API.app.core.Workspaces.root_binding_service import (
+    WorkspaceRootAttachRequest,
+    WorkspaceRootServiceError,
+    attach_primary_workspace_root,
+)
+from tldw_Server_API.app.core.Workspaces.models import normalize_project_root_state
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
     build_workspace_capability_projection,
@@ -82,6 +101,7 @@ def _ws_to_response(ws: dict) -> WorkspaceResponse:
         name=ws.get("name"),
         archived=bool(ws.get("archived", False)),
         study_materials_policy=str(ws.get("study_materials_policy") or "general"),
+        workspace_profile=str(ws.get("workspace_profile") or "research"),
         deleted=bool(ws.get("deleted", False)),
         banner_title=ws.get("banner_title"),
         banner_subtitle=ws.get("banner_subtitle"),
@@ -110,6 +130,91 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
         added_at=str(src.get("added_at", "")),
         version=src.get("version", 1),
     )
+
+
+def _root_to_response(root: dict[str, Any]) -> WorkspaceRootResponse:
+    """Convert a project root DB row to a redacted public response."""
+    return WorkspaceRootResponse(
+        workspace_id=root.get("workspace_id"),
+        root_id=root.get("root_id") or root.get("id"),
+        backend=_root_backend(root.get("backend")),
+        state=normalize_project_root_state(root.get("root_state") or root.get("state")),
+        display_name=root.get("display_name"),
+        path_hint=_root_path_hint(root),
+        git_state=root.get("git_state"),
+        file_inventory_state=root.get("file_inventory_state"),
+        file_inventory=_workspace_file_inventory_summary(root),
+        indexing_state=root.get("indexing_state"),
+        sandbox_mount_state=root.get("sandbox_mount_state"),
+        mcp_trust_state=root.get("mcp_trust_state"),
+        is_primary=bool(root.get("is_primary", True)),
+        version=root.get("version"),
+        updated_at=str(root["updated_at"]) if root.get("updated_at") else None,
+    )
+
+
+def _workspace_roots_response(
+    *,
+    workspace_id: str,
+    workspace: dict[str, Any],
+    roots: list[dict[str, Any]],
+) -> WorkspaceRootsResponse:
+    primary_root = next((root for root in roots if bool(root.get("is_primary"))), None)
+    return WorkspaceRootsResponse(
+        workspace_id=workspace_id,
+        workspace_profile=str(workspace.get("workspace_profile") or "research"),
+        primary_root=_root_to_response(primary_root) if primary_root else None,
+        roots=[_root_to_response(root) for root in roots],
+    )
+
+
+def _root_path_hint(root: dict[str, Any]) -> str | None:
+    explicit_hint = root.get("path_hint")
+    if explicit_hint:
+        return _redacted_path_hint(explicit_hint)
+    if root.get("sandbox_volume_id"):
+        return str(root["sandbox_volume_id"])
+    if root.get("display_name"):
+        return _redacted_path_hint(root["display_name"])
+    absolute_root = root.get("absolute_root")
+    if absolute_root:
+        return _basename_path_hint(absolute_root)
+    return None
+
+
+def _root_backend(value: Any) -> str | None:
+    backend = str(value or "").strip().lower()
+    if backend in {"host_local", "sandbox_volume"}:
+        return backend
+    return None
+
+
+def _redacted_path_hint(value: Any) -> str:
+    raw_value = str(value)
+    windows_path = PureWindowsPath(raw_value)
+    if raw_value.startswith(("/", "~", "\\\\")) or windows_path.is_absolute():
+        if windows_path.is_absolute() or raw_value.startswith("\\\\"):
+            return windows_path.name or "project_root"
+        return PurePath(raw_value).name or "project_root"
+    if "/" in raw_value or "\\" in raw_value:
+        return windows_path.name or PurePath(raw_value).name or "project_root"
+    return raw_value
+
+
+def _basename_path_hint(value: Any) -> str:
+    raw_value = str(value).strip()
+    if not raw_value:
+        return "project_root"
+    windows_path = PureWindowsPath(raw_value)
+    windows_name = windows_path.name
+    if windows_name and windows_name not in {".", "..", "/", "\\"}:
+        return windows_name
+    if windows_path.drive or windows_path.root:
+        return "project_root"
+    posix_name = PurePath(raw_value).name
+    if posix_name and posix_name not in {".", "..", "/", "\\"}:
+        return posix_name
+    return "project_root"
 
 
 def _utc_now_iso() -> str:
@@ -188,6 +293,62 @@ def _job_status_payload(job: dict[str, Any]) -> dict[str, Any]:
         "progress_message": job.get("progress_message"),
         "error_message": job.get("error_message"),
     }
+
+
+def _workspace_file_inventory_job_status(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not job:
+        return None
+    payload = _job_status_payload(job)
+    payload["error_message"] = None
+    return payload
+
+
+def _safe_get_job(jm: JobManager | None, job_id: Any) -> dict[str, Any] | None:
+    if jm is None or job_id is None:
+        return None
+    try:
+        return jm.get_job(int(job_id))
+    except (AttributeError, TypeError, ValueError) as exc:
+        logger.warning("Workspace file inventory job lookup failed for id {}: {}", job_id, exc)
+        return None
+    except Exception as exc:
+        logger.warning("Workspace file inventory job lookup failed for id {}: {}", job_id, exc)
+        return None
+
+
+def _workspace_file_inventory_status_response(
+    status_payload: dict[str, Any],
+    *,
+    job: dict[str, Any] | None = None,
+) -> WorkspaceFileInventoryStatusResponse:
+    return WorkspaceFileInventoryStatusResponse(
+        workspace_id=str(status_payload.get("workspace_id") or ""),
+        root_id=status_payload.get("root_id"),
+        state=str(status_payload.get("state") or "not_started"),
+        durable_state=status_payload.get("durable_state"),
+        stale=bool(status_payload.get("stale", False)),
+        last_scan_id=status_payload.get("scan_id"),
+        last_scan_started_at=status_payload.get("started_at"),
+        last_scan_completed_at=status_payload.get("completed_at"),
+        root_version=status_payload.get("root_version"),
+        scan_root_version=status_payload.get("scan_root_version"),
+        ignore_policy_fingerprint=status_payload.get("ignore_policy_fingerprint"),
+        root_snapshot_token=status_payload.get("root_snapshot_token"),
+        counts=status_payload.get("counts") or {},
+        diagnostics=status_payload.get("diagnostics") or [],
+        job=_workspace_file_inventory_job_status(job),
+        updated_at=status_payload.get("updated_at"),
+    )
+
+
+def _workspace_file_inventory_no_root_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "workspace_project_root_missing",
+            "message": "Workspace has no primary project root.",
+        },
+    )
 
 
 def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
@@ -278,6 +439,71 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
+
+
+def _workspace_with_primary_root(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    workspace: dict,
+) -> dict:
+    """Attach the primary project root to a workspace row for read-model projection."""
+    primary_root = db.get_workspace_primary_root(workspace_id)
+    if primary_root is None:
+        return workspace
+    enriched = dict(workspace)
+    enriched["primary_root"] = _workspace_primary_root_with_file_inventory_status(
+        db,
+        workspace_id,
+        primary_root,
+    )
+    return enriched
+
+
+def _workspace_primary_root_with_file_inventory_status(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    primary_root: dict[str, Any],
+) -> dict[str, Any]:
+    enriched_root = dict(primary_root)
+    status_payload = db.get_workspace_file_inventory_status(workspace_id)
+    enriched_root["file_inventory"] = _workspace_file_inventory_summary(status_payload)
+    enriched_root["file_inventory_state"] = status_payload.get("state") or primary_root.get("file_inventory_state")
+    return enriched_root
+
+
+def _workspace_file_inventory_summary(source: dict[str, Any]) -> dict[str, Any]:
+    raw_inventory = source.get("file_inventory")
+    if isinstance(raw_inventory, dict):
+        return {
+            "state": raw_inventory.get("state") or source.get("file_inventory_state") or "not_started",
+            "indexed_file_count": _non_negative_int(raw_inventory.get("indexed_file_count"), default=0),
+            "total_file_count": _non_negative_int(raw_inventory.get("total_file_count"), default=0),
+            "updated_at": str(raw_inventory["updated_at"]) if raw_inventory.get("updated_at") else None,
+        }
+
+    counts = source.get("counts") if isinstance(source.get("counts"), dict) else {}
+    return {
+        "state": source.get("state") or source.get("file_inventory_state") or "not_started",
+        "indexed_file_count": 0,
+        "total_file_count": _non_negative_int(counts.get("files"), default=0),
+        "updated_at": _workspace_file_inventory_updated_at(source),
+    }
+
+
+def _workspace_file_inventory_updated_at(source: dict[str, Any]) -> str | None:
+    for key in ("updated_at", "completed_at", "last_scan_completed_at", "started_at", "last_scan_started_at"):
+        value = source.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, coerced)
 
 
 def try_get_workspace_job_manager() -> JobManager | None:
@@ -649,10 +875,16 @@ async def upsert_workspace(
 ):
     """Create or update a workspace (idempotent)."""
     try:
+        workspace_profile = (
+            body.workspace_profile
+            if "workspace_profile" in body.model_fields_set
+            else None
+        )
         ws = db.upsert_workspace(
             workspace_id,
             body.name,
             study_materials_policy=body.study_materials_policy,
+            workspace_profile=workspace_profile,
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to create or update workspace") from exc
@@ -772,6 +1004,7 @@ async def get_workspace_capabilities(
     workspace = _require_workspace(db, workspace_id)
     try:
         sources = db.list_workspace_sources(workspace_id)
+        workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace capabilities") from exc
     status_payload = build_source_status_projection(
@@ -781,7 +1014,7 @@ async def get_workspace_capabilities(
         jobs=_list_recent_media_ingest_jobs(jm, current_user),
     )
     payload = build_workspace_capability_projection(
-        workspace=workspace,
+        workspace=workspace_projection,
         status_projection=status_payload,
         service_capabilities=await collect_workspace_service_capabilities(
             workspace_id=workspace_id,
@@ -808,6 +1041,7 @@ async def get_workspace_context(
     workspace = _require_workspace(db, workspace_id)
     try:
         sources = db.list_workspace_sources(workspace_id)
+        workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace context") from exc
 
@@ -819,7 +1053,7 @@ async def get_workspace_context(
         jobs=jobs,
     )
     capability_payload = build_workspace_capability_projection(
-        workspace=workspace,
+        workspace=workspace_projection,
         status_projection=status_payload,
         service_capabilities=await collect_workspace_service_capabilities(
             workspace_id=workspace_id,
@@ -862,10 +1096,13 @@ async def get_workspace_context(
     ]
     return WorkspaceContextResponse(
         workspace_id=workspace_id,
-        workspace_kind="research_workspace",
-        schema_version=1,
+        workspace_profile=str(capability_payload.get("workspace_profile") or "research"),
+        workspace_kind=str(capability_payload.get("workspace_kind") or "research_workspace"),
+        schema_version=2,
         generated_at=_utc_now_iso(),
         workspace=_ws_to_response(workspace),
+        resolution=capability_payload.get("resolution") or {},
+        project_root=capability_payload.get("project_root") or {},
         sources={
             "items": context_sources,
             "summary": status_payload.get("summary") or {},
@@ -875,6 +1112,229 @@ async def get_workspace_context(
         allowed_actions=capability_payload.get("allowed_actions") or {},
         active_jobs=active_jobs,
         partial_errors=partial_errors,
+    )
+
+
+@router.get(
+    "/{workspace_id}/roots",
+    response_model=WorkspaceRootsResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace project roots",
+)
+async def list_workspace_roots(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRootsResponse:
+    """Return the read-only project root contract for a workspace."""
+    _ = current_user
+    try:
+        workspace = _require_workspace(db, workspace_id)
+        roots = db.list_workspace_project_roots(workspace_id)
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace roots") from exc
+
+    return _workspace_roots_response(workspace_id=workspace_id, workspace=workspace, roots=roots)
+
+
+@router.put(
+    "/{workspace_id}/roots/primary",
+    response_model=WorkspaceRootsResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Attach or replace the workspace primary project root",
+)
+async def attach_workspace_primary_root(
+    workspace_id: str,
+    body: WorkspacePrimaryRootAttachRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRootsResponse:
+    """Attach or replace a workspace primary project root through the root-binding service."""
+    try:
+        _require_workspace(db, workspace_id)
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id=workspace_id,
+            user_id=str(getattr(current_user, "id", "")),
+            request=WorkspaceRootAttachRequest(**body.model_dump()),
+        )
+        workspace = _require_workspace(db, workspace_id)
+        roots = db.list_workspace_project_roots(workspace_id)
+    except WorkspaceRootServiceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to attach workspace primary root",
+        ) from exc
+
+    return _workspace_roots_response(workspace_id=workspace_id, workspace=workspace, roots=roots)
+
+
+@router.post(
+    "/{workspace_id}/file-inventory/scan",
+    response_model=WorkspaceFileInventoryStatusResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Queue a workspace project-root file inventory scan",
+)
+async def queue_workspace_file_inventory_scan(
+    workspace_id: str,
+    body: WorkspaceFileInventoryScanRequest,
+    response: Response,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceFileInventoryStatusResponse:
+    """Queue a metadata-only inventory scan for the workspace primary root."""
+    _require_workspace(db, workspace_id)
+    root = db.get_workspace_primary_root(workspace_id)
+    if root is None:
+        raise _workspace_file_inventory_no_root_conflict()
+    if body.expected_root_version is not None and int(root.get("version") or 0) != body.expected_root_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "root_version_mismatch",
+                "message": "Workspace project root version does not match expected_root_version.",
+            },
+        )
+
+    policy = build_inventory_ignore_policy()
+    try:
+        current_status = db.get_workspace_file_inventory_status(
+            workspace_id,
+            policy_fingerprint=policy.fingerprint,
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace file inventory status",
+        ) from exc
+    if not body.force and current_status.get("state") == "current":
+        response.status_code = status.HTTP_200_OK
+        return _workspace_file_inventory_status_response(current_status)
+
+    if jm is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "jobs_unavailable",
+                "message": "Jobs unavailable for workspace file inventory scans.",
+            },
+        )
+
+    try:
+        result = enqueue_workspace_file_inventory_scan_job(
+            db=db,
+            workspace_id=workspace_id,
+            root_id=str(root["root_id"]),
+            root_version=int(root["version"]),
+            policy_fingerprint=policy.fingerprint,
+            requested_by=str(getattr(current_user, "id", "")),
+            owner_user_id=str(getattr(current_user, "id", "")),
+            job_manager=jm,
+        )
+    except WorkspaceFileInventoryEnqueueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": exc.error_code,
+                "message": "Jobs unavailable for workspace file inventory scans.",
+            },
+        ) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to queue workspace file inventory scan",
+        ) from exc
+
+    response.status_code = status.HTTP_202_ACCEPTED
+    return _workspace_file_inventory_status_response(
+        result["status"],
+        job=result.get("job"),
+    )
+
+
+@router.get(
+    "/{workspace_id}/file-inventory/status",
+    response_model=WorkspaceFileInventoryStatusResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace project-root file inventory status",
+)
+async def get_workspace_file_inventory_status(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceFileInventoryStatusResponse:
+    """Return the latest durable file inventory scan status."""
+    _ = current_user
+    _require_workspace(db, workspace_id)
+    try:
+        status_payload = db.get_workspace_file_inventory_status(
+            workspace_id,
+            policy_fingerprint=build_inventory_ignore_policy().fingerprint,
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace file inventory status",
+        ) from exc
+    job = _safe_get_job(jm, status_payload.get("job_id"))
+    return _workspace_file_inventory_status_response(status_payload, job=job)
+
+
+@router.get(
+    "/{workspace_id}/file-inventory/items",
+    response_model=WorkspaceFileInventoryItemsResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace project-root file inventory items",
+)
+async def list_workspace_file_inventory_items(
+    workspace_id: str,
+    prefix: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    cursor: str | None = Query(default=None),
+    include_ignored: bool = Query(default=False),
+    entry_kind: WorkspaceFileInventoryEntryKind | None = Query(default=None),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceFileInventoryItemsResponse:
+    """Return redacted, project-root-relative inventory items."""
+    _ = current_user
+    _require_workspace(db, workspace_id)
+    root = db.get_workspace_primary_root(workspace_id)
+    if root is None:
+        raise _workspace_file_inventory_no_root_conflict()
+    try:
+        page = db.list_workspace_file_inventory_items(
+            workspace_id,
+            prefix=prefix,
+            cursor=cursor,
+            limit=limit,
+            include_ignored=include_ignored,
+            entry_kind=entry_kind,
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to list workspace file inventory items",
+        ) from exc
+    return WorkspaceFileInventoryItemsResponse(
+        workspace_id=workspace_id,
+        root_id=root.get("root_id"),
+        items=page.get("items") or [],
+        next_cursor=page.get("next_cursor"),
+        limit=limit,
     )
 
 

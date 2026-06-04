@@ -15,6 +15,19 @@ WORKSPACE_MIGRATION_MAX_CHUNK_BYTES = 2 * 1024 * 1024
 WORKSPACE_MIGRATION_MAX_DECLARED_CHUNKS = 512
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
+WorkspaceProfile = Literal["research", "project"]
+WorkspaceKind = Literal["research_workspace", "project_workspace"]
+WorkspaceResolutionStatus = Literal["complete", "partial", "failed"]
+WorkspaceProjectRootBackend = Literal["host_local", "sandbox_volume"]
+WorkspaceProjectRootState = Literal[
+    "not_configured",
+    "attached",
+    "missing",
+    "detached",
+    "failed",
+    "archived",
+]
+
 
 def _json_size_bytes(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8"))
@@ -40,12 +53,14 @@ class WorkspaceUpsertRequest(BaseModel):
     name: str
     archived: bool = False
     study_materials_policy: Literal["general", "workspace"] = "general"
+    workspace_profile: WorkspaceProfile = "research"
 
 
 class WorkspacePatchRequest(BaseModel):
     name: str | None = None
     archived: bool | None = None
     study_materials_policy: Literal["general", "workspace"] | None = None
+    workspace_profile: WorkspaceProfile | None = None
     banner_title: str | None = None
     banner_subtitle: str | None = None
     banner_color: str | None = None
@@ -61,6 +76,7 @@ class WorkspaceResponse(BaseModel):
     name: str | None = None
     archived: bool = False
     study_materials_policy: Literal["general", "workspace"] = "general"
+    workspace_profile: WorkspaceProfile = "research"
     deleted: bool = False
     banner_title: str | None = None
     banner_subtitle: str | None = None
@@ -210,10 +226,166 @@ class WorkspaceAllowedAction(BaseModel):
     reason_code: str | None = None
 
 
+class WorkspaceContextPartialError(BaseModel):
+    scope: str = "workspace"
+    code: str = "dependency_resolution_partial"
+    message: str = ""
+
+
+class WorkspaceResolution(BaseModel):
+    status: WorkspaceResolutionStatus = "complete"
+    partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
+
+
+class WorkspaceFileInventory(BaseModel):
+    state: str | None = None
+    indexed_file_count: int | None = None
+    total_file_count: int | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceProjectRoot(BaseModel):
+    state: WorkspaceProjectRootState = "not_configured"
+    root_id: str | None = None
+    backend: WorkspaceProjectRootBackend | None = None
+    display_name: str | None = None
+    path_hint: str | None = None
+    git_state: str | None = None
+    file_inventory_state: str | None = None
+    file_inventory: WorkspaceFileInventory = Field(default_factory=WorkspaceFileInventory)
+    indexing_state: str | None = None
+    sandbox_mount_state: str | None = None
+    mcp_trust_state: str | None = None
+
+
+class WorkspacePrimaryRootAttachRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: WorkspaceProjectRootBackend
+    root_id: str | None = None
+    absolute_root: str | None = None
+    sandbox_volume_id: str | None = None
+    display_name: str | None = Field(default=None, max_length=120)
+    replace_existing: StrictBool = False
+    expected_workspace_version: int | None = Field(default=None, ge=1)
+    strict_sandbox_validation: StrictBool = False
+
+
+WorkspaceFileInventoryState = Literal[
+    "not_started",
+    "queued",
+    "scanning",
+    "current",
+    "partial",
+    "stale",
+    "failed",
+    "disabled",
+]
+WorkspaceFileInventoryEntryKind = Literal["file", "directory", "symlink", "other"]
+
+
+class WorkspaceFileInventoryScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force: StrictBool = False
+    expected_root_version: int | None = Field(default=None, ge=1)
+
+
+class WorkspaceFileInventoryJobStatus(BaseModel):
+    id: int | None = None
+    uuid: str | None = None
+    status: str | None = None
+    job_type: str | None = None
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    error_message: str | None = None
+
+
+class WorkspaceFileInventoryCounts(BaseModel):
+    files: int = 0
+    directories: int = 0
+    symlinks: int = 0
+    ignored: int = 0
+    indexing_candidates: int = 0
+    diagnostics: int = 0
+    total_entries: int = 0
+
+
+class WorkspaceFileInventoryDiagnostic(BaseModel):
+    code: str
+    message: str
+    path_hint: str | None = None
+
+
+class WorkspaceFileInventoryStatusResponse(BaseModel):
+    workspace_id: str
+    root_id: str | None = None
+    state: WorkspaceFileInventoryState
+    durable_state: str | None = None
+    stale: bool = False
+    last_scan_id: str | None = None
+    last_scan_started_at: str | None = None
+    last_scan_completed_at: str | None = None
+    root_version: int | None = None
+    scan_root_version: int | None = None
+    ignore_policy_fingerprint: str | None = None
+    root_snapshot_token: str | None = None
+    counts: WorkspaceFileInventoryCounts = Field(default_factory=WorkspaceFileInventoryCounts)
+    diagnostics: list[WorkspaceFileInventoryDiagnostic] = Field(default_factory=list)
+    job: WorkspaceFileInventoryJobStatus | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceFileInventoryItemResponse(BaseModel):
+    relative_path: str
+    entry_kind: str
+    size_bytes: int | None = None
+    mtime_ns: int | None = None
+    mode_bits: int | None = None
+    extension: str | None = None
+    mime_hint: str | None = None
+    language_hint: str | None = None
+    ignored: bool = False
+    ignore_reason: str | None = None
+    indexing_candidate: bool = False
+
+
+class WorkspaceFileInventoryItemsResponse(BaseModel):
+    workspace_id: str
+    root_id: str | None = None
+    items: list[WorkspaceFileInventoryItemResponse]
+    next_cursor: str | None = None
+    limit: int
+
+
+class WorkspaceRuntimeBinding(BaseModel):
+    service: str
+    state: WorkspaceCapabilityServiceState
+    reason_code: str | None = None
+    management_surface: str | None = None
+
+
+class WorkspaceRootResponse(WorkspaceProjectRoot):
+    workspace_id: str | None = None
+    is_primary: bool = True
+    version: int | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceRootsResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "research"
+    primary_root: WorkspaceRootResponse | None = None
+    roots: list[WorkspaceRootResponse] = Field(default_factory=list)
+
+
 class WorkspaceCapabilitiesResponse(BaseModel):
     workspace_id: str
-    workspace_kind: Literal["research_workspace"]
+    workspace_profile: WorkspaceProfile = "research"
+    workspace_kind: WorkspaceKind = "research_workspace"
     access_level: Literal["owner", "editor", "viewer"] = "owner"
+    resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
+    project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
     source_summary: WorkspaceSourceStatusSummary
     workspace_services: dict[str, WorkspaceCapabilityService]
     allowed_actions: dict[str, WorkspaceAllowedAction]
@@ -253,18 +425,15 @@ class WorkspaceContextSources(BaseModel):
     summary: WorkspaceSourceStatusSummary
 
 
-class WorkspaceContextPartialError(BaseModel):
-    scope: str
-    code: str
-    message: str
-
-
 class WorkspaceContextResponse(BaseModel):
     workspace_id: str
-    workspace_kind: Literal["research_workspace"]
-    schema_version: int = 1
+    workspace_profile: WorkspaceProfile = "research"
+    workspace_kind: WorkspaceKind = "research_workspace"
+    schema_version: int = 2
     generated_at: str
     workspace: WorkspaceResponse
+    resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
+    project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
     sources: WorkspaceContextSources
     capabilities: WorkspaceCapabilitiesResponse
     services: dict[str, WorkspaceCapabilityService]

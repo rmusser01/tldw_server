@@ -270,6 +270,59 @@ def test_workspace_context_combines_sources_readiness_capabilities_and_preview_r
 
 
 @pytest.mark.integration
+def test_workspace_context_includes_attached_primary_root(
+    workspace_preview_app,
+    tmp_path,
+    monkeypatch,
+):
+    db = CharactersRAGDB(db_path=str(tmp_path / "project-context-chacha.db"), client_id="user-1")
+    db.upsert_workspace("ws-project-context", "Project Workspace")
+    db.upsert_workspace_primary_root(
+        "ws-project-context",
+        {
+            "root_id": "root-1",
+            "backend": "host_local",
+            "display_name": "Local project",
+            "absolute_root": "/Users/researcher/local-project",
+            "root_state": "attached",
+            "indexing_state": "ready",
+            "mcp_trust_state": "trusted",
+        },
+    )
+
+    async def _service_capabilities(*, workspace_id: str, user_id: int | str | None) -> dict[str, Any]:
+        _ = (workspace_id, user_id)
+        return {
+            "workspace_services": {
+                "preview": {"state": "available", "reason_code": None},
+            },
+        }
+
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _service_capabilities,
+        raising=True,
+    )
+    _install_overrides(workspace_preview_app, db, _MediaPreviewDB({}))
+    try:
+        with TestClient(workspace_preview_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-project-context/context")
+    finally:
+        _clear_overrides(workspace_preview_app)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_profile"] == "project"
+    assert payload["workspace_kind"] == "project_workspace"
+    assert payload["project_root"]["state"] == "attached"
+    assert payload["project_root"]["backend"] == "host_local"
+    assert payload["project_root"]["display_name"] == "Local project"
+    assert payload["project_root"]["path_hint"] == "Local project"
+    assert payload["allowed_actions"]["write_files"]["allowed"] is True
+
+
+@pytest.mark.integration
 def test_workspace_context_reports_jobs_partial_error_when_jobs_manager_unavailable(
     workspace_preview_app,
     workspace_preview_db,

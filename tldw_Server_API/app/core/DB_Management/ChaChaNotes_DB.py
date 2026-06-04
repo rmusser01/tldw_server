@@ -115,6 +115,14 @@ from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     simulate_fsrs_review_transition,
 )
 from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile  # noqa: E402
+from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa: E402
+    bounded_inventory_diagnostics,
+    decode_inventory_cursor,
+    encode_inventory_cursor,
+    normalize_durable_inventory_state,
+    normalize_inventory_counts,
+    sort_inventory_relative_paths,
+)
 
 #
 ########################################################################################################################
@@ -135,6 +143,8 @@ _FLASHCARD_TEMPLATE_FIELD_NAMES = ("front_template", "back_template", "notes_tem
 _FLASHCARD_TEMPLATE_TOKEN_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 _DECK_VISIBILITIES = frozenset({"private", "team", "org", "public"})
 _DECK_SHARE_ROLES = frozenset({"owner", "editor", "viewer"})
+_WORKSPACE_PROFILES = frozenset({"research", "project"})
+_WORKSPACE_PROJECT_ROOT_BACKENDS = frozenset({"host_local", "sandbox_volume"})
 
 
 def _coerce_scheduler_type(value: Any) -> str:
@@ -3302,6 +3312,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     description   TEXT,
     metadata_json TEXT    NOT NULL DEFAULT '{}',
     study_materials_policy TEXT NOT NULL DEFAULT 'general',
+    workspace_profile TEXT NOT NULL DEFAULT 'research',
     archived      BOOLEAN NOT NULL DEFAULT false,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -7344,6 +7355,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     name          TEXT    NOT NULL,
                     description   TEXT,
                     metadata_json TEXT    NOT NULL DEFAULT '{}',
+                    workspace_profile TEXT NOT NULL DEFAULT 'research',
                     archived      BOOLEAN  NOT NULL DEFAULT 0,
                     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -8615,6 +8627,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "banner_title": "TEXT",
                 "banner_subtitle": "TEXT",
                 "banner_color": "TEXT",
+                "workspace_profile": "TEXT NOT NULL DEFAULT 'research'",
                 "audio_provider": "TEXT",
                 "audio_model": "TEXT",
                 "audio_voice": "TEXT",
@@ -8623,6 +8636,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for col_name, col_type in new_ws_cols.items():
                 if col_name not in ws_cols:
                     conn.execute(f"ALTER TABLE workspaces ADD COLUMN {col_name} {col_type}")  # nosec B608
+            conn.execute(
+                "UPDATE workspaces SET workspace_profile = 'research' "
+                "WHERE workspace_profile IS NULL OR trim(workspace_profile) = ''"
+            )
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_project_roots (
+                    root_id              TEXT PRIMARY KEY NOT NULL,
+                    workspace_id         TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    is_primary           BOOLEAN NOT NULL DEFAULT 1,
+                    backend              TEXT NOT NULL,
+                    absolute_root        TEXT,
+                    sandbox_volume_id    TEXT,
+                    display_name         TEXT,
+                    root_state           TEXT NOT NULL DEFAULT 'not_configured',
+                    git_state            TEXT NOT NULL DEFAULT 'absent',
+                    file_inventory_state TEXT NOT NULL DEFAULT 'not_started',
+                    indexing_state       TEXT NOT NULL DEFAULT 'disabled',
+                    sandbox_mount_state  TEXT NOT NULL DEFAULT 'not_configured',
+                    mcp_trust_state      TEXT NOT NULL DEFAULT 'not_configured',
+                    metadata_json        TEXT NOT NULL DEFAULT '{}',
+                    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    version              INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_project_roots_workspace "
+                "ON workspace_project_roots(workspace_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_project_roots_one_primary "
+                "ON workspace_project_roots(workspace_id) WHERE is_primary = 1"
+            )
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS workspace_sources (
@@ -8760,10 +8807,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS banner_title TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS banner_subtitle TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS banner_color TEXT",
+            "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS workspace_profile TEXT NOT NULL DEFAULT 'research'",
+            "UPDATE workspaces SET workspace_profile = 'research' "
+            "WHERE workspace_profile IS NULL OR btrim(workspace_profile) = ''",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_provider TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_model TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_voice TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_speed REAL DEFAULT 1.0",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_project_roots (
+                root_id              TEXT PRIMARY KEY NOT NULL,
+                workspace_id         TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                is_primary           BOOLEAN NOT NULL DEFAULT true,
+                backend              TEXT NOT NULL,
+                absolute_root        TEXT,
+                sandbox_volume_id    TEXT,
+                display_name         TEXT,
+                root_state           TEXT NOT NULL DEFAULT 'not_configured',
+                git_state            TEXT NOT NULL DEFAULT 'absent',
+                file_inventory_state TEXT NOT NULL DEFAULT 'not_started',
+                indexing_state       TEXT NOT NULL DEFAULT 'disabled',
+                sandbox_mount_state  TEXT NOT NULL DEFAULT 'not_configured',
+                mcp_trust_state      TEXT NOT NULL DEFAULT 'not_configured',
+                metadata_json        TEXT NOT NULL DEFAULT '{}',
+                created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version              INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_project_roots_workspace ON workspace_project_roots(workspace_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_project_roots_one_primary "
+            "ON workspace_project_roots(workspace_id) WHERE is_primary = true",
             """
             CREATE TABLE IF NOT EXISTS workspace_sources (
                 id            TEXT    NOT NULL,
@@ -8967,6 +9041,139 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration ON workspace_migration_chunks(migration_id)",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
+    def _ensure_workspace_file_inventory_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure Workspace file inventory scan and item tables exist for SQLite."""
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_file_inventory_scans (
+                    scan_id                   TEXT PRIMARY KEY NOT NULL,
+                    workspace_id              TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    root_id                   TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                    root_version              INTEGER NOT NULL,
+                    job_id                    INTEGER,
+                    job_uuid                  TEXT,
+                    state                     TEXT NOT NULL,
+                    requested_by              TEXT,
+                    ignore_policy_fingerprint TEXT NOT NULL,
+                    root_snapshot_token       TEXT,
+                    started_at                DATETIME,
+                    completed_at              DATETIME,
+                    counts_json               TEXT NOT NULL DEFAULT '{}',
+                    diagnostics_json          TEXT NOT NULL DEFAULT '[]',
+                    created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    version                   INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_root_created "
+                "ON workspace_file_inventory_scans(workspace_id, root_id, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_active "
+                "ON workspace_file_inventory_scans(workspace_id, root_id, state)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_job_id "
+                "ON workspace_file_inventory_scans(job_id)"
+            )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_file_inventory_items (
+                    workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    root_id            TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                    relative_path      TEXT NOT NULL,
+                    scan_id            TEXT NOT NULL REFERENCES workspace_file_inventory_scans(scan_id) ON DELETE CASCADE,
+                    entry_kind         TEXT NOT NULL,
+                    size_bytes         INTEGER,
+                    mtime_ns           INTEGER,
+                    mode_bits          INTEGER,
+                    extension          TEXT,
+                    mime_hint          TEXT,
+                    language_hint      TEXT,
+                    ignored            BOOLEAN NOT NULL DEFAULT 0,
+                    ignore_reason      TEXT,
+                    indexing_candidate BOOLEAN NOT NULL DEFAULT 0,
+                    coverage_state     TEXT NOT NULL DEFAULT 'current',
+                    last_seen_at       DATETIME NOT NULL,
+                    deleted            BOOLEAN NOT NULL DEFAULT 0,
+                    metadata_json      TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY (workspace_id, root_id, relative_path)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_root_path "
+                "ON workspace_file_inventory_items(workspace_id, root_id, relative_path)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_scan "
+                "ON workspace_file_inventory_items(scan_id)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite workspace file inventory schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_workspace_file_inventory_schema_postgres(self, conn: Any) -> None:
+        """Ensure Workspace file inventory scan and item tables exist for PostgreSQL."""
+        if not hasattr(self.backend, "execute"):
+            return
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS workspace_file_inventory_scans (
+                scan_id                   TEXT PRIMARY KEY NOT NULL,
+                workspace_id              TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                root_id                   TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                root_version              INTEGER NOT NULL,
+                job_id                    INTEGER,
+                job_uuid                  TEXT,
+                state                     TEXT NOT NULL,
+                requested_by              TEXT,
+                ignore_policy_fingerprint TEXT NOT NULL,
+                root_snapshot_token       TEXT,
+                started_at                TIMESTAMP,
+                completed_at              TIMESTAMP,
+                counts_json               TEXT NOT NULL DEFAULT '{}',
+                diagnostics_json          TEXT NOT NULL DEFAULT '[]',
+                created_at                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version                   INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_root_created "
+            "ON workspace_file_inventory_scans(workspace_id, root_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_active "
+            "ON workspace_file_inventory_scans(workspace_id, root_id, state)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_scans_job_id "
+            "ON workspace_file_inventory_scans(job_id)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_file_inventory_items (
+                workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                root_id            TEXT NOT NULL REFERENCES workspace_project_roots(root_id) ON DELETE CASCADE,
+                relative_path      TEXT NOT NULL,
+                scan_id            TEXT NOT NULL REFERENCES workspace_file_inventory_scans(scan_id) ON DELETE CASCADE,
+                entry_kind         TEXT NOT NULL,
+                size_bytes         INTEGER,
+                mtime_ns           BIGINT,
+                mode_bits          INTEGER,
+                extension          TEXT,
+                mime_hint          TEXT,
+                language_hint      TEXT,
+                ignored            BOOLEAN NOT NULL DEFAULT FALSE,
+                ignore_reason      TEXT,
+                indexing_candidate BOOLEAN NOT NULL DEFAULT FALSE,
+                coverage_state     TEXT NOT NULL DEFAULT 'current',
+                last_seen_at       TIMESTAMP NOT NULL,
+                deleted            BOOLEAN NOT NULL DEFAULT FALSE,
+                metadata_json      TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (workspace_id, root_id, relative_path)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_root_path "
+            "ON workspace_file_inventory_items(workspace_id, root_id, relative_path)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_file_inventory_items_scan "
+            "ON workspace_file_inventory_items(scan_id)",
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
@@ -9807,6 +10014,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
+                self._ensure_workspace_file_inventory_schema_sqlite(conn)
                 self._ensure_workspace_migration_schema_sqlite(conn)
                 self._ensure_workspace_study_material_schema_sqlite(conn)
                 self._ensure_flashcard_asset_schema_sqlite(conn)
@@ -13645,6 +13853,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
+            self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
 
@@ -14229,6 +14438,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 description   TEXT,
                 metadata_json TEXT    NOT NULL DEFAULT '{}',
                 study_materials_policy TEXT NOT NULL DEFAULT 'general',
+                workspace_profile TEXT NOT NULL DEFAULT 'research',
                 archived      BOOLEAN NOT NULL DEFAULT false,
                 created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -15146,6 +15356,72 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Workspace Methods ---
 
+    @staticmethod
+    def _validate_workspace_profile(workspace_profile: str) -> str:
+        """Validate a persisted workspace profile value."""
+        normalized = str(workspace_profile or "").strip().lower()
+        if normalized not in _WORKSPACE_PROFILES:
+            raise InputError("workspace_profile must be 'research' or 'project'")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _validate_workspace_project_root_backend(backend: Any) -> str:
+        """Validate a Workspace-owned project-root backend."""
+        normalized = str(backend or "").strip().lower()
+        if normalized not in _WORKSPACE_PROJECT_ROOT_BACKENDS:
+            raise InputError("workspace project root backend must be 'host_local' or 'sandbox_volume'")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _serialize_workspace_project_root_metadata(value: Any) -> str:
+        """Serialize project-root metadata while rejecting malformed JSON strings."""
+        if value is None:
+            return "{}"
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError("metadata_json must be valid JSON when provided as a string.") from exc  # noqa: TRY003
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError("metadata_json must be JSON-serializable.") from exc  # noqa: TRY003
+
+    def _workspace_active_deleted_value(self) -> bool | int:
+        return False if self.backend_type == BackendType.POSTGRESQL else 0
+
+    def _workspace_primary_root_value(self) -> bool | int:
+        return True if self.backend_type == BackendType.POSTGRESQL else 1
+
+    def _workspace_project_root_row_by_id(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        workspace_id: str,
+        root_id: str,
+    ) -> dict[str, Any] | None:
+        row = conn.execute(
+            """
+            SELECT r.*
+              FROM workspace_project_roots r
+              JOIN workspaces w ON w.id = r.workspace_id
+             WHERE r.workspace_id = ?
+               AND r.root_id = ?
+               AND w.deleted = ?
+            """,
+            (workspace_id, root_id, self._workspace_active_deleted_value()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def _workspace_project_root_integrity_error(self, exc: Exception) -> CharactersRAGDBError:
+        message = str(exc).lower()
+        if "unique" in message or "duplicate" in message or "foreign key" in message or "constraint" in message:
+            return ConflictError(
+                f"Workspace project root write conflicted: {exc}",
+                entity="workspace_project_roots",
+            )
+        return CharactersRAGDBError(f"Workspace project root write failed: {exc}")  # noqa: TRY003
+
     def upsert_workspace(
         self,
         workspace_id: str,
@@ -15154,6 +15430,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         description: str | None = None,
         metadata_json: str | None = None,
         study_materials_policy: str = "general",
+        workspace_profile: str | None = None,
     ) -> dict[str, Any]:
         """Create a workspace or update the existing row in place.
 
@@ -15171,6 +15448,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise InputError("workspace_id and name are required.")  # noqa: TRY003
 
         normalized_policy = study_materials_policy or "general"
+        normalized_profile = (
+            self._validate_workspace_profile(workspace_profile)
+            if workspace_profile is not None
+            else "research"
+        )
         existing = self.get_workspace(workspace_id)
         if existing is not None:
             updates: dict[str, Any] = {}
@@ -15182,6 +15464,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 updates["metadata_json"] = metadata_json
             if existing.get("study_materials_policy") != normalized_policy:
                 updates["study_materials_policy"] = normalized_policy
+            if (
+                workspace_profile is not None
+                and existing.get("workspace_profile", "research") != normalized_profile
+            ):
+                updates["workspace_profile"] = normalized_profile
             if not updates:
                 return existing
             return self.update_workspace(workspace_id, updates, expected_version=int(existing["version"]))
@@ -15190,8 +15477,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         client_id = self.client_id or "unknown"
         query = (
             "INSERT INTO workspaces "
-            "(id, name, description, metadata_json, study_materials_policy, created_at, last_modified, deleted, client_id, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1)"
+            "(id, name, description, metadata_json, study_materials_policy, workspace_profile, "
+            "created_at, last_modified, deleted, client_id, version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)"
         )
         params = (
             workspace_id,
@@ -15199,6 +15487,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             description,
             metadata_json or "{}",
             normalized_policy,
+            normalized_profile,
             now,
             now,
             client_id,
@@ -15260,13 +15549,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params: list[Any] = [now, expected_version + 1]
 
         for col in (
-            "name", "description", "metadata_json", "study_materials_policy", "archived", "tag",
+            "name", "description", "metadata_json", "study_materials_policy", "workspace_profile", "archived", "tag",
             "banner_title", "banner_subtitle", "banner_color",
             "audio_provider", "audio_model", "audio_voice", "audio_speed",
         ):
             if col in update_data:
                 set_clauses.append(f"{col} = ?")
-                params.append(update_data[col])
+                if col == "workspace_profile":
+                    params.append(self._validate_workspace_profile(update_data[col]))
+                else:
+                    params.append(update_data[col])
 
         query = f"UPDATE workspaces SET {', '.join(set_clauses)} WHERE id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, expected_version])
@@ -15376,7 +15668,1098 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
             self.hard_delete_conversation(str(conversation_id))
         with self.transaction() as conn:
+            conn.execute("DELETE FROM workspace_project_roots WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+
+    def upsert_workspace_primary_root(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Create or replace the primary project root for a workspace."""
+        if not workspace_id:
+            raise InputError("workspace_id is required.")  # noqa: TRY003
+        root_id = str(data.get("root_id") or "").strip()
+        if not root_id:
+            raise InputError("root_id is required.")  # noqa: TRY003
+        backend = self._validate_workspace_project_root_backend(data.get("backend"))
+        expected_workspace_version_raw = data.get("expected_workspace_version")
+        expected_workspace_version: int | None = None
+        if expected_workspace_version_raw is not None:
+            if isinstance(expected_workspace_version_raw, bool):
+                raise InputError("expected_workspace_version must be an integer when provided.")  # noqa: TRY003
+            if isinstance(expected_workspace_version_raw, int):
+                expected_workspace_version = expected_workspace_version_raw
+            elif isinstance(expected_workspace_version_raw, str):
+                normalized_expected_version = expected_workspace_version_raw.strip()
+                if not normalized_expected_version or not normalized_expected_version.isdecimal():
+                    raise InputError("expected_workspace_version must be an integer when provided.")  # noqa: TRY003
+                expected_workspace_version = int(normalized_expected_version)
+            else:
+                raise InputError("expected_workspace_version must be an integer when provided.")  # noqa: TRY003
+        replace_existing = bool(data.get("replace_existing", False))
+        metadata_json = (
+            self._serialize_workspace_project_root_metadata(data.get("metadata_json"))
+            if "metadata_json" in data
+            else None
+        )
+        now = self._get_current_utc_timestamp_iso()
+        primary_value = self._workspace_primary_root_value()
+        deleted_value = self._workspace_active_deleted_value()
+
+        values = {
+            "root_id": root_id,
+            "workspace_id": workspace_id,
+            "is_primary": primary_value,
+            "backend": backend,
+            "absolute_root": data.get("absolute_root"),
+            "sandbox_volume_id": data.get("sandbox_volume_id"),
+            "display_name": data.get("display_name"),
+            "root_state": data.get("root_state") or "not_configured",
+            "git_state": data.get("git_state") or "absent",
+            "file_inventory_state": data.get("file_inventory_state") or "not_started",
+            "indexing_state": data.get("indexing_state") or "disabled",
+            "sandbox_mount_state": data.get("sandbox_mount_state") or "not_configured",
+            "mcp_trust_state": data.get("mcp_trust_state") or "not_configured",
+            "metadata_json": metadata_json or "{}",
+            "created_at": now,
+            "updated_at": now,
+            "version": 1,
+        }
+
+        try:
+            with self.transaction() as conn:
+                def update_workspace_for_root_attach() -> None:
+                    if expected_workspace_version is None:
+                        conn.execute(
+                            """
+                            UPDATE workspaces
+                               SET workspace_profile = 'project',
+                                   last_modified = ?,
+                                   version = version + 1
+                             WHERE id = ? AND deleted = ?
+                            """,
+                            (now, workspace_id, deleted_value),
+                        )
+                        return
+
+                    cursor = conn.execute(
+                        """
+                        UPDATE workspaces
+                           SET workspace_profile = 'project',
+                               last_modified = ?,
+                               version = version + 1
+                         WHERE id = ? AND deleted = ? AND version = ?
+                        """,
+                        (now, workspace_id, deleted_value, expected_workspace_version),
+                    )
+                    if cursor.rowcount == 0:
+                        raise ConflictError(
+                            f"Workspace '{workspace_id}' concurrent root attach detected.",
+                            entity="workspaces",
+                            entity_id=workspace_id,
+                        )
+
+                workspace_row = conn.execute(
+                    "SELECT id, workspace_profile, version FROM workspaces WHERE id = ? AND deleted = ?",
+                    (workspace_id, deleted_value),
+                ).fetchone()
+                if workspace_row is None:
+                    raise ConflictError(
+                        f"Workspace '{workspace_id}' not found.",
+                        entity="workspaces",
+                        entity_id=workspace_id,
+                    )
+                workspace = dict(workspace_row)
+                if (
+                    expected_workspace_version is not None
+                    and int(workspace["version"]) != expected_workspace_version
+                ):
+                    raise ConflictError(
+                        f"Workspace '{workspace_id}' version mismatch "
+                        f"(db={workspace['version']}, expected={expected_workspace_version}).",
+                        entity="workspaces",
+                        entity_id=workspace_id,
+                    )
+                existing_primary_row = conn.execute(
+                    """
+                    SELECT *
+                      FROM workspace_project_roots
+                     WHERE workspace_id = ?
+                       AND is_primary = ?
+                    """,
+                    (workspace_id, primary_value),
+                ).fetchone()
+                existing_primary = dict(existing_primary_row) if existing_primary_row else None
+                root_binding_changed = existing_primary is None or existing_primary.get("root_id") != root_id
+
+                if existing_primary is not None and existing_primary.get("root_id") == root_id:
+                    if existing_primary.get("backend") != backend:
+                        if not replace_existing:
+                            raise ConflictError(
+                                f"Workspace project root '{root_id}' backend mismatch.",
+                                entity="workspace_project_roots",
+                                entity_id=root_id,
+                            )
+                        root_binding_changed = True
+                    else:
+                        binding_columns = (
+                            "absolute_root",
+                            "sandbox_volume_id",
+                            "display_name",
+                            "metadata_json",
+                        )
+                        operational_columns = (
+                            "root_state",
+                            "git_state",
+                            "file_inventory_state",
+                            "indexing_state",
+                            "sandbox_mount_state",
+                            "mcp_trust_state",
+                        )
+                        root_updates: dict[str, Any] = {}
+                        for column in binding_columns:
+                            if column not in data:
+                                continue
+                            new_value = metadata_json if column == "metadata_json" else values[column]
+                            if existing_primary.get(column) != new_value:
+                                root_updates[column] = new_value
+                        for column in operational_columns:
+                            if column not in data:
+                                continue
+                            new_value = values[column]
+                            if existing_primary.get(column) != new_value:
+                                root_updates[column] = new_value
+                        if root_updates:
+                            root_binding_changed = True
+                            set_clauses = ["updated_at = ?", "version = ?"]
+                            params: list[Any] = [now, int(existing_primary["version"]) + 1]
+                            for column, value in root_updates.items():
+                                set_clauses.append(f"{column} = ?")
+                                params.append(value)
+                            params.extend([workspace_id, root_id])
+                            conn.execute(
+                                f"""
+                                UPDATE workspace_project_roots
+                                   SET {', '.join(set_clauses)}
+                                 WHERE workspace_id = ?
+                                   AND root_id = ?
+                                """,  # nosec B608
+                                tuple(params),
+                            )
+                        root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
+                        if root is None:
+                            raise CharactersRAGDBError(  # noqa: TRY003
+                                f"Failed to reload workspace project root '{root_id}'."
+                            )
+                        if root_binding_changed or workspace.get("workspace_profile") != "project":
+                            update_workspace_for_root_attach()
+                        return root
+                if existing_primary is None or existing_primary.get("root_id") != root_id or replace_existing:
+                    conn.execute(
+                        "DELETE FROM workspace_project_roots WHERE workspace_id = ? AND is_primary = ?",
+                        (workspace_id, primary_value),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_project_roots (
+                            root_id, workspace_id, is_primary, backend, absolute_root, sandbox_volume_id,
+                            display_name, root_state, git_state, file_inventory_state, indexing_state,
+                            sandbox_mount_state, mcp_trust_state, metadata_json, created_at, updated_at, version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            values["root_id"],
+                            values["workspace_id"],
+                            values["is_primary"],
+                            values["backend"],
+                            values["absolute_root"],
+                            values["sandbox_volume_id"],
+                            values["display_name"],
+                            values["root_state"],
+                            values["git_state"],
+                            values["file_inventory_state"],
+                            values["indexing_state"],
+                            values["sandbox_mount_state"],
+                            values["mcp_trust_state"],
+                            values["metadata_json"],
+                            values["created_at"],
+                            values["updated_at"],
+                            values["version"],
+                        ),
+                    )
+                if root_binding_changed or workspace.get("workspace_profile") != "project":
+                    update_workspace_for_root_attach()
+                root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
+                if root is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to reload workspace project root '{root_id}'."
+                    )
+                return root
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace project root write failed: {exc}") from exc  # noqa: TRY003
+
+    def get_workspace_primary_root(self, workspace_id: str) -> dict[str, Any] | None:
+        """Return the active primary project root for a non-deleted workspace."""
+        if not workspace_id:
+            return None
+        cursor = self.execute_query(
+            """
+            SELECT r.*
+              FROM workspace_project_roots r
+              JOIN workspaces w ON w.id = r.workspace_id
+             WHERE r.workspace_id = ?
+               AND r.is_primary = ?
+               AND w.deleted = ?
+             ORDER BY r.created_at DESC
+             LIMIT 1
+            """,
+            (workspace_id, self._workspace_primary_root_value(), self._workspace_active_deleted_value()),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_workspace_project_roots(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Return project roots for a non-deleted workspace."""
+        if not workspace_id:
+            return []
+        cursor = self.execute_query(
+            """
+            SELECT r.*
+              FROM workspace_project_roots r
+              JOIN workspaces w ON w.id = r.workspace_id
+             WHERE r.workspace_id = ?
+               AND w.deleted = ?
+             ORDER BY r.is_primary DESC, r.created_at ASC, r.root_id ASC
+            """,
+            (workspace_id, self._workspace_active_deleted_value()),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_workspace_project_root_state(
+        self,
+        workspace_id: str,
+        root_id: str,
+        updates: dict[str, Any],
+        expected_version: int,
+    ) -> dict[str, Any]:
+        """Update mutable project-root state with optimistic locking."""
+        if not workspace_id or not root_id:
+            raise InputError("workspace_id and root_id are required.")  # noqa: TRY003
+        operational_updates = {
+            "root_state",
+            "git_state",
+            "file_inventory_state",
+            "indexing_state",
+            "sandbox_mount_state",
+            "mcp_trust_state",
+        }
+        clean_updates: dict[str, Any] = {}
+        for key, value in (updates or {}).items():
+            if key not in operational_updates:
+                raise InputError(f"Unsupported workspace project root state field: {key}")  # noqa: TRY003
+            clean_updates[key] = value
+        existing = self.get_workspace_primary_root(workspace_id)
+        if existing is None or existing.get("root_id") != root_id:
+            raise ConflictError(
+                f"Workspace project root '{root_id}' not found.",
+                entity="workspace_project_roots",
+                entity_id=root_id,
+            )
+        if int(existing["version"]) != int(expected_version):
+            raise ConflictError(
+                f"Workspace project root '{root_id}' version mismatch.",
+                entity="workspace_project_roots",
+                entity_id=root_id,
+            )
+        if not clean_updates:
+            return existing
+
+        now = self._get_current_utc_timestamp_iso()
+        set_clauses = ["updated_at = ?", "version = ?"]
+        params: list[Any] = [now, int(expected_version) + 1]
+        for key, value in clean_updates.items():
+            set_clauses.append(f"{key} = ?")
+            params.append(value)
+        params.extend([workspace_id, root_id, int(expected_version)])
+
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    f"""
+                    UPDATE workspace_project_roots
+                       SET {', '.join(set_clauses)}
+                     WHERE workspace_id = ?
+                       AND root_id = ?
+                       AND version = ?
+                    """,  # nosec B608
+                    tuple(params),
+                )
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Workspace project root '{root_id}' concurrent update detected.",
+                        entity="workspace_project_roots",
+                        entity_id=root_id,
+                    )
+                root = self._workspace_project_root_row_by_id(conn, workspace_id, root_id)
+                if root is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to reload workspace project root '{root_id}'."
+                    )
+                return root
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_project_root_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace project root update failed: {exc}") from exc  # noqa: TRY003
+
+    # --- Workspace File Inventory Methods ---
+
+    def _workspace_file_inventory_bool_value(self, value: bool) -> bool | int:
+        return bool(value) if self.backend_type == BackendType.POSTGRESQL else int(bool(value))
+
+    @staticmethod
+    def _workspace_file_inventory_integrity_error(exc: Exception) -> CharactersRAGDBError:
+        message = str(exc).lower()
+        if "unique" in message or "duplicate" in message or "foreign key" in message or "constraint" in message:
+            return ConflictError(
+                f"Workspace file inventory write conflicted: {exc}",
+                entity="workspace_file_inventory",
+            )
+        return CharactersRAGDBError(f"Workspace file inventory write failed: {exc}")  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None:
+        if value is None:
+            if required:
+                raise InputError(f"{field_name} is required.")  # noqa: TRY003
+            return None
+        if isinstance(value, bool):
+            raise InputError(f"{field_name} must be an integer.")  # noqa: TRY003
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped and (stripped.isdecimal() or (stripped.startswith("-") and stripped[1:].isdecimal())):
+                return int(stripped)
+        raise InputError(f"{field_name} must be an integer.")  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_json(value: Any, *, default: Any) -> str:
+        if value is None:
+            value = default
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError("workspace file inventory JSON fields must contain valid JSON.") from exc  # noqa: TRY003
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError("workspace file inventory values must be JSON serializable.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_json_load(value: Any, *, fallback: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+
+    def _workspace_file_inventory_counts_json(self, value: Any) -> str:
+        return json.dumps(normalize_inventory_counts(value), ensure_ascii=True)
+
+    def _workspace_file_inventory_diagnostics_json(self, value: Any) -> str:
+        return json.dumps(bounded_inventory_diagnostics(value), ensure_ascii=True)
+
+    def _workspace_file_inventory_scan_by_id(
+        self,
+        scan_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any] | None:
+        query = "SELECT * FROM workspace_file_inventory_scans WHERE scan_id = ?"
+        if conn is None:
+            row = self.execute_query(query, (scan_id,)).fetchone()
+        else:
+            row = conn.execute(query, (scan_id,)).fetchone()
+        return dict(row) if row else None
+
+    def _workspace_file_inventory_require_scan(
+        self,
+        scan_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+    ) -> dict[str, Any]:
+        scan = self._workspace_file_inventory_scan_by_id(scan_id, conn=conn)
+        if scan is None:
+            raise ConflictError(
+                f"Workspace file inventory scan '{scan_id}' not found.",
+                entity="workspace_file_inventory_scans",
+                entity_id=scan_id,
+            )
+        return scan
+
+    def _workspace_file_inventory_update_root_state(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        workspace_id: str,
+        root_id: str,
+        state: str,
+        updated_at: str,
+    ) -> None:
+        conn.execute(
+            """
+            UPDATE workspace_project_roots
+               SET file_inventory_state = ?,
+                   updated_at = ?
+             WHERE workspace_id = ?
+               AND root_id = ?
+            """,
+            (state, updated_at, workspace_id, root_id),
+        )
+
+    @staticmethod
+    def _workspace_file_inventory_relative_path(value: Any) -> str:
+        try:
+            return sort_inventory_relative_paths([str(value or "")])[0]
+        except ValueError as exc:
+            raise InputError("relative_path must be a safe project-root-relative path.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_file_inventory_prefix(value: Any) -> str | None:
+        if value is None:
+            return None
+        raw = str(value).strip().replace("\\", "/")
+        if not raw:
+            return None
+        if raw.startswith("/") or raw.startswith("~"):
+            raise InputError("prefix must be project-root-relative.")  # noqa: TRY003
+        had_trailing_slash = raw.endswith("/")
+        parts: list[str] = []
+        for part in raw.split("/"):
+            if not part or part == ".":
+                continue
+            if part == "..":
+                raise InputError("prefix must not contain parent directory traversal.")  # noqa: TRY003
+            parts.append(part)
+        if not parts:
+            return None
+        normalized = "/".join(parts)
+        return f"{normalized}/" if had_trailing_slash else normalized
+
+    def begin_workspace_file_inventory_scan(
+        self,
+        workspace_id: str,
+        root_id: str,
+        root_version: int,
+        policy_fingerprint: str,
+        *,
+        requested_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a queued Workspace file inventory scan or reuse an active scan with an attached job."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        normalized_root_id = str(root_id or "").strip()
+        normalized_policy = str(policy_fingerprint or "").strip()
+        normalized_root_version = self._workspace_file_inventory_int(
+            root_version,
+            field_name="root_version",
+            required=True,
+        )
+        if not normalized_workspace_id or not normalized_root_id or not normalized_policy:
+            raise InputError("workspace_id, root_id, and policy_fingerprint are required.")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        scan_id = f"ws-file-scan-{uuid.uuid4().hex}"
+        try:
+            with self.transaction() as conn:
+                root = self._workspace_project_root_row_by_id(conn, normalized_workspace_id, normalized_root_id)
+                if root is None:
+                    raise ConflictError(
+                        f"Workspace project root '{normalized_root_id}' not found.",
+                        entity="workspace_project_roots",
+                        entity_id=normalized_root_id,
+                    )
+                if int(root["version"]) != int(normalized_root_version):
+                    raise ConflictError(
+                        f"Workspace project root '{normalized_root_id}' version mismatch.",
+                        entity="workspace_project_roots",
+                        entity_id=normalized_root_id,
+                    )
+                active = conn.execute(
+                    """
+                    SELECT *
+                      FROM workspace_file_inventory_scans
+                     WHERE workspace_id = ?
+                       AND root_id = ?
+                       AND root_version = ?
+                       AND ignore_policy_fingerprint = ?
+                       AND state IN ('queued', 'scanning')
+                       AND job_id IS NOT NULL
+                     ORDER BY created_at DESC, scan_id DESC
+                     LIMIT 1
+                    """,
+                    (
+                        normalized_workspace_id,
+                        normalized_root_id,
+                        normalized_root_version,
+                        normalized_policy,
+                    ),
+                ).fetchone()
+                if active is not None:
+                    return dict(active)
+
+                conn.execute(
+                    """
+                    INSERT INTO workspace_file_inventory_scans (
+                        scan_id, workspace_id, root_id, root_version, state, requested_by,
+                        ignore_policy_fingerprint, counts_json, diagnostics_json, created_at, updated_at, version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        scan_id,
+                        normalized_workspace_id,
+                        normalized_root_id,
+                        normalized_root_version,
+                        "queued",
+                        str(requested_by).strip() if requested_by is not None else None,
+                        normalized_policy,
+                        self._workspace_file_inventory_counts_json({}),
+                        self._workspace_file_inventory_diagnostics_json([]),
+                        now,
+                        now,
+                    ),
+                )
+                self._workspace_file_inventory_update_root_state(
+                    conn,
+                    workspace_id=normalized_workspace_id,
+                    root_id=normalized_root_id,
+                    state="queued",
+                    updated_at=now,
+                )
+                created = self._workspace_file_inventory_scan_by_id(scan_id, conn=conn)
+                if created is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{scan_id}' after create."
+                    )
+                return created
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory scan create failed: {exc}") from exc  # noqa: TRY003
+
+    def attach_workspace_file_inventory_job(self, scan_id: str, job_row: Mapping[str, Any]) -> dict[str, Any]:
+        """Attach a Jobs row to a queued Workspace file inventory scan idempotently."""
+        normalized_scan_id = str(scan_id or "").strip()
+        if not normalized_scan_id:
+            raise InputError("scan_id is required.")  # noqa: TRY003
+        if not isinstance(job_row, Mapping):
+            raise InputError("job_row must be a mapping.")  # noqa: TRY003
+        job_id = self._workspace_file_inventory_int(
+            job_row.get("job_id", job_row.get("id")),
+            field_name="job_id",
+            required=True,
+        )
+        job_uuid = str(job_row.get("job_uuid") or job_row.get("uuid") or job_id).strip()
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                if scan.get("job_id") is not None:
+                    if int(scan["job_id"]) == int(job_id) and str(scan.get("job_uuid") or "") == job_uuid:
+                        return scan
+                    raise ConflictError(
+                        f"Workspace file inventory scan '{normalized_scan_id}' already has a different job.",
+                        entity="workspace_file_inventory_scans",
+                        entity_id=normalized_scan_id,
+                    )
+                conn.execute(
+                    """
+                    UPDATE workspace_file_inventory_scans
+                       SET job_id = ?,
+                           job_uuid = ?,
+                           updated_at = ?,
+                           version = version + 1
+                     WHERE scan_id = ?
+                    """,
+                    (job_id, job_uuid, now, normalized_scan_id),
+                )
+                updated = self._workspace_file_inventory_scan_by_id(normalized_scan_id, conn=conn)
+                if updated is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{normalized_scan_id}' after job attach."
+                    )
+                return updated
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory job attach failed: {exc}") from exc  # noqa: TRY003
+
+    def mark_workspace_file_inventory_enqueue_failed(
+        self,
+        scan_id: str,
+        diagnostics: Any,
+    ) -> dict[str, Any]:
+        """Mark a queued scan failed when Jobs enqueue fails after scan-row creation."""
+        return self._transition_workspace_file_inventory_scan(
+            scan_id,
+            state="failed",
+            diagnostics=diagnostics,
+            set_completed=True,
+            set_started=False,
+        )
+
+    def mark_workspace_file_inventory_scanning(self, scan_id: str) -> dict[str, Any]:
+        """Mark a Workspace file inventory scan as acquired by a worker."""
+        return self._transition_workspace_file_inventory_scan(
+            scan_id,
+            state="scanning",
+            diagnostics=None,
+            set_completed=False,
+            set_started=True,
+        )
+
+    def _transition_workspace_file_inventory_scan(
+        self,
+        scan_id: str,
+        *,
+        state: str,
+        diagnostics: Any,
+        set_completed: bool,
+        set_started: bool,
+    ) -> dict[str, Any]:
+        normalized_scan_id = str(scan_id or "").strip()
+        normalized_state = normalize_durable_inventory_state(state)
+        if not normalized_scan_id:
+            raise InputError("scan_id is required.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        diagnostics_json = self._workspace_file_inventory_diagnostics_json(diagnostics)
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                set_clauses = ["state = ?", "updated_at = ?", "version = version + 1"]
+                params: list[Any] = [normalized_state, now]
+                if diagnostics is not None:
+                    set_clauses.append("diagnostics_json = ?")
+                    params.append(diagnostics_json)
+                if set_started:
+                    set_clauses.append("started_at = COALESCE(started_at, ?)")
+                    params.append(now)
+                if set_completed:
+                    set_clauses.append("completed_at = ?")
+                    params.append(now)
+                params.append(normalized_scan_id)
+                conn.execute(
+                    f"""
+                    UPDATE workspace_file_inventory_scans
+                       SET {', '.join(set_clauses)}
+                     WHERE scan_id = ?
+                    """,  # nosec B608
+                    tuple(params),
+                )
+                self._workspace_file_inventory_update_root_state(
+                    conn,
+                    workspace_id=str(scan["workspace_id"]),
+                    root_id=str(scan["root_id"]),
+                    state=normalized_state,
+                    updated_at=now,
+                )
+                updated = self._workspace_file_inventory_scan_by_id(normalized_scan_id, conn=conn)
+                if updated is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{normalized_scan_id}' after update."
+                    )
+                return updated
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory scan update failed: {exc}") from exc  # noqa: TRY003
+
+    def complete_workspace_file_inventory_scan(
+        self,
+        scan_id: str,
+        state: str,
+        counts: Any,
+        diagnostics: Any,
+        *,
+        root_snapshot_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Complete a Workspace file inventory scan with durable counts and diagnostics."""
+        normalized_state = str(state or "").strip().lower()
+        if normalized_state not in {"current", "partial", "failed"}:
+            raise InputError("completed inventory state must be current, partial, or failed.")  # noqa: TRY003
+        normalized_scan_id = str(scan_id or "").strip()
+        if not normalized_scan_id:
+            raise InputError("scan_id is required.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        counts_json = self._workspace_file_inventory_counts_json(counts)
+        diagnostics_json = self._workspace_file_inventory_diagnostics_json(diagnostics)
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                conn.execute(
+                    """
+                    UPDATE workspace_file_inventory_scans
+                       SET state = ?,
+                           root_snapshot_token = ?,
+                           completed_at = ?,
+                           counts_json = ?,
+                           diagnostics_json = ?,
+                           updated_at = ?,
+                           version = version + 1
+                     WHERE scan_id = ?
+                    """,
+                    (
+                        normalized_state,
+                        root_snapshot_token,
+                        now,
+                        counts_json,
+                        diagnostics_json,
+                        now,
+                        normalized_scan_id,
+                    ),
+                )
+                self._workspace_file_inventory_update_root_state(
+                    conn,
+                    workspace_id=str(scan["workspace_id"]),
+                    root_id=str(scan["root_id"]),
+                    state=normalized_state,
+                    updated_at=now,
+                )
+                updated = self._workspace_file_inventory_scan_by_id(normalized_scan_id, conn=conn)
+                if updated is None:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to read workspace file inventory scan '{normalized_scan_id}' after completion."
+                    )
+                return updated
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory scan completion failed: {exc}") from exc  # noqa: TRY003
+
+    def replace_workspace_file_inventory_items(
+        self,
+        workspace_id: str,
+        root_id: str,
+        scan_id: str,
+        items: list[Mapping[str, Any]],
+        *,
+        scan_coverage_complete: bool,
+    ) -> int:
+        """Replace the current item projection for seen paths from one scan."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        normalized_root_id = str(root_id or "").strip()
+        normalized_scan_id = str(scan_id or "").strip()
+        if not normalized_workspace_id or not normalized_root_id or not normalized_scan_id:
+            raise InputError("workspace_id, root_id, and scan_id are required.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        false_value = self._workspace_file_inventory_bool_value(False)
+        true_value = self._workspace_file_inventory_bool_value(True)
+        normalized_items: list[dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, Mapping):
+                raise InputError("inventory items must be mappings.")  # noqa: TRY003
+            relative_path = self._workspace_file_inventory_relative_path(item.get("relative_path"))
+            entry_kind = str(item.get("entry_kind") or "file").strip() or "file"
+            normalized_items.append(
+                {
+                    "relative_path": relative_path,
+                    "entry_kind": entry_kind,
+                    "size_bytes": self._workspace_file_inventory_int(item.get("size_bytes"), field_name="size_bytes"),
+                    "mtime_ns": self._workspace_file_inventory_int(item.get("mtime_ns"), field_name="mtime_ns"),
+                    "mode_bits": self._workspace_file_inventory_int(item.get("mode_bits"), field_name="mode_bits"),
+                    "extension": item.get("extension"),
+                    "mime_hint": item.get("mime_hint"),
+                    "language_hint": item.get("language_hint"),
+                    "ignored": self._workspace_file_inventory_bool_value(bool(item.get("ignored", False))),
+                    "ignore_reason": item.get("ignore_reason"),
+                    "indexing_candidate": self._workspace_file_inventory_bool_value(
+                        bool(item.get("indexing_candidate", False))
+                    ),
+                    "metadata_json": self._workspace_file_inventory_json(item.get("metadata"), default={}),
+                }
+            )
+        try:
+            with self.transaction() as conn:
+                scan = self._workspace_file_inventory_require_scan(normalized_scan_id, conn=conn)
+                if scan["workspace_id"] != normalized_workspace_id or scan["root_id"] != normalized_root_id:
+                    raise ConflictError(
+                        "Workspace file inventory scan does not match workspace/root.",
+                        entity="workspace_file_inventory_scans",
+                        entity_id=normalized_scan_id,
+                    )
+                for item in normalized_items:
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_file_inventory_items (
+                            workspace_id, root_id, relative_path, scan_id, entry_kind, size_bytes,
+                            mtime_ns, mode_bits, extension, mime_hint, language_hint, ignored,
+                            ignore_reason, indexing_candidate, coverage_state, last_seen_at, deleted,
+                            metadata_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'current', ?, ?, ?)
+                        ON CONFLICT(workspace_id, root_id, relative_path) DO UPDATE SET
+                            scan_id = excluded.scan_id,
+                            entry_kind = excluded.entry_kind,
+                            size_bytes = excluded.size_bytes,
+                            mtime_ns = excluded.mtime_ns,
+                            mode_bits = excluded.mode_bits,
+                            extension = excluded.extension,
+                            mime_hint = excluded.mime_hint,
+                            language_hint = excluded.language_hint,
+                            ignored = excluded.ignored,
+                            ignore_reason = excluded.ignore_reason,
+                            indexing_candidate = excluded.indexing_candidate,
+                            coverage_state = 'current',
+                            last_seen_at = excluded.last_seen_at,
+                            deleted = excluded.deleted,
+                            metadata_json = excluded.metadata_json
+                        """,
+                        (
+                            normalized_workspace_id,
+                            normalized_root_id,
+                            item["relative_path"],
+                            normalized_scan_id,
+                            item["entry_kind"],
+                            item["size_bytes"],
+                            item["mtime_ns"],
+                            item["mode_bits"],
+                            item["extension"],
+                            item["mime_hint"],
+                            item["language_hint"],
+                            item["ignored"],
+                            item["ignore_reason"],
+                            item["indexing_candidate"],
+                            now,
+                            false_value,
+                            item["metadata_json"],
+                        ),
+                    )
+                if scan_coverage_complete:
+                    conn.execute(
+                        """
+                        UPDATE workspace_file_inventory_items
+                           SET coverage_state = 'previous',
+                               deleted = ?,
+                               metadata_json = metadata_json
+                         WHERE workspace_id = ?
+                           AND root_id = ?
+                           AND scan_id <> ?
+                        """,
+                        (true_value, normalized_workspace_id, normalized_root_id, normalized_scan_id),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE workspace_file_inventory_items
+                           SET coverage_state = 'previous'
+                         WHERE workspace_id = ?
+                           AND root_id = ?
+                           AND scan_id <> ?
+                           AND deleted = ?
+                        """,
+                        (normalized_workspace_id, normalized_root_id, normalized_scan_id, false_value),
+                    )
+                return len(normalized_items)
+        except ConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except BackendDatabaseError as exc:
+            raise self._workspace_file_inventory_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace file inventory item replacement failed: {exc}") from exc  # noqa: TRY003
+
+    def get_workspace_file_inventory_status(
+        self,
+        workspace_id: str,
+        *,
+        policy_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the latest Workspace file inventory status projection."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if not normalized_workspace_id:
+            raise InputError("workspace_id is required.")  # noqa: TRY003
+        root = self.get_workspace_primary_root(normalized_workspace_id)
+        zero_counts = normalize_inventory_counts({})
+        if root is None:
+            return {
+                "workspace_id": normalized_workspace_id,
+                "root_id": None,
+                "scan_id": None,
+                "state": "not_started",
+                "durable_state": None,
+                "stale": False,
+                "counts": zero_counts,
+                "diagnostics": [],
+            }
+        cursor = self.execute_query(
+            """
+            SELECT *
+              FROM workspace_file_inventory_scans
+             WHERE workspace_id = ?
+               AND root_id = ?
+             ORDER BY created_at DESC, scan_id DESC
+             LIMIT 1
+            """,
+            (normalized_workspace_id, root["root_id"]),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return {
+                "workspace_id": normalized_workspace_id,
+                "root_id": root["root_id"],
+                "scan_id": None,
+                "state": "not_started",
+                "durable_state": None,
+                "stale": False,
+                "counts": zero_counts,
+                "diagnostics": [],
+            }
+
+        scan = dict(row)
+        latest_diagnostics = bounded_inventory_diagnostics(
+            self._workspace_file_inventory_json_load(scan.get("diagnostics_json"), fallback=[])
+        )
+        if normalize_durable_inventory_state(scan.get("state")) == "failed" and any(
+            diagnostic.get("code") == "root_version_mismatch"
+            for diagnostic in latest_diagnostics
+        ):
+            completed_row = self.execute_query(
+                """
+                SELECT *
+                  FROM workspace_file_inventory_scans
+                 WHERE workspace_id = ?
+                   AND root_id = ?
+                   AND state IN ('current', 'partial')
+                 ORDER BY completed_at DESC, created_at DESC, scan_id DESC
+                 LIMIT 1
+                """,
+                (normalized_workspace_id, root["root_id"]),
+            ).fetchone()
+            if completed_row is not None:
+                scan = dict(completed_row)
+
+        durable_state = normalize_durable_inventory_state(scan.get("state"))
+        counts = normalize_inventory_counts(
+            self._workspace_file_inventory_json_load(scan.get("counts_json"), fallback={})
+        )
+        diagnostics = bounded_inventory_diagnostics(
+            self._workspace_file_inventory_json_load(scan.get("diagnostics_json"), fallback=[])
+        )
+        policy_mismatch = (
+            policy_fingerprint is not None
+            and str(scan.get("ignore_policy_fingerprint") or "") != str(policy_fingerprint)
+        )
+        stale = durable_state in {"current", "partial"} and (
+            int(scan["root_version"]) != int(root["version"]) or policy_mismatch
+        )
+        return {
+            "workspace_id": normalized_workspace_id,
+            "root_id": root["root_id"],
+            "scan_id": scan["scan_id"],
+            "state": "stale" if stale else durable_state,
+            "durable_state": durable_state,
+            "stale": stale,
+            "counts": counts,
+            "diagnostics": diagnostics,
+            "root_version": root["version"],
+            "scan_root_version": scan["root_version"],
+            "ignore_policy_fingerprint": scan.get("ignore_policy_fingerprint"),
+            "root_snapshot_token": scan.get("root_snapshot_token"),
+            "job_id": scan.get("job_id"),
+            "job_uuid": scan.get("job_uuid"),
+            "started_at": scan.get("started_at"),
+            "completed_at": scan.get("completed_at"),
+            "updated_at": scan.get("updated_at"),
+        }
+
+    def list_workspace_file_inventory_items(
+        self,
+        workspace_id: str,
+        *,
+        prefix: str | None = None,
+        cursor: str | None = None,
+        limit: int = 100,
+        include_ignored: bool = False,
+        entry_kind: str | None = None,
+    ) -> dict[str, Any]:
+        """List non-deleted inventory items sorted by project-root-relative path."""
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if not normalized_workspace_id:
+            raise InputError("workspace_id is required.")  # noqa: TRY003
+        bounded_limit = max(1, min(int(limit), 500))
+        root = self.get_workspace_primary_root(normalized_workspace_id)
+        if root is None:
+            return {"items": [], "next_cursor": None}
+
+        normalized_prefix = self._workspace_file_inventory_prefix(prefix)
+        normalized_entry_kind = str(entry_kind or "").strip().lower() or None
+        try:
+            cursor_path = decode_inventory_cursor(cursor) if cursor else None
+        except ValueError as exc:
+            raise InputError("cursor must be a valid workspace file inventory cursor.") from exc  # noqa: TRY003
+        false_value = self._workspace_file_inventory_bool_value(False)
+        clauses = ["workspace_id = ?", "root_id = ?", "deleted = ?"]
+        params: list[Any] = [normalized_workspace_id, root["root_id"], false_value]
+        if not include_ignored:
+            clauses.append("ignored = ?")
+            params.append(false_value)
+        if normalized_prefix is not None:
+            clauses.append("relative_path LIKE ?")
+            params.append(f"{normalized_prefix}%")
+        if normalized_entry_kind is not None:
+            clauses.append("entry_kind = ?")
+            params.append(normalized_entry_kind)
+        if cursor_path is not None:
+            clauses.append("relative_path > ?")
+            params.append(cursor_path)
+        params.append(bounded_limit + 1)
+        query = f"""
+            SELECT workspace_id, root_id, relative_path, scan_id, entry_kind, size_bytes,
+                   mtime_ns, mode_bits, extension, mime_hint, language_hint, ignored,
+                   ignore_reason, indexing_candidate, coverage_state, last_seen_at, deleted,
+                   metadata_json
+              FROM workspace_file_inventory_items
+             WHERE {' AND '.join(clauses)}
+             ORDER BY relative_path ASC
+             LIMIT ?
+        """  # nosec B608
+        rows = [dict(row) for row in self.execute_query(query, tuple(params)).fetchall()]
+        has_more = len(rows) > bounded_limit
+        visible_rows = rows[:bounded_limit]
+        next_cursor = encode_inventory_cursor(visible_rows[-1]["relative_path"]) if has_more and visible_rows else None
+        for item in visible_rows:
+            item["ignored"] = bool(item.get("ignored"))
+            item["indexing_candidate"] = bool(item.get("indexing_candidate"))
+            item["deleted"] = bool(item.get("deleted"))
+            item["metadata"] = self._workspace_file_inventory_json_load(item.get("metadata_json"), fallback={})
+        return {"items": visible_rows, "next_cursor": next_cursor}
 
     # --- Workspace Migration Methods ---
 

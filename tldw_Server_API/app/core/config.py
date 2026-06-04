@@ -368,6 +368,15 @@ _INGESTION_SOURCE_ALLOWED_ROOT_ENV_KEYS = (
     "INGESTION_SOURCE_ALLOWED_ROOTS",
     "TLDW_INGESTION_SOURCE_ALLOWED_ROOTS",
 )
+_WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_SECTION = "WORKSPACES"
+_WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_KEY = "project_root_allowed_base_paths"
+_WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_ENV_KEYS = (
+    "WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS",
+    "TLDW_WORKSPACE_PROJECT_ROOT_ALLOWED_BASE_PATHS",
+)
+_WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_SECTION = "ACP-WORKSPACE"
+_WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_KEY = "allowed_base_paths"
+_WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_ENV_KEYS = ("ACP_WORKSPACE_ALLOWED_BASE_PATHS",)
 
 
 def _split_allowed_root_values(raw: Optional[object]) -> list[str]:
@@ -394,20 +403,9 @@ def _normalize_allowed_root_entry(raw: object) -> Path | None:
     return candidate
 
 
-def get_ingestion_source_allowed_roots(*, reload: bool = False) -> tuple[Path, ...]:
+def _dedupe_normalized_allowed_roots(raw_values: list[str]) -> tuple[Path, ...]:
     roots: list[Path] = []
     seen: set[str] = set()
-
-    config_value = get_config_value(
-        _INGESTION_SOURCE_ALLOWED_ROOT_SECTION,
-        _INGESTION_SOURCE_ALLOWED_ROOT_KEY,
-        default="",
-        reload=reload,
-    )
-    raw_values: list[str] = _split_allowed_root_values(config_value)
-    for env_name in _INGESTION_SOURCE_ALLOWED_ROOT_ENV_KEYS:
-        raw_values.extend(_split_allowed_root_values(os.getenv(env_name)))
-
     for raw_value in raw_values:
         normalized = _normalize_allowed_root_entry(raw_value)
         if normalized is None:
@@ -419,6 +417,50 @@ def get_ingestion_source_allowed_roots(*, reload: bool = False) -> tuple[Path, .
         roots.append(normalized)
 
     return tuple(roots)
+
+
+def get_ingestion_source_allowed_roots(*, reload: bool = False) -> tuple[Path, ...]:
+    config_value = get_config_value(
+        _INGESTION_SOURCE_ALLOWED_ROOT_SECTION,
+        _INGESTION_SOURCE_ALLOWED_ROOT_KEY,
+        default="",
+        reload=reload,
+    )
+    raw_values: list[str] = _split_allowed_root_values(config_value)
+    for env_name in _INGESTION_SOURCE_ALLOWED_ROOT_ENV_KEYS:
+        raw_values.extend(_split_allowed_root_values(os.getenv(env_name)))
+
+    return _dedupe_normalized_allowed_roots(raw_values)
+
+
+def get_workspace_project_root_allowed_roots(*, reload: bool = False) -> tuple[Path, ...]:
+    workspace_values = _split_allowed_root_values(
+        get_config_value(
+            _WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_SECTION,
+            _WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_KEY,
+            default="",
+            reload=reload,
+        )
+    )
+    for env_name in _WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_ENV_KEYS:
+        workspace_values.extend(_split_allowed_root_values(os.getenv(env_name)))
+
+    workspace_roots = _dedupe_normalized_allowed_roots(workspace_values)
+    if workspace_roots:
+        return workspace_roots
+
+    fallback_values = _split_allowed_root_values(
+        get_config_value(
+            _WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_SECTION,
+            _WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_KEY,
+            default="",
+            reload=reload,
+        )
+    )
+    for env_name in _WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_ENV_KEYS:
+        fallback_values.extend(_split_allowed_root_values(os.getenv(env_name)))
+
+    return _dedupe_normalized_allowed_roots(fallback_values)
 
 
 def get_config_source_metadata() -> dict[str, Any]:

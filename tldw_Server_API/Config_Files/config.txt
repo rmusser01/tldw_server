@@ -115,6 +115,11 @@ run_first_rollout_mode = default_on
 run_first_provider_allowlist = openai:gpt-4o-mini,anthropic:claude-3-7-sonnet,openai:gpt-4o,google:gemini-2.5-flash
 run_first_presentation_variant = acp_phase2b_v1
 
+[WORKSPACES]
+# Optional. Project Workspace host-local roots must be under one of these paths.
+# This is intentionally separate from ingestion_source_allowed_roots.
+project_root_allowed_base_paths =
+
 [ACP-WORKSPACE]
 # Optional. If set, workspace root_path must be under one of these paths (comma-separated).
 # Leave empty to allow any absolute path.

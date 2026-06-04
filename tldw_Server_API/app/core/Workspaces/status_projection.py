@@ -7,6 +7,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
 
 
 _ACTIVE_JOB_STATUSES = frozenset({"queued", "processing", "running", "retrying"})
@@ -145,14 +146,31 @@ def build_workspace_capability_projection(
     }
     allowed_actions.update(service_actions)
     allowed_actions["ask_grounded_questions"] = ask_action
+    core_context = build_workspace_core_context(
+        workspace=workspace,
+        primary_root=workspace.get("primary_root") or workspace.get("project_root"),
+        source_summary=summary,
+        service_capabilities={
+            "workspace_services": workspace_services,
+            "allowed_actions": allowed_actions,
+        },
+        partial_errors=(
+            service_capabilities.get("partial_errors")
+            if isinstance(service_capabilities, dict)
+            else []
+        ),
+    )
 
     return {
-        "workspace_id": workspace["id"],
-        "workspace_kind": "research_workspace",
-        "access_level": "owner",
-        "source_summary": summary,
-        "workspace_services": workspace_services,
-        "allowed_actions": allowed_actions,
+        "workspace_id": core_context["workspace_id"],
+        "workspace_profile": core_context["workspace_profile"],
+        "workspace_kind": core_context["workspace_kind"],
+        "access_level": core_context["access_level"],
+        "resolution": core_context["resolution"],
+        "project_root": core_context["project_root"],
+        "source_summary": core_context["source_summary"],
+        "workspace_services": core_context["workspace_services"],
+        "allowed_actions": core_context["allowed_actions"],
     }
 
 
