@@ -14,7 +14,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Backfill a bounded DB Management ADR from TASK-2249 evidence. Scope the accepted decision to DB_Management ownership of per-user database paths under USER_DB_BASE_DIR/default Databases/user_databases, SQLite as the default per-user content storage mode, PostgreSQL as the shared content backend option with startup validation, and explicit caveats for AuthNZ/users DB separation, explicit SQLite path overrides, test fallback paths, legacy aliases, and non-universal PostgreSQL support across every DB family.
+Backfill a bounded DB Management ADR from TASK-2249 evidence. Scope the accepted decision to DB_Management ownership of per-user database paths under USER_DB_BASE_DIR (defaulting to Databases/user_databases), SQLite as the default per-user content storage mode, PostgreSQL as the shared content backend option with startup validation, and explicit caveats for AuthNZ/users DB separation, explicit SQLite path overrides, test fallback paths, legacy aliases, and non-universal PostgreSQL support across every DB family.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
