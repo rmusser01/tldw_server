@@ -39,13 +39,13 @@ Resolve PR #1982 review comments, inspect checks, and address merge conflicts fo
 - 2026-06-03: Reproduced the post-lockfile `Playground Device/A11y/Composer Gates` failure in `PlaygroundForm.signals.guard.test.ts`; updated the guard for the current submit result normalization path and verified `bun run test:playground:composer` passes locally.
 - 2026-06-03: Reproduced the next `Playground Device/A11y/Composer Gates` failure in `test:playground:device-matrix`; `ResearchWorkspaceBody` had discarded status state values needed by `WorkspaceTrustPanel`. Restored the state reads and verified both `env CI=true bun run test:playground:device-matrix` and `env CI=true bun run test:playground:a11y`.
 - 2026-06-03: Reproduced the remote `e2e-smoke` failure from both Ubuntu and macOS logs; app import failed because the merge left duplicate workspace route registrations for `/sources/status` and `/capabilities`. Removed the stale main-side duplicate route pair while keeping the dev-side service-capability implementation. Verified `duplicate_count 0`, `test_workspace_service_capabilities.py` (`9 passed`), and the full CI-shaped critical e2e smoke command (`15 passed, 276 skipped`).
-- 2026-06-03: Watchlists Extension E2E rerun remained stuck in the same `bunx playwright install --with-deps chromium` step that previously timed out. Updated that workflow to invoke the locally installed Playwright CLI through the frozen workspace install: `bun run playwright install --with-deps chromium`.
+- 2026-06-03: Watchlists Extension E2E rerun remained stuck in the same browser install step that previously timed out. The previous log showed the hang occurred after the Chrome-for-Testing archive reached 100%, so the workflow now runs extension tests against the hosted runner's system Chrome channel and verifies `google-chrome --version` instead of downloading a Playwright Chromium bundle.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved PR #1982 merge conflicts and review feedback. `dev` was kept for overlapping conflict hunks, non-conflicting `main` changes were retained, review-targeted workflow/docs/design/compose fixes were applied, MCP catalog connection validation was corrected, the frontend workspace lockfile was refreshed after the merge, playground gate regressions were fixed, duplicate workspace route registrations from the merge were removed, the stuck Watchlists E2E Playwright install step was switched to the local CLI, and validation passed locally.
+Resolved PR #1982 merge conflicts and review feedback. `dev` was kept for overlapping conflict hunks, non-conflicting `main` changes were retained, review-targeted workflow/docs/design/compose fixes were applied, MCP catalog connection validation was corrected, the frontend workspace lockfile was refreshed after the merge, playground gate regressions were fixed, duplicate workspace route registrations from the merge were removed, the stuck Watchlists E2E browser install was replaced with the hosted runner's system Chrome channel, and validation passed locally.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
