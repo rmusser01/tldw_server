@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from math import log
-import re
 from typing import Any
 
 from mcp_unified.profiles.models import MCPProfile
@@ -196,7 +196,11 @@ def _installed_entry(profile: MCPProfile, tool: Any) -> _ToolEntry | None:
         or _first_text(tool, "display_name", "displayName", "title")
         or tool_id
     )
-    description = _first_text(tool, "description") or _first_text(metadata, "description") or ""
+    description = (
+        _first_text(tool, "description")
+        or _first_text(metadata, "description")
+        or ""
+    )
     capabilities = tuple(_tool_capabilities(tool))
     activation = _first_text(metadata, "activation") or _first_text(tool, "activation")
     unavailable_reason = (
@@ -450,8 +454,9 @@ def _category_payload(
     fallback_priority = len(category_priorities)
     categories: dict[str, Counter[str]] = {}
     for entry in entries:
-        categories.setdefault(entry.category, Counter())
-        categories[entry.category][entry.installation_status] += 1
+        category = _normalize_category(entry.category) or _DEFAULT_CATEGORY
+        categories.setdefault(category, Counter())
+        categories[category][entry.installation_status] += 1
 
     return [
         {

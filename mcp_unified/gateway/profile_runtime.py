@@ -80,7 +80,12 @@ _BRIDGE_TOOL_DESCRIPTORS: dict[str, dict[str, Any]] = {
             "properties": {
                 "query": {"type": "string", "default": ""},
                 "category": {"type": ["string", "null"], "default": None},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                },
             },
             "additionalProperties": False,
         },

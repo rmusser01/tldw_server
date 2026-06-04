@@ -15,7 +15,6 @@ from mcp_unified.gateway.tool_discovery import (
 )
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 
-
 REPO_ROOT = Path(__file__).resolve().parents[5]
 TOOL_DISCOVERY_PATH = REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py"
 
@@ -70,6 +69,35 @@ def test_tool_search_filters_by_profile_before_bm25() -> None:
     results = search_profile_tools(profile, tools, query="run search")
 
     assert [item["tool_id"] for item in results] == ["code.search"]
+
+
+def test_list_profile_tools_consolidates_category_counts_by_normalized_name() -> None:
+    profile = _profile(capabilities=["code_search"])
+    tools = [
+        {
+            "name": "code.search",
+            "description": "Search code",
+            "metadata": {"capability": "code_search", "category": "Code"},
+        },
+        {
+            "name": "code.symbols",
+            "description": "Find symbols",
+            "metadata": {"capability": "code_search", "category": "code"},
+        },
+    ]
+
+    payload = list_profile_tools(profile, tools)
+    results = search_profile_tools(profile, tools, query="", category="CODE")
+
+    assert payload["categories"] == [
+        {
+            "category": "code",
+            "count": 2,
+            "installed_count": 2,
+            "recommended_unavailable_count": 0,
+        }
+    ]
+    assert {item["tool_id"] for item in results} == {"code.search", "code.symbols"}
 
 
 def test_tool_search_orders_installed_before_unavailable_then_bm25() -> None:

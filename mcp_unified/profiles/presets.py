@@ -191,7 +191,12 @@ _FILES_WRITE_TOOLS = [*_FILES_READ_TOOLS, "fs.write_text"]
 _CODE_READ_TOOLS = ["code.search", "code.symbols", "code.references"]
 _DOCS_READ_TOOLS = ["docs.search", "docs.read"]
 _DOCS_WRITE_TOOLS = [*_DOCS_READ_TOOLS, "docs.write"]
-_GIT_READ_TOOLS = ["git.status", "git.diff", "git.conflicts.list", "git.conflicts.read"]
+_GIT_READ_TOOLS = [
+    "git.status",
+    "git.diff",
+    "git.conflicts.list",
+    "git.conflicts.read",
+]
 _TEST_READ_TOOLS = ["tests.results.read", "tests.logs.read"]
 _TEST_REQUEST_TOOLS = [*_TEST_READ_TOOLS, "tests.request"]
 

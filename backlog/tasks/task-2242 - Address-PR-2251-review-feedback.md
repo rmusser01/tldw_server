@@ -40,6 +40,14 @@ still-valid comments with doc/task-record-only edits:
   changed the task-2232 implementation notes markers to
   `SECTION:IMPLEMENTATION_NOTES`.
 
+Second Qodo pass after push raised two additional valid items. Addressed both:
+
+- Reflowed long schema/constant/helper lines in `profile_runtime.py`,
+  `tool_discovery.py`, and `presets.py`.
+- Fixed category summary aggregation to normalize category keys consistently with
+  category filtering, and added a regression test covering mixed-case category
+  metadata.
+
 No unresolved review item was skipped as stale.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
@@ -47,10 +55,11 @@ No unresolved review item was skipped as stale.
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Rebased PR #2251 onto latest `origin/dev`, addressed all still-valid review
-threads with minimal documentation/task-record updates, and validated the
-rebased branch. Verification: focused MCP pytest suite passed
-(`273 passed, 6 warnings`); `git diff --check` passed; Bandit on changed MCP
-implementation modules reported zero findings in
+threads with minimal documentation/task-record and MCP discovery fixes, and
+validated the rebased branch. Verification: added regression test failed before
+the category normalization fix and passed after; focused MCP pytest suite passed
+(`274 passed, 6 warnings`); Ruff touched-file check passed; `git diff --check`
+passed; Bandit on changed MCP implementation modules reported zero findings in
 `/tmp/bandit_pr2251_profile_tooling.json`. PR merge is performed after pushing
 this branch update and confirming remote checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
