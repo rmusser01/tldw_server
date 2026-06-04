@@ -7,6 +7,7 @@ import type {
   WorkspaceApiResponse,
   WorkspaceContextResponse
 } from "@/services/tldw/domains/workspace-api"
+import { WORKSPACE_STORAGE_KEY } from "@/store/research-workspace-legacy-storage-inventory"
 
 const apiMocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
@@ -122,6 +123,7 @@ const renderManager = () =>
 describe("WorkspacesManagerPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
     vi.stubGlobal("crypto", {
       randomUUID: () => "test-workspace-id"
     })
@@ -282,6 +284,76 @@ describe("WorkspacesManagerPage", () => {
         }
       )
     })
+  })
+
+  it("separates local-only Research Workspace entries from server-backed rows", async () => {
+    window.localStorage.setItem(
+      WORKSPACE_STORAGE_KEY,
+      JSON.stringify({
+        schema: "workspace_split_v1",
+        version: 12,
+        state: {
+          workspaceId: "local-only",
+          savedWorkspaces: [
+            {
+              id: "local-only",
+              name: "Local Only Notes",
+              sourceCount: 2
+            }
+          ],
+          archivedWorkspaces: [],
+          workspaceIds: ["local-only"],
+          workspaceSnapshots: {},
+          workspaceChatSessions: {}
+        }
+      })
+    )
+    const research = workspace({
+      id: "ws-research",
+      name: "Server Research"
+    })
+    apiMocks.listWorkspaces.mockResolvedValueOnce({
+      items: [research],
+      total: 1
+    })
+    apiMocks.getWorkspaceContext.mockResolvedValueOnce(contextFor(research))
+
+    renderManager()
+
+    expect(await screen.findByText("Local Research Workspaces")).toBeVisible()
+    expect(screen.getByText("Local Only Notes")).toBeVisible()
+    expect(screen.getByText("Server Research")).toBeVisible()
+  })
+
+  it("shows local-only entries even when no server-backed Workspaces exist yet", async () => {
+    window.localStorage.setItem(
+      WORKSPACE_STORAGE_KEY,
+      JSON.stringify({
+        schema: "workspace_split_v1",
+        version: 12,
+        state: {
+          workspaceId: "local-first",
+          savedWorkspaces: [
+            {
+              id: "local-first",
+              name: "First Local Workspace",
+              sourceCount: 1
+            }
+          ],
+          archivedWorkspaces: [],
+          workspaceIds: ["local-first"],
+          workspaceSnapshots: {},
+          workspaceChatSessions: {}
+        }
+      })
+    )
+    apiMocks.listWorkspaces.mockResolvedValueOnce({ items: [], total: 0 })
+
+    renderManager()
+
+    expect(await screen.findByText("Local Research Workspaces")).toBeVisible()
+    expect(screen.getByText("First Local Workspace")).toBeVisible()
+    expect(screen.getByText("No server-backed Workspaces yet")).toBeVisible()
   })
 
   it("edits metadata, archives, unarchives, and opens without hard-delete controls", async () => {

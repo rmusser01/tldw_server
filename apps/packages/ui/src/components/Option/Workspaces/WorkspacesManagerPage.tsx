@@ -13,6 +13,7 @@ import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog"
 import { WorkspaceList } from "./WorkspaceList"
 import { WorkspaceMetadataDialog } from "./WorkspaceMetadataDialog"
 import { WorkspaceProjectRootPanel } from "./WorkspaceProjectRootPanel"
+import { WorkspaceReconciliationPanel } from "./WorkspaceReconciliationPanel"
 import {
   normalizeWorkspaceManagerItem,
   type WorkspaceManagerAttention,
@@ -213,6 +214,13 @@ export const WorkspacesManagerPage = () => {
     }
   }
 
+  const handleServerWorkspaceCreated = (workspace: WorkspaceApiResponse): void => {
+    setItems((current) =>
+      mergeWorkspaceItem(current, workspace, { prependIfMissing: true })
+    )
+    setSelectedItemId(workspace.id)
+  }
+
   return (
     <section className="flex h-full min-h-0 w-full flex-col bg-bg text-text">
       <div className="border-b border-border px-4 py-3">
@@ -327,28 +335,34 @@ export const WorkspacesManagerPage = () => {
             </Alert>
           </div>
         ) : items.length === 0 ? (
-          <div className="p-6">
-            <div className="max-w-xl rounded-lg border border-border bg-surface p-5">
-              <h2 className="text-base font-semibold text-text">
-                No server-backed Workspaces yet
-              </h2>
-              <p className="mt-2 text-sm text-text-muted">
-                Create a Workspace here when you want a durable server record for
-                research sources, notes, project files, and future agent sessions.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button onClick={() => setCreateProfile("research")}>
-                  Create Research Workspace
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => setCreateProfile("project")}
-                >
-                  Create Project Workspace
-                </Button>
+          <>
+            <WorkspaceReconciliationPanel
+              serverWorkspaces={items}
+              onServerWorkspaceCreated={handleServerWorkspaceCreated}
+            />
+            <div className="p-6">
+              <div className="max-w-xl rounded-lg border border-border bg-surface p-5">
+                <h2 className="text-base font-semibold text-text">
+                  No server-backed Workspaces yet
+                </h2>
+                <p className="mt-2 text-sm text-text-muted">
+                  Create a Workspace here when you want a durable server record for
+                  research sources, notes, project files, and future agent sessions.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button onClick={() => setCreateProfile("research")}>
+                    Create Research Workspace
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => setCreateProfile("project")}
+                  >
+                    Create Project Workspace
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
+          </>
         ) : (
           <>
             <div className="flex items-center justify-between gap-3 px-4 py-2 text-sm text-text-muted">
@@ -361,6 +375,10 @@ export const WorkspacesManagerPage = () => {
                 </Badge>
               )}
             </div>
+            <WorkspaceReconciliationPanel
+              serverWorkspaces={items}
+              onServerWorkspaceCreated={handleServerWorkspaceCreated}
+            />
             {filteredItems.length === 0 ? (
               <div className="p-6 text-sm text-text-muted">
                 No Workspaces match the current filters.
