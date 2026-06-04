@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from loguru import logger
 
@@ -27,6 +27,9 @@ from ..base import BaseModule, ModuleConfig, create_tool_definition
 RUN_PARENT_IDEMPOTENCY_KEY_METADATA_KEY = "run_parent_idempotency_key"
 
 _RUN_WRITE_BACKEND_TOOLS = {"fs.write_text", "sandbox.run"}
+_RUN_TOOL_NAME = "run"
+_RUN_TOOL_ALIASES = ("bash", "shell")
+_RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 
 
 class _AdapterBackend(CommandBackend):
@@ -59,36 +62,33 @@ class RunCommandModule(BaseModule):
         return {"initialized": True}
 
     async def get_tools(self) -> list[dict[str, Any]]:
-        run_tool = create_tool_definition(
-            name="run",
+        run_tool = self._create_run_tool_definition(
+            name=_RUN_TOOL_NAME,
             description="Execute a governed command in the MCP virtual CLI runtime.",
-            parameters={
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Command chain to execute (example: ls | grep py).",
-                    },
-                    "idempotency_key": {
-                        "type": "string",
-                        "description": "Legacy alias for idempotencyKey.",
-                    },
-                    "idempotencyKey": {
-                        "type": "string",
-                        "description": "Optional parent idempotency key for nested governed steps.",
-                    },
-                },
-                "required": ["command"],
-            },
             metadata={
                 "category": "utility",
                 "notes": "Wrapper tool; nested prepared MCP calls carry path/process metadata",
             },
         )
-        run_tool["inputSchema"]["additionalProperties"] = False
-        return [run_tool]
+        alias_tools = [
+            self._create_run_tool_definition(
+                name=alias_name,
+                description=(
+                    f"Governed shell-like facade for `run`; {alias_name} is not a raw host shell "
+                    "and only executes profile-granted virtual CLI commands."
+                ),
+                metadata={
+                    "category": "utility",
+                    "canonical_tool": _RUN_TOOL_NAME,
+                    "notes": "Compatibility alias; no raw host shell execution is performed.",
+                },
+            )
+            for alias_name in _RUN_TOOL_ALIASES
+        ]
+        return [run_tool, *alias_tools]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        if tool_name != "run":
+        if tool_name not in _RUN_TOOL_NAMES:
             raise ValueError(f"Unknown tool: {tool_name}")
         args = self.sanitize_input(arguments or {})
         self.validate_tool_arguments(tool_name, args)
@@ -167,9 +167,9 @@ class RunCommandModule(BaseModule):
             await self._cleanup_spill_artifacts(result)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
-        if tool_name != "run":
+        if tool_name not in _RUN_TOOL_NAMES:
             raise ValueError(f"Unknown tool: {tool_name}")
-        unknown = sorted({key for key in arguments.keys()} - {"command", "idempotencyKey", "idempotency_key"})
+        unknown = sorted(set(arguments) - {"command", "idempotencyKey", "idempotency_key"})
         if unknown:
             raise ValueError(f"unknown arguments: {', '.join(unknown)}")
         command = arguments.get("command")
@@ -217,7 +217,7 @@ class RunCommandModule(BaseModule):
         arguments: dict[str, Any],
         tool_def: dict[str, Any] | None = None,
     ) -> bool:
-        if tool_name != "run":
+        if tool_name not in _RUN_TOOL_NAMES:
             return super().is_write_tool_call(tool_name, arguments, tool_def=tool_def)
 
         command = str(arguments.get("command") or "").strip()
@@ -239,6 +239,38 @@ class RunCommandModule(BaseModule):
                 if any(tool in _RUN_WRITE_BACKEND_TOOLS for tool in descriptor.backend_tools):
                     return True
         return False
+
+    @staticmethod
+    def _create_run_tool_definition(
+        *,
+        name: str,
+        description: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        tool = create_tool_definition(
+            name=name,
+            description=description,
+            parameters={
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Command chain to execute (example: ls | grep py).",
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": "Legacy alias for idempotencyKey.",
+                    },
+                    "idempotencyKey": {
+                        "type": "string",
+                        "description": "Optional parent idempotency key for nested governed steps.",
+                    },
+                },
+                "required": ["command"],
+            },
+            metadata=metadata,
+        )
+        tool["inputSchema"]["additionalProperties"] = False
+        return tool
 
     async def _resolve_protocol(self) -> Any:
         configured = self.config.settings.get("protocol")

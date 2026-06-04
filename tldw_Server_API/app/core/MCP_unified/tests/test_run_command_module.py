@@ -44,6 +44,9 @@ class _ProtocolStub:
                 {"name": "fs.list", "module": "filesystem", "canExecute": True},
                 {"name": "fs.read_text", "module": "filesystem", "canExecute": True},
                 {"name": "fs.write_text", "module": "filesystem", "canExecute": True},
+                {"name": "fs.stat", "module": "filesystem", "canExecute": True},
+                {"name": "fs.glob", "module": "filesystem", "canExecute": True},
+                {"name": "fs.grep", "module": "filesystem", "canExecute": True},
             ]
         }
 
@@ -95,6 +98,53 @@ class _ProtocolStub:
                 "content": [{"type": "json", "json": {"path": "notes.txt", "text": self.read_text_content}}],
                 "tool": tool_name,
             }
+        if tool_name == "fs.stat":
+            return {
+                "content": [
+                    {
+                        "type": "json",
+                        "json": {
+                            "path": "docs/readme.md",
+                            "type": "file",
+                            "size_bytes": 42,
+                        },
+                    }
+                ],
+                "tool": tool_name,
+            }
+        if tool_name == "fs.glob":
+            return {
+                "content": [
+                    {
+                        "type": "json",
+                        "json": {
+                            "matches": [
+                                {"path": "src/app.py", "type": "file"},
+                                {"path": "src/pkg", "type": "directory"},
+                            ]
+                        },
+                    }
+                ],
+                "tool": tool_name,
+            }
+        if tool_name == "fs.grep":
+            return {
+                "content": [
+                    {
+                        "type": "json",
+                        "json": {
+                            "matches": [
+                                {
+                                    "path": "src/app.py",
+                                    "line_number": 7,
+                                    "line": "TODO: wire facade",
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "tool": tool_name,
+            }
         raise AssertionError(f"Unexpected tool execution: {tool_name}")
 
 
@@ -123,6 +173,23 @@ def _build_module(protocol: _ProtocolStub) -> RunCommandModule:
 
 
 @pytest.mark.asyncio
+async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    tools = await module.get_tools()
+
+    by_name = {tool["name"]: tool for tool in tools}
+    assert list(by_name) == ["run", "bash", "shell"]
+    assert by_name["run"]["metadata"].get("canonical_tool") is None
+    for alias_name in ("bash", "shell"):
+        alias = by_name[alias_name]
+        assert alias["metadata"]["canonical_tool"] == "run"
+        assert "not a raw host shell" in alias["description"]
+        assert alias["inputSchema"]["properties"] == by_name["run"]["inputSchema"]["properties"]
+
+
+@pytest.mark.asyncio
 async def test_run_ls_uses_fs_list_and_returns_footer() -> None:
     protocol = _ProtocolStub()
     module = _build_module(protocol)
@@ -136,6 +203,103 @@ async def test_run_ls_uses_fs_list_and_returns_footer() -> None:
     assert len(protocol.prepare_calls) == 1
     assert protocol.prepare_calls[0].params["name"] == "fs.list"
     assert protocol.prepare_calls[0].params["arguments"] == {"path": "."}
+
+
+@pytest.mark.asyncio
+async def test_shell_alias_uses_governed_run_implementation_without_raw_shell_delegation() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-shell-alias", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("shell", {"command": "echo unsafe"}, context=context)
+
+    assert "Unknown command: echo" in rendered
+    assert "[exit:127 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_filesystem_aliases_route_to_backing_tools() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-filesystem-aliases", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": 'stat docs/readme.md ; glob "**/*.py" src ; find "*.md" docs ; rg TODO src ; grep-files FIXME docs'},
+        context=context,
+    )
+
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == [
+        "fs.stat",
+        "fs.glob",
+        "fs.glob",
+        "fs.grep",
+        "fs.grep",
+    ]
+    assert [call.params["arguments"] for call in protocol.prepare_calls] == [
+        {"path": "docs/readme.md"},
+        {"pattern": "**/*.py", "base_path": "src"},
+        {"pattern": "*.md", "base_path": "docs"},
+        {"pattern": "TODO", "base_path": "src"},
+        {"pattern": "FIXME", "base_path": "docs"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_plain_grep_still_filters_stdin_instead_of_calling_fs_grep() -> None:
+    protocol = _ProtocolStub()
+    protocol.read_text_content = "ERROR one\nINFO two\nerror three\n"
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-pure-grep", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cat app.log | grep ERROR"}, context=context)
+
+    assert "ERROR one" in rendered
+    assert "INFO two" not in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read_text"]
+    assert [call.params["name"] for call in protocol.execute_calls] == ["fs.read_text"]
+
+
+@pytest.mark.asyncio
+async def test_run_help_policy_filters_filesystem_aliases() -> None:
+    class _RestrictedProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {
+                "tools": [
+                    {"name": "fs.stat", "module": "filesystem", "canExecute": True},
+                    {"name": "fs.grep", "module": "filesystem", "canExecute": True},
+                ]
+            }
+
+    module = _build_module(_RestrictedProtocolStub())
+    context = RequestContext(request_id="run-help-filesystem-aliases", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "--help"}, context=context)
+
+    assert "stat" in rendered
+    assert "rg" in rendered
+    assert "grep-files" in rendered
+    assert "grep" in rendered
+    assert "glob" not in rendered
+    assert "find" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_bash_alias_returns_governed_alias_usage_errors() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-bash-alias-usage", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("bash", {"command": "rg"}, context=context)
+
+    assert "usage: rg <pattern> [base_path]" in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
 
 
 @pytest.mark.asyncio

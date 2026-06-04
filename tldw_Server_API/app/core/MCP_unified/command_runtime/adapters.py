@@ -5,10 +5,10 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from .executor import HandlerInvocationContext
 from .models import CommandChain, CommandSpillReference, CommandStepResult
@@ -260,6 +260,36 @@ class PhaseOneCommandAdapters:
                 tool_name="fs.write_text",
                 arguments={"path": argv[1], "content": " ".join(argv[2:])},
                 renderer=self._render_write,
+            )
+        if command == "stat":
+            if len(argv) != 2:
+                return _UsageError("usage: stat <path>")
+            return _GovernedCallPlan(
+                tool_name="fs.stat",
+                arguments={"path": argv[1]},
+                renderer=self._render_json_payload,
+            )
+        if command in {"glob", "find"}:
+            if len(argv) not in {2, 3}:
+                return _UsageError(f"usage: {command} <pattern> [base_path]")
+            arguments = {"pattern": argv[1]}
+            if len(argv) == 3:
+                arguments["base_path"] = argv[2]
+            return _GovernedCallPlan(
+                tool_name="fs.glob",
+                arguments=arguments,
+                renderer=self._render_json_payload,
+            )
+        if command in {"rg", "grep-files"}:
+            if len(argv) not in {2, 3}:
+                return _UsageError(f"usage: {command} <pattern> [base_path]")
+            arguments = {"pattern": argv[1]}
+            if len(argv) == 3:
+                arguments["base_path"] = argv[2]
+            return _GovernedCallPlan(
+                tool_name="fs.grep",
+                arguments=arguments,
+                renderer=self._render_json_payload,
             )
         if command == "knowledge":
             return self._knowledge_plan(argv)

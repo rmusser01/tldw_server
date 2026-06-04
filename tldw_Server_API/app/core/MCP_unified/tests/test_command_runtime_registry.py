@@ -18,6 +18,23 @@ def test_registry_hides_commands_without_visible_backing_tools():
     assert "knowledge" not in visible
     assert "media" not in visible
     assert "sandbox" not in visible
+    assert "stat" not in visible
+    assert "glob" not in visible
+    assert "find" not in visible
+    assert "rg" not in visible
+    assert "grep-files" not in visible
+
+
+def test_registry_exposes_filesystem_aliases_only_when_backing_tools_are_visible():
+    registry = build_default_registry()
+    visible = registry.visible_commands(allowed_tools={"fs.stat", "fs.grep"})
+
+    assert "stat" in visible
+    assert "rg" in visible
+    assert "grep-files" in visible
+    assert "grep" in visible
+    assert "glob" not in visible
+    assert "find" not in visible
 
 
 def test_registry_exposes_phase_one_mappings():
@@ -31,3 +48,8 @@ def test_registry_exposes_phase_one_mappings():
     assert registry.get_command("mcp").backend_tools == ("mcp.modules.list", "mcp.tools.list")
     assert registry.get_command("sandbox").backend_tools == ("sandbox.run",)
     assert registry.get_command("grep").pure_transform is True
+    assert registry.get_command("stat").backend_tools == ("fs.stat",)
+    assert registry.get_command("glob").backend_tools == ("fs.glob",)
+    assert registry.get_command("find").backend_tools == ("fs.glob",)
+    assert registry.get_command("rg").backend_tools == ("fs.grep",)
+    assert registry.get_command("grep-files").backend_tools == ("fs.grep",)
