@@ -43,6 +43,8 @@ export interface WorkspaceManagerItem {
   attentionState: WorkspaceManagerAttention
   projectRoot: WorkspaceManagerProjectRoot
   fileInventoryAvailable: boolean
+  sourceCount: number | null
+  selectedSourceCount: number | null
   activeOperations: WorkspaceOperationResponse[]
   updatedAt: string
   version: number
@@ -97,6 +99,8 @@ export const normalizeWorkspaceManagerItem = (
     attentionState,
     projectRoot,
     fileInventoryAvailable: projectRoot.fileInventory.available,
+    sourceCount: context?.sources?.summary?.total ?? null,
+    selectedSourceCount: context?.sources?.summary?.selected ?? null,
     activeOperations: Array.isArray(context?.active_operations)
       ? context.active_operations
       : [],

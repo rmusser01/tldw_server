@@ -133,6 +133,7 @@ export const AUDITED_ROOT_ROUTE_PATHS = [
   "/knowledge",
   "/search",
   "/research",
+  "/workspaces",
   "/research-workspace",
   "/document-workspace",
   "/repo2txt",
@@ -398,6 +399,17 @@ export const ROUTE_METADATA = [
     smoke: "manual",
     requiresBackend: true,
     rationale: "Research run route discovered outside the original smoke inventory."
+  }),
+  defineRoute({
+    path: "/workspaces",
+    label: "Workspaces",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    smoke: "manual",
+    nav: "secondary",
+    requiresBackend: true,
+    rationale: "Canonical Workspace manager for research and project workspaces."
   }),
   defineRoute({
     path: "/research-workspace",

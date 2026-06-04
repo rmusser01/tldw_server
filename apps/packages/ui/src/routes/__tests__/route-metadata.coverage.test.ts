@@ -32,6 +32,7 @@ const AUDITED_ROOT_ROUTES = [
   "/knowledge",
   "/search",
   "/research",
+  "/workspaces",
   "/research-workspace",
   "/document-workspace",
   "/repo2txt",
@@ -87,9 +88,9 @@ const AUDITED_ROOT_ROUTES = [
 ] as const
 
 describe("route metadata coverage", () => {
-  it("tracks the audited 74-route bootstrap set explicitly", () => {
+  it("tracks the audited 75-route bootstrap set explicitly", () => {
     expect(AUDITED_ROOT_ROUTE_PATHS).toEqual(AUDITED_ROOT_ROUTES)
-    expect(AUDITED_ROOT_ROUTE_PATHS).toHaveLength(74)
+    expect(AUDITED_ROOT_ROUTE_PATHS).toHaveLength(75)
   })
 
   it("defines metadata for every audited root route", () => {
@@ -129,6 +130,25 @@ describe("route metadata coverage", () => {
     expect(metadata?.aliases).toBeUndefined()
     expect(metadata?.redirectsTo).toBeUndefined()
     expect(getRouteMetadata("/workspace-playground")).toBeUndefined()
+  })
+
+  it("defines Workspaces as the canonical manager route without aliases or redirects", () => {
+    const metadata = getRouteMetadata("/workspaces")
+
+    expect(metadata).toMatchObject({
+      path: "/workspaces",
+      canonicalPath: "/workspaces",
+      label: "Workspaces",
+      group: "workspace",
+      surface: "advanced_self_hosted",
+      nav: "secondary",
+      requiresBackend: true
+    })
+    expect(metadata?.availability).toEqual(
+      expect.arrayContaining(["web", "extension_options"])
+    )
+    expect(metadata?.aliases).toBeUndefined()
+    expect(metadata?.redirectsTo).toBeUndefined()
   })
 
   it("labels /notes as the primary Notes workspace destination", () => {
