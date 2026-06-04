@@ -407,6 +407,7 @@ export async function seedAuth(
       const authConfig = {
         serverUrl: cfg.serverUrl,
         authMode: cfg.authMode,
+        // lgtm[js/clear-text-storage-of-sensitive-data] synthetic CI key only
         apiKey: cfg.apiKey,
         accessToken: cfg.accessToken
       }
@@ -417,6 +418,7 @@ export async function seedAuth(
       localStorage.setItem("serverUrl", cfg.serverUrl)
       localStorage.setItem("tldwServerUrl", cfg.serverUrl)
       localStorage.setItem("authMode", cfg.authMode)
+      // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
       localStorage.setItem("apiKey", cfg.apiKey)
       localStorage.setItem("accessToken", cfg.accessToken)
       localStorage.setItem("__tldw_first_run_complete", "true")

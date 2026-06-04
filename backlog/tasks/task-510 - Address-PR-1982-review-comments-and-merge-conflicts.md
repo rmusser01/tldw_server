@@ -41,12 +41,13 @@ Resolve PR #1982 review comments, inspect checks, and address merge conflicts fo
 - 2026-06-03: Reproduced the remote `e2e-smoke` failure from both Ubuntu and macOS logs; app import failed because the merge left duplicate workspace route registrations for `/sources/status` and `/capabilities`. Removed the stale main-side duplicate route pair while keeping the dev-side service-capability implementation. Verified `duplicate_count 0`, `test_workspace_service_capabilities.py` (`9 passed`), and the full CI-shaped critical e2e smoke command (`15 passed, 276 skipped`).
 - 2026-06-03: Watchlists Extension E2E rerun remained stuck in the same browser install step that previously timed out. The previous log showed the hang occurred after the Chrome-for-Testing archive reached 100%, so the workflow now runs extension tests against the hosted runner's system Chrome channel and verifies `google-chrome --version` instead of downloading a Playwright Chromium bundle.
 - 2026-06-03: Corrected the merge strategy error by reverting the bad `-X ours` merge against parent 1. This removes main-only changes imported by the merge so the PR result is dev-over-main, while preserving the follow-up PR fixes that remain applicable.
+- 2026-06-03: Addressed the remaining GitHub Advanced Security review threads by adding the repo's existing `lgtm[js/clear-text-storage-of-sensitive-data]` suppressions to E2E-only browser auth seeding sinks in smoke and real-server Playwright setup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved PR #1982 merge conflicts and review feedback. The bad recursive `-X ours` merge was corrected so dev wins over main rather than retaining main-only changes; follow-up PR fixes that remain applicable were preserved, duplicate workspace route registrations were removed, the Watchlists E2E browser install hang was replaced with the hosted runner's system Chrome channel, and validation was recorded.
+Resolved PR #1982 merge conflicts and review feedback. The bad recursive `-X ours` merge was corrected so dev wins over main rather than retaining main-only changes; follow-up PR fixes that remain applicable were preserved, duplicate workspace route registrations were removed, the Watchlists E2E browser install hang was replaced with the hosted runner's system Chrome channel, remaining CodeQL review threads were handled for E2E auth setup, and validation was recorded.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -20,6 +20,7 @@ const bypassChatGates = async (page: Page) => {
     const authConfig = {
       serverUrl: 'http://127.0.0.1:8000',
       authMode: 'single-user',
+      // lgtm[js/clear-text-storage-of-sensitive-data] synthetic CI key only
       apiKey: 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY',
     };
 
@@ -27,6 +28,7 @@ const bypassChatGates = async (page: Page) => {
     window.localStorage.setItem('__tldw_first_run_complete', 'true');
     window.localStorage.setItem('__tldw_test_bypass', 'true');
     window.localStorage.setItem('tldwConfig', JSON.stringify(authConfig));
+    // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
     window.localStorage.setItem('apiKey', authConfig.apiKey);
     window.localStorage.setItem('authMode', authConfig.authMode);
     window.localStorage.setItem('stickyChatInput', 'true');
