@@ -239,6 +239,9 @@ class AsyncGitCommandRunner:
                 "GIT_OPTIONAL_LOCKS": "0",
                 "GIT_PAGER": "cat",
                 "GIT_EXTERNAL_DIFF": "",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "core.fsmonitor",
+                "GIT_CONFIG_VALUE_0": "false",
             }
         )
         return env
@@ -888,6 +891,7 @@ class GitModule(BaseModule):
             str(repository.repository_root),
             "blame",
             "--line-porcelain",
+            "--no-textconv",
             "-L",
             f"{start_line},{end_line}",
             "--",

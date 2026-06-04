@@ -374,6 +374,9 @@ async def test_git_runner_uses_create_subprocess_exec_without_shell_and_safe_env
     assert captured["kwargs"]["env"]["GIT_OPTIONAL_LOCKS"] == "0"  # nosec B101
     assert captured["kwargs"]["env"]["GIT_PAGER"] == "cat"  # nosec B101
     assert captured["kwargs"]["env"]["GIT_EXTERNAL_DIFF"] == ""  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_CONFIG_COUNT"] == "1"  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_CONFIG_KEY_0"] == "core.fsmonitor"  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_CONFIG_VALUE_0"] == "false"  # nosec B101
     assert result.argv == ["git", "--version"]  # nosec B101
     assert result.returncode == 0  # nosec B101
     assert result.stdout == "git version 2.45.0\n"  # nosec B101
@@ -1338,6 +1341,7 @@ async def test_git_blame_parses_line_porcelain_range_caps_lines_and_no_emails(tm
         str(workspace_root),
         "blame",
         "--line-porcelain",
+        "--no-textconv",
         "-L",
         "1,2",
         "--",
@@ -1406,6 +1410,7 @@ async def test_git_blame_translates_workspace_relative_path_to_repo_relative_pat
         str(repo_root),
         "blame",
         "--line-porcelain",
+        "--no-textconv",
         "-L",
         "1,1",
         "--",
