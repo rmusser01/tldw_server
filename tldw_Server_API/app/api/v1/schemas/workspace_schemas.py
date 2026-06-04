@@ -283,6 +283,16 @@ class WorkspacePrimaryRootAttachRequest(BaseModel):
     strict_sandbox_validation: StrictBool = False
 
 
+class WorkspaceSandboxRootProvisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, max_length=120)
+    requested_runtime: str | None = Field(default=None, max_length=80)
+    root_id: str | None = Field(default=None, max_length=128)
+    replace_existing: StrictBool = False
+    expected_workspace_version: int | None = Field(default=None, ge=1)
+
+
 WorkspaceFileInventoryState = Literal[
     "not_started",
     "queued",
@@ -411,6 +421,13 @@ class WorkspaceRootsResponse(BaseModel):
     workspace_profile: WorkspaceProfile = "research"
     primary_root: WorkspaceRootResponse | None = None
     roots: list[WorkspaceRootResponse] = Field(default_factory=list)
+
+
+class WorkspaceSandboxRootProvisionResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "project"
+    operation: WorkspaceOperationResponse
+    primary_root: WorkspaceRootResponse | None = None
 
 
 class WorkspaceCapabilitiesResponse(BaseModel):

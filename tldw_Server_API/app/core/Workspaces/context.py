@@ -29,6 +29,7 @@ def build_workspace_core_context(
     source_summary: Mapping[str, Any] | None,
     service_capabilities: Mapping[str, Any] | None,
     partial_errors: list[Mapping[str, Any]] | None,
+    active_operations: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Resolve the read-only Workspace Core context for status surfaces."""
     workspace_dict = dict(workspace or {})
@@ -66,7 +67,7 @@ def build_workspace_core_context(
         "source_summary": dict(source_summary or {}),
         "workspace_services": workspace_services,
         "allowed_actions": allowed_actions,
-        "active_operations": [],
+        "active_operations": [dict(operation) for operation in (active_operations or [])],
     }
 
 

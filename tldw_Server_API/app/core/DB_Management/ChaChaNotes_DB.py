@@ -123,6 +123,11 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa:
     normalize_inventory_counts,
     sort_inventory_relative_paths,
 )
+from tldw_Server_API.app.core.Workspaces.operations import (  # noqa: E402
+    WORKSPACE_OPERATION_ACTIVE_STATUSES,
+    WORKSPACE_OPERATION_STATUSES,
+    redact_operation_diagnostics,
+)
 
 #
 ########################################################################################################################
@@ -8907,6 +8912,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_project_roots_one_primary "
                 "ON workspace_project_roots(workspace_id) WHERE is_primary = 1"
             )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_operations (
+                    id                       TEXT PRIMARY KEY NOT NULL,
+                    workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    user_id                  TEXT NOT NULL,
+                    command                  TEXT NOT NULL,
+                    idempotency_key          TEXT NOT NULL,
+                    request_fingerprint      TEXT NOT NULL,
+                    linked_idempotency_key   TEXT,
+                    status                   TEXT NOT NULL,
+                    result_ref_json          TEXT NOT NULL DEFAULT '{}',
+                    diagnostics_json         TEXT NOT NULL DEFAULT '{}',
+                    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    expires_at               DATETIME
+                )
+            """)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_operations_idempotency "
+                "ON workspace_operations(workspace_id, user_id, command, idempotency_key)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_operations_active "
+                "ON workspace_operations(workspace_id, status, expires_at)"
+            )
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS workspace_sources (
@@ -9075,6 +9105,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "CREATE INDEX IF NOT EXISTS idx_ws_project_roots_workspace ON workspace_project_roots(workspace_id)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_project_roots_one_primary "
             "ON workspace_project_roots(workspace_id) WHERE is_primary = true",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_operations (
+                id                       TEXT PRIMARY KEY NOT NULL,
+                workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                user_id                  TEXT NOT NULL,
+                command                  TEXT NOT NULL,
+                idempotency_key          TEXT NOT NULL,
+                request_fingerprint      TEXT NOT NULL,
+                linked_idempotency_key   TEXT,
+                status                   TEXT NOT NULL,
+                result_ref_json          TEXT NOT NULL DEFAULT '{}',
+                diagnostics_json         TEXT NOT NULL DEFAULT '{}',
+                created_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at               TIMESTAMP
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_operations_idempotency "
+            "ON workspace_operations(workspace_id, user_id, command, idempotency_key)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_operations_active "
+            "ON workspace_operations(workspace_id, status, expires_at)",
             """
             CREATE TABLE IF NOT EXISTS workspace_sources (
                 id            TEXT    NOT NULL,
@@ -16265,6 +16316,318 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise self._workspace_project_root_integrity_error(exc) from exc
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Workspace project root update failed: {exc}") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _validate_workspace_operation_status(status: Any) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized not in WORKSPACE_OPERATION_STATUSES:
+            raise InputError("workspace operation status is invalid.")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _workspace_operation_json(value: Any, *, diagnostics: bool = False) -> str:
+        payload = redact_operation_diagnostics(value) if diagnostics else (value or {})
+        if isinstance(payload, str):
+            try:
+                json.loads(payload)
+            except json.JSONDecodeError as exc:
+                raise InputError("workspace operation JSON fields must contain valid JSON.") from exc  # noqa: TRY003
+            return payload
+        try:
+            return json.dumps(payload, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError("workspace operation values must be JSON serializable.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_operation_json_load(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if value is None:
+            return {}
+        try:
+            loaded = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(loaded) if isinstance(loaded, dict) else {}
+
+    def _workspace_operation_row(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        payload = dict(row)
+        payload["result_ref"] = self._workspace_operation_json_load(payload.pop("result_ref_json", None))
+        payload["diagnostics"] = redact_operation_diagnostics(
+            self._workspace_operation_json_load(payload.pop("diagnostics_json", None))
+        )
+        return payload
+
+    @staticmethod
+    def _workspace_operation_integrity_error(exc: Exception) -> CharactersRAGDBError:
+        message = str(exc).lower()
+        if "unique" in message or "duplicate" in message or "foreign key" in message or "constraint" in message:
+            return ConflictError(
+                f"Workspace operation write conflicted: {exc}",
+                entity="workspace_operations",
+            )
+        return CharactersRAGDBError(f"Workspace operation write failed: {exc}")  # noqa: TRY003
+
+    @staticmethod
+    def _workspace_operation_timestamp(value: datetime | str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat()
+        text = str(value).strip()
+        return text or None
+
+    def create_workspace_operation(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        command: str,
+        idempotency_key: str,
+        request_fingerprint: str,
+        linked_idempotency_key: str | None = None,
+        status: str = "queued",
+        result_ref: Mapping[str, Any] | None = None,
+        diagnostics: Mapping[str, Any] | None = None,
+        expires_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        """Create an idempotent Workspace operation or return the matching existing row."""
+        workspace_key = str(workspace_id or "").strip()
+        user_key = str(user_id or "").strip()
+        command_key = str(command or "").strip()
+        key = str(idempotency_key or "").strip()
+        fingerprint = str(request_fingerprint or "").strip()
+        if not workspace_key or not user_key or not command_key or not key or not fingerprint:
+            raise InputError(
+                "workspace_id, user_id, command, idempotency_key, and request_fingerprint are required."
+            )  # noqa: TRY003
+        normalized_status = self._validate_workspace_operation_status(status)
+        existing = self.get_workspace_operation_by_idempotency(
+            workspace_id=workspace_key,
+            user_id=user_key,
+            command=command_key,
+            idempotency_key=key,
+        )
+        if existing is not None:
+            if existing.get("request_fingerprint") != fingerprint:
+                raise ConflictError(
+                    "Workspace operation idempotency key was reused with a different request.",
+                    entity="workspace_operations",
+                    entity_id=str(existing.get("id") or ""),
+                )
+            return existing
+        if self.get_workspace(workspace_key) is None:
+            raise ConflictError(
+                f"Workspace '{workspace_key}' not found.",
+                entity="workspaces",
+                entity_id=workspace_key,
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        operation_id = f"wop_{uuid.uuid4().hex}"
+        expiry = self._workspace_operation_timestamp(expires_at)
+        if expiry is None:
+            expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        params = (
+            operation_id,
+            workspace_key,
+            user_key,
+            command_key,
+            key,
+            fingerprint,
+            linked_idempotency_key,
+            normalized_status,
+            self._workspace_operation_json(result_ref),
+            self._workspace_operation_json(diagnostics, diagnostics=True),
+            now,
+            now,
+            expiry,
+        )
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO workspace_operations (
+                        id, workspace_id, user_id, command, idempotency_key,
+                        request_fingerprint, linked_idempotency_key, status,
+                        result_ref_json, diagnostics_json, created_at, updated_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    params,
+                )
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raced = self.get_workspace_operation_by_idempotency(
+                workspace_id=workspace_key,
+                user_id=user_key,
+                command=command_key,
+                idempotency_key=key,
+            )
+            if raced is not None:
+                if raced.get("request_fingerprint") == fingerprint:
+                    return raced
+                raise ConflictError(
+                    "Workspace operation idempotency key was reused with a different request.",
+                    entity="workspace_operations",
+                    entity_id=str(raced.get("id") or ""),
+                ) from exc
+            raise self._workspace_operation_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace operation create failed: {exc}") from exc  # noqa: TRY003
+        created = self.get_workspace_operation(workspace_key, operation_id)
+        if created is None:
+            raise CharactersRAGDBError("Failed to reload created workspace operation.")  # noqa: TRY003
+        return created
+
+    def get_workspace_operation(self, workspace_id: str, operation_id: str) -> dict[str, Any] | None:
+        """Return a Workspace operation by id."""
+        workspace_key = str(workspace_id or "").strip()
+        operation_key = str(operation_id or "").strip()
+        if not workspace_key or not operation_key:
+            return None
+        cursor = self.execute_query(
+            """
+            SELECT *
+              FROM workspace_operations
+             WHERE workspace_id = ?
+               AND id = ?
+            """,
+            (workspace_key, operation_key),
+        )
+        return self._workspace_operation_row(cursor.fetchone())
+
+    def get_workspace_operation_by_idempotency(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        command: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a Workspace operation by command idempotency key."""
+        workspace_key = str(workspace_id or "").strip()
+        user_key = str(user_id or "").strip()
+        command_key = str(command or "").strip()
+        key = str(idempotency_key or "").strip()
+        if not workspace_key or not user_key or not command_key or not key:
+            return None
+        cursor = self.execute_query(
+            """
+            SELECT *
+              FROM workspace_operations
+             WHERE workspace_id = ?
+               AND user_id = ?
+               AND command = ?
+               AND idempotency_key = ?
+            """,
+            (workspace_key, user_key, command_key, key),
+        )
+        return self._workspace_operation_row(cursor.fetchone())
+
+    def update_workspace_operation(
+        self,
+        workspace_id: str,
+        operation_id: str,
+        *,
+        status: str | None = None,
+        result_ref: Mapping[str, Any] | None = None,
+        diagnostics: Mapping[str, Any] | None = None,
+        expires_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        """Update mutable Workspace operation fields."""
+        existing = self.get_workspace_operation(workspace_id, operation_id)
+        if existing is None:
+            raise ConflictError(
+                f"Workspace operation '{operation_id}' not found.",
+                entity="workspace_operations",
+                entity_id=operation_id,
+            )
+        set_clauses = ["updated_at = ?"]
+        params: list[Any] = [self._get_current_utc_timestamp_iso()]
+        if status is not None:
+            set_clauses.append("status = ?")
+            params.append(self._validate_workspace_operation_status(status))
+        if result_ref is not None:
+            set_clauses.append("result_ref_json = ?")
+            params.append(self._workspace_operation_json(result_ref))
+        if diagnostics is not None:
+            set_clauses.append("diagnostics_json = ?")
+            params.append(self._workspace_operation_json(diagnostics, diagnostics=True))
+        if expires_at is not None:
+            set_clauses.append("expires_at = ?")
+            params.append(self._workspace_operation_timestamp(expires_at))
+        params.extend([workspace_id, operation_id])
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    f"""
+                    UPDATE workspace_operations
+                       SET {', '.join(set_clauses)}
+                     WHERE workspace_id = ?
+                       AND id = ?
+                    """,  # nosec B608
+                    tuple(params),
+                )
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Workspace operation '{operation_id}' concurrent update detected.",
+                        entity="workspace_operations",
+                        entity_id=operation_id,
+                    )
+        except ConflictError:
+            raise
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Workspace operation update failed: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace operation update failed: {exc}") from exc  # noqa: TRY003
+        updated = self.get_workspace_operation(workspace_id, operation_id)
+        if updated is None:
+            raise CharactersRAGDBError("Failed to reload updated workspace operation.")  # noqa: TRY003
+        return updated
+
+    def cleanup_expired_workspace_operations(self, *, now: datetime | str | None = None) -> int:
+        """Delete expired operation envelopes without touching linked Workspace roots."""
+        now_iso = self._workspace_operation_timestamp(now) or datetime.now(timezone.utc).isoformat()
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM workspace_operations
+                     WHERE expires_at IS NOT NULL
+                       AND expires_at <= ?
+                    """,
+                    (now_iso,),
+                )
+                return int(getattr(cursor, "rowcount", 0) or 0)
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Workspace operation cleanup failed: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Workspace operation cleanup failed: {exc}") from exc  # noqa: TRY003
+
+    def list_active_workspace_operations(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Return non-expired active operations for a workspace."""
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        active_statuses = sorted(WORKSPACE_OPERATION_ACTIVE_STATUSES)
+        cursor = self.execute_query(
+            """
+            SELECT *
+              FROM workspace_operations
+             WHERE workspace_id = ?
+               AND status IN (?, ?)
+               AND (expires_at IS NULL OR expires_at > ?)
+             ORDER BY created_at ASC, id ASC
+            """,
+            (workspace_key, active_statuses[0], active_statuses[1], now_iso),
+        )
+        return [
+            operation
+            for row in cursor.fetchall()
+            if (operation := self._workspace_operation_row(row)) is not None
+        ]
 
     # --- Workspace File Inventory Methods ---
 

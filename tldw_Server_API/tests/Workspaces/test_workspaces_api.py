@@ -25,6 +25,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Sandbox.store import InMemoryStore
+from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Workspaces import root_binding_service
 
 
@@ -157,6 +159,62 @@ def _put_workspace_primary_root_response(
         workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
         workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+def _post_workspace_sandbox_root_response(
+    workspace_fastapi_app: FastAPI,
+    db_like: Any,
+    payload: dict[str, Any],
+    workspace_id: str = "ws-root",
+    idempotency_key: str | None = "root-key",
+):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
+    workspace_fastapi_app.dependency_overrides[
+        workspaces_endpoint.get_workspace_sandbox_volume_service
+    ] = lambda: sandbox_service
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    headers = {"Idempotency-Key": idempotency_key} if idempotency_key is not None else {}
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            return client.post(
+                f"/api/v1/workspaces/{workspace_id}/roots/primary/sandbox-volume",
+                json=payload,
+                headers=headers,
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(
+            workspaces_endpoint.get_workspace_sandbox_volume_service,
+            None,
+        )
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+def _get_workspace_operation_response(
+    workspace_fastapi_app: FastAPI,
+    db_like: Any,
+    workspace_id: str,
+    operation_id: str,
+):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            return client.get(f"/api/v1/workspaces/{workspace_id}/operations/{operation_id}")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
 
 
 def test_root_path_hint_redacts_relative_path_segments() -> None:
@@ -717,6 +775,92 @@ def test_attach_workspace_primary_sandbox_volume_returns_not_configured_mount_st
     assert payload["primary_root"]["backend"] == "sandbox_volume"
     assert payload["primary_root"]["path_hint"] == "volume-123"
     assert payload["primary_root"]["sandbox_mount_state"] == "not_configured"
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_requires_idempotency_key(workspace_fastapi_app, db):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+
+    response = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key=None,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "workspace_idempotency_key_required"
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_returns_active_operation_and_pollable_status(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+
+    response = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+    )
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["workspace_profile"] == "project"
+    assert payload["primary_root"]["backend"] == "sandbox_volume"
+    assert payload["primary_root"]["sandbox_mount_state"] == "not_configured"
+    assert payload["operation"]["status"] == "running"
+    assert payload["operation"]["retryable"] is True
+    operation_id = payload["operation"]["operation_id"]
+
+    retry = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+    )
+    assert retry.status_code == 202, retry.text
+    assert retry.json()["operation"]["operation_id"] == operation_id
+
+    status_response = _get_workspace_operation_response(
+        workspace_fastapi_app,
+        db,
+        "ws-root",
+        operation_id,
+    )
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["operation_id"] == operation_id
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db, "ws-root")
+    assert context_response.status_code == 200, context_response.text
+    active_operations = context_response.json()["active_operations"]
+    assert [operation["operation_id"] for operation in active_operations] == [operation_id]
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_conflicts_for_changed_idempotent_request(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    first = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+    )
+    assert first.status_code == 202, first.text
+
+    changed = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "vz_linux"},
+        idempotency_key="root-key",
+    )
+
+    assert changed.status_code == 409, changed.text
 
 
 @pytest.mark.integration
