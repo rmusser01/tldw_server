@@ -4,6 +4,7 @@ Centralized rate limiting and concurrency control with policy-based configuratio
 
 ## Overview & PRD
 - Design PRD: `Docs/Product/Completed/AuthNZ-Refactor/Resource_Governor_PRD.md`
+- Architecture decision: `Docs/ADR/018-resource-governance-endpoint-policy-and-route-map.md`
 - Example policies YAML: `tldw_Server_API/Config_Files/resource_governor_policies.yaml`
 
 ## New endpoints checklist (RG-aware design)

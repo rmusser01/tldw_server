@@ -49,3 +49,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-015](015-evaluations-existing-evaluator-integration.md) | Accepted | Wrap existing evaluator modules instead of rewriting evaluator logic inside the API runner or endpoints. |
 | [ADR-016](016-acp-session-and-orchestration-persistence.md) | Accepted | Persist ACP shared operational state in `Databases/acp_sessions.db` and user orchestration state in per-user `orchestration.db` files. |
 | [ADR-017](017-scoped-org-team-rbac-core-semantics.md) | Accepted | Use feature-flagged scoped Org/Team RBAC overlays with `require_active` default scope and denylist-filtered grants. |
+| [ADR-018](018-resource-governance-endpoint-policy-and-route-map.md) | Accepted | Use claim-first new-endpoint authorization with explicit Resource Governor applicability decisions, route-map ownership, DB/file route-map merge semantics, and request-ingress missing-policy denial. |
