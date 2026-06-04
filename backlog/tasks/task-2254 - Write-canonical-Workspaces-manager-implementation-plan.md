@@ -13,6 +13,11 @@ dependencies: []
 documentation:
   - >-
     Docs/superpowers/specs/2026-06-04-canonical-workspaces-manager-project-creation-design.md
+references:
+  - https://github.com/rmusser01/tldw_server/issues/1984
+  - https://github.com/rmusser01/tldw_server/issues/1990
+  - https://github.com/rmusser01/tldw_server/issues/1992
+  - https://github.com/rmusser01/tldw_server/issues/1995
 ---
 
 ## Description

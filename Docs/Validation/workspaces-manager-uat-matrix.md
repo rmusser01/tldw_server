@@ -6,11 +6,41 @@ Scope: canonical `/workspaces` manager, Research Workspace reconciliation, Proje
 
 This matrix is an evidence tracker. Do not mark a row verified unless it was exercised against a live backend and WebUI in the named environment.
 
+## Phase 2 Epic Alignment
+
+This matrix covers a bounded `/workspaces` manager and Project Workspace
+root/setup slice under GitHub issue
+[#1984](https://github.com/rmusser01/tldw_server/issues/1984), the Workspace
+container foundation and single-user operating context epic.
+
+The manager is not the full Workspace product. It provides registry,
+lifecycle, project-root, recovery, and cross-surface handoff evidence for the
+broader single-user Workspace container. Existing surfaces should remain
+globally browsable while becoming Workspace-aware through membership tags,
+active-context eligibility, and explicit copy/link flows.
+
+Coverage summary:
+
+- Covered or partially covered here: canonical Workspace registry/metadata,
+  Research versus Project profile intent, archive/unarchive manager behavior,
+  host-local and sandbox-managed root setup contracts, local Research Workspace
+  reconciliation metadata, and selected Research Workspace/MCP/ACP/Sandbox
+  handoffs.
+- Still outside this matrix: the generic cross-resource membership service
+  from [#1990](https://github.com/rmusser01/tldw_server/issues/1990), full
+  active-context eligibility/recovery from
+  [#1992](https://github.com/rmusser01/tldw_server/issues/1992), existing
+  surface adoption across notes/media/artifacts/chats/prompts/workflows/
+  watchlists, and the full end-to-end Phase 2 container evidence required by
+  [#1995](https://github.com/rmusser01/tldw_server/issues/1995).
+
 ## Route And Ownership Rules
 
 - Canonical manager route: `/workspaces`
 - Research Workspace route: `/research-workspace`
 - Deprecated names: `/workspace-playground` must not be registered as an alias or redirect.
+- Workspace selection must not hide globally owned Library, Notes, Artifact,
+  chat, prompt, workflow, or watchlist records.
 - MCP Hub Shared Workspaces own path-trust records and workspace-set policy.
 - ACP owns agent/session execution state.
 - Sandbox owns runtime execution and durable sandbox volume mechanics.

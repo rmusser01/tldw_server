@@ -13,6 +13,51 @@ backend contracts needed to create, edit, archive, unarchive, and upgrade
 Workspaces into Project Workspaces with host-local or sandbox-managed primary
 roots.
 
+## Phase 2 Epic Alignment
+
+This workstream is a bounded implementation slice under GitHub issue
+[#1984](https://github.com/rmusser01/tldw_server/issues/1984), "Workspace
+container foundation and single-user operating context." The epic defines
+Workspace as the durable operating container that existing tldw capabilities
+attach to: notes, media/sources, artifacts, chats, prompts, workflows,
+watchlists, ACP sessions, sandbox sessions, runtime bindings, and metadata.
+
+The `/workspaces` route in this spec is therefore not the whole Workspace
+product and not a replacement for existing surfaces. It is the registry,
+lifecycle, project-root, recovery, and cross-surface handoff surface for the
+broader single-user Workspace container. Library, Notes, Artifacts, chats,
+prompts, workflows, watchlists, ACP, MCP, Sandbox, and Research Workspace must
+remain globally browsable or surface-owned while becoming Workspace-aware
+through membership tags, active-context eligibility, and explicit copy/link
+flows.
+
+Issue alignment:
+
+- Advances
+  [#1988](https://github.com/rmusser01/tldw_server/issues/1988) through
+  canonical Workspace profile/root/context contracts.
+- Advances
+  [#1989](https://github.com/rmusser01/tldw_server/issues/1989) through
+  single-user Workspace registry, lifecycle, archive/unarchive, and manager
+  metadata flows.
+- Advances
+  [#1991](https://github.com/rmusser01/tldw_server/issues/1991) through
+  host-local and sandbox-managed root binding descriptors with redacted
+  metadata.
+- Partially advances
+  [#1993](https://github.com/rmusser01/tldw_server/issues/1993) through
+  manager/client contracts and selected Research Workspace, MCP Hub, ACP, and
+  Sandbox handoffs.
+- Partially advances
+  [#1994](https://github.com/rmusser01/tldw_server/issues/1994) and
+  [#1995](https://github.com/rmusser01/tldw_server/issues/1995) only for the
+  manager/project-root loop covered by the UAT matrix.
+- Does not close
+  [#1990](https://github.com/rmusser01/tldw_server/issues/1990) cross-resource
+  membership, [#1992](https://github.com/rmusser01/tldw_server/issues/1992)
+  active-context eligibility/recovery, or the full end-to-end evidence required
+  by [#1995](https://github.com/rmusser01/tldw_server/issues/1995).
+
 ## Current Verified Baseline
 
 The current `origin/dev` branch already has substantial Workspace Core backend
@@ -37,7 +82,8 @@ support:
 
 ## Product Decision
 
-Create a new canonical `/workspaces` product surface.
+Create a new canonical `/workspaces` management surface for the single-user
+Workspace container.
 
 The `/workspaces` manager owns Workspace identity, profile intent, metadata,
 archive/unarchive lifecycle, project-root lifecycle entry points, and
@@ -56,6 +102,13 @@ cross-surface navigation. Specialized subsystems keep their existing ownership:
 This workstream does not:
 
 - Replace the full Research Workspace local store in one PR.
+- Implement the full cross-resource membership service for notes,
+  media/sources, artifacts, chats, prompts, workflows, watchlists, ACP sessions,
+  and sandbox sessions.
+- Implement the full active Workspace context eligibility gate across existing
+  surfaces.
+- Use Workspace selection as a hard browse/search filter that hides globally
+  owned user records.
 - Make MCP Hub the Workspace manager.
 - Add multi-root Project Workspaces.
 - Add team governance or sharing.

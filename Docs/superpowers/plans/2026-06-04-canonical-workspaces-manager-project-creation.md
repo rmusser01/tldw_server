@@ -4,7 +4,9 @@
 
 **Goal:** Build the canonical `/workspaces` manager and the backend contracts needed to create, edit, archive, unarchive, and upgrade Workspaces into Project Workspaces with host-local or sandbox-managed primary roots.
 
-**Architecture:** Workspace Core remains the canonical product identity. Sandbox owns durable runtime volume mechanics. ACP, MCP Hub, and Prototype Workspaces remain specialized projections or policy surfaces, and the new manager links to them without reusing their response models as canonical Workspace models. Backend work lands first so the WebUI can consume stable normalized read models.
+**Architecture:** This plan implements a bounded manager/project-root slice under GitHub issue [#1984](https://github.com/rmusser01/tldw_server/issues/1984), the Workspace Phase 2 container foundation epic. Workspace Core remains the canonical product identity. Sandbox owns durable runtime volume mechanics. ACP, MCP Hub, and Prototype Workspaces remain specialized projections or policy surfaces, and the new manager links to them without reusing their response models as canonical Workspace models. Backend work lands first so the WebUI can consume stable normalized read models.
+
+**Epic Boundary:** `/workspaces` is a registry, lifecycle, project-root, recovery, and cross-surface handoff manager for the broader single-user Workspace operating container. It is not the entire Workspace product and must not become a hard browse/search filter that hides globally owned notes, media/sources, artifacts, chats, prompts, workflows, or watchlists. The cross-resource membership service in [#1990](https://github.com/rmusser01/tldw_server/issues/1990), active-context eligibility/recovery in [#1992](https://github.com/rmusser01/tldw_server/issues/1992), and full container-loop release evidence in [#1995](https://github.com/rmusser01/tldw_server/issues/1995) remain open after this plan unless a later task explicitly implements them.
 
 **Tech Stack:** FastAPI, Pydantic, `CharactersRAGDB`, Sandbox store/services, pytest, Next/React WebUI, TypeScript, Vitest, Testing Library, Playwright/CDP.
 
@@ -12,7 +14,7 @@
 
 ## Scope Check
 
-The approved spec spans backend contracts, WebUI manager UI, local Research Workspace reconciliation, Sandbox volume ownership, and cross-surface validation. These are related but independently reviewable, so implement them as sequential PR-sized tasks with clear parallel seams:
+The approved spec spans backend contracts, WebUI manager UI, local Research Workspace reconciliation, Sandbox volume ownership, and cross-surface validation. These are related but independently reviewable, so implement them as sequential PR-sized tasks with clear parallel seams. Map this plan to the original Phase 2 epic as follows: it advances #1988, #1989, #1991, and the manager-facing parts of #1993/#1994/#1995, but it does not close #1990 or #1992.
 
 1. Backend canonical read model and operation envelope.
 2. WebUI API client parity and normalized manager models.
