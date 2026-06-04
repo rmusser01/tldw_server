@@ -37,6 +37,8 @@ Implement the approved active-workspace Git read-only MCP tools with shared tool
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete. Added shared MCP tool observability/evaluation metadata helpers and tests in commit cb5568787d. RED: targeted pytest failed with missing module before implementation. GREEN: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py -q` -> 8 passed. `git diff --check` passed. Spec compliance review approved; code quality review approved with no findings.
+
+Task 2 complete. Added minimal GitModule schemas/validation and tests in commit 60ae4cbec33c5a0ad1eaa444e99e59840326c357. RED: targeted pytest failed with missing `git_module.py`. GREEN: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_git_module.py -q -k "schema or validates"` -> 57 passed. Spec compliance review approved; code quality review approved with no findings. Follow-up note for Task 3: ensure `execute_tool()` calls `validate_tool_arguments()` before any Git execution.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
