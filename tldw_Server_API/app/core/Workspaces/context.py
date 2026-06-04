@@ -11,6 +11,8 @@ from tldw_Server_API.app.core.Workspaces.models import (
     fail_closed_action,
     normalize_project_root_state,
     normalize_workspace_profile,
+    workspace_attention_state,
+    workspace_file_inventory_available,
     workspace_kind_for_profile,
 )
 
@@ -39,6 +41,12 @@ def build_workspace_core_context(
     )
     workspace_services = _workspace_services(service_capabilities)
     base_allowed_actions = _base_allowed_actions(service_capabilities)
+    attention_state = _workspace_attention_state(
+        profile=profile,
+        workspace=workspace_dict,
+        project_root=project_root,
+        resolution=resolution,
+    )
     allowed_actions = _allowed_actions(
         profile=profile,
         project_root=project_root,
@@ -54,9 +62,11 @@ def build_workspace_core_context(
         "access_level": workspace_dict.get("access_level", "owner"),
         "resolution": resolution,
         "project_root": project_root,
+        "attention_state": attention_state,
         "source_summary": dict(source_summary or {}),
         "workspace_services": workspace_services,
         "allowed_actions": allowed_actions,
+        "active_operations": [],
     }
 
 
@@ -163,6 +173,7 @@ def _empty_file_inventory() -> dict[str, Any]:
         "indexed_file_count": 0,
         "total_file_count": 0,
         "updated_at": None,
+        "available": False,
     }
 
 
@@ -179,7 +190,48 @@ def _file_inventory_projection(root: Mapping[str, Any]) -> dict[str, Any]:
         "indexed_file_count": _non_negative_int(inventory.get("indexed_file_count"), default=0),
         "total_file_count": _non_negative_int(inventory.get("total_file_count"), default=0),
         "updated_at": str(inventory["updated_at"]) if inventory.get("updated_at") else None,
+        "available": workspace_file_inventory_available(
+            project_root_state=root.get("root_state", root.get("state")),
+            root_id=root.get("root_id") or root.get("id"),
+            backend=root.get("backend"),
+            sandbox_mount_state=root.get("sandbox_mount_state"),
+            inventory_state=state,
+        ),
     }
+
+
+def _workspace_attention_state(
+    *,
+    profile: str,
+    workspace: Mapping[str, Any],
+    project_root: Mapping[str, Any],
+    resolution: Mapping[str, Any],
+) -> str:
+    service_errors: list[str] = []
+    resolution_status = str(resolution.get("status") or "").strip().lower()
+    if resolution_status == "failed":
+        service_errors.append("workspace_resolution_failed")
+    elif resolution_status == "partial":
+        service_errors.append("workspace_resolution_partial")
+
+    if project_root.get("backend") == "sandbox_volume" and project_root.get("state") == "attached":
+        mount_state = str(project_root.get("sandbox_mount_state") or "not_configured").strip().lower()
+        if mount_state not in {"ready", "mounted"}:
+            service_errors.append(f"sandbox_mount_{mount_state or 'not_configured'}")
+
+    inventory = project_root.get("file_inventory")
+    inventory_state = (
+        project_root.get("file_inventory_state")
+        or (inventory.get("state") if isinstance(inventory, Mapping) else None)
+        or "not_started"
+    )
+    return workspace_attention_state(
+        workspace_profile=profile,
+        project_root_state=project_root.get("state"),
+        inventory_state=inventory_state,
+        service_errors=service_errors,
+        archived=bool(workspace.get("archived")),
+    )
 
 
 def _non_negative_int(value: Any, *, default: int) -> int:

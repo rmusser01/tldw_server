@@ -769,12 +769,14 @@ def test_attached_host_local_primary_root_is_redacted_across_read_contracts(
         assert root["root_id"] == "primary"
         assert root["backend"] == "host_local"
         assert root["path_hint"] == project.name
+        assert root["file_inventory"]["available"] is True
         assert "absolute_root" not in root
 
     context_capability_root = context["capabilities"]["project_root"]
     assert context_capability_root["root_id"] == "primary"
     assert context_capability_root["backend"] == "host_local"
     assert context_capability_root["path_hint"] == project.name
+    assert context_capability_root["file_inventory"]["available"] is True
 
     serialized_payloads = [
         json.dumps(payload, sort_keys=True)
@@ -856,6 +858,7 @@ def test_workspace_capabilities_and_context_include_file_inventory_summary(
         assert inventory["total_file_count"] == 7
         assert inventory["indexed_file_count"] == 0
         assert isinstance(inventory["updated_at"], str)
+        assert inventory["available"] is True
         assert payload["allowed_actions"]["scan_files"] == {
             "allowed": True,
             "reason_code": None,
@@ -905,6 +908,9 @@ def test_sandbox_volume_primary_root_fails_closed_across_read_contracts(
     assert capabilities["project_root"]["sandbox_mount_state"] == "not_configured"
     assert context["project_root"]["sandbox_mount_state"] == "not_configured"
     assert context["capabilities"]["project_root"]["sandbox_mount_state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["attention_state"] == "needs_attention"
+    assert context["active_operations"] == []
 
     for payload in (capabilities, context):
         assert payload["workspace_kind"] == "project_workspace"
@@ -919,6 +925,102 @@ def test_sandbox_volume_primary_root_fails_closed_across_read_contracts(
             action = payload["allowed_actions"][action_name]
             assert action["allowed"] is False
             assert action["reason_code"] == "sandbox_mount_not_configured"
+
+
+@pytest.mark.integration
+def test_workspace_context_manager_defaults_for_research_workspace(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Research Workspace", workspace_profile="research")
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["workspace_profile"] == "research"
+    assert context["attention_state"] == "ready"
+    assert context["project_root"]["state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["active_operations"] == []
+
+
+@pytest.mark.integration
+def test_workspace_context_project_shell_without_root_is_setup_pending(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["workspace_profile"] == "project"
+    assert context["attention_state"] == "setup_pending"
+    assert context["project_root"]["state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["active_operations"] == []
+
+
+@pytest.mark.integration
+def test_workspace_context_project_inventory_scan_is_working(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed-project-roots"
+    project = allowed / "active-inventory"
+    project.mkdir(parents=True)
+    db.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+    attach_response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(project)},
+    )
+    assert attach_response.status_code == 200, attach_response.text
+    root = db.get_workspace_primary_root("ws-root")
+    assert root is not None
+    db.begin_workspace_file_inventory_scan(
+        "ws-root",
+        str(root["root_id"]),
+        int(root["version"]),
+        "policy-fingerprint",
+        requested_by="test-user",
+    )
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["project_root"]["file_inventory"]["state"] == "queued"
+    assert context["project_root"]["file_inventory"]["available"] is True
+    assert context["attention_state"] == "working"
+    assert context["active_operations"] == []
+
+
+@pytest.mark.integration
+def test_workspace_context_archived_workspace_attention_state(
+    workspace_fastapi_app,
+    db,
+):
+    workspace = db.upsert_workspace("ws-root", "Archived Project", workspace_profile="project")
+    db.update_workspace("ws-root", {"archived": True}, expected_version=int(workspace["version"]))
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["workspace"]["archived"] is True
+    assert context["attention_state"] == "archived"
+    assert context["active_operations"] == []
 
 
 @pytest.mark.integration

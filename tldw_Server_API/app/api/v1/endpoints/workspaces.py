@@ -65,6 +65,7 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     WorkspaceFileInventoryEnqueueError,
     enqueue_workspace_file_inventory_scan_job,
 )
+from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
 from tldw_Server_API.app.core.Workspaces.source_jobs import (
     WORKSPACE_SOURCE_JOB_DOMAIN,
     WORKSPACE_SOURCE_JOB_QUEUE,
@@ -79,7 +80,10 @@ from tldw_Server_API.app.core.Workspaces.root_binding_service import (
     WorkspaceRootServiceError,
     attach_primary_workspace_root,
 )
-from tldw_Server_API.app.core.Workspaces.models import normalize_project_root_state
+from tldw_Server_API.app.core.Workspaces.models import (
+    normalize_project_root_state,
+    workspace_file_inventory_available,
+)
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
     build_workspace_capability_projection,
@@ -468,25 +472,48 @@ def _workspace_primary_root_with_file_inventory_status(
     status_payload = db.get_workspace_file_inventory_status(workspace_id)
     enriched_root["file_inventory"] = _workspace_file_inventory_summary(status_payload)
     enriched_root["file_inventory_state"] = status_payload.get("state") or primary_root.get("file_inventory_state")
+    enriched_root["file_inventory"]["available"] = workspace_file_inventory_available(
+        project_root_state=primary_root.get("root_state") or primary_root.get("state"),
+        root_id=primary_root.get("root_id") or primary_root.get("id"),
+        backend=primary_root.get("backend"),
+        sandbox_mount_state=primary_root.get("sandbox_mount_state"),
+        inventory_state=enriched_root["file_inventory"]["state"],
+    )
     return enriched_root
 
 
 def _workspace_file_inventory_summary(source: dict[str, Any]) -> dict[str, Any]:
     raw_inventory = source.get("file_inventory")
     if isinstance(raw_inventory, dict):
+        inventory_state = raw_inventory.get("state") or source.get("file_inventory_state") or "not_started"
         return {
-            "state": raw_inventory.get("state") or source.get("file_inventory_state") or "not_started",
+            "state": inventory_state,
             "indexed_file_count": _non_negative_int(raw_inventory.get("indexed_file_count"), default=0),
             "total_file_count": _non_negative_int(raw_inventory.get("total_file_count"), default=0),
             "updated_at": str(raw_inventory["updated_at"]) if raw_inventory.get("updated_at") else None,
+            "available": workspace_file_inventory_available(
+                project_root_state=source.get("root_state") or source.get("state"),
+                root_id=source.get("root_id") or source.get("id"),
+                backend=source.get("backend"),
+                sandbox_mount_state=source.get("sandbox_mount_state"),
+                inventory_state=inventory_state,
+            ),
         }
 
     counts = source.get("counts") if isinstance(source.get("counts"), dict) else {}
+    inventory_state = source.get("state") or source.get("file_inventory_state") or "not_started"
     return {
-        "state": source.get("state") or source.get("file_inventory_state") or "not_started",
+        "state": inventory_state,
         "indexed_file_count": 0,
         "total_file_count": _non_negative_int(counts.get("files"), default=0),
         "updated_at": _workspace_file_inventory_updated_at(source),
+        "available": workspace_file_inventory_available(
+            project_root_state=source.get("root_state"),
+            root_id=source.get("root_id"),
+            backend=source.get("backend"),
+            sandbox_mount_state=source.get("sandbox_mount_state"),
+            inventory_state=inventory_state,
+        ),
     }
 
 
@@ -1060,6 +1087,16 @@ async def get_workspace_context(
             user_id=getattr(current_user, "id", None),
         ),
     )
+    core_context_payload = build_workspace_core_context(
+        workspace=workspace_projection,
+        primary_root=workspace_projection.get("primary_root") or workspace_projection.get("project_root"),
+        source_summary=status_payload.get("summary") or {},
+        service_capabilities={
+            "workspace_services": capability_payload.get("workspace_services") or {},
+            "allowed_actions": capability_payload.get("allowed_actions") or {},
+        },
+        partial_errors=capability_payload.get("resolution", {}).get("partial_errors") or [],
+    )
     statuses_by_id = {
         str(source_status.get("id")): source_status
         for source_status in status_payload.get("sources", [])
@@ -1101,6 +1138,7 @@ async def get_workspace_context(
         schema_version=2,
         generated_at=_utc_now_iso(),
         workspace=_ws_to_response(workspace),
+        attention_state=str(core_context_payload.get("attention_state") or "needs_attention"),
         resolution=capability_payload.get("resolution") or {},
         project_root=capability_payload.get("project_root") or {},
         sources={
@@ -1111,6 +1149,7 @@ async def get_workspace_context(
         services=capability_payload.get("workspace_services") or {},
         allowed_actions=capability_payload.get("allowed_actions") or {},
         active_jobs=active_jobs,
+        active_operations=core_context_payload.get("active_operations") or [],
         partial_errors=partial_errors,
     )
 
