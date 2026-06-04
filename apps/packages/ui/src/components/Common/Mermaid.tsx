@@ -1,12 +1,26 @@
 import React, { useEffect, useRef, useState } from "react"
 
+export type MermaidTheme =
+  | "default"
+  | "base"
+  | "dark"
+  | "forest"
+  | "neutral"
+  | "null"
+export type MermaidRenderStatus = "idle" | "rendering" | "success" | "error"
+export type MermaidRenderState = {
+  status: MermaidRenderStatus
+  svg?: string
+  error?: string
+  theme?: MermaidTheme
+}
+
 export type MermaidProps = {
   code: string
   className?: string
   ariaLabel?: string
+  onRenderStateChange?: (state: MermaidRenderState) => void
 }
-
-type MermaidTheme = "default" | "base" | "dark" | "forest" | "neutral" | "null"
 
 const hashCode = (input: string) => {
   let hash = 0
@@ -38,12 +52,21 @@ const resolveMermaidTheme = (): MermaidTheme => {
   return "default"
 }
 
-export const Mermaid: React.FC<MermaidProps> = ({ code, className, ariaLabel }) => {
+export const Mermaid: React.FC<MermaidProps> = ({
+  code,
+  className,
+  ariaLabel,
+  onRenderStateChange
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<MermaidTheme>(() => resolveMermaidTheme())
   const renderIdRef = useRef(0)
+  const renderSequenceRef = useRef(0)
   const initializedThemeRef = useRef<MermaidTheme | null>(null)
+  const onRenderStateChangeRef =
+    useRef<MermaidProps["onRenderStateChange"]>(undefined)
+  onRenderStateChangeRef.current = onRenderStateChange
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -93,18 +116,31 @@ export const Mermaid: React.FC<MermaidProps> = ({ code, className, ariaLabel }) 
       return
     }
 
-    let active = true
+    const renderSequence = renderSequenceRef.current + 1
+    renderSequenceRef.current = renderSequence
+    const isCurrentRender = () => renderSequenceRef.current === renderSequence
+    const reportRenderState = (state: MermaidRenderState) => {
+      if (isCurrentRender()) {
+        onRenderStateChangeRef.current?.(state)
+      }
+    }
+
     const renderDiagram = async () => {
       if (!code?.trim()) {
         setError(null)
         if (containerRef.current) {
           containerRef.current.innerHTML = ""
         }
+        reportRenderState({ status: "idle", theme })
         return
       }
 
+      reportRenderState({ status: "rendering", theme })
       try {
         const mermaidModule = await import("mermaid")
+        if (!isCurrentRender()) {
+          return
+        }
         const mermaid = mermaidModule.default
 
         if (initializedThemeRef.current !== theme) {
@@ -118,27 +154,31 @@ export const Mermaid: React.FC<MermaidProps> = ({ code, className, ariaLabel }) 
         const id = `mermaid-${hashCode(code)}-${renderIdRef.current++}`
         const { svg, bindFunctions } = await mermaid.render(id, code)
 
-        if (!active || !containerRef.current) {
+        if (!isCurrentRender() || !containerRef.current) {
           return
         }
 
         containerRef.current.innerHTML = svg
         bindFunctions?.(containerRef.current)
         setError(null)
+        reportRenderState({ status: "success", svg, theme })
       } catch (err) {
-        if (!active) return
-        setError(
+        if (!isCurrentRender()) return
+        const message =
           err instanceof Error ? err.message : "Unable to render diagram."
-        )
+        setError(message)
         if (containerRef.current) {
           containerRef.current.textContent = code
         }
+        reportRenderState({ status: "error", error: message, theme })
       }
     }
 
     renderDiagram()
     return () => {
-      active = false
+      if (renderSequenceRef.current === renderSequence) {
+        renderSequenceRef.current += 1
+      }
     }
   }, [code, theme])
 
