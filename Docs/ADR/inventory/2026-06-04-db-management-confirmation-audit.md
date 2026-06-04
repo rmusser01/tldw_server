@@ -1,7 +1,7 @@
 # DB Management Confirmation Audit - 2026-06-04
 
-**Related task:** TASK-2249
-**Follow-up:** TASK-2250
+**Related task:** TASK-2253
+**Follow-up:** TASK-2254
 **Inventory row:** INV-030
 **Source candidate:** `tldw_Server_API/app/core/DB_Management/README.md`
 **Disposition:** Current governing; ready for a bounded accepted ADR backfill.
@@ -39,7 +39,7 @@ The candidate is current enough for accepted ADR backfill if the ADR is scoped t
 
 ## Recommended Next Action
 
-Create one accepted ADR via TASK-2250, expected as `Docs/ADR/020-db-management-per-user-paths-and-content-backend.md`, covering:
+Create one accepted ADR via TASK-2254, expected as `Docs/ADR/020-db-management-per-user-paths-and-content-backend.md`, covering:
 
 1. `DatabasePaths` owns per-user database path resolution under `USER_DB_BASE_DIR`, defaulting to `Databases/user_databases` outside tests.
 2. SQLite is the default content-storage mode and uses per-user file paths by default rather than a shared content backend.
@@ -47,4 +47,4 @@ Create one accepted ADR via TASK-2250, expected as `Docs/ADR/020-db-management-p
 4. PostgreSQL content mode must have a usable shared backend and startup validation for schema/RLS readiness.
 5. Caveats for explicit SQLite path overrides, test fallback directories, AuthNZ/users DB separation, deprecated compatibility aliases, and non-universal PostgreSQL support.
 
-Update INV-030 to record TASK-2249 confirmation and keep ADR creation bounded to these claims.
+Update INV-030 to record TASK-2253 confirmation and keep ADR creation bounded to these claims.

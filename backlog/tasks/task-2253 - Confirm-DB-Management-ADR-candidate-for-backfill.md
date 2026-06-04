@@ -1,5 +1,5 @@
 ---
-id: TASK-2249
+id: TASK-2253
 title: Confirm DB Management ADR candidate for backfill
 status: Done
 labels:
@@ -10,8 +10,8 @@ labels:
 modified_files:
 - Docs/ADR/inventory/2026-06-04-db-management-confirmation-audit.md
 - Docs/ADR/inventory/2026-06-03-decision-inventory.md
-- backlog/tasks/task-2249 - Confirm-DB-Management-ADR-candidate-for-backfill.md
-- backlog/tasks/task-2250 - Backfill-DB-Management-per-user-paths-and-content-backend-ADR.md
+- backlog/tasks/task-2253 - Confirm-DB-Management-ADR-candidate-for-backfill.md
+- backlog/tasks/task-2254 - Backfill-DB-Management-per-user-paths-and-content-backend-ADR.md
 ---
 
 ## Description
@@ -33,12 +33,12 @@ Confirm whether INV-030 from Docs/ADR/inventory/2026-06-03-decision-inventory.md
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created `Docs/ADR/inventory/2026-06-04-db-management-confirmation-audit.md`.
 - Classified INV-030 as current governing and ready for one bounded ADR backfill, with scope limited to DB_Management per-user path ownership, SQLite default content-storage behavior, PostgreSQL shared content backend option, startup validation, and caveats.
-- Updated `Docs/ADR/inventory/2026-06-03-decision-inventory.md` to record TASK-2249 confirmation and queue TASK-2250 for the ADR backfill.
-- Created TASK-2250 as the follow-up ADR implementation task.
+- Updated `Docs/ADR/inventory/2026-06-03-decision-inventory.md` to record TASK-2253 confirmation and queue TASK-2254 for the ADR backfill.
+- Created TASK-2254 as the follow-up ADR implementation task.
 - Verification:
   - `git diff --check` passed.
-  - ADR/backlog reference grep passed for TASK-2249, TASK-2250, INV-030, PostgreSQL, SQLite, AuthNZ, and Bandit references.
-  - `backlog task TASK-2249 --plain` and `backlog task TASK-2250 --plain` rendered correctly.
+  - ADR/backlog reference grep passed for TASK-2253, TASK-2254, INV-030, PostgreSQL, SQLite, AuthNZ, and Bandit references.
+  - `backlog task TASK-2253 --plain` and `backlog task TASK-2254 --plain` rendered correctly.
   - Targeted DB/startup verification command ran 97 tests: 93 passed and 4 failed in unchanged current-base tests under `tldw_Server_API/tests/DB_Management/test_content_backend_cache.py`.
   - Reproduced the 4 failing current-base tests directly: analytics backend tuple/bootstrapped-target expectations and watchlists default watchlist lookup fail in unchanged code. This task changed docs/backlog only and did not modify Python code.
 - Bandit: skipped because the touched scope is documentation and Backlog task metadata only; no Python/code paths were changed.
@@ -47,7 +47,7 @@ Confirm whether INV-030 from Docs/ADR/inventory/2026-06-03-decision-inventory.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Confirmed INV-030 as ready for a bounded DB Management ADR backfill. The confirmation audit now captures current evidence, caveats, and a scoped TASK-2250 follow-up for the actual ADR. Verification found unrelated current-base DB cache test failures; they are documented here and not caused by this docs-only task.
+Confirmed INV-030 as ready for a bounded DB Management ADR backfill. The confirmation audit now captures current evidence, caveats, and a scoped TASK-2254 follow-up for the actual ADR. Verification found unrelated current-base DB cache test failures; they are documented here and not caused by this docs-only task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
