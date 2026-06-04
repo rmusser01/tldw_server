@@ -427,6 +427,39 @@ async def test_filesystem_stat_symlink_policy_does_not_leak_targets(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_filesystem_stat_rejects_parent_symlink_escape_without_following(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    outside_file = outside_dir / "secret.txt"
+    outside_file.write_text("outside", encoding="utf-8")
+    link_dir = workspace_root / "outside-dir"
+    try:
+        link_dir.symlink_to(outside_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-stat-parent-symlink",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    with pytest.raises(PermissionError, match="outside"):
+        await mod.execute_tool("fs.stat", {"path": "outside-dir/secret.txt"}, context=context)
+
+
+@pytest.mark.asyncio
 async def test_filesystem_glob_matches_sorted_paths_and_normalizes_patterns(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     package_dir = workspace_root / "pkg"
@@ -458,6 +491,30 @@ async def test_filesystem_glob_matches_sorted_paths_and_normalizes_patterns(tmp_
     assert result["base_path"] == "."  # nosec B101
     assert result["pattern"] == "**/*.py"  # nosec B101
     assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_rejects_excessive_double_star_patterns(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-double-star-cap",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    with pytest.raises(ValueError, match="too many double-star"):
+        await mod.execute_tool("fs.glob", {"pattern": "**/**/**/**/**/**/*.py"}, context=context)
 
 
 @pytest.mark.asyncio
@@ -582,6 +639,41 @@ async def test_filesystem_glob_caps_walk_and_rejects_outside_symlink_dirs(tmp_pa
     assert "outside-link/secret.py" not in [match["path"] for match in no_follow["matches"]]  # nosec B101
     with pytest.raises(PermissionError, match="outside"):
         await mod.execute_tool("fs.glob", {"pattern": "**/*.py", "follow_symlinks": True}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_returns_symlink_directories_without_traversing(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.py").write_text("secret", encoding="utf-8")
+    link_path = workspace_root / "outside-link"
+    try:
+        link_path.symlink_to(outside_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-symlink-dir-entry",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    result = await mod.execute_tool("fs.glob", {"pattern": "*"}, context=context)
+
+    assert result["matches"] == [  # nosec B101
+        {"path": "outside-link", "type": "symlink"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -732,6 +824,37 @@ async def test_filesystem_grep_limits_and_regex_errors(tmp_path: Path, monkeypat
     monkeypatch.setattr(Path, "read_bytes", _fail_read_bytes)
     with pytest.raises(ValueError, match="invalid regex pattern"):
         await limit_mod.execute_tool("fs.grep", {"pattern": "[", "regex": True}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_caps_directory_only_walks(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    for index in range(5):
+        (workspace_root / f"empty-{index}").mkdir()
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_walk_entry_limit": 2}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(
+        request_id="req-filesystem-grep-dir-cap",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    result = await mod.execute_tool("fs.grep", {"pattern": "missing"}, context=context)
+
+    assert result["matches"] == []  # nosec B101
+    assert result["truncated"] is True  # nosec B101
 
 
 @pytest.mark.asyncio

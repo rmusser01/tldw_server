@@ -17,7 +17,7 @@ from .tooling import (
     web_search_server_recommendation,
 )
 
-PRESET_RELEASE_DATE = date(2026, 5, 27)
+PRESET_RELEASE_DATE = date(2026, 6, 4)
 PRESET_VERSION = PRESET_RELEASE_DATE.strftime("%Y.%m.%d")
 PRESET_CREATED_AT = datetime(
     PRESET_RELEASE_DATE.year,

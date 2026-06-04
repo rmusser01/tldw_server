@@ -535,9 +535,12 @@ class FilesystemModule(BaseModule):
         if not candidate.is_absolute():
             candidate = workspace_root / candidate
         normalized = Path(os.path.abspath(os.fspath(candidate)))
-        if normalized != workspace_root and workspace_root not in normalized.parents:
+        if normalized == workspace_root:
+            return workspace_root
+        parent_resolved = normalized.parent.resolve(strict=False)
+        if parent_resolved != workspace_root and workspace_root not in parent_resolved.parents:
             raise PermissionError("path is outside workspace scope")
-        return normalized
+        return parent_resolved / normalized.name
 
     @staticmethod
     def _resolved_path_within_workspace(workspace_root: Path, target: Path) -> Path:
@@ -571,6 +574,8 @@ class FilesystemModule(BaseModule):
             raise ValueError("unsafe pattern: drive-qualified patterns are not allowed")
         if any(part == ".." for part in pattern.split("/")):
             raise ValueError("unsafe pattern: parent traversal is not allowed")
+        if pattern.count("**/") > 5:
+            raise ValueError("unsafe pattern: too many double-star wildcards")
 
     @staticmethod
     def _portable_pattern_matches(path: str, pattern: str, *, case_sensitive: bool) -> bool:
@@ -665,6 +670,7 @@ class FilesystemModule(BaseModule):
             dirnames.sort()
             filenames.sort()
 
+            symlink_dirs: list[str] = []
             for dirname in list(dirnames):
                 dir_path = current_root / dirname
                 rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
@@ -682,8 +688,10 @@ class FilesystemModule(BaseModule):
                         seen_dirs.add(resolved_dir)
                     else:
                         dirnames.remove(dirname)
+                        symlink_dirs.append(dirname)
 
             candidates: list[tuple[Path, str]] = [(current_root / dirname, "directory") for dirname in dirnames]
+            candidates.extend((current_root / dirname, "directory") for dirname in symlink_dirs)
             candidates.extend((current_root / filename, "file") for filename in filenames)
 
             for candidate, candidate_kind in candidates:
@@ -791,6 +799,15 @@ class FilesystemModule(BaseModule):
                         seen_dirs.add(resolved_dir)
                     else:
                         dirnames.remove(dirname)
+                        continue
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+            if walk_truncated:
+                break
 
             for filename in filenames:
                 visited_entries += 1

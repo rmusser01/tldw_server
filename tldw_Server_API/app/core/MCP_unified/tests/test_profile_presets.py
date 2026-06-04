@@ -85,7 +85,7 @@ def test_profile_presets_module_has_no_tldw_server_imports() -> None:
 def test_builtin_presets_cover_initial_mode_ids_and_pass_safety_baseline() -> None:
     bundled = presets.list_builtin_presets()
     assert {preset.id for preset in bundled} == EXPECTED_PRESET_IDS
-    assert all(preset.version == "2026.05.27" for preset in bundled)
+    assert all(preset.version == "2026.06.04" for preset in bundled)
 
     safety_violations = {
         preset.id: presets.validate_preset_safety(preset)
@@ -257,7 +257,7 @@ def test_duplicate_builtin_preset_returns_editable_profile_with_provenance() -> 
     assert profile.id == "workspace-architect"
     assert profile.name == "Workspace Architect"
     assert profile.preset_id == "architect"
-    assert profile.preset_version == "2026.05.27"
+    assert profile.preset_version == "2026.06.04"
     assert profile.provenance["source"] == "builtin_preset"
     assert profile.provenance["preset_id"] == "architect"
 
