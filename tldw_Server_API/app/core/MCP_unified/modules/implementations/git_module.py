@@ -487,7 +487,20 @@ class GitModule(BaseModule):
         context: Any | None = None,
     ) -> Any:
         args = self.sanitize_input(arguments or {})
-        self.validate_tool_arguments(tool_name, args)
+        try:
+            self.validate_tool_arguments(tool_name, args)
+        except ValueError as exc:
+            if self._is_execute_path_validation_error(tool_name, exc):
+                return self._error_result(
+                    tool_name,
+                    "path_outside_workspace",
+                    "The requested path is outside the active workspace.",
+                    path_filter_used="path" in args,
+                    result_kind=self._result_kind_for_tool(tool_name),
+                    truncated=False,
+                    context=context,
+                )
+            raise
 
         try:
             repository = await self._prepare_repository(context)
@@ -710,15 +723,17 @@ class GitModule(BaseModule):
                 ("unstaged", unstaged_result),
             ):
                 diff_text, text_truncated = self._truncate_text_bytes(command_result.stdout, remaining)
+                byte_count = len(diff_text.encode("utf-8"))
                 remaining = max(0, remaining - len(diff_text.encode("utf-8")))
                 truncated = truncated or text_truncated
-                sections.append({"scope": section_scope, "diff": diff_text})
+                sections.append({"scope": section_scope, "diff": diff_text, "bytes": byte_count})
 
-            return {
+            response: dict[str, Any] = {
                 "ok": True,
                 "repository_root": repository.repository_root_relative,
                 "scope": "working_tree",
                 "sections": sections,
+                "bytes": sum(section["bytes"] for section in sections),
                 "truncated": truncated,
                 "limits": self._effective_limits(tool_name, args),
                 "git": self._safe_git_metadata(unstaged_result, subcommand="diff"),
@@ -732,6 +747,9 @@ class GitModule(BaseModule):
                     context=context,
                 ),
             }
+            if path is not None:
+                response["path"] = path
+            return response
 
         result = await self._run_diff_command(
             repository,
@@ -748,11 +766,12 @@ class GitModule(BaseModule):
 
         diff_text, text_truncated = self._truncate_text_bytes(result.stdout, max_bytes)
         truncated = bool(result.truncated or text_truncated)
-        return {
+        response = {
             "ok": True,
             "repository_root": repository.repository_root_relative,
             "scope": scope,
             "diff": diff_text,
+            "bytes": len(diff_text.encode("utf-8")),
             "truncated": truncated,
             "limits": self._effective_limits(tool_name, args),
             "git": self._safe_git_metadata(result, subcommand="diff"),
@@ -766,6 +785,9 @@ class GitModule(BaseModule):
                 context=context,
             ),
         }
+        if path is not None:
+            response["path"] = path
+        return response
 
     async def _execute_log(
         self,
@@ -865,6 +887,8 @@ class GitModule(BaseModule):
             "ok": True,
             "repository_root": repository.repository_root_relative,
             "path": path,
+            "start_line": start_line,
+            "end_line": end_line,
             "lines": parsed["lines"],
             "truncated": truncated,
             "limits": self._effective_limits(tool_name, args),
@@ -975,6 +999,7 @@ class GitModule(BaseModule):
             "repository_root": repository.repository_root_relative,
             "path": path,
             "hunks": parsed["hunks"],
+            "bytes": self._hunks_byte_count(parsed["hunks"]),
             "truncated": truncated,
             "limits": self._effective_limits(tool_name, args),
             "git": self._safe_git_metadata(result, subcommand="ls-files"),
@@ -1897,6 +1922,17 @@ class GitModule(BaseModule):
         if reason.replace("_", "").isalnum():
             return reason
         return default
+
+    @staticmethod
+    def _is_execute_path_validation_error(tool_name: str, exc: ValueError) -> bool:
+        if tool_name not in {_TOOL_DIFF, _TOOL_LOG, _TOOL_BLAME, _TOOL_CONFLICTS_READ}:
+            return False
+        message = str(exc)
+        return "absolute paths" in message or "outside workspace" in message
+
+    @staticmethod
+    def _hunks_byte_count(hunks: list[dict[str, Any]]) -> int:
+        return sum(len(str(hunk.get("text") or "").encode("utf-8")) for hunk in hunks)
 
     @staticmethod
     def _path_inside(candidate: Path, root: Path) -> bool:

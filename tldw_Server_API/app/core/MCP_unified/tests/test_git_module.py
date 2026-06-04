@@ -234,6 +234,45 @@ def test_git_validates_rejects_paths_that_escape_workspace(
         module.validate_tool_arguments(tool_name, args)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "args"),
+    [
+        ("git.diff", {"path": "/workspace/src/app.py"}),
+        ("git.log", {"path": "../outside.py"}),
+        ("git.blame", {"path": "/workspace/src/app.py"}),
+        ("git.conflicts.read", {"path": "../outside.py"}),
+    ],
+)
+async def test_git_diff_log_blame_conflicts_read_execute_returns_structured_path_errors_without_running_git(
+    tool_name: str,
+    args: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(result=_git_result(stdout=f"{workspace_root}\n"))
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(tool_name, args, context=_context())
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "path_outside_workspace"  # nosec B101
+    assert result["eval"]["reason_code"] == "path_outside_workspace"  # nosec B101
+    assert result["eval"]["path_filter_used"] is True  # nosec B101
+    assert runner.calls == []  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+    assert "/workspace/src/app.py" not in str(result)  # nosec B101
+
+
 @pytest.mark.parametrize(
     ("tool_name", "args", "message"),
     [
@@ -846,7 +885,9 @@ async def test_git_diff_runs_unstaged_with_path_separator_and_dash_path(tmp_path
     ]
     assert result["ok"] is True  # nosec B101
     assert result["scope"] == "unstaged"  # nosec B101
+    assert result["path"] == "-danger.py"  # nosec B101
     assert result["diff"] == diff_text  # nosec B101
+    assert result["bytes"] == len(diff_text.encode("utf-8"))  # nosec B101
     assert result["truncated"] is False  # nosec B101
     assert result["limits"] == {"context_lines": 3, "max_bytes": 512}  # nosec B101
     assert result["git"]["subcommand"] == "diff"  # nosec B101
@@ -897,6 +938,8 @@ async def test_git_diff_runs_staged_with_cached_scope(tmp_path: Path) -> None:
     ]
     assert result["ok"] is True  # nosec B101
     assert result["scope"] == "staged"  # nosec B101
+    assert result["path"] == "src/app.py"  # nosec B101
+    assert result["bytes"] == len(result["diff"].encode("utf-8"))  # nosec B101
     assert result["truncated"] is False  # nosec B101
 
 
@@ -953,9 +996,10 @@ async def test_git_diff_working_tree_returns_staged_and_unstaged_sections(tmp_pa
     assert result["ok"] is True  # nosec B101
     assert result["scope"] == "working_tree"  # nosec B101
     assert result["sections"] == [  # nosec B101
-        {"scope": "staged", "diff": "staged-diff"},
-        {"scope": "unstaged", "diff": "unstaged-diff"},
+        {"scope": "staged", "diff": "staged-diff", "bytes": 11},
+        {"scope": "unstaged", "diff": "unstaged-diff", "bytes": 13},
     ]
+    assert result["bytes"] == 24  # nosec B101
     assert result["truncated"] is False  # nosec B101
 
 
@@ -987,6 +1031,7 @@ async def test_git_diff_respects_max_bytes_truncation(tmp_path: Path) -> None:
 
     assert result["ok"] is True  # nosec B101
     assert result["diff"] == "0123"  # nosec B101
+    assert result["bytes"] == 4  # nosec B101
     assert result["truncated"] is True  # nosec B101
     assert result["eval"]["truncated"] is True  # nosec B101
 
@@ -1112,6 +1157,8 @@ async def test_git_blame_parses_line_porcelain_range_caps_lines_and_no_emails(tm
         "src/app.py",
     ]
     assert result["ok"] is True  # nosec B101
+    assert result["start_line"] == 1  # nosec B101
+    assert result["end_line"] == 2  # nosec B101
     assert result["lines"] == [  # nosec B101
         {
             "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1220,6 +1267,7 @@ async def test_git_conflicts_read_parses_bounded_hunks_for_conflicted_path(tmp_p
 
     assert result["ok"] is True  # nosec B101
     assert result["path"] == "src/conflict.py"  # nosec B101
+    assert result["bytes"] == len("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature".encode("utf-8"))  # nosec B101
     assert result["hunks"] == [  # nosec B101
         {
             "start_line": 2,
@@ -1269,6 +1317,7 @@ async def test_git_conflicts_read_respects_max_bytes(tmp_path: Path) -> None:
     assert result["ok"] is True  # nosec B101
     assert result["hunks"][0]["text"] == "<<<<<<< HE"  # nosec B101
     assert len(result["hunks"][0]["text"].encode("utf-8")) <= 10  # nosec B101
+    assert result["bytes"] == 10  # nosec B101
     assert result["truncated"] is True  # nosec B101
     assert result["eval"]["truncated"] is True  # nosec B101
 
