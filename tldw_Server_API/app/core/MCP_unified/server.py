@@ -575,16 +575,17 @@ class MCPServer:
 
             # 6) Optional: Git module - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_GIT_MODULE"):
-                modules_to_load.append({
-                    "id": "git",
-                    "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module:GitModule",
-                    "enabled": True,
-                    "name": "Git",
-                    "version": "1.0.0",
-                    "department": "management",
-                    "settings": {},
-                })
-                logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
+                if not any(m.get("id") == "git" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "git",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module:GitModule",
+                        "enabled": True,
+                        "name": "Git",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
 
             # 7) Optional: Sandbox module (code interpreter) - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):

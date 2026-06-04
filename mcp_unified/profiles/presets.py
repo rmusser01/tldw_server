@@ -629,13 +629,13 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             direct_categories=[
                 "files",
                 "code",
-                "git",
                 "tests",
                 "browser",
                 "frontend",
                 "tool_discovery",
             ],
             deferred_categories=[
+                "git",
                 "safe_test_runner",
                 "issue_tracker",
                 "web_search",
@@ -741,8 +741,8 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "screenshots.capture",
                 "app_state.read",
             ],
-            direct_categories=["files", "code", "git", "tests", "browser", "tool_discovery"],
-            deferred_categories=["safe_test_runner", "issue_tracker"],
+            direct_categories=["files", "code", "tests", "browser", "tool_discovery"],
+            deferred_categories=["git", "safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "tests.plan.generate",

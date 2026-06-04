@@ -53,6 +53,26 @@ TOOLING_PRESET_IDS = {
     "sdet",
 }
 
+TOOL_CATEGORY_BY_PREFIX = {
+    "app_state": "app_state",
+    "api": "backend",
+    "browser": "browser",
+    "code": "code",
+    "deploy": "deployments",
+    "docs": "docs",
+    "fs": "files",
+    "git": "git",
+    "infra": "infra",
+    "logs": "logs",
+    "profile": "tool_discovery",
+    "screenshots": "screenshots",
+    "tests": "tests",
+    "tool_categories": "tool_discovery",
+    "tool_describe": "tool_discovery",
+    "tool_search": "tool_discovery",
+    "ui": "frontend",
+}
+
 
 def _tldw_imports_for(path: Path) -> list[str]:
     """Return imports from a Python file that cross into the host package."""
@@ -133,6 +153,22 @@ def test_role_presets_include_tooling_metadata() -> None:
         )
         assert tooling["recommendation_catalog_patchable"] is True
         assert tooling["progressive_disclosure"]["max_direct_tools"] <= 24
+
+
+def test_preset_direct_categories_do_not_exceed_max_direct_tools() -> None:
+    bundled_by_id = {preset.id: preset for preset in presets.list_builtin_presets()}
+
+    for preset_id in TOOLING_PRESET_IDS:
+        tooling = bundled_by_id[preset_id].profile.metadata["tooling"]
+        progressive_disclosure = tooling["progressive_disclosure"]
+        direct_categories = set(progressive_disclosure["direct_categories"])
+        direct_tools = [
+            tool
+            for tool in tooling["enabled_tools"]
+            if TOOL_CATEGORY_BY_PREFIX.get(tool.split(".", 1)[0]) in direct_categories
+        ]
+
+        assert len(direct_tools) <= progressive_disclosure["max_direct_tools"], preset_id  # nosec B101
 
 
 def test_filesystem_read_presets_include_helper_tools() -> None:
@@ -237,9 +273,7 @@ def test_git_capable_presets_include_native_read_tools() -> None:
         "code-reviewer",
         "devops-engineer",
         "backend-engineer",
-        "frontend-engineer",
         "qa-engineer",
-        "sdet",
     ):
         preset = presets.get_builtin_preset(preset_id)
         assert preset is not None  # nosec B101
@@ -249,6 +283,17 @@ def test_git_capable_presets_include_native_read_tools() -> None:
         assert "git.read" in tooling["enabled_capabilities"]  # nosec B101
         assert "git.read" in preset.profile.policy_document.capabilities  # nosec B101
         assert "git" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
+
+    for preset_id in ("frontend-engineer", "sdet"):
+        preset = presets.get_builtin_preset(preset_id)
+        assert preset is not None  # nosec B101
+
+        tooling = preset.profile.metadata["tooling"]
+        assert git_read_tools <= set(tooling["enabled_tools"])  # nosec B101
+        assert "git.read" in tooling["enabled_capabilities"]  # nosec B101
+        assert "git.read" in preset.profile.policy_document.capabilities  # nosec B101
+        assert "git" not in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
+        assert "git" in tooling["progressive_disclosure"]["deferred_categories"]  # nosec B101
 
 
 def test_product_owner_and_documentation_writer_do_not_enable_git_by_default() -> None:
