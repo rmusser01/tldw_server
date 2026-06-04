@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.backends.factory import close_all_backends
 
 
 pytestmark = pytest.mark.unit
@@ -16,15 +17,19 @@ pytestmark = pytest.mark.unit
 @pytest.fixture()
 def collections_db(monkeypatch: pytest.MonkeyPatch) -> CollectionsDatabase:
     base_dir = Path.cwd() / "Databases" / "test_user_dbs_reminders_notifications"
+    close_all_backends()
     shutil.rmtree(base_dir, ignore_errors=True)
     base_dir.mkdir(parents=True, exist_ok=True)
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
     settings.USER_DB_BASE_DIR = str(base_dir)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
 
+    db = CollectionsDatabase.for_user(user_id=778)
     try:
-        yield CollectionsDatabase.for_user(user_id=778)
+        yield db
     finally:
+        db.close()
+        close_all_backends()
         if prev_base_dir is not None:
             settings.USER_DB_BASE_DIR = prev_base_dir
         else:
@@ -32,6 +37,7 @@ def collections_db(monkeypatch: pytest.MonkeyPatch) -> CollectionsDatabase:
                 del settings.USER_DB_BASE_DIR
             except AttributeError:
                 pass
+        shutil.rmtree(base_dir, ignore_errors=True)
 
 
 def test_create_and_list_reminder_task(collections_db: CollectionsDatabase) -> None:

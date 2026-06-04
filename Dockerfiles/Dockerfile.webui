@@ -9,19 +9,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app/apps
 
 # Copy the root manifest plus the workspace sources Bun needs during install.
-# Only copy the extension manifest + prepare shim here so unrelated extension
-# source changes do not invalidate the WebUI dependency layer.
 COPY apps/package.json /app/apps/package.json
 COPY apps/bun.lock /app/apps/bun.lock
 COPY apps/scripts /app/apps/scripts
-COPY apps/extension/package.json /app/apps/extension/package.json
-COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs
-COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
 
-# Install the frontend monorepo with Bun so workspace:* dependencies resolve correctly.
+# Install only the WebUI workspace set so unrelated workspaces do not affect this image.
 ENV SKIP_WXT_PREPARE=1
+RUN bun -e "const fs=require('fs'); const path='/app/apps/package.json'; const pkg=JSON.parse(fs.readFileSync(path,'utf8')); pkg.workspaces=['tldw-frontend','packages/ui']; fs.writeFileSync(path, JSON.stringify(pkg,null,2)+'\\n')"
 RUN bun install --frozen-lockfile --cwd /app/apps
 
 # Build-time API config baked into client bundle

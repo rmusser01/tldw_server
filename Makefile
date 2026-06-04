@@ -119,13 +119,8 @@ setup-docker-single: setup-wizard-tools
 
 start-docker-single:
 	@command -v docker >/dev/null 2>&1 || (echo "[start-docker-single] docker not found. Install Docker and retry." && exit 1)
-	@api_key="$$(grep '^SINGLE_USER_API_KEY=' "$(TLDW_ENV_FILE)" 2>/dev/null | cut -d= -f2-)"; \
-		if [ -z "$${NEXT_PUBLIC_X_API_KEY:-$$api_key}" ]; then \
-			echo "[start-docker-single] Missing SINGLE_USER_API_KEY in $(TLDW_ENV_FILE). Run: make setup-docker-single" >&2; \
-			exit 1; \
-		fi; \
-		NEXT_PUBLIC_X_API_KEY="$${NEXT_PUBLIC_X_API_KEY:-$$api_key}" \
-		docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" -f "$(DOCKER_WEBUI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
+	@test -f "$(TLDW_ENV_FILE)" || (echo "[start-docker-single] $(TLDW_ENV_FILE) not found. Run: make setup-docker-single" >&2 && exit 1)
+	@docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" -f "$(DOCKER_WEBUI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
 	@echo "[start-docker-single] API:   $(TLDW_BASE_URL)"
 	@echo "[start-docker-single] WebUI: $(TLDW_WEBUI_URL)"
 	@echo "[start-docker-single] Next:  make verify-docker-single, then open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI."

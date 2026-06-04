@@ -37,6 +37,7 @@ def _make_principal(
 
 def _build_app_with_overrides(
     principal: Optional[AuthPrincipal],
+    monkeypatch: pytest.MonkeyPatch,
     *,
     fail_with_401: bool = False,
 ) -> FastAPI:
@@ -69,14 +70,20 @@ def _build_app_with_overrides(
         def capabilities(self):
             return {"backend": "stub"}
 
-    _app.state.rg_governor = _FakeGovernor()
+    fake_governor = _FakeGovernor()
+    for target_app in (_app, rg_mod._get_app()):
+        monkeypatch.setattr(target_app.state, "rg_governor", fake_governor, raising=False)
 
     return app
 
 
 @pytest.mark.asyncio
-async def test_rg_diag_capabilities_401_when_principal_unavailable():
-    app = _build_app_with_overrides(principal=None, fail_with_401=True)
+async def test_rg_diag_capabilities_401_when_principal_unavailable(monkeypatch):
+    app = _build_app_with_overrides(
+        principal=None,
+        monkeypatch=monkeypatch,
+        fail_with_401=True,
+    )
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/resource-governor/diag/capabilities")
@@ -86,13 +93,13 @@ async def test_rg_diag_capabilities_401_when_principal_unavailable():
 
 
 @pytest.mark.asyncio
-async def test_rg_diag_capabilities_403_when_missing_admin_role():
+async def test_rg_diag_capabilities_403_when_missing_admin_role(monkeypatch):
     principal = _make_principal(
         is_admin=False,
         roles=["user"],
         permissions=[],
     )
-    app = _build_app_with_overrides(principal=principal)
+    app = _build_app_with_overrides(principal=principal, monkeypatch=monkeypatch)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/resource-governor/diag/capabilities")
@@ -101,13 +108,13 @@ async def test_rg_diag_capabilities_403_when_missing_admin_role():
 
 
 @pytest.mark.asyncio
-async def test_rg_diag_capabilities_200_for_admin_principal():
+async def test_rg_diag_capabilities_200_for_admin_principal(monkeypatch):
     principal = _make_principal(
         is_admin=True,
         roles=["admin"],
         permissions=[],
     )
-    app = _build_app_with_overrides(principal=principal)
+    app = _build_app_with_overrides(principal=principal, monkeypatch=monkeypatch)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/resource-governor/diag/capabilities")

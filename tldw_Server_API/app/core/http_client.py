@@ -90,6 +90,18 @@ _HTTPCLIENT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_HTTPX_REQUEST_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+if httpx is not None:
+    _HTTPX_REQUEST_EXCEPTIONS = tuple(
+        cls
+        for cls in (
+            getattr(httpx, "HTTPError", None),
+            getattr(httpx, "TransportError", None),
+            getattr(httpx, "TimeoutException", None),
+        )
+        if isinstance(cls, type)
+    )
+_HTTPCLIENT_REQUEST_EXCEPTIONS = _HTTPCLIENT_NONCRITICAL_EXCEPTIONS + _HTTPX_REQUEST_EXCEPTIONS
 
 try:
     # Python 3.8+/backport safe import
@@ -2131,7 +2143,7 @@ async def _afetch_httpx(
                 verify=verify,
             )
             return r, "ok"  # noqa: TRY300
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Let callers see HTTPStatusError directly so that adapters/tests
             # can distinguish 4xx/5xx responses from transport failures. All
             # other exceptions are normalized into a NetworkError reason.
@@ -2799,7 +2811,7 @@ def _fetch_httpx_response(
                 follow_redirects=False,
             )
             return r, "ok"  # noqa: TRY300
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Classify DNS resolution errors explicitly so that retry logic
             # can treat them as permanent failures.
             try:
