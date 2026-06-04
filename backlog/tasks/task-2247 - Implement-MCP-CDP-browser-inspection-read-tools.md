@@ -20,7 +20,9 @@ modified_files:
 - backlog/tasks/task-2247 - Implement-MCP-CDP-browser-inspection-read-tools.md
 - tldw_Server_API/app/core/MCP_unified/browser_cdp/__init__.py
 - tldw_Server_API/app/core/MCP_unified/browser_cdp/client.py
+- tldw_Server_API/app/core/MCP_unified/modules/implementations/browser_cdp_module.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_client.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_module.py
 ---
 
 ## Description
@@ -42,7 +44,7 @@ Docs/superpowers/plans/2026-06-04-mcp-cdp-browser-inspection-read-tools-implemen
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Planning/design review completed before implementation. Tightened loopback endpoint validation requirements to avoid DNS-based trust, clarified explicit-disable precedence over MCP_BROWSER_CDP_URL auto-registration, and chose a dedicated browser CDP server-registration test file instead of modifying filesystem tests.
+Task 2 completed: added BrowserCDPModule descriptors and strict read-only argument validation. Verification: pytest tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_module.py -q (2 passed); ruff check touched browser CDP files (passed); git diff --check (passed).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
