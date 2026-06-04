@@ -32,7 +32,9 @@ class TestFileLockAcquireRelease:
         assert lock.acquire() is True
         assert lock_path.exists()
         # Lock file should contain our PID.
-        content = lock_path.read_text().strip()
+        assert lock._fd is not None
+        os.lseek(lock._fd, 0, os.SEEK_SET)
+        content = os.read(lock._fd, 64).decode().strip()
         assert content == str(os.getpid())
 
         lock.release()

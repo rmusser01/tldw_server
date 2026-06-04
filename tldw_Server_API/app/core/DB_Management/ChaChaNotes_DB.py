@@ -10006,6 +10006,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
+                self._ensure_prompt_presets_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -10065,6 +10066,56 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
         except sqlite3.Error as e:
             raise SchemaError(f"Failed verifying FTS tables for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _ensure_prompt_presets_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure custom Character Chat prompt presets are available in SQLite."""
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_presets(
+                  preset_id              TEXT PRIMARY KEY NOT NULL,
+                  name                   TEXT NOT NULL,
+                  section_order_json     TEXT NOT NULL DEFAULT '[]',
+                  section_templates_json TEXT NOT NULL DEFAULT '{}',
+                  created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted                BOOLEAN NOT NULL DEFAULT 0,
+                  client_id              TEXT NOT NULL DEFAULT 'unknown',
+                  version                INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_prompt_presets_active_updated
+                  ON prompt_presets(deleted, last_modified DESC);
+                """
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring prompt_presets schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_prompt_presets_schema_postgres(self, conn: Any) -> None:
+        """Ensure custom Character Chat prompt presets are available in PostgreSQL."""
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_presets(
+                  preset_id              TEXT PRIMARY KEY NOT NULL,
+                  name                   TEXT NOT NULL,
+                  section_order_json     TEXT NOT NULL DEFAULT '[]',
+                  section_templates_json TEXT NOT NULL DEFAULT '{}',
+                  created_at             TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted                BOOLEAN NOT NULL DEFAULT FALSE,
+                  client_id              TEXT NOT NULL DEFAULT 'unknown',
+                  version                INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_prompt_presets_active_updated
+                  ON prompt_presets(deleted, last_modified DESC)
+                """
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL prompt_presets schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_character_cards_fts_columns_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add legacy-missing character card columns required by FTS rebuild."""
@@ -13852,6 +13903,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
+            self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
             self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
@@ -26567,6 +26619,222 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:
             logger.error(f"Error fetching latest sync log change_id: {e}")
             raise
+
+    # --- Prompt Preset Methods ---
+    @staticmethod
+    def _normalize_prompt_preset_id(preset_id: str) -> str:
+        value = str(preset_id or "").strip()
+        if not value:
+            raise InputError("Prompt preset ID is required.")  # noqa: TRY003
+        if len(value) > 128:
+            raise InputError("Prompt preset ID must be 128 characters or fewer.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_prompt_preset_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise InputError("Prompt preset name is required.")  # noqa: TRY003
+        if len(value) > 255:
+            raise InputError("Prompt preset name must be 255 characters or fewer.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _serialize_prompt_preset_order(section_order: list[str]) -> str:
+        if not isinstance(section_order, list):
+            raise InputError("Prompt preset section_order must be a list.")  # noqa: TRY003
+        normalized = [item for item in section_order if isinstance(item, str) and item.strip()]
+        return json.dumps(normalized, ensure_ascii=True)
+
+    @staticmethod
+    def _serialize_prompt_preset_templates(section_templates: dict[str, str]) -> str:
+        if not isinstance(section_templates, dict):
+            raise InputError("Prompt preset section_templates must be an object.")  # noqa: TRY003
+        normalized = {
+            str(key): value
+            for key, value in section_templates.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        return json.dumps(normalized, ensure_ascii=True)
+
+    @staticmethod
+    def _decode_prompt_preset_json(value: Any, default: Any) -> Any:
+        if isinstance(value, str) and value.strip():
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return default
+        return default
+
+    def _prompt_preset_from_row(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        record = dict(row)
+        section_order = self._decode_prompt_preset_json(record.get("section_order_json"), [])
+        section_templates = self._decode_prompt_preset_json(record.get("section_templates_json"), {})
+        return {
+            "preset_id": record.get("preset_id"),
+            "name": record.get("name"),
+            "section_order": section_order if isinstance(section_order, list) else [],
+            "section_templates": section_templates if isinstance(section_templates, dict) else {},
+            "created_at": record.get("created_at"),
+            "updated_at": record.get("last_modified"),
+            "last_modified": record.get("last_modified"),
+            "client_id": record.get("client_id"),
+            "version": record.get("version"),
+        }
+
+    def upsert_prompt_preset(
+        self,
+        *,
+        preset_id: str,
+        name: str,
+        section_order: list[str],
+        section_templates: dict[str, str],
+    ) -> bool:
+        """Create or update a custom Character Chat prompt preset."""
+        preset_id_value = self._normalize_prompt_preset_id(preset_id)
+        name_value = self._normalize_prompt_preset_name(name)
+        section_order_json = self._serialize_prompt_preset_order(section_order)
+        section_templates_json = self._serialize_prompt_preset_templates(section_templates)
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+
+        try:
+            with self.transaction() as conn:
+                existing = conn.execute(
+                    "SELECT version FROM prompt_presets WHERE preset_id = ?",
+                    (preset_id_value,),
+                ).fetchone()
+                if existing is not None:
+                    version = int(dict(existing).get("version") or 1)
+                    conn.execute(
+                        """
+                        UPDATE prompt_presets
+                           SET name = ?,
+                               section_order_json = ?,
+                               section_templates_json = ?,
+                               deleted = ?,
+                               last_modified = ?,
+                               client_id = ?,
+                               version = ?
+                         WHERE preset_id = ?
+                        """,
+                        (
+                            name_value,
+                            section_order_json,
+                            section_templates_json,
+                            active_value,
+                            now,
+                            self.client_id,
+                            version + 1,
+                            preset_id_value,
+                        ),
+                    )
+                    return True
+
+                conn.execute(
+                    """
+                    INSERT INTO prompt_presets (
+                        preset_id,
+                        name,
+                        section_order_json,
+                        section_templates_json,
+                        created_at,
+                        last_modified,
+                        deleted,
+                        client_id,
+                        version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        preset_id_value,
+                        name_value,
+                        section_order_json,
+                        section_templates_json,
+                        now,
+                        now,
+                        active_value,
+                        self.client_id,
+                        1,
+                    ),
+                )
+                return True
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            logger.error("Failed to upsert prompt preset '{}': {}", preset_id_value, exc)
+            raise CharactersRAGDBError(f"Failed to upsert prompt preset '{preset_id_value}': {exc}") from exc  # noqa: TRY003
+
+    def get_prompt_preset(self, preset_id: str) -> dict[str, Any] | None:
+        """Return one active custom prompt preset by ID."""
+        preset_id_value = self._normalize_prompt_preset_id(preset_id)
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        cursor = self.execute_query(
+            """
+            SELECT preset_id, name, section_order_json, section_templates_json,
+                   created_at, last_modified, client_id, version
+              FROM prompt_presets
+             WHERE preset_id = ? AND deleted = ?
+             LIMIT 1
+            """,
+            (preset_id_value, active_value),
+        )
+        return self._prompt_preset_from_row(cursor.fetchone())
+
+    def list_prompt_presets(self) -> list[dict[str, Any]]:
+        """List active custom prompt presets."""
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        cursor = self.execute_query(
+            """
+            SELECT preset_id, name, section_order_json, section_templates_json,
+                   created_at, last_modified, client_id, version
+              FROM prompt_presets
+             WHERE deleted = ?
+             ORDER BY last_modified DESC, preset_id ASC
+            """,
+            (active_value,),
+        )
+        return [
+            preset
+            for row in cursor.fetchall()
+            if (preset := self._prompt_preset_from_row(row)) is not None
+        ]
+
+    def delete_prompt_preset(self, preset_id: str) -> bool:
+        """Soft-delete a custom prompt preset."""
+        preset_id_value = self._normalize_prompt_preset_id(preset_id)
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+
+        with self.transaction() as conn:
+            existing = conn.execute(
+                "SELECT version, deleted FROM prompt_presets WHERE preset_id = ?",
+                (preset_id_value,),
+            ).fetchone()
+            if existing is None:
+                return False
+            record = dict(existing)
+            if bool(record.get("deleted")):
+                return True
+            cursor = conn.execute(
+                """
+                UPDATE prompt_presets
+                   SET deleted = ?,
+                       last_modified = ?,
+                       client_id = ?,
+                       version = ?
+                 WHERE preset_id = ? AND deleted = ?
+                """,
+                (
+                    deleted_value,
+                    now,
+                    self.client_id,
+                    int(record.get("version") or 1) + 1,
+                    preset_id_value,
+                    active_value,
+                ),
+            )
+            return bool(getattr(cursor, "rowcount", 0))
 
 
 def _delegate_store_method(store_attr: str, method_name: str) -> Callable[..., Any]:

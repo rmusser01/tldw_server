@@ -9,12 +9,20 @@ import pytest
 async def test_audit_pii_overrides_and_scan_fields(monkeypatch):
     # Configure custom PII pattern and an extra scan field
     from tldw_Server_API.app.core.config import settings
-    from tldw_Server_API.app.core.Audit.unified_audit_service import UnifiedAuditService, AuditEventType, AuditContext
+    from tldw_Server_API.app.core.Audit import unified_audit_service as audit_mod
+
+    UnifiedAuditService = audit_mod.UnifiedAuditService
+    AuditEventType = audit_mod.AuditEventType
+    AuditContext = audit_mod.AuditContext
 
     # Custom pattern to match HELLO followed by 3 digits
-    settings["AUDIT_PII_PATTERNS"] = {"custom": r"HELLO\d{3}"}
+    pii_patterns = {"custom": r"HELLO\d{3}"}
+    monkeypatch.setitem(settings, "AUDIT_PII_PATTERNS", pii_patterns)
+    monkeypatch.setitem(audit_mod._app_settings, "AUDIT_PII_PATTERNS", pii_patterns)
     # Ensure we scan a context field not in defaults to prove override works
-    settings["AUDIT_PII_SCAN_FIELDS"] = ["context_endpoint"]
+    scan_fields = ["context_endpoint"]
+    monkeypatch.setitem(settings, "AUDIT_PII_SCAN_FIELDS", scan_fields)
+    monkeypatch.setitem(audit_mod._app_settings, "AUDIT_PII_SCAN_FIELDS", scan_fields)
 
     # Use a temp DB for isolation
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:

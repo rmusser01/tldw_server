@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -1413,4 +1415,5 @@ async def test_handle_tools_call_direct_cwd_descendants_stays_narrower_than_work
     approval = exc.value.approval or {}
     assert approval["reason"] == "path_outside_current_folder_scope"
     assert approval["scope_context"]["path_scope_mode"] == "cwd_descendants"
-    assert approval["scope_context"]["scope_root"] == "/private/tmp/mcp-hub-direct/project/src"
+    expected_scope_root = Path("/").joinpath("tmp", "mcp-hub-direct", "project", "src").resolve(strict=False)
+    assert approval["scope_context"]["scope_root"] == str(expected_scope_root)

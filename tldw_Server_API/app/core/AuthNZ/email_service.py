@@ -611,7 +611,7 @@ class EmailService:
         """Send mock email for development/testing"""
 
         timestamp = datetime.now(timezone.utc).isoformat()
-        email_id = f"{timestamp}_{to_email.replace('@', '_at_')}"
+        email_id = self._safe_mock_email_file_id(timestamp, to_email)
         stored_html_body = self._redact_mock_email_body(html_body) if redact_mock_tokens else html_body
         stored_text_body = (
             self._redact_mock_email_body(text_body or "")
@@ -675,6 +675,14 @@ class EmailService:
         await asyncio.sleep(0.1)
 
         return True
+
+    @staticmethod
+    def _safe_mock_email_file_id(timestamp: str, to_email: str) -> str:
+        """Return a mock-email file stem that is valid across supported platforms."""
+        raw_id = f"{timestamp}_{to_email.replace('@', '_at_')}"
+        safe_id = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", raw_id)
+        safe_id = re.sub(r"_+", "_", safe_id).strip(" ._")
+        return safe_id or "mock_email"
 
     @staticmethod
     def _redact_mock_email_body(body: str) -> str:

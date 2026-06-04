@@ -72,6 +72,10 @@ def multi_user_webhook_client(tmp_path, monkeypatch):
 
     app.dependency_overrides[eval_auth.verify_api_key] = _verify_api_key
     app.dependency_overrides[eval_auth.get_eval_request_user] = _get_eval_request_user
+    app.dependency_overrides[webhooks.verify_api_key] = _verify_api_key
+    app.dependency_overrides[webhooks.get_eval_request_user] = _get_eval_request_user
+    app.dependency_overrides[webhooks.verify_api_key] = _verify_api_key
+    app.dependency_overrides[webhooks.get_eval_request_user] = _get_eval_request_user
 
     with TestClient(app) as client:
         yield client

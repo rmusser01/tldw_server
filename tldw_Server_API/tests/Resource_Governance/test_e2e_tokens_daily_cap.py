@@ -206,14 +206,14 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
                 r1 = c.post(
                     "/api/v1/chat/completions",
                     headers={"X-API-KEY": api_key},
-                    data=json.dumps(body),
+                    json=body,
                 )
                 assert r1.status_code == 200
 
                 r2 = c.post(
                     "/api/v1/chat/completions",
                     headers={"X-API-KEY": api_key},
-                    data=json.dumps(body),
+                    json=body,
                 )
                 assert r2.status_code == 429
                 assert r2.headers.get("Retry-After") is not None
@@ -285,14 +285,14 @@ async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_
             r1 = c.post(
                 "/api/v1/embeddings",
                 headers={"X-API-KEY": api_key},
-                data=json.dumps(body),
+                json=body,
             )
             assert r1.status_code == 200, r1.text
 
             r2 = c.post(
                 "/api/v1/embeddings",
                 headers={"X-API-KEY": api_key},
-                data=json.dumps(body),
+                json=body,
             )
             assert r2.status_code == 429, r2.text
             assert r2.headers.get("Retry-After") is not None

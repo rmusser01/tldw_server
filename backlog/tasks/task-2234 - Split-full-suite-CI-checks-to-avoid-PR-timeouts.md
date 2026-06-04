@@ -21,6 +21,8 @@ modified_files:
 - apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
 - apps/packages/ui/src/routes/option-setup.tsx
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
+- tldw_Server_API/app/core/AuthNZ/email_service.py
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
 - tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
 - tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py
 - tldw_Server_API/app/api/v1/endpoints/sync.py
@@ -34,22 +36,33 @@ modified_files:
 - tldw_Server_API/app/core/MCP_unified/server.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
+- tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
 - tldw_Server_API/tests/AuthNZ/integration/test_jwt_refresh_rotation_blacklist.py
+- tldw_Server_API/tests/AuthNZ/unit/test_email_service.py
+- tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_api_keys.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_resource_governor_permissions_claims.py
 - tldw_Server_API/tests/Collections/test_collections_close.py
 - tldw_Server_API/tests/Collections/test_embedding_queue.py
 - tldw_Server_API/tests/Collections/test_reminders_notifications_db.py
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
+- tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py
+- tldw_Server_API/tests/Evaluations/integration/test_webhook_multi_user_api.py
+- tldw_Server_API/tests/Infrastructure/test_distributed_lock.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_overrides.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_shared_workspace_registry.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_workspace_set_objects.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py
+- tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
 - tldw_Server_API/tests/Media/test_json_url_download.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
+- tldw_Server_API/tests/RAG/test_analytics_backend.py
+- tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
+- tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
 - tldw_Server_API/tests/conftest.py
+- tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
 references:
 - https://github.com/rmusser01/tldw_server/pull/2258
 ---
@@ -91,6 +104,8 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-04 recheck after commit `dc28e1f1e9` found `Full Suite shard (macos-latest / Python 3.12 / auth-db)` failing because `test_create_permission_sanitizes_backend_error` patches the legacy `admin_rbac.is_test_mode` test hook, but the split admin RBAC module no longer exposed that compatibility wrapper.
 
 2026-06-04 recheck after commit `3d3c796af9` found `Full Suite shard (macos-latest / Python 3.12 / media-audio)` failing because fake-client JSON download tests still hit global egress allowlist validation before streaming, and `Full Suite shard (macos-latest / Python 3.12 / product-modules)` failing because the claims rebuild health persistence test could read a stale module settings/path target and fall back to live service health instead of the inserted persisted row.
+
+2026-06-04 final completed-check recheck before pushing found the remaining completed PR #2258 failures concentrated in full-suite shards rather than frontend/build gates. Additional root causes included single-user API key test setup not matching the stricter single-user key contract, macOS `/tmp` symlink path expectations in MCP path-scope assertions, direct mutation of the read-only RAG analytics backend type property, Audit PII settings imported before test overrides, Windows path-string and locked-file assumptions in Evaluations and Infrastructure tests, raw JSON bodies missing `application/json` in Resource Governance E2E cap tests, egress metric assertions not accepting allowlist denial wording, WebSearch cancellation tests depending on globally registered routes and media DB startup, mock email filenames containing Windows-invalid timestamp separators, Evaluation webhook tests overriding only the module source instead of direct route dependency objects, and Character Chat custom prompt preset endpoints calling missing ChaChaNotesDB persistence methods. The canceled Windows ai-retrieval shard showed a HuggingFace 429 during model predownload but no pytest failure before cancellation; the other canceled shards only reported cancellation.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -107,6 +122,8 @@ Fourth recheck remediation for PR #2258: restored frozen-lockfile-compatible Web
 Fifth recheck remediation for PR #2258: restored the patchable `admin_rbac.is_test_mode()` compatibility wrapper by delegating to the shared core testing helper, keeping the admin RBAC error-mapping test hook available without changing endpoint behavior. Verification on 2026-06-04: the failing `test_create_permission_sanitizes_backend_error` was reproduced locally before the fix; the exact test passed after the fix; the full `test_admin_rbac_error_mapping.py` file passed (11); compileall passed for `admin_rbac.py`; Bandit on `admin_rbac.py` passed; git diff --check passed.
 
 Sixth recheck remediation for PR #2258: isolated fake-client JSON URL download tests from global egress allowlist validation, and hardened claims rebuild health persistence test setup to patch settings through `monkeypatch` plus the `claims_service` module's path hook. Verification on 2026-06-04: `test_download_url_json_content_type` reproduced the CI egress denial locally before the fix; the exact claims persistence test passed alone locally before the hardening; the full Claims folder passed locally on Python 3.11 before the hardening; after the fix, `test_json_url_download.py` passed under the restrictive CI allowlist (3), the exact claims persistence test passed, and the full Claims folder passed (166 passed, 1 skipped); compileall passed for the two touched test files; Bandit on the touched tests passed with test assert rule B101 skipped; git diff --check passed.
+
+Seventh recheck remediation for PR #2258: fixed the remaining completed full-suite failures by aligning single-user API-key test setup with the configured key, normalizing MCP `/tmp` scope-root expectations across macOS/Linux, using a real AnalyticsDatabase backend mock shape instead of assigning the read-only property, patching Audit PII module-level settings, normalizing Windows-sensitive path and file-lock test behavior, sending Resource Governance E2E payloads with `json=`, accepting allowlist wording in egress denial metrics, idempotently installing and overriding the WebSearch route dependencies for the cancellation test, making mock email output filenames platform-safe, overriding direct Evaluation webhook route dependencies, and adding ChaChaNotesDB custom prompt preset schema plus CRUD support required by Character Chat preset endpoints. Verification on 2026-06-04: focused CI failures passed locally across AuthNZ/MCP/RAG/Audit/Infrastructure/http-client (7), email/recipe (3), WebSearch/webhook (2), Character Chat prompt preview (1), Resource Governance chat/embeddings cap cases (2), full email service file (16), full webhook multi-user file (4), Character Chat preset editor plus request-preset preview (9), and adjusted recipe/MCP tests (2); compileall passed for touched Python files; production Bandit on `email_service.py` and `ChaChaNotes_DB.py` passed with zero findings; test-scope Bandit showed only existing assert/test-fixture literal findings after the new `/tmp` finding was removed; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
