@@ -490,12 +490,10 @@ async def test_git_status_runs_porcelain_v2_and_returns_grouped_counts(tmp_path:
     ]
     assert result["ok"] is True  # nosec B101
     assert result["repository_root"] == "."  # nosec B101
-    assert result["branch"] == {  # nosec B101
-        "branch": "main",
-        "upstream": "origin/main",
-        "ahead": 2,
-        "behind": 1,
-    }
+    assert result["branch"] == "main"  # nosec B101
+    assert result["upstream"] == "origin/main"  # nosec B101
+    assert result["ahead"] == 2  # nosec B101
+    assert result["behind"] == 1  # nosec B101
     assert result["counts"] == {  # nosec B101
         "staged": 1,
         "unstaged": 1,
@@ -700,6 +698,8 @@ async def test_git_conflicts_list_runs_ls_files_and_groups_unmerged_stages(tmp_p
             "100644 bbb 2\tsrc/conflict.py",
             "100644 ccc 3\tsrc/conflict.py",
             "100644 ddd 2\tsrc/added-by-us.py",
+            "100644 eee 2\tsrc/both-added.py",
+            "100644 fff 3\tsrc/both-added.py",
         ]
     ) + "\0"
     runner = _SequenceGitRunner(
@@ -734,6 +734,12 @@ async def test_git_conflicts_list_runs_ls_files_and_groups_unmerged_stages(tmp_p
             "xy_status": "AU",
             "stages": [2],
             "conflict_type": "added_by_us",
+        },
+        {
+            "path": "src/both-added.py",
+            "xy_status": "AA",
+            "stages": [2, 3],
+            "conflict_type": "both_added",
         },
     ]
     assert result["truncated"] is False  # nosec B101

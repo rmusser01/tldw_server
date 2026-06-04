@@ -559,7 +559,10 @@ class GitModule(BaseModule):
         return {
             "ok": True,
             "repository_root": repository.repository_root_relative,
-            "branch": parsed["branch"],
+            "branch": parsed["branch"]["branch"],
+            "upstream": parsed["branch"]["upstream"],
+            "ahead": parsed["branch"]["ahead"],
+            "behind": parsed["branch"]["behind"],
             "entries": parsed["entries"],
             "counts": parsed["counts"],
             "truncated": truncated,
@@ -1212,6 +1215,8 @@ class GitModule(BaseModule):
         stage_set = set(stages)
         if stage_set == {1, 2, 3}:
             return "UU"
+        if stage_set == {2, 3}:
+            return "AA"
         if stage_set == {2}:
             return "AU"
         if stage_set == {3}:
@@ -1227,6 +1232,8 @@ class GitModule(BaseModule):
         stage_set = set(stages)
         if stage_set == {1, 2, 3}:
             return "both_modified"
+        if stage_set == {2, 3}:
+            return "both_added"
         if stage_set == {2}:
             return "added_by_us"
         if stage_set == {3}:
