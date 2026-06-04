@@ -320,6 +320,113 @@ async def test_filesystem_list_read_and_write_text_within_workspace(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_filesystem_stat_file_and_directory_metadata(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    source_file = docs_dir / "hello.txt"
+    source_file.write_text("hello world", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-stat",
+        user_id="7",
+        session_id="sess-1",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    file_stat = await mod.execute_tool("fs.stat", {"path": "docs/hello.txt"}, context=context)
+    dir_stat = await mod.execute_tool("fs.stat", {"path": "docs"}, context=context)
+
+    assert file_stat["path"] == "docs/hello.txt"  # nosec B101
+    assert file_stat["name"] == "hello.txt"  # nosec B101
+    assert file_stat["type"] == "file"  # nosec B101
+    assert file_stat["size"] == len("hello world".encode("utf-8"))  # nosec B101
+    assert file_stat["is_symlink"] is False  # nosec B101
+    assert isinstance(file_stat["modified_at"], str) and file_stat["modified_at"]  # nosec B101
+    assert isinstance(file_stat.get("mode"), int)  # nosec B101
+    assert dir_stat["path"] == "docs"  # nosec B101
+    assert dir_stat["name"] == "docs"  # nosec B101
+    assert dir_stat["type"] == "directory"  # nosec B101
+    assert dir_stat["is_symlink"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_stat_rejects_missing_and_escaped_paths(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-stat-missing",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    with pytest.raises(FileNotFoundError, match="path not found"):
+        await mod.execute_tool("fs.stat", {"path": "missing.txt"}, context=context)
+    with pytest.raises(PermissionError, match="outside"):
+        await mod.execute_tool("fs.stat", {"path": "../escape.txt"}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_filesystem_stat_symlink_policy_does_not_leak_targets(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    outside_file = outside_dir / "secret.txt"
+    outside_file.write_text("outside", encoding="utf-8")
+    link_path = docs_dir / "secret-link"
+    try:
+        link_path.symlink_to(outside_file)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-stat-symlink",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    link_stat = await mod.execute_tool("fs.stat", {"path": "docs/secret-link"}, context=context)
+
+    assert link_stat["path"] == "docs/secret-link"  # nosec B101
+    assert link_stat["name"] == "secret-link"  # nosec B101
+    assert link_stat["type"] == "symlink"  # nosec B101
+    assert link_stat["is_symlink"] is True  # nosec B101
+    assert str(outside_file.resolve()) not in str(link_stat)  # nosec B101
+    with pytest.raises(PermissionError, match="outside"):
+        await mod.execute_tool("fs.stat", {"path": "docs/secret-link", "follow_symlinks": True}, context=context)
+
+
+@pytest.mark.asyncio
 async def test_protocol_rejects_unknown_fs_read_text_arguments(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"

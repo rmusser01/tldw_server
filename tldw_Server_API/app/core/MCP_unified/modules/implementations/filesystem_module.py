@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import stat as stat_module
 from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -230,6 +232,15 @@ class FilesystemModule(BaseModule):
                 "bytes_written": write_result["bytes_written"],
             }
 
+        if tool_name == "fs.stat":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._stat_path,
+                workspace_root,
+                target,
+                bool(args.get("follow_symlinks", False)),
+            )
+
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def _list_entry_limit(self) -> int:
@@ -434,6 +445,61 @@ class FilesystemModule(BaseModule):
         if resolved != workspace_root and workspace_root not in resolved.parents:
             raise PermissionError("path is outside workspace scope")
         return resolved
+
+    @staticmethod
+    def _resolve_workspace_path_no_follow(workspace_root: Path, raw_path: str) -> Path:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace_root / candidate
+        normalized = Path(os.path.abspath(os.fspath(candidate)))
+        if normalized != workspace_root and workspace_root not in normalized.parents:
+            raise PermissionError("path is outside workspace scope")
+        return normalized
+
+    @staticmethod
+    def _resolved_path_within_workspace(workspace_root: Path, target: Path) -> Path:
+        resolved = target.resolve(strict=False)
+        if resolved != workspace_root and workspace_root not in resolved.parents:
+            raise PermissionError("path is outside workspace scope")
+        return resolved
+
+    @staticmethod
+    def _stat_path(workspace_root: Path, target: Path, follow_symlinks: bool) -> dict[str, Any]:
+        if not target.exists() and not target.is_symlink():
+            raise FileNotFoundError(f"path not found: {target}")
+
+        if follow_symlinks:
+            stat_target = FilesystemModule._resolved_path_within_workspace(workspace_root, target)
+            stat_result = stat_target.stat()
+            is_symlink = target.is_symlink()
+            target_within_workspace = True
+        else:
+            stat_result = target.lstat()
+            is_symlink = stat_module.S_ISLNK(stat_result.st_mode)
+            target_within_workspace = None
+
+        mode = stat_result.st_mode
+        if is_symlink and not follow_symlinks:
+            entry_type = "symlink"
+        elif stat_module.S_ISDIR(mode):
+            entry_type = "directory"
+        elif stat_module.S_ISREG(mode):
+            entry_type = "file"
+        else:
+            entry_type = "other"
+
+        record: dict[str, Any] = {
+            "path": FilesystemModule._to_workspace_relative_path(workspace_root, target),
+            "name": target.name or ".",
+            "type": entry_type,
+            "size": stat_result.st_size,
+            "modified_at": datetime.fromtimestamp(stat_result.st_mtime, timezone.utc).isoformat(),
+            "mode": stat_module.S_IMODE(mode),
+            "is_symlink": is_symlink,
+        }
+        if target_within_workspace is not None:
+            record["target_within_workspace"] = target_within_workspace
+        return record
 
     @staticmethod
     def _list_directory(workspace_root: Path, target: Path, entry_limit: int) -> dict[str, Any]:
