@@ -1,7 +1,7 @@
 ---
 id: TASK-2247
 title: Implement MCP CDP browser inspection read tools
-status: In Progress
+status: Done
 labels:
 - mcp-unified
 - browser
@@ -18,6 +18,7 @@ modified_files:
 - Docs/superpowers/specs/2026-06-04-mcp-cdp-browser-inspection-read-tools-design.md
 - Docs/superpowers/plans/2026-06-04-mcp-cdp-browser-inspection-read-tools-implementation-plan.md
 - backlog/tasks/task-2247 - Implement-MCP-CDP-browser-inspection-read-tools.md
+- mcp_unified/USER_GUIDE.md
 - mcp_unified/profiles/presets.py
 - tldw_Server_API/app/core/MCP_unified/browser_cdp/__init__.py
 - tldw_Server_API/app/core/MCP_unified/browser_cdp/client.py
@@ -57,20 +58,22 @@ Task 2 completed: added BrowserCDPModule descriptors and strict read-only argume
 Task 3 completed: implemented read-only tool execution for status, pages, snapshots, page state, screenshots, console events, and network events using fake-client coverage for target resolution, truncation, and screenshot payload limits. Verification: pytest tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_client.py tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_module.py -q (21 passed); ruff check touched browser CDP files (passed); git diff --check (passed).
 
 Task 4 completed: added optional BrowserCDPModule default registration when MCP_ENABLE_BROWSER_CDP_MODULE is true or MCP_BROWSER_CDP_URL is configured, with explicit false taking precedence; added browser read tools/capabilities to Frontend Engineer, QA Engineer, and SDET preset tooling metadata. Verification: pytest tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_client.py tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_module.py tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_server_registration.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q (46 passed); ruff check touched files (passed); git diff --check (passed).
+
+Task 5 completed: documented CDP configuration, read-only tool list, loopback defaults, non-goals, and budget settings in mcp_unified/USER_GUIDE.md. Final verification: pytest focused Task 5 suite (83 passed); Bandit touched Python scope passed with report /tmp/bandit_mcp_cdp_browser_tools.json; ruff check touched files passed; git diff --check passed. Optional live CDP smoke skipped because no local listener was running on TCP port 9222.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Added optional native CDP-backed read-only MCP browser inspection tools, with loopback-safe client validation, strict read-only tool schemas, bounded execution behavior, optional server registration, browser-capable preset discovery metadata, tests, and package-local user guide documentation. Live browser smoke was skipped because no local CDP endpoint was already running.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

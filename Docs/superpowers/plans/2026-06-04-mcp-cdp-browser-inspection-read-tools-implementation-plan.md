@@ -4,6 +4,8 @@
 
 **Goal:** Add optional, read-only CDP-backed browser inspection MCP tools for browser-capable profiles.
 
+**Status:** Complete. Final verification passed; optional live CDP smoke was skipped because no local CDP endpoint was already running.
+
 **Architecture:** Add a small CDP client seam under `tldw_Server_API/app/core/MCP_unified/browser_cdp/` and a `BrowserCDPModule` under MCP module implementations. Keep CDP endpoint configuration operator-owned, use fake clients for unit tests, register the module only when explicitly enabled/configured, and wire profile discovery by adding read-only browser tool names/capabilities to existing browser-oriented presets.
 
 **Tech Stack:** Python 3.11, MCP Unified module framework, `httpx`, `websockets`, pytest, pytest-asyncio, Bandit.
