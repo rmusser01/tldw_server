@@ -15,6 +15,31 @@ class RuntimeType(str, Enum):
     worktree = "worktree"
 
 
+class WorkspaceVolumeState(str, Enum):
+    provisioning = "provisioning"
+    ready = "ready"
+    not_configured = "not_configured"
+    unavailable = "unavailable"
+    failed = "failed"
+    cleanup_pending = "cleanup_pending"
+
+
+@dataclass
+class WorkspaceVolume:
+    id: str
+    workspace_id: str
+    user_id: str
+    state: WorkspaceVolumeState
+    runtime: str | None = None
+    display_name: str | None = None
+    mount_path: str | None = None
+    diagnostics: dict[str, object] = field(default_factory=dict)
+    idempotency_key: str | None = None
+    idempotency_fingerprint: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class TrustLevel(str, Enum):
     """Risk-based isolation profiles for sandbox execution.
 

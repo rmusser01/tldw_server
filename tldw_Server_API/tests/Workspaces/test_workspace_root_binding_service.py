@@ -521,6 +521,49 @@ def test_ready_sandbox_resolver_repairs_prior_unavailable_retry(db):
     assert repaired["display_name"] == "Resolved volume"
 
 
+@pytest.mark.parametrize("state", ["provisioning", "cleanup_pending"])
+def test_sandbox_resolver_accepts_new_non_strict_volume_states(db, state):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    root = attach_primary_workspace_root(
+        db=db,
+        workspace_id="ws-1",
+        user_id="user-1",
+        request=WorkspaceRootAttachRequest(
+            backend="sandbox_volume",
+            sandbox_volume_id="volume-1",
+        ),
+        sandbox_resolver=_StaticSandboxResolver(state),
+    )
+
+    assert root["backend"] == "sandbox_volume"
+    assert root["sandbox_mount_state"] == state
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["not_configured", "unavailable", "failed", "cleanup_pending"],
+)
+def test_strict_sandbox_validation_fails_closed_for_unusable_volume_states(db, state):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+                strict_sandbox_validation=True,
+            ),
+            sandbox_resolver=_StaticSandboxResolver(state),
+        )
+
+    assert exc_info.value.code == "workspace_sandbox_volume_resolver_unavailable"
+    assert db.get_workspace_primary_root("ws-1") is None
+
+
 class _VersionConflictDB:
     def get_workspace(self, workspace_id):
         return {"version": 1}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -17,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-from .models import RunPhase, RunStatus, RuntimeType
+from .models import RunPhase, RunStatus, RuntimeType, WorkspaceVolume, WorkspaceVolumeState
 from .utils import coerce_optional_nonempty_string
 
 _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS = (
@@ -39,6 +40,14 @@ _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     sqlite3.Error,
 )
+
+_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_KEYS = 12
+_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_STRING = 240
+_WORKSPACE_VOLUME_SECRET_KEY_RE = re.compile(r"(api[_-]?key|secret|token|password|credential)", re.IGNORECASE)
+_WORKSPACE_VOLUME_HOST_PATH_RE = re.compile(
+    r"(/Users/[^\s'\"<>]+|/home/[^\s'\"<>]+|/private/[^\s'\"<>]+|/var/folders/[^\s'\"<>]+|[A-Za-z]:\\[^\s'\"<>]+)"
+)
+_WORKSPACE_VOLUME_SAFE_MOUNT_PREFIXES = ("/workspace/", "/mnt/workspace/", "/workspaces/")
 
 
 def _now_iso() -> str:
@@ -83,6 +92,119 @@ def _normalize_string_dict(value: Any) -> dict[str, str]:
     if not isinstance(loaded, dict):
         return {}
     return {str(k): str(v) for k, v in loaded.items()}
+
+
+def _coerce_workspace_volume_state(value: Any) -> WorkspaceVolumeState:
+    if isinstance(value, WorkspaceVolumeState):
+        return value
+    try:
+        return WorkspaceVolumeState(str(value))
+    except (TypeError, ValueError):
+        return WorkspaceVolumeState.unavailable
+
+
+def _normalize_diagnostics(value: Any) -> dict[str, object]:
+    if isinstance(value, dict):
+        return sanitize_workspace_volume_diagnostics(value)
+    if value is None:
+        return {}
+    text = str(value).strip()
+    if not text:
+        return {}
+    try:
+        loaded = json.loads(text)
+    except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+        return {}
+    return sanitize_workspace_volume_diagnostics(loaded) if isinstance(loaded, dict) else {}
+
+
+def sanitize_workspace_volume_diagnostics(diagnostics: dict[str, object] | None) -> dict[str, object]:
+    """Return bounded Workspace volume diagnostics without secrets or raw host paths."""
+    if not isinstance(diagnostics, dict):
+        return {}
+    sanitized: dict[str, object] = {}
+    for idx, (key, value) in enumerate(diagnostics.items()):
+        if idx >= _WORKSPACE_VOLUME_DIAGNOSTIC_MAX_KEYS:
+            sanitized["truncated"] = True
+            break
+        key_text = _bounded_workspace_volume_text(key, 64) or "diagnostic"
+        sanitized[key_text] = _sanitize_workspace_volume_diagnostic_value(key_text, value)
+    return sanitized
+
+
+def sanitize_workspace_volume_mount_path(value: str | None) -> str | None:
+    """Keep only sandbox-visible mount hints; never persist raw host-local paths."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if any(
+        text == prefix.rstrip("/") or text.startswith(prefix)
+        for prefix in _WORKSPACE_VOLUME_SAFE_MOUNT_PREFIXES
+    ):
+        return text
+    return None
+
+
+def _sanitize_workspace_volume_diagnostic_value(key: str, value: object) -> object:
+    if _WORKSPACE_VOLUME_SECRET_KEY_RE.search(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return sanitize_workspace_volume_diagnostics(value)
+    if isinstance(value, (list, tuple)):
+        return [
+            _sanitize_workspace_volume_diagnostic_value(key, item)
+            for item in value[:_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_KEYS]
+        ]
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    text = str(value)
+    text = _WORKSPACE_VOLUME_HOST_PATH_RE.sub("[redacted-path]", text)
+    if _WORKSPACE_VOLUME_SECRET_KEY_RE.search(text):
+        text = "[redacted]"
+    return text[:_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_STRING]
+
+
+def _bounded_workspace_volume_text(value: Any, limit: int) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return None
+    return text[: max(1, int(limit))]
+
+
+def _workspace_volume_from_mapping(row: Any) -> WorkspaceVolume:
+    row_dict = dict(row)
+    return WorkspaceVolume(
+        id=str(row_dict.get("id") or ""),
+        workspace_id=str(row_dict.get("workspace_id") or ""),
+        user_id=str(row_dict.get("user_id") or ""),
+        state=_coerce_workspace_volume_state(row_dict.get("state")),
+        runtime=(
+            str(row_dict["runtime"])
+            if row_dict.get("runtime") is not None
+            else None
+        ),
+        display_name=(
+            str(row_dict["display_name"])
+            if row_dict.get("display_name") is not None
+            else None
+        ),
+        mount_path=sanitize_workspace_volume_mount_path(
+            str(row_dict["mount_path"]) if row_dict.get("mount_path") is not None else None
+        ),
+        diagnostics=_normalize_diagnostics(row_dict.get("diagnostics")),
+        idempotency_key=(
+            str(row_dict["idempotency_key"])
+            if row_dict.get("idempotency_key") is not None
+            else None
+        ),
+        idempotency_fingerprint=(
+            str(row_dict["idempotency_fingerprint"])
+            if row_dict.get("idempotency_fingerprint") is not None
+            else None
+        ),
+        created_at=_parse_optional_iso_datetime(row_dict.get("created_at")),
+        updated_at=_parse_optional_iso_datetime(row_dict.get("updated_at")),
+    )
 
 
 class IdempotencyConflict(Exception):
@@ -178,6 +300,35 @@ class SandboxStore:
         raise NotImplementedError
 
     def delete_session(self, session_id: str) -> bool:
+        raise NotImplementedError
+
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        raise NotImplementedError
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
         raise NotImplementedError
 
     # ACP control-plane metadata for cross-process/cross-node session rehydration.
@@ -384,6 +535,7 @@ class InMemoryStore(SandboxStore):
         self._sessions: dict[str, dict[str, Any]] = {}
         self._acp_sessions: dict[str, dict[str, Any]] = {}
         self._vz_sessions: dict[str, dict[str, Any]] = {}
+        self._workspace_volumes: dict[str, WorkspaceVolume] = {}
         self._user_bytes: dict[str, int] = {}
         self._run_queue: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -666,6 +818,77 @@ class InMemoryStore(SandboxStore):
     def delete_session(self, session_id: str) -> bool:
         with self._lock:
             return self._sessions.pop(str(session_id), None) is not None
+
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        now = datetime.now(timezone.utc)
+        if volume.created_at is None:
+            volume.created_at = now
+        volume.updated_at = now
+        volume.mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
+        volume.diagnostics = sanitize_workspace_volume_diagnostics(volume.diagnostics)
+        with self._lock:
+            self._workspace_volumes[str(volume.id)] = volume
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        with self._lock:
+            return self._workspace_volumes.get(str(volume_id))
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        user_key = self._user_key(user_id)
+        key = str(idempotency_key or "").strip()
+        if not user_key or not key:
+            return None
+        with self._lock:
+            for volume in self._workspace_volumes.values():
+                if volume.user_id != user_key or volume.idempotency_key != key:
+                    continue
+                if (
+                    idempotency_fingerprint is not None
+                    and volume.idempotency_fingerprint != idempotency_fingerprint
+                ):
+                    raise IdempotencyConflict(volume.id, key=key)
+                if str(volume.workspace_id) != str(workspace_id):
+                    return None
+                return volume
+        return None
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        with self._lock:
+            volume = self._workspace_volumes.get(str(volume_id))
+            if volume is None:
+                return None
+            volume.state = _coerce_workspace_volume_state(state)
+            volume.mount_path = sanitize_workspace_volume_mount_path(mount_path)
+            if diagnostics is not None:
+                volume.diagnostics = sanitize_workspace_volume_diagnostics(diagnostics)
+            volume.updated_at = datetime.now(timezone.utc)
+            self._workspace_volumes[volume.id] = volume
+            return volume
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        with self._lock:
+            return [
+                volume
+                for volume in self._workspace_volumes.values()
+                if str(volume.workspace_id) == workspace_key
+            ]
 
     def put_acp_session_control(
         self,
@@ -1149,6 +1372,25 @@ class SQLiteStore(SandboxStore):
                     created_at REAL,
                     updated_at REAL
                 );
+                CREATE TABLE IF NOT EXISTS workspace_volumes (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    runtime TEXT,
+                    display_name TEXT,
+                    mount_path TEXT,
+                    diagnostics TEXT,
+                    idempotency_key TEXT,
+                    idempotency_fingerprint TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_volumes_workspace
+                    ON workspace_volumes(workspace_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency
+                    ON workspace_volumes(user_id, idempotency_key)
+                    WHERE idempotency_key IS NOT NULL;
                 """
             )
             # Backfill migrations for older schemas.
@@ -1207,6 +1449,12 @@ class SQLiteStore(SandboxStore):
             _ensure_sqlite_column("sandbox_acp_sessions", "scope_snapshot_id", "TEXT")
             _ensure_sqlite_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
             _ensure_sqlite_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "runtime", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "display_name", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "mount_path", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "diagnostics", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "idempotency_key", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "idempotency_fingerprint", "TEXT")
 
     def _fp(self, body: dict[str, Any]) -> str:
         """
@@ -1793,6 +2041,147 @@ class SQLiteStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        now = datetime.now(timezone.utc)
+        created_at = volume.created_at or now
+        updated_at = now
+        mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
+        diagnostics = sanitize_workspace_volume_diagnostics(volume.diagnostics)
+        with self._lock, self._conn() as con:
+            con.execute(
+                (
+                    "INSERT INTO workspace_volumes("
+                    "id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "idempotency_key,idempotency_fingerprint,created_at,updated_at"
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "workspace_id=excluded.workspace_id,"
+                    "user_id=excluded.user_id,"
+                    "state=excluded.state,"
+                    "runtime=excluded.runtime,"
+                    "display_name=excluded.display_name,"
+                    "mount_path=excluded.mount_path,"
+                    "diagnostics=excluded.diagnostics,"
+                    "idempotency_key=excluded.idempotency_key,"
+                    "idempotency_fingerprint=excluded.idempotency_fingerprint,"
+                    "updated_at=excluded.updated_at"
+                ),
+                (
+                    str(volume.id),
+                    str(volume.workspace_id),
+                    self._user_key(volume.user_id),
+                    _coerce_workspace_volume_state(volume.state).value,
+                    (str(volume.runtime) if volume.runtime is not None else None),
+                    (str(volume.display_name) if volume.display_name is not None else None),
+                    mount_path,
+                    json.dumps(diagnostics, ensure_ascii=False),
+                    (str(volume.idempotency_key) if volume.idempotency_key is not None else None),
+                    (
+                        str(volume.idempotency_fingerprint)
+                        if volume.idempotency_fingerprint is not None
+                        else None
+                    ),
+                    created_at.isoformat(),
+                    updated_at.isoformat(),
+                ),
+            )
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE id=?"
+                ),
+                (str(volume_id),),
+            )
+            row = cur.fetchone()
+            return _workspace_volume_from_mapping(row) if row else None
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        user_key = self._user_key(user_id)
+        key = str(idempotency_key or "").strip()
+        if not user_key or not key:
+            return None
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE user_id=? AND idempotency_key=?"
+                ),
+                (user_key, key),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        volume = _workspace_volume_from_mapping(row)
+        if idempotency_fingerprint is not None and volume.idempotency_fingerprint != idempotency_fingerprint:
+            created_at = volume.created_at.timestamp() if volume.created_at is not None else None
+            raise IdempotencyConflict(volume.id, key=key, created_at=created_at)
+        if str(volume.workspace_id) != str(workspace_id):
+            return None
+        return volume
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        next_state = _coerce_workspace_volume_state(state)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        mount_path = sanitize_workspace_volume_mount_path(mount_path)
+        diagnostics_json = (
+            json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False)
+            if diagnostics is not None
+            else None
+        )
+        with self._lock, self._conn() as con:
+            if diagnostics is None:
+                cur = con.execute(
+                    (
+                        "UPDATE workspace_volumes SET state=?, mount_path=?, updated_at=? "
+                        "WHERE id=?"
+                    ),
+                    (next_state.value, mount_path, updated_at, str(volume_id)),
+                )
+            else:
+                cur = con.execute(
+                    (
+                        "UPDATE workspace_volumes SET state=?, mount_path=?, diagnostics=?, updated_at=? "
+                        "WHERE id=?"
+                    ),
+                    (next_state.value, mount_path, diagnostics_json, updated_at, str(volume_id)),
+                )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE workspace_id=? ORDER BY created_at ASC, id ASC"
+                ),
+                (workspace_key,),
+            )
+            return [_workspace_volume_from_mapping(row) for row in cur.fetchall()]
 
     def put_acp_session_control(
         self,
@@ -2451,6 +2840,33 @@ class PostgresStore(SandboxStore):
                     );
                     """
             )
+            cur.execute(
+                """
+                    CREATE TABLE IF NOT EXISTS workspace_volumes (
+                        id TEXT PRIMARY KEY,
+                        workspace_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        runtime TEXT,
+                        display_name TEXT,
+                        mount_path TEXT,
+                        diagnostics JSONB,
+                        idempotency_key TEXT,
+                        idempotency_fingerprint TEXT,
+                        created_at TEXT,
+                        updated_at TEXT
+                    );
+                    """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workspace_volumes_workspace ON workspace_volumes(workspace_id)"
+            )
+            cur.execute(
+                (
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency "
+                    "ON workspace_volumes(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
+                )
+            )
             # Migrations: ensure new columns exist
             def _ensure_column(table: str, col: str, coltype: str) -> None:
                 try:
@@ -2502,6 +2918,12 @@ class PostgresStore(SandboxStore):
             _ensure_column("sandbox_acp_sessions", "scope_snapshot_id", "TEXT")
             _ensure_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
             _ensure_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
+            _ensure_column("workspace_volumes", "runtime", "TEXT")
+            _ensure_column("workspace_volumes", "display_name", "TEXT")
+            _ensure_column("workspace_volumes", "mount_path", "TEXT")
+            _ensure_column("workspace_volumes", "diagnostics", "JSONB")
+            _ensure_column("workspace_volumes", "idempotency_key", "TEXT")
+            _ensure_column("workspace_volumes", "idempotency_fingerprint", "TEXT")
 
     def _fp(self, body: dict[str, Any]) -> str:
         try:
@@ -3092,6 +3514,145 @@ class PostgresStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        now = datetime.now(timezone.utc)
+        created_at = volume.created_at or now
+        updated_at = now
+        mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
+        diagnostics = sanitize_workspace_volume_diagnostics(volume.diagnostics)
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO workspace_volumes(
+                    id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                    idempotency_key,idempotency_fingerprint,created_at,updated_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(id) DO UPDATE SET
+                    workspace_id=EXCLUDED.workspace_id,
+                    user_id=EXCLUDED.user_id,
+                    state=EXCLUDED.state,
+                    runtime=EXCLUDED.runtime,
+                    display_name=EXCLUDED.display_name,
+                    mount_path=EXCLUDED.mount_path,
+                    diagnostics=EXCLUDED.diagnostics,
+                    idempotency_key=EXCLUDED.idempotency_key,
+                    idempotency_fingerprint=EXCLUDED.idempotency_fingerprint,
+                    updated_at=EXCLUDED.updated_at
+                """,
+                (
+                    str(volume.id),
+                    str(volume.workspace_id),
+                    self._user_key(volume.user_id),
+                    _coerce_workspace_volume_state(volume.state).value,
+                    (str(volume.runtime) if volume.runtime is not None else None),
+                    (str(volume.display_name) if volume.display_name is not None else None),
+                    mount_path,
+                    json.dumps(diagnostics, ensure_ascii=False),
+                    (str(volume.idempotency_key) if volume.idempotency_key is not None else None),
+                    (
+                        str(volume.idempotency_fingerprint)
+                        if volume.idempotency_fingerprint is not None
+                        else None
+                    ),
+                    created_at.isoformat(),
+                    updated_at.isoformat(),
+                ),
+            )
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                       idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE id=%s
+                """,
+                (str(volume_id),),
+            )
+            row = cur.fetchone()
+            return _workspace_volume_from_mapping(row) if row else None
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        user_key = self._user_key(user_id)
+        key = str(idempotency_key or "").strip()
+        if not user_key or not key:
+            return None
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                       idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE user_id=%s AND idempotency_key=%s
+                """,
+                (user_key, key),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        volume = _workspace_volume_from_mapping(row)
+        if idempotency_fingerprint is not None and volume.idempotency_fingerprint != idempotency_fingerprint:
+            created_at = volume.created_at.timestamp() if volume.created_at is not None else None
+            raise IdempotencyConflict(volume.id, key=key, created_at=created_at)
+        if str(volume.workspace_id) != str(workspace_id):
+            return None
+        return volume
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        next_state = _coerce_workspace_volume_state(state)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        mount_path = sanitize_workspace_volume_mount_path(mount_path)
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            if diagnostics is None:
+                cur.execute(
+                    "UPDATE workspace_volumes SET state=%s, mount_path=%s, updated_at=%s WHERE id=%s",
+                    (next_state.value, mount_path, updated_at, str(volume_id)),
+                )
+            else:
+                cur.execute(
+                    (
+                        "UPDATE workspace_volumes SET state=%s, mount_path=%s, diagnostics=%s, "
+                        "updated_at=%s WHERE id=%s"
+                    ),
+                    (
+                        next_state.value,
+                        mount_path,
+                        json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False),
+                        updated_at,
+                        str(volume_id),
+                    ),
+                )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                       idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE workspace_id=%s ORDER BY created_at ASC, id ASC
+                """,
+                (workspace_key,),
+            )
+            return [_workspace_volume_from_mapping(row) for row in (cur.fetchall() or [])]
 
     def put_acp_session_control(
         self,
