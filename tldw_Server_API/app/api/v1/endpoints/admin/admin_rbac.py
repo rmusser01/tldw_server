@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import InputError, KanbanDB, KanbanDBError
 from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
+from tldw_Server_API.app.core.testing import is_test_mode as _shared_is_test_mode
 from tldw_Server_API.app.services.admin_roles_permissions_service import (
     create_role as svc_create_role,
 )
@@ -128,6 +129,11 @@ def _get_is_postgres_backend_fn() -> Callable[[], Awaitable[bool]]:
 def _get_kanban_db_for_user_id(user_id: int) -> KanbanDB:
     db_path = DatabasePaths.get_kanban_db_path(user_id)
     return KanbanDB(db_path=str(db_path), user_id=str(user_id))
+
+
+def is_test_mode() -> bool:
+    """Return the shared test-mode flag for legacy admin RBAC patch points."""
+    return _shared_is_test_mode()
 
 
 @router.post(
