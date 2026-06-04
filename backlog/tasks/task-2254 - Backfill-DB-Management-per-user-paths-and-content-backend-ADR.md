@@ -39,7 +39,7 @@ Backfill a bounded DB Management ADR from TASK-2253 evidence. Scope the accepted
 - Updated `Docs/ADR/README.md`, the INV-030 inventory row/default disposition, and `tldw_Server_API/app/core/DB_Management/README.md`.
 - Verification:
   - `git diff --check` passed.
-  - `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Docs/test_docs_index_path_hygiene_script.py tldw_Server_API/tests/Docs/test_readme_docs_path_hygiene_script.py tldw_Server_API/tests/Docs/test_top_guides_docs_path_hygiene_script.py` passed: 3 passed.
+  - `source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Docs/test_docs_index_path_hygiene_script.py tldw_Server_API/tests/Docs/test_readme_docs_path_hygiene_script.py tldw_Server_API/tests/Docs/test_top_guides_docs_path_hygiene_script.py` passed: 3 passed.
   - ADR/reference grep confirmed ADR-020 index, inventory, and DB_Management README references.
   - Stale queued-phrasing grep found no matches.
 - Bandit: not applicable because this task touched only Markdown documentation and Backlog task metadata, not Python/code files.
