@@ -18,6 +18,9 @@ modified_files:
 - Docs/superpowers/specs/2026-06-04-mcp-cdp-browser-inspection-read-tools-design.md
 - Docs/superpowers/plans/2026-06-04-mcp-cdp-browser-inspection-read-tools-implementation-plan.md
 - backlog/tasks/task-2247 - Implement-MCP-CDP-browser-inspection-read-tools.md
+- tldw_Server_API/app/core/MCP_unified/browser_cdp/__init__.py
+- tldw_Server_API/app/core/MCP_unified/browser_cdp/client.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_client.py
 ---
 
 ## Description
