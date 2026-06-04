@@ -1,7 +1,7 @@
 ---
 id: TASK-510
 title: Address PR 1982 review comments and merge conflicts
-status: In Progress
+status: Done
 labels:
   - pr-review
   - merge-conflicts
