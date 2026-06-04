@@ -136,8 +136,8 @@ def test_webui_dockerfile_uses_copy_chown_instead_of_recursive_chown():
     )
 
 
-def test_webui_dockerfile_installs_only_frontend_and_ui_workspaces():
-    """The WebUI Docker build should avoid installing every workspace."""
+def test_webui_dockerfile_copies_only_required_workspace_sources():
+    """The WebUI Docker build should avoid copying every workspace source tree."""
     text = _read_text("Dockerfiles/Dockerfile.webui")
 
     _require(
@@ -161,12 +161,24 @@ def test_webui_dockerfile_installs_only_frontend_and_ui_workspaces():
         "Expected Dockerfile.webui to copy the shared ui workspace explicitly",
     )
     _require(
-        "pkg.workspaces=['tldw-frontend','packages/ui']" in text,
-        "Expected Dockerfile.webui to rewrite the workspace manifest down to the frontend and shared ui workspaces",
+        "COPY apps/extension/package.json /app/apps/extension/package.json" in text,
+        "Expected Dockerfile.webui to copy the extension manifest for frozen lockfile workspace resolution",
+    )
+    _require(
+        "COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs" in text,
+        "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
+    )
+    _require(
+        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json" in text,
+        "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
+    )
+    _require(
+        "pkg.workspaces=" not in text,
+        "Expected Dockerfile.webui not to rewrite the workspace manifest because that invalidates the frozen lockfile",
     )
     _require(
         "RUN bun install --frozen-lockfile --cwd /app/apps" in text,
-        "Expected Dockerfile.webui to install the narrowed Bun workspace set",
+        "Expected Dockerfile.webui to install with the committed Bun lockfile",
     )
 
 

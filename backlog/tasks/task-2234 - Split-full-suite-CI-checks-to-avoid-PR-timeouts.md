@@ -17,6 +17,7 @@ modified_files:
 - Dockerfiles/docker-compose.webui.yml
 - Makefile
 - apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts
+- apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts
 - apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
 - apps/packages/ui/src/routes/option-setup.tsx
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
@@ -44,6 +45,7 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
+- tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
 - tldw_Server_API/tests/conftest.py
 references:
 - https://github.com/rmusser01/tldw_server/pull/2258
@@ -80,6 +82,8 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-04 recheck of run 26934657519 found new full-suite shard failures after the previous push. Representative logs showed broad shards inheriting a shared Postgres `DATABASE_URL`/`TEST_DATABASE_URL`, causing tests that should use SQLite or per-test Postgres databases to hit the shared `tldw_content` database, drop it, exhaust connections, or miss AuthNZ tables. macOS auth-db also exposed a closed managed SQLite backend cached between JWT refresh tests, and integrations exposed a Python 3.12 default-event-loop assumption in `test_bridge_opt_out.py`.
 
 2026-06-04 recheck after commit `530804c529` found additional PR #2258 failures: Resource Governor diag tests using a stale app state returned 503, notifications service lifecycle fakes no longer matched sidecar worker startup, MCP Hub tests compared authored policy documents to normalized resolved policy documents, product-module tests inherited `TLDW_TEST_MODE`, a config test poisoned global `os.getenv`, the WebUI Docker build still installed unrelated workspaces, quickstart Makefile parsing leaked env-file semantics, httpx transport exceptions bypassed network-error normalization, reminders DB tests reused cached SQLite backends across temp directory teardown, external federation fake managers did not expose the current write-flag API, and a telemetry sanitizer test patched the pre-extraction global instead of runtime dependencies.
+
+2026-06-04 recheck after commit `7dd08107a3` found `build (webui)` failing in the container-build workflow because the Dockerfile rewrote `apps/package.json` workspaces before `bun install --frozen-lockfile`, producing a package graph that no longer matched `apps/bun.lock`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -90,6 +94,8 @@ Follow-up CI remediation for PR #2258 after rebasing onto dev. Addressed failing
 Second recheck remediation for run 26934657519: forced full-suite pytest steps back to SQLite defaults while leaving Postgres host/port/user/password available for explicit per-test Postgres fixtures; added a CI workflow contract preventing shared Postgres DSN leakage into broad shard pytest steps; evicted managed SQLite AuthNZ backends on config reset so closed pools are not reused between tests; reset the shared FastAPI app lifecycle state around tests to prevent `shutdown_in_progress` 503 leakage; and updated the notification bridge test helper to use `asyncio.run` on Python 3.12+. Verification on 2026-06-04: JWT refresh rotation and notifications bridge tests passed (7); CI contracts plus representative audit/embeddings/resource-governor 503 regressions passed (44); lifecycle/drain gate tests passed (32); representative audio/claims/MCP failures passed (3); compileall passed; app-code Bandit passed with no findings; broader touched test-scope Bandit only reported existing test assert/test-string findings; git diff --check passed.
 
 Third recheck remediation for PR #2258: isolated Resource Governor app-state overrides, updated notification lifecycle fakes for scheduler task return values and sidecar worker paths, made MCP Hub policy tests assert authored versus normalized resolved policies explicitly, disabled both test-mode env vars in embedding queue tests, localized the quickstart `os.getenv` failure stub, constrained the WebUI Docker install to frontend/UI workspaces, moved single-user WebUI key fallback into Compose interpolation, normalized httpx transport exceptions in the shared HTTP client, closed shared SQLite backends around reminders notification DB tests, updated external federation and telemetry tests to current injected APIs, and left unrelated untracked watchlist template files unstaged. Verification on 2026-06-04: original five failing CI tests passed together (5); MCP downstream tail passed (107 passed, 2 skipped); config quickstart, Docker contract, Makefile masking, frontend quickstart Vitest, HTTP client, unit subset, product tail, reminders notification DB, and watchlist/WebSub tail checks passed from the local recheck; compileall passed; Bandit on touched production code passed; git diff --check passed.
+
+Fourth recheck remediation for PR #2258: restored frozen-lockfile-compatible WebUI Docker workspace setup by keeping the root workspace graph intact, copying only unrelated workspace manifests and the extension prepare shim, and removing the lockfile-breaking workspace rewrite. Verification on 2026-06-04: the WebUI Docker `bun install --frozen-lockfile` step was simulated locally with the same copied files and passed; Docker hardening pytest passed; frontend Docker/networking Vitest passed (14); compileall for the updated Python contract test passed; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
