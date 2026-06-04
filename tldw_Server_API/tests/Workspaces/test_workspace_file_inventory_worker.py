@@ -165,6 +165,70 @@ async def test_worker_host_local_scan_completes_and_writes_items(
     assert str(tmp_path) not in str(result)
 
 
+async def test_worker_policy_fingerprint_mismatch_fails_scan_without_writing_items(
+    db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    root_path = tmp_path / "project"
+    (root_path / "notes.txt").parent.mkdir(parents=True)
+    (root_path / "notes.txt").write_text("notes", encoding="utf-8")
+    root = _workspace_with_host_root(db, root_path)
+    scan = _attached_scan(db, root, "stale-policy-fingerprint")
+
+    result = await handle_workspace_file_inventory_job(
+        _job(root, scan, "stale-policy-fingerprint"),
+        db=db,
+        allowed_roots=[tmp_path],
+    )
+
+    updated = db.execute_query(
+        "SELECT state, diagnostics_json FROM workspace_file_inventory_scans WHERE scan_id = ?",
+        (scan["scan_id"],),
+    ).fetchone()
+    page = db.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=20)
+
+    assert result["state"] == "failed"
+    assert updated["state"] == "failed"
+    assert "ignore_policy_fingerprint_mismatch" in updated["diagnostics_json"]
+    assert page["items"] == []
+
+
+async def test_worker_unexpected_scan_error_finalizes_scan_failed(
+    db: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.services.workspace_file_inventory_jobs_worker as worker
+
+    root_path = tmp_path / "project"
+    root = _workspace_with_host_root(db, root_path)
+    policy = build_inventory_ignore_policy()
+    scan = _attached_scan(db, root, policy.fingerprint)
+
+    def _raise_scan_error(*args: object, **kwargs: object) -> object:
+        raise RuntimeError(f"scanner leaked {tmp_path}")
+
+    monkeypatch.setattr(worker, "scan_workspace_file_inventory", _raise_scan_error)
+
+    result = await handle_workspace_file_inventory_job(
+        _job(root, scan, policy.fingerprint),
+        db=db,
+        allowed_roots=[tmp_path],
+    )
+
+    updated = db.execute_query(
+        "SELECT state, diagnostics_json FROM workspace_file_inventory_scans WHERE scan_id = ?",
+        (scan["scan_id"],),
+    ).fetchone()
+    root_after = db.get_workspace_primary_root("ws-1")
+
+    assert result["state"] == "failed"
+    assert updated["state"] == "failed"
+    assert root_after["file_inventory_state"] == "failed"
+    assert "workspace_file_inventory_job_failed" in updated["diagnostics_json"]
+    assert str(tmp_path) not in updated["diagnostics_json"]
+
+
 async def test_worker_sandbox_root_without_mount_resolver_fails_closed(db: CharactersRAGDB) -> None:
     root = _workspace_with_sandbox_root(db)
     policy = build_inventory_ignore_policy()

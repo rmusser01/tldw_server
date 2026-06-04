@@ -150,7 +150,100 @@ def scan_workspace_file_inventory(
 
         try:
             with os.scandir(directory) as entries:
-                dir_entries = sorted(list(entries), key=lambda entry: entry.name)
+                for entry in entries:
+                    if _scan_timed_out(started_at, normalized_bounds):
+                        coverage_complete = False
+                        _add_diagnostic(
+                            diagnostics,
+                            normalized_bounds,
+                            code="scan_timeout",
+                            path_hint=parent_relative_path,
+                            message="Workspace file inventory scan time limit was reached.",
+                        )
+                        stop_scan = True
+                        break
+
+                    relative_path = _join_relative_path(parent_relative_path, entry.name)
+                    try:
+                        entry_is_dir = entry.is_dir(follow_symlinks=False)
+                    except OSError:
+                        entry_is_dir = False
+                    decision = should_ignore_inventory_path(
+                        relative_path,
+                        is_dir=entry_is_dir,
+                        policy=policy,
+                    )
+                    if decision.ignored:
+                        ignored_count += 1
+                        continue
+
+                    if len(relative_path) > normalized_bounds.max_path_length:
+                        coverage_complete = False
+                        _add_diagnostic(
+                            diagnostics,
+                            normalized_bounds,
+                            code="path_too_long",
+                            path_hint=relative_path,
+                            message="A path exceeded the inventory path length limit.",
+                        )
+                        continue
+
+                    entry_depth = depth + 1
+                    if entry_depth > normalized_bounds.max_depth:
+                        coverage_complete = False
+                        _add_diagnostic(
+                            diagnostics,
+                            normalized_bounds,
+                            code="scan_limit_reached",
+                            path_hint=relative_path,
+                            message="Workspace file inventory depth limit was reached.",
+                        )
+                        continue
+
+                    metadata = _entry_metadata(entry, relative_path)
+                    if metadata is None:
+                        coverage_complete = False
+                        _add_diagnostic(
+                            diagnostics,
+                            normalized_bounds,
+                            code="stat_failed",
+                            path_hint=relative_path,
+                            message="A path could not be inspected.",
+                        )
+                        continue
+
+                    if metadata["entry_kind"] == "file" and files_recorded >= normalized_bounds.max_files:
+                        coverage_complete = False
+                        _add_diagnostic(
+                            diagnostics,
+                            normalized_bounds,
+                            code="scan_limit_reached",
+                            path_hint=relative_path,
+                            message="Workspace file inventory file limit was reached.",
+                        )
+                        stop_scan = True
+                        break
+                    if (
+                        metadata["entry_kind"] == "directory"
+                        and directories_recorded >= normalized_bounds.max_directories
+                    ):
+                        coverage_complete = False
+                        _add_diagnostic(
+                            diagnostics,
+                            normalized_bounds,
+                            code="scan_limit_reached",
+                            path_hint=relative_path,
+                            message="Workspace file inventory directory limit was reached.",
+                        )
+                        stop_scan = True
+                        break
+
+                    items.append(metadata)
+                    if metadata["entry_kind"] == "directory":
+                        directories_recorded += 1
+                        stack.append((Path(entry.path), relative_path, entry_depth))
+                    elif metadata["entry_kind"] == "file":
+                        files_recorded += 1
         except PermissionError:
             coverage_complete = False
             _add_diagnostic(
@@ -171,101 +264,6 @@ def scan_workspace_file_inventory(
                 message="A directory could not be inspected.",
             )
             continue
-
-        for entry in dir_entries:
-            if _scan_timed_out(started_at, normalized_bounds):
-                coverage_complete = False
-                _add_diagnostic(
-                    diagnostics,
-                    normalized_bounds,
-                    code="scan_timeout",
-                    path_hint=parent_relative_path,
-                    message="Workspace file inventory scan time limit was reached.",
-                )
-                stop_scan = True
-                break
-
-            relative_path = _join_relative_path(parent_relative_path, entry.name)
-            try:
-                entry_is_dir = entry.is_dir(follow_symlinks=False)
-            except OSError:
-                entry_is_dir = False
-            decision = should_ignore_inventory_path(
-                relative_path,
-                is_dir=entry_is_dir,
-                policy=policy,
-            )
-            if decision.ignored:
-                ignored_count += 1
-                continue
-
-            if len(relative_path) > normalized_bounds.max_path_length:
-                coverage_complete = False
-                _add_diagnostic(
-                    diagnostics,
-                    normalized_bounds,
-                    code="path_too_long",
-                    path_hint=relative_path,
-                    message="A path exceeded the inventory path length limit.",
-                )
-                continue
-
-            entry_depth = depth + 1
-            if entry_depth > normalized_bounds.max_depth:
-                coverage_complete = False
-                _add_diagnostic(
-                    diagnostics,
-                    normalized_bounds,
-                    code="scan_limit_reached",
-                    path_hint=relative_path,
-                    message="Workspace file inventory depth limit was reached.",
-                )
-                continue
-
-            metadata = _entry_metadata(entry, relative_path)
-            if metadata is None:
-                coverage_complete = False
-                _add_diagnostic(
-                    diagnostics,
-                    normalized_bounds,
-                    code="stat_failed",
-                    path_hint=relative_path,
-                    message="A path could not be inspected.",
-                )
-                continue
-
-            if metadata["entry_kind"] == "file" and files_recorded >= normalized_bounds.max_files:
-                coverage_complete = False
-                _add_diagnostic(
-                    diagnostics,
-                    normalized_bounds,
-                    code="scan_limit_reached",
-                    path_hint=relative_path,
-                    message="Workspace file inventory file limit was reached.",
-                )
-                stop_scan = True
-                break
-            if (
-                metadata["entry_kind"] == "directory"
-                and directories_recorded >= normalized_bounds.max_directories
-            ):
-                coverage_complete = False
-                _add_diagnostic(
-                    diagnostics,
-                    normalized_bounds,
-                    code="scan_limit_reached",
-                    path_hint=relative_path,
-                    message="Workspace file inventory directory limit was reached.",
-                )
-                stop_scan = True
-                break
-
-            items.append(metadata)
-            if metadata["entry_kind"] == "directory":
-                directories_recorded += 1
-                stack.append((Path(entry.path), relative_path, entry_depth))
-            elif metadata["entry_kind"] == "file":
-                files_recorded += 1
 
     return _result(items, ignored_count, diagnostics, coverage_complete=coverage_complete)
 

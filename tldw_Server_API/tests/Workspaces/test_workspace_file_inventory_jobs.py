@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     WorkspaceFileInventoryEnqueueError,
     enqueue_workspace_file_inventory_scan_job,
 )
+import tldw_Server_API.app.core.Workspaces.file_inventory_jobs as file_inventory_jobs
 
 
 class _RecordingJobs:
@@ -44,6 +45,11 @@ class _RecordingJobs:
             if int(row["id"]) == int(job_id):
                 return row
         return None
+
+
+class _RaisingReloadJobs(_RecordingJobs):
+    def get_job(self, job_id: int) -> dict[str, Any] | None:
+        raise RuntimeError(f"reload failed for {job_id}")
 
 
 @pytest.fixture
@@ -172,6 +178,32 @@ def test_enqueue_failure_marks_scan_failed_and_next_enqueue_does_not_reuse_it(
     assert result["scan"]["scan_id"] != failed_scan["scan_id"]
     assert result["scan"]["state"] == "queued"
     assert result["scan"]["job_id"] == jobs.created_jobs[0]["id"]
+
+
+def test_enqueue_logs_reload_failure_without_hiding_created_job(
+    db: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _workspace_with_root(db, tmp_path / "project")
+    policy = build_inventory_ignore_policy()
+    warnings: list[str] = []
+    monkeypatch.setattr(file_inventory_jobs.logger, "warning", lambda message: warnings.append(str(message)))
+
+    result = enqueue_workspace_file_inventory_scan_job(
+        db=db,
+        workspace_id="ws-1",
+        root_id=root["root_id"],
+        root_version=int(root["version"]),
+        policy_fingerprint=policy.fingerprint,
+        requested_by="user-1",
+        owner_user_id="1",
+        job_manager=_RaisingReloadJobs(),
+    )
+
+    assert result["job"]["id"] == 100
+    assert result["scan"]["job_id"] == 100
+    assert warnings == ["Workspace file inventory job reload failed for job_id=100"]
 
 
 def test_enqueue_reuses_active_scan_only_when_job_id_exists(db: CharactersRAGDB, tmp_path: Path) -> None:

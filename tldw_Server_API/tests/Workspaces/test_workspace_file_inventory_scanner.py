@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -134,6 +135,70 @@ def test_scanner_ignores_paths_before_bounds_diagnostics(tmp_path: Path) -> None
     assert result.diagnostics == ()
     assert result.coverage_complete is True
     assert result.counts["ignored"] == 1
+
+
+@dataclass
+class _FakeStat:
+    st_size: int = 1
+    st_mtime_ns: int = 1
+    st_mode: int = 0o100644
+
+
+@dataclass
+class _FakeFileEntry:
+    name: str
+    path: str
+
+    def is_symlink(self) -> bool:
+        return False
+
+    def is_dir(self, *, follow_symlinks: bool = False) -> bool:
+        _ = follow_symlinks
+        return False
+
+    def stat(self, *, follow_symlinks: bool = False) -> _FakeStat:
+        _ = follow_symlinks
+        return _FakeStat()
+
+
+class _BoundedScandir:
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self.count = 0
+
+    def __enter__(self) -> "_BoundedScandir":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def __iter__(self) -> "_BoundedScandir":
+        return self
+
+    def __next__(self) -> _FakeFileEntry:
+        self.count += 1
+        if self.count > 2:
+            raise AssertionError("scanner materialized entries after file limit")
+        return _FakeFileEntry(name=f"file-{self.count}.txt", path=str(self.directory / f"file-{self.count}.txt"))
+
+
+def test_scanner_does_not_materialize_directory_entries_past_file_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.Workspaces.file_inventory_scanner as scanner
+
+    monkeypatch.setattr(scanner.os, "scandir", lambda directory: _BoundedScandir(Path(directory)))
+
+    result = scan_workspace_file_inventory(
+        tmp_path,
+        policy=build_inventory_ignore_policy(),
+        bounds=InventoryScanBounds(max_files=1, max_diagnostics=1),
+    )
+
+    assert [item["relative_path"] for item in result.items] == ["file-1.txt"]
+    assert result.coverage_complete is False
+    assert result.diagnostics[0]["code"] == "scan_limit_reached"
 
 
 def test_scanner_records_partial_diagnostics_for_directory_listing_failures(

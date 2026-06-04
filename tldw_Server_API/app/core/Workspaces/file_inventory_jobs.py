@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 WORKSPACE_JOBS_DOMAIN = "workspaces"
@@ -169,6 +171,7 @@ def _reload_job(manager: Any, created_job: dict[str, Any]) -> dict[str, Any]:
     try:
         return manager.get_job(job_id) or created_job
     except Exception:
+        logger.warning(f"Workspace file inventory job reload failed for job_id={job_id}")
         return created_job
 
 

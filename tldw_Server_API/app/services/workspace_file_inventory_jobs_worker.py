@@ -112,35 +112,52 @@ def _handle_workspace_file_inventory_job_sync(
         )
 
     db.mark_workspace_file_inventory_scanning(scan_id)
-    policy = build_inventory_ignore_policy()
-    scan_result = scan_workspace_file_inventory(
-        resolution.local_path,
-        policy=policy,
-        bounds=InventoryScanBounds(),
-    )
-    state = "current" if scan_result.coverage_complete else "partial"
-    items_written = db.replace_workspace_file_inventory_items(
-        workspace_id,
-        root_id,
-        scan_id,
-        list(scan_result.items),
-        scan_coverage_complete=scan_result.coverage_complete,
-    )
-    completed = db.complete_workspace_file_inventory_scan(
-        scan_id,
-        state,
-        scan_result.counts,
-        list(scan_result.diagnostics),
-        root_snapshot_token=resolution.root_snapshot_token,
-    )
-    return {
-        "scan_id": scan_id,
-        "state": completed["state"],
-        "counts": scan_result.counts,
-        "diagnostics": list(scan_result.diagnostics),
-        "items_written": items_written,
-        "ignore_policy_fingerprint": policy_fingerprint,
-    }
+    try:
+        policy = build_inventory_ignore_policy()
+        if policy.fingerprint != policy_fingerprint:
+            return _complete_failed_scan(
+                db,
+                scan_id=scan_id,
+                code="ignore_policy_fingerprint_mismatch",
+                message="Workspace file inventory ignore policy changed before scan started.",
+            )
+
+        scan_result = scan_workspace_file_inventory(
+            resolution.local_path,
+            policy=policy,
+            bounds=InventoryScanBounds(),
+        )
+        state = "current" if scan_result.coverage_complete else "partial"
+        items_written = db.replace_workspace_file_inventory_items(
+            workspace_id,
+            root_id,
+            scan_id,
+            list(scan_result.items),
+            scan_coverage_complete=scan_result.coverage_complete,
+        )
+        completed = db.complete_workspace_file_inventory_scan(
+            scan_id,
+            state,
+            scan_result.counts,
+            list(scan_result.diagnostics),
+            root_snapshot_token=resolution.root_snapshot_token,
+        )
+        return {
+            "scan_id": scan_id,
+            "state": completed["state"],
+            "counts": scan_result.counts,
+            "diagnostics": list(scan_result.diagnostics),
+            "items_written": items_written,
+            "ignore_policy_fingerprint": policy_fingerprint,
+        }
+    except Exception:
+        logger.warning(f"Workspace file inventory scan failed for scan_id={scan_id}")
+        return _complete_failed_scan(
+            db,
+            scan_id=scan_id,
+            code="workspace_file_inventory_job_failed",
+            message="Workspace file inventory scan failed.",
+        )
 
 
 def _validate_job_payload(job: dict[str, Any]) -> dict[str, Any]:
