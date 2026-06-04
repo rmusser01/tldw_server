@@ -193,6 +193,33 @@ def test_cdp_browser_exact_target_is_documented() -> None:
     )
 
 
+def test_browser_capable_presets_include_native_cdp_read_tools() -> None:
+    browser_read_tools = {
+        "browser.status",
+        "browser.pages.list",
+        "browser.snapshot",
+        "browser.page_state",
+        "browser.screenshot",
+        "browser.console",
+        "browser.network",
+    }
+
+    for preset_id in ("frontend-engineer", "qa-engineer", "sdet"):
+        preset = presets.get_builtin_preset(preset_id)
+        assert preset is not None  # nosec B101
+
+        tooling = preset.profile.metadata["tooling"]
+        policy_caps = set(preset.profile.policy_document.capabilities)
+        assert browser_read_tools <= set(tooling["enabled_tools"])  # nosec B101
+        assert {"browser.inspect", "browser.debug"} <= set(tooling["enabled_capabilities"])  # nosec B101
+        assert "browser.inspect" in policy_caps  # nosec B101
+        for capability in {"browser.debug", "screenshots.capture", "app_state.read"}:
+            if capability in tooling["enabled_capabilities"]:
+                assert capability in policy_caps  # nosec B101
+        assert "browser" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
+        assert "browser" not in tooling["progressive_disclosure"]["deferred_categories"]  # nosec B101
+
+
 def test_recommendation_catalog_patch_does_not_grant_authority() -> None:
     from mcp_unified.profiles.tooling import merge_tooling_recommendations
 

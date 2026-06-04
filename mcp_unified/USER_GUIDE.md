@@ -127,6 +127,58 @@ For native browser inspection, prefer the Chrome DevTools Protocol path first.
 The stable exact target for that path is
 `ChromeDevTools/chrome-devtools-mcp`.
 
+### Native CDP Browser Inspection
+
+The `tldw-server` MCP host can expose optional read-only browser inspection
+tools through Chrome DevTools Protocol. This path is intended for Frontend
+Engineer, QA Engineer, and SDET profiles that need to inspect a running app
+without granting browser interaction or arbitrary JavaScript execution.
+
+Enable the module by setting a local CDP debugger URL:
+
+```bash
+export MCP_BROWSER_CDP_URL=http://127.0.0.1:9222
+```
+
+You can also enable the module explicitly:
+
+```bash
+export MCP_ENABLE_BROWSER_CDP_MODULE=true
+```
+
+If `MCP_BROWSER_CDP_URL` is set, the module auto-registers unless explicitly
+disabled:
+
+```bash
+export MCP_ENABLE_BROWSER_CDP_MODULE=false
+```
+
+By default, the CDP endpoint must use a literal loopback host such as
+`localhost`, `127.0.0.1`, or `::1`. Non-loopback CDP endpoints require an
+operator-owned override:
+
+```bash
+export MCP_BROWSER_CDP_ALLOW_NON_LOOPBACK=true
+```
+
+Available native read tools:
+
+- `browser.status` - report configured/reachable CDP availability.
+- `browser.pages.list` - list inspectable page targets.
+- `browser.snapshot` - return a bounded accessibility-tree snapshot.
+- `browser.page_state` - return fixed URL/title/readiness/viewport state.
+- `browser.screenshot` - capture a bounded base64 screenshot payload.
+- `browser.console` - observe console/log events during a bounded window.
+- `browser.network` - observe network events during a bounded window.
+
+These tools do not accept CDP URLs, navigation targets, selectors, custom
+scripts, expressions, clicks, typing, reloads, focus changes, or storage
+mutation arguments. Screenshot, snapshot, console, and network reads are bounded
+by module settings such as `MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES`,
+`MCP_BROWSER_CDP_MAX_EVENTS`, `MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS`,
+`MCP_BROWSER_CDP_MAX_OBSERVATION_WINDOW_MS`, and
+`MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES`.
+
 ## 4. Register External Servers
 
 External servers describe upstream MCP servers that the gateway can manage and
