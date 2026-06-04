@@ -168,6 +168,20 @@ def test_scanner_stops_at_file_limit_and_reports_bounded_partial_result(tmp_path
     assert all(not item["relative_path"].startswith("/") for item in result.items)
 
 
+def test_scanner_zero_second_timeout_disables_timeout_check(tmp_path: Path) -> None:
+    (tmp_path / "notes.txt").write_text("metadata only", encoding="utf-8")
+
+    result = scan_workspace_file_inventory(
+        tmp_path,
+        policy=build_inventory_ignore_policy(),
+        bounds=InventoryScanBounds(max_seconds=0.0),
+    )
+
+    assert [item["relative_path"] for item in result.items] == ["notes.txt"]
+    assert result.diagnostics == ()
+    assert result.coverage_complete is True
+
+
 def test_scanner_redacts_absolute_paths_from_diagnostics(tmp_path: Path) -> None:
     result = scan_workspace_file_inventory(
         tmp_path / "missing",

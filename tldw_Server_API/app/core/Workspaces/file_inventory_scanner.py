@@ -354,7 +354,7 @@ def _add_diagnostic(
 
 
 def _scan_timed_out(started_at: float, bounds: InventoryScanBounds) -> bool:
-    return bounds.max_seconds == 0.0 or time.monotonic() - started_at > bounds.max_seconds
+    return bounds.max_seconds > 0.0 and time.monotonic() - started_at > bounds.max_seconds
 
 
 def _join_relative_path(parent: str, name: str) -> str:

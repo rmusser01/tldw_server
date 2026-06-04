@@ -213,8 +213,16 @@ def _rule_matches(
     pattern = rule.match_pattern
     if rule.directory_only:
         if rule.anchored:
-            return relative_path == pattern or relative_path.startswith(f"{pattern}/")
-        return any(fnmatchcase(segment, pattern) for segment in segments)
+            if relative_path == pattern:
+                return is_dir
+            return relative_path.startswith(f"{pattern}/")
+        if "/" in pattern:
+            if relative_path == pattern or relative_path.endswith(f"/{pattern}"):
+                return is_dir
+            return relative_path.startswith(f"{pattern}/") or f"/{pattern}/" in relative_path
+        if is_dir and fnmatchcase(segments[-1], pattern):
+            return True
+        return any(fnmatchcase(segment, pattern) for segment in segments[:-1])
 
     if rule.anchored:
         return (

@@ -56,6 +56,27 @@ def test_simple_gitignore_subset_matches_anchored_unanchored_and_directory_rules
     assert should_ignore_inventory_path("src/site-build/index.js", is_dir=False, policy=policy).ignored is False
 
 
+def test_directory_only_patterns_do_not_ignore_files_with_same_name() -> None:
+    policy = build_inventory_ignore_policy(
+        gitignore_texts=[
+            (
+                ".gitignore",
+                """
+                logs/
+                /build/
+                """,
+            )
+        ]
+    )
+
+    assert should_ignore_inventory_path("logs", is_dir=False, policy=policy).ignored is False
+    assert should_ignore_inventory_path("logs", is_dir=True, policy=policy).reason == "gitignore:logs/"
+    assert should_ignore_inventory_path("logs/app.log", is_dir=False, policy=policy).reason == "gitignore:logs/"
+    assert should_ignore_inventory_path("build", is_dir=False, policy=policy).ignored is False
+    assert should_ignore_inventory_path("build", is_dir=True, policy=policy).reason == "gitignore:/build/"
+    assert should_ignore_inventory_path("build/index.js", is_dir=False, policy=policy).reason == "gitignore:/build/"
+
+
 def test_workspace_patterns_are_included_in_policy() -> None:
     policy = build_inventory_ignore_policy(workspace_patterns=["private/"])
 
