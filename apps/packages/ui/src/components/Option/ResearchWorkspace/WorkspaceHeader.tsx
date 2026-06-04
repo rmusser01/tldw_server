@@ -94,6 +94,7 @@ import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
 import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
+import { WORKSPACES_PATH } from "@/routes/route-paths"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -524,6 +525,11 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     // Save current workspace before navigating
     saveCurrentWorkspace()
     navigate("/")
+  }
+
+  const handleOpenWorkspacesManager = () => {
+    saveCurrentWorkspace()
+    navigate(WORKSPACES_PATH)
   }
 
   const handleOpenAgentTaskModal = () => {
@@ -1463,6 +1469,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             ),
             onClick: handleOpenWorkspaceBrowser
           },
+          {
+            key: "manage-server-workspaces",
+            icon: <Settings className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.manageServerWorkspaces",
+              "Manage server Workspaces"
+            ),
+            onClick: handleOpenWorkspacesManager
+          },
           { type: "divider" as const, key: "divider-view-all" }
         ]
       : []),
@@ -1476,6 +1491,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   // ── Settings kebab menu: import/export, templates, tools, navigation ──
   const workspaceSettingsItems: MenuProps["items"] = [
+    {
+      key: "manage-workspaces",
+      icon: <Settings className="h-4 w-4" />,
+      label: t(
+        "playground:workspace.manageInWorkspaces",
+        "Manage in Workspaces"
+      ),
+      onClick: handleOpenWorkspacesManager
+    },
+    { type: "divider" as const, key: "divider-workspaces-manager" },
     ...(workspaceId
       ? [
           {

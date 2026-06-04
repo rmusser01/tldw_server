@@ -570,6 +570,23 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
   })
 
+  it("opens the canonical Workspaces manager from the Workspaces dropdown", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    fireEvent.click(await screen.findByText("Manage server Workspaces"))
+
+    expect(mockSaveCurrentWorkspace).toHaveBeenCalledTimes(1)
+    expect(mockNavigate).toHaveBeenCalledWith("/workspaces")
+  })
+
   it("switches workspace when selecting from view-all modal", async () => {
     render(
       <WorkspaceHeader
@@ -678,6 +695,23 @@ describe("WorkspaceHeader workspace browser modal", () => {
       expect(mockCreateWorkspaceExportZipBlob).toHaveBeenCalledTimes(1)
       expect(mockCreateWorkspaceExportZipFilename).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("opens the canonical Workspaces manager from the settings menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Manage in Workspaces"))
+
+    expect(mockSaveCurrentWorkspace).toHaveBeenCalledTimes(1)
+    expect(mockNavigate).toHaveBeenCalledWith("/workspaces")
   })
 
   it("raises split workspace intent from the settings menu", async () => {

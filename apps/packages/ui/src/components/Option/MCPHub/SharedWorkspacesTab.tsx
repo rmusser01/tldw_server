@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Button, Card, Empty, List, Space, Tag, Typography } from "antd"
 import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
+import { WORKSPACES_PATH } from "@/routes/route-paths"
 
 import {
   createSharedWorkspace,
@@ -141,11 +142,14 @@ export const SharedWorkspacesTab = ({
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      <Typography.Text type="secondary">
-        Shared workspaces are admin-managed trusted absolute roots for team, org, and global path
-        policies. Workspace sets can reference their ids without depending on user-local workspace
-        mappings.
-      </Typography.Text>
+      <Space align="start" wrap style={{ justifyContent: "space-between", width: "100%" }}>
+        <Typography.Text type="secondary" style={{ maxWidth: 760 }}>
+          Shared Workspaces are MCP Hub path-trust records for team, org, and global
+          absolute roots. Create or edit Research and Project Workspace metadata in the
+          canonical Workspaces manager.
+        </Typography.Text>
+        <Button href={`#${WORKSPACES_PATH}`}>Manage canonical Workspaces</Button>
+      </Space>
       {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
 
       <Button type="primary" onClick={() => setCreateOpen(true)}>
