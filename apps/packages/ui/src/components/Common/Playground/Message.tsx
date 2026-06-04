@@ -1205,11 +1205,12 @@ export const PlaygroundMessage = (props: Props) => {
     props.isStreaming &&
     !errorPayload &&
     !renderGreetingMarkdown
+  const isActiveStreamingMessage = props.isStreaming && isLastMessage
   const enableAssistantMermaidDiagrams =
     props.isBot &&
     !isSystemMessage &&
     renderMermaidDiagrams !== false &&
-    !props.isStreaming
+    !isActiveStreamingMessage
   const dynamicUIEnvelope = normalizeDynamicUIEnvelope(
     props.metadataExtra?.dynamic_ui
   )

@@ -63,6 +63,15 @@ Verification:
 - Regression: bunx vitest run src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Common/Playground/__tests__/messageSuspenseGuard.test.ts passed (2 files, 7 tests).
 - Diff check passed for the Task 5 touched chat renderer and test files.
 - Bandit skipped: frontend TypeScript-only change.
+
+Task 5 code-review follow-up completed: Mermaid suppression now applies only to the active streaming assistant row in Playground and QuickChat. Older completed assistant rows keep Mermaid enabled while a later response streams.
+
+Verification:
+- Red: bunx vitest run src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx src/components/Common/QuickChatHelper/__tests__/QuickChatMessage.mermaid.test.tsx failed because older completed assistant rows received enableMermaidDiagrams: false while global streaming was true.
+- Green: bunx vitest run src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx src/components/Common/QuickChatHelper/__tests__/QuickChatMessage.mermaid.test.tsx passed (2 files, 12 tests).
+- Regression: bunx vitest run src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Common/Playground/__tests__/messageSuspenseGuard.test.ts passed (2 files, 7 tests).
+- Diff check passed for Message.tsx, QuickChatMessage.tsx, and the two Mermaid rendering test files.
+- Bandit skipped: frontend TypeScript-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

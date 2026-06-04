@@ -69,6 +69,24 @@ describe("QuickChatMessage Mermaid rendering gates", () => {
     expect(markdownCalls[0]?.enableMermaidDiagrams).not.toBe(true)
   })
 
+  it("keeps Mermaid enabled for an older completed assistant message while another row streams", async () => {
+    render(
+      <QuickChatMessage
+        message={assistantMessage}
+        isStreaming
+        isLast={false}
+      />
+    )
+
+    await screen.findByTestId("mock-markdown")
+
+    expect(markdownCalls[0]).toEqual(
+      expect.objectContaining({
+        enableMermaidDiagrams: true
+      })
+    )
+  })
+
   it("does not render Markdown for user messages", async () => {
     render(
       <QuickChatMessage

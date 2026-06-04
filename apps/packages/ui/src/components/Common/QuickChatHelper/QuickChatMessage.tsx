@@ -67,7 +67,7 @@ export const QuickChatMessage: React.FC<Props> = ({
                   enableMermaidDiagrams={
                     message.role !== "user" &&
                     renderMermaidDiagrams !== false &&
-                    !isStreaming
+                    !showStreamingCursor
                   }
                 />
               </React.Suspense>

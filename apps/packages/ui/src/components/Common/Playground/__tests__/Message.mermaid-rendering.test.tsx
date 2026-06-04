@@ -320,6 +320,25 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
     expect(markdownCalls).toHaveLength(0)
   })
 
+  it("keeps Mermaid enabled for an older completed assistant message while another row streams", async () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        currentMessageIndex={0}
+        totalMessages={2}
+        isStreaming
+      />
+    )
+
+    await screen.findByTestId("mock-markdown")
+
+    expect(markdownCalls[0]).toEqual(
+      expect.objectContaining({
+        enableMermaidDiagrams: true
+      })
+    )
+  })
+
   it("does not enable Mermaid on user messages", async () => {
     render(
       <PlaygroundMessage
