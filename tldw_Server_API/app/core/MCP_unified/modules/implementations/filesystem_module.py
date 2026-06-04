@@ -13,6 +13,7 @@ Exposes:
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import os
 import stat as stat_module
 from contextlib import suppress
@@ -241,6 +242,26 @@ class FilesystemModule(BaseModule):
                 bool(args.get("follow_symlinks", False)),
             )
 
+        if tool_name == "fs.glob":
+            base_path = str(args.get("base_path") or ".")
+            base = self._resolve_workspace_path(workspace_root, base_path)
+            pattern = self._normalize_portable_pattern(str(args.get("pattern")))
+            self._reject_unsafe_pattern(pattern)
+            limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("glob_result_limit", 500))
+            return await asyncio.to_thread(
+                self._glob_paths,
+                workspace_root,
+                base,
+                pattern,
+                bool(args.get("include_hidden", False)),
+                bool(args.get("include_files", True)),
+                bool(args.get("include_directories", True)),
+                bool(args.get("follow_symlinks", False)),
+                bool(args.get("case_sensitive", True)),
+                limit,
+                self._setting_positive_int("glob_walk_entry_limit", 50_000),
+            )
+
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def _list_entry_limit(self) -> int:
@@ -401,6 +422,20 @@ class FilesystemModule(BaseModule):
         if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
             raise ValueError(f"{key} must be a positive integer")
 
+    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
+        """Sanitize filesystem inputs while allowing portable glob syntax."""
+
+        if _depth > 20:
+            raise ValueError("Input too deeply nested")
+
+        if isinstance(input_data, str):
+            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
+        if isinstance(input_data, dict):
+            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
+        if isinstance(input_data, list):
+            return [self.sanitize_input(v, _depth + 1) for v in input_data]
+        return input_data
+
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
         metadata_map = dict(metadata) if isinstance(metadata, dict) else {}
@@ -464,6 +499,59 @@ class FilesystemModule(BaseModule):
         return resolved
 
     @staticmethod
+    def _bounded_positive_int(value: Any, default: int) -> int:
+        if value is None:
+            return max(1, int(default))
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError("limit must be a positive integer")
+        return value
+
+    @staticmethod
+    def _normalize_portable_pattern(pattern: str) -> str:
+        normalized = pattern.strip().replace("\\", "/")
+        while "//" in normalized and not normalized.startswith("//"):
+            normalized = normalized.replace("//", "/")
+        return normalized
+
+    @staticmethod
+    def _reject_unsafe_pattern(pattern: str) -> None:
+        if not pattern:
+            raise ValueError("unsafe pattern: pattern is required")
+        if pattern.startswith("/") or pattern.startswith("//"):
+            raise ValueError("unsafe pattern: absolute patterns are not allowed")
+        if len(pattern) >= 2 and pattern[1] == ":" and pattern[0].isalpha():
+            raise ValueError("unsafe pattern: drive-qualified patterns are not allowed")
+        if any(part == ".." for part in pattern.split("/")):
+            raise ValueError("unsafe pattern: parent traversal is not allowed")
+
+    @staticmethod
+    def _portable_pattern_matches(path: str, pattern: str, *, case_sensitive: bool) -> bool:
+        candidate = path if case_sensitive else path.lower()
+        patterns = FilesystemModule._expand_double_star_zero_dir_patterns(
+            pattern if case_sensitive else pattern.lower()
+        )
+        return any(fnmatch.fnmatchcase(candidate, candidate_pattern) for candidate_pattern in patterns)
+
+    @staticmethod
+    def _expand_double_star_zero_dir_patterns(pattern: str) -> set[str]:
+        patterns = {pattern}
+        queue = [pattern]
+        while queue:
+            current = queue.pop()
+            start = current.find("**/")
+            while start != -1:
+                collapsed = f"{current[:start]}{current[start + 3:]}"
+                if collapsed not in patterns:
+                    patterns.add(collapsed)
+                    queue.append(collapsed)
+                start = current.find("**/", start + 1)
+        return patterns
+
+    @staticmethod
+    def _is_hidden_relative_path(path: str) -> bool:
+        return any(part.startswith(".") and part not in {"."} for part in path.split("/"))
+
+    @staticmethod
     def _stat_path(workspace_root: Path, target: Path, follow_symlinks: bool) -> dict[str, Any]:
         if not target.exists() and not target.is_symlink():
             raise FileNotFoundError(f"path not found: {target}")
@@ -500,6 +588,103 @@ class FilesystemModule(BaseModule):
         if target_within_workspace is not None:
             record["target_within_workspace"] = target_within_workspace
         return record
+
+    @staticmethod
+    def _glob_paths(
+        workspace_root: Path,
+        base: Path,
+        pattern: str,
+        include_hidden: bool,
+        include_files: bool,
+        include_directories: bool,
+        follow_symlinks: bool,
+        case_sensitive: bool,
+        limit: int,
+        walk_entry_limit: int,
+    ) -> dict[str, Any]:
+        if not base.exists():
+            raise FileNotFoundError(f"path not found: {base}")
+        if not base.is_dir():
+            raise NotADirectoryError(f"path is not a directory: {base}")
+
+        matches: list[dict[str, Any]] = []
+        visited_entries = 0
+        walk_truncated = False
+        seen_dirs: set[Path] = {base.resolve(strict=False)}
+
+        for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+            current_root = Path(root)
+            dirnames.sort()
+            filenames.sort()
+
+            for dirname in list(dirnames):
+                dir_path = current_root / dirname
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    dirnames.remove(dirname)
+                    continue
+                if dir_path.is_symlink():
+                    resolved_dir = dir_path.resolve(strict=False)
+                    if follow_symlinks:
+                        if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        if resolved_dir in seen_dirs:
+                            dirnames.remove(dirname)
+                            continue
+                        seen_dirs.add(resolved_dir)
+                    else:
+                        dirnames.remove(dirname)
+
+            candidates: list[tuple[Path, str]] = [(current_root / dirname, "directory") for dirname in dirnames]
+            candidates.extend((current_root / filename, "file") for filename in filenames)
+
+            for candidate, candidate_kind in candidates:
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    continue
+                is_symlink = candidate.is_symlink()
+                if is_symlink:
+                    candidate_type = "symlink"
+                else:
+                    candidate_type = candidate_kind
+
+                include_candidate = (
+                    (candidate_kind == "file" and include_files)
+                    or (candidate_kind == "directory" and include_directories)
+                )
+                if not include_candidate:
+                    continue
+                if not FilesystemModule._portable_pattern_matches(rel_path, pattern, case_sensitive=case_sensitive):
+                    continue
+
+                record: dict[str, Any] = {
+                    "path": rel_path,
+                    "type": candidate_type,
+                }
+                if candidate_kind == "file":
+                    with suppress(OSError):
+                        record["size"] = candidate.stat(follow_symlinks=False).st_size
+                matches.append(record)
+
+            if walk_truncated:
+                break
+
+        matches.sort(key=lambda item: str(item.get("path") or ""))
+        limited_matches = matches[:limit]
+        remaining_count = max(0, len(matches) - len(limited_matches))
+        return {
+            "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "pattern": pattern,
+            "matches": limited_matches,
+            "truncated": walk_truncated or remaining_count > 0,
+            "remaining_count": remaining_count,
+        }
 
     @staticmethod
     def _list_directory(workspace_root: Path, target: Path, entry_limit: int) -> dict[str, Any]:

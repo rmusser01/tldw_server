@@ -427,6 +427,164 @@ async def test_filesystem_stat_symlink_policy_does_not_leak_targets(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_filesystem_glob_matches_sorted_paths_and_normalizes_patterns(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    package_dir = workspace_root / "pkg"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "app.py").write_text("print('root')", encoding="utf-8")
+    (package_dir / "app.py").write_text("print('pkg')", encoding="utf-8")
+    (package_dir / "README.md").write_text("# docs", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    result = await mod.execute_tool("fs.glob", {"pattern": "**/*.py"}, context=context)
+    backslash_result = await mod.execute_tool("fs.glob", {"pattern": r"**\*.py"}, context=context)
+
+    assert [match["path"] for match in result["matches"]] == ["app.py", "pkg/app.py"]  # nosec B101
+    assert [match["path"] for match in backslash_result["matches"]] == ["app.py", "pkg/app.py"]  # nosec B101
+    assert result["base_path"] == "."  # nosec B101
+    assert result["pattern"] == "**/*.py"  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_case_hidden_and_limit_behavior(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    hidden_dir = workspace_root / ".secret"
+    hidden_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "App.PY").write_text("print('mixed')", encoding="utf-8")
+    (workspace_root / "visible.py").write_text("print('visible')", encoding="utf-8")
+    (workspace_root / ".hidden.py").write_text("print('hidden')", encoding="utf-8")
+    (hidden_dir / "nested.py").write_text("print('nested')", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-hidden",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    sensitive = await mod.execute_tool("fs.glob", {"pattern": "**/*.py"}, context=context)
+    insensitive = await mod.execute_tool(
+        "fs.glob",
+        {"pattern": "**/*.py", "case_sensitive": False},
+        context=context,
+    )
+    hidden = await mod.execute_tool(
+        "fs.glob",
+        {"pattern": "**/*.py", "case_sensitive": False, "include_hidden": True},
+        context=context,
+    )
+    limited = await mod.execute_tool(
+        "fs.glob",
+        {"pattern": "**/*.py", "case_sensitive": False, "include_hidden": True, "limit": 2},
+        context=context,
+    )
+
+    assert [match["path"] for match in sensitive["matches"]] == ["visible.py"]  # nosec B101
+    assert [match["path"] for match in insensitive["matches"]] == ["App.PY", "visible.py"]  # nosec B101
+    assert [match["path"] for match in hidden["matches"]] == [  # nosec B101
+        ".hidden.py",
+        ".secret/nested.py",
+        "App.PY",
+        "visible.py",
+    ]
+    assert limited["truncated"] is True  # nosec B101
+    assert limited["remaining_count"] == 2  # nosec B101
+    assert len(limited["matches"]) == 2  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_rejects_unsafe_patterns(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-unsafe",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    for pattern in ("/tmp/*", "C:/tmp/*", "//server/share/*", "../*"):
+        with pytest.raises(ValueError, match="unsafe pattern"):
+            await mod.execute_tool("fs.glob", {"pattern": pattern}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_caps_walk_and_rejects_outside_symlink_dirs(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    for index in range(5):
+        (docs_dir / f"file-{index}.py").write_text("x", encoding="utf-8")
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.py").write_text("secret", encoding="utf-8")
+    link_path = workspace_root / "outside-link"
+    try:
+        link_path.symlink_to(outside_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"glob_walk_entry_limit": 2}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(
+        request_id="req-filesystem-glob-cap",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    capped = await mod.execute_tool("fs.glob", {"pattern": "**/*.py", "base_path": "docs"}, context=context)
+    no_follow = await mod.execute_tool("fs.glob", {"pattern": "**/*.py"}, context=context)
+
+    assert capped["truncated"] is True  # nosec B101
+    assert len(capped["matches"]) <= 2  # nosec B101
+    assert "outside-link/secret.py" not in [match["path"] for match in no_follow["matches"]]  # nosec B101
+    with pytest.raises(PermissionError, match="outside"):
+        await mod.execute_tool("fs.glob", {"pattern": "**/*.py", "follow_symlinks": True}, context=context)
+
+
+@pytest.mark.asyncio
 async def test_protocol_rejects_unknown_fs_read_text_arguments(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"
