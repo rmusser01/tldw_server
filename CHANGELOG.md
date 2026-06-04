@@ -8,10 +8,48 @@ and this project adheres to Some kind of Versioning
 
 ## [Unreleased]
 
+> Rollup coverage: this entry covers the 921 PR-numbered merge/squash
+> commits present on `dev` after the `0.1.31` changelog push
+> (`42d9c31b0b`, 2026-04-19) through PR #2255. That includes older
+> backfilled branch merges (#861, #961, #971, #1072) plus the main
+> post-release branch sequence from PR #1101 onward.
+
 ### Added
+
+- **Sandbox, MCP Gateway, And Native CodeGraph Expansion** — Added the
+  VZ Linux real-execution stack, helper lifecycle management, operator image
+  store, runtime capability inventories, network-policy admission metadata,
+  cleanup/recovery contracts, native CodeGraph extractors and indexing modes,
+  and the staged MCP Unified package/gateway/external-runtime architecture with
+  profile presets, catalog loading, stdio transports, CLI support, admin
+  configuration, standalone extras, and release-readiness gates.
+- **Research, Knowledge, And Study Workflow Expansion** — Added the Chat
+  Workspace WebUI, research-workspace service capabilities and migration
+  status flows, Deep Research literature launch and bundle import/return
+  handoffs, flashcards extension capture/generation/review/template workflows,
+  flashcard hierarchy/dashboard/session-history surfaces, notes folder/source
+  closeouts, quick-ingest validation/offline-progress/result handoffs, and
+  study-suggestion product-state coverage.
+- **Onboarding, Provider, And Runtime Admin Surfaces** — Added public
+  onboarding profile helpers, local-model/confidence/recovery flows,
+  setup-readiness closeouts, `llama.cpp` admin configuration and model
+  inventory diagnostics, provider-key settings, persona/character-card
+  documentation, companion-home shortcuts, and ACP/Codex workspace diagnostics.
 
 ### Changed
 
+- **Backend Architecture And API Contract Modularization** — Continued the
+  router-group, dependency, response-envelope, pagination, storage-route,
+  API-versioning, OpenAPI-contract, ChaChaNotes/persona delegation, worker
+  lifecycle, and job/scheduler registration migrations so large modules now
+  rely more heavily on explicit route groups, typed helpers, lifecycle
+  inventories, and smaller package boundaries.
+- **Design-System And WebUI UX Migration** — Migrated chat, playground,
+  prompt studio, evaluations, flashcards, dictionaries, integrations, workflow
+  editor, data tables, provider keys, monitoring/admin, and research-workspace
+  states toward the shared design-system alert/status primitives, while
+  rebaselining chat rails, sticky composer behavior, sidebar tools, first-run
+  readiness, and visual QA expectations.
 - Expanded ACP release-signoff evidence for permission denial, reconnect, and
   recovery paths with deterministic frontend hook coverage and a readiness
   addendum that separates automated evidence from live downstream-agent caveats.
@@ -27,6 +65,23 @@ and this project adheres to Some kind of Versioning
   retention is not yet a release-certified claim.
 
 ### Fixed
+
+- **CI, Dependency, And Type-Check Reliability** — Hardened the PR validation
+  stack with coverage-ratchet baselines, SBOM and package-build fixes,
+  action/dependency updates, Playwright/browser gate stabilization, frontend
+  TypeScript baseline reductions, full-suite flake remediation, pre-commit and
+  CodeQL follow-ups, and targeted e2e-smoke/watchlists/playground route fixes.
+- **Security, Auth, And Runtime Safety Hardening** — Tightened auth dependency
+  aliases, permission guards, onboarding secret handling, provider URL
+  validation, API-key/log redaction, MCP catalog validation, sandbox helper
+  trust boundaries, SSRF/network-policy handling, Starlette CVE pins, and
+  clear-text E2E auth CodeQL suppressions for test-only browser storage sinks.
+- **Product Workflow Stabilization** — Fixed research-workspace migration and
+  source readiness issues, flashcard import/review/re-rate handoffs, quick
+  ingest routing and estimate behavior, chat response failure copy and
+  persistent error banners, notes remediation follow-ups, Deep Research bundle
+  import hardening, and duplicate workspace route registrations after the
+  dev/main integration correction for PR #1982.
 
 ### Removed
 
