@@ -291,35 +291,12 @@ Add tests for:
 - `queueWorkspaceFileInventoryScan`
 - `getWorkspaceFileInventoryStatus`
 - `getWorkspaceFileInventoryItems`
-- `getWorkspaceOperation`
-- `provisionWorkspaceSandboxRoot`
+- current Workspace source, artifact, and note sub-resource methods
 
-Example:
-
-```ts
-it("uses the canonical operation status endpoint", async () => {
-  mocks.bgRequest.mockResolvedValue({
-    operation_id: "op-1",
-    workspace_id: "ws-1",
-    command: "provision_sandbox_root",
-    status: "running",
-    started_at: "2026-06-04T00:00:00Z",
-    updated_at: "2026-06-04T00:00:01Z",
-    retryable: true,
-    diagnostics: {},
-    poll_href: "/api/v1/workspaces/ws-1/operations/op-1"
-  })
-
-  await workspaceApiMethods.getWorkspaceOperation("ws-1", "op-1")
-
-  expect(mocks.bgRequest).toHaveBeenCalledWith(
-    expect.objectContaining({
-      path: "/api/v1/workspaces/ws-1/operations/op-1",
-      method: "GET"
-    })
-  )
-})
-```
+Do not add callables for `GET /operations/{operation_id}` or
+`POST /roots/primary/sandbox-volume` in Task 2. Those backend routes land in
+Task 4, and the frontend callables are added with the Project root panel slice
+after the backend contract exists.
 
 - [ ] **Step 2: Run client tests and verify they fail**
 
@@ -336,9 +313,10 @@ Expected: FAIL because methods/types are missing.
 Update `workspace-api.ts`:
 
 - Add `workspace_profile` to `WorkspaceApiResponse`.
-- Add `WorkspaceRootsResponse`, `WorkspaceRootResponse`, `WorkspaceOperationResponse`, `WorkspaceSandboxRootProvisionRequest`, and `WorkspaceSandboxRootProvisionResponse`.
+- Add `WorkspaceRootsResponse`, `WorkspaceRootResponse`, and `WorkspaceOperationResponse` for `context.active_operations`.
 - Add methods listed in Step 1.
-- Encode `workspaceId`, `rootId`, and `operationId` path parts.
+- Encode backend-valid path segment IDs and reject slash-delimited IDs that
+  FastAPI segment routes cannot match as a single parameter.
 
 - [ ] **Step 4: Add normalized manager model helpers**
 
@@ -803,6 +781,8 @@ Implement:
 
 - profile upgrade action via `patchWorkspace({ workspace_profile: "project" })`
 - host-local attach form with `expected_workspace_version`
+- frontend client methods for `GET /operations/{operation_id}` and
+  `POST /roots/primary/sandbox-volume`, backed by Task 4 endpoint tests
 - sandbox-managed form with runtime/display name and idempotency key generation
 - operation polling with exponential backoff capped at a few seconds
 - retry/remediation copy for `not_configured`, `unavailable`, `failed`, and `cleanup_pending`
