@@ -13,6 +13,7 @@ from typing import Any, NoReturn, TextIO
 
 from mcp_unified.package_metadata import package_metadata_summary
 from mcp_unified.profiles.presets import (
+    ProfilePreset,
     duplicate_builtin_preset,
     get_builtin_preset,
     list_builtin_presets,
@@ -1516,6 +1517,44 @@ def _load_json_argument_file(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _preset_tooling_summary(preset: ProfilePreset) -> dict[str, Any]:
+    """Build compact tooling discovery metadata for preset list output."""
+
+    tooling = preset.profile.metadata.get("tooling")
+    if not isinstance(tooling, dict):
+        return {}
+
+    progressive = tooling.get("progressive_disclosure")
+    if not isinstance(progressive, dict):
+        progressive = {}
+
+    recommended_servers = tooling.get("recommended_servers")
+    if not isinstance(recommended_servers, (list, tuple)):
+        recommended_servers = []
+
+    return {
+        "direct_categories": _string_list(progressive.get("direct_categories")),
+        "deferred_categories": _string_list(progressive.get("deferred_categories")),
+        "recommended_server_categories": [
+            server.get("category")
+            for server in recommended_servers
+            if isinstance(server, dict) and isinstance(server.get("category"), str)
+        ],
+        "recommendation_catalog_patchable": tooling.get(
+            "recommendation_catalog_patchable"
+        )
+        is True,
+    }
+
+
+def _string_list(value: Any) -> list[str]:
+    """Return only string items from list-like metadata values."""
+
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
 def _handle_list_presets(_args: argparse.Namespace) -> int:
     """Emit bundled profile preset summaries as deterministic JSON."""
 
@@ -1527,6 +1566,7 @@ def _handle_list_presets(_args: argparse.Namespace) -> int:
                     "description": preset.profile.description,
                     "id": preset.id,
                     "name": preset.profile.name,
+                    "tooling": _preset_tooling_summary(preset),
                     "version": preset.version,
                 }
                 for preset in presets

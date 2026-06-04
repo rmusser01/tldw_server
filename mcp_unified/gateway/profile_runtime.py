@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Any, Protocol
 
 from mcp_unified.interfaces.storage import ProfileStore
@@ -15,8 +16,121 @@ from mcp_unified.profiles.resolution import (
 from mcp_unified.profiles.resolver import StoreBackedProfileResolver
 
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
+from .tool_discovery import (
+    describe_profile_tool,
+    list_profile_tools,
+    resolve_profile_tool_call,
+    search_profile_tools,
+)
 
 EFFECTIVE_POLICY_METADATA_KEY = "_gateway_effective_policy"
+_TOOL_DISCOVERY_CATEGORY = "tool_discovery"
+_TOOL_DISCOVERY_READ_CAPABILITY = "tool_discovery.read"
+_TOOL_DISCOVERY_CALL_CAPABILITY = "tool_discovery.call"
+_TOOL_CATEGORIES_LIST = "tool_categories.list"
+_PROFILE_TOOLS_LIST = "profile.tools.list"
+_TOOL_SEARCH = "tool_search"
+_TOOL_DESCRIBE = "tool_describe"
+_TOOL_CALL = "tool_call"
+_READ_ONLY_BRIDGE_TOOL_NAMES = frozenset(
+    {
+        _TOOL_CATEGORIES_LIST,
+        _PROFILE_TOOLS_LIST,
+        _TOOL_SEARCH,
+        _TOOL_DESCRIBE,
+    }
+)
+_BRIDGE_TOOL_NAMES = frozenset({*_READ_ONLY_BRIDGE_TOOL_NAMES, _TOOL_CALL})
+_TOOL_CALL_ARGUMENT_KEYS = frozenset({"tool_id", "arguments"})
+_TOOL_SEARCH_ARGUMENT_KEYS = frozenset({"query", "category", "limit"})
+_TOOL_DESCRIBE_ARGUMENT_KEYS = frozenset({"tool_id"})
+_EMPTY_ARGUMENT_KEYS = frozenset()
+_BRIDGE_TOOL_DESCRIPTORS: dict[str, dict[str, Any]] = {
+    _TOOL_CATEGORIES_LIST: {
+        "name": _TOOL_CATEGORIES_LIST,
+        "description": "List tool categories visible to the active profile.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "metadata": {
+            "category": _TOOL_DISCOVERY_CATEGORY,
+            "capabilities": [_TOOL_DISCOVERY_READ_CAPABILITY],
+        },
+    },
+    _PROFILE_TOOLS_LIST: {
+        "name": _PROFILE_TOOLS_LIST,
+        "description": "List the tool catalog visible to the active profile.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "metadata": {
+            "category": _TOOL_DISCOVERY_CATEGORY,
+            "capabilities": [_TOOL_DISCOVERY_READ_CAPABILITY],
+        },
+    },
+    _TOOL_SEARCH: {
+        "name": _TOOL_SEARCH,
+        "description": "Search tools visible to the active profile.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "default": ""},
+                "category": {"type": ["string", "null"], "default": None},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                },
+            },
+            "additionalProperties": False,
+        },
+        "metadata": {
+            "category": _TOOL_DISCOVERY_CATEGORY,
+            "capabilities": [_TOOL_DISCOVERY_READ_CAPABILITY],
+        },
+    },
+    _TOOL_DESCRIBE: {
+        "name": _TOOL_DESCRIBE,
+        "description": "Describe one tool visible to the active profile.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tool_id": {"type": "string"},
+            },
+            "required": ["tool_id"],
+            "additionalProperties": False,
+        },
+        "metadata": {
+            "category": _TOOL_DISCOVERY_CATEGORY,
+            "capabilities": [_TOOL_DISCOVERY_READ_CAPABILITY],
+        },
+    },
+    _TOOL_CALL: {
+        "name": _TOOL_CALL,
+        "description": "Call an installed tool by profile-scoped tool id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tool_id": {"type": "string"},
+                "arguments": {"type": "object"},
+            },
+            "required": ["tool_id", "arguments"],
+            "additionalProperties": False,
+        },
+        "metadata": {
+            "category": _TOOL_DISCOVERY_CATEGORY,
+            "capabilities": [
+                _TOOL_DISCOVERY_READ_CAPABILITY,
+                _TOOL_DISCOVERY_CALL_CAPABILITY,
+            ],
+        },
+    },
+}
 
 
 class GatewayProfileResolver(Protocol):
@@ -72,20 +186,29 @@ class ProfileAwareGatewayRuntime:
         if profile_result.status != "resolved" or profile_result.profile is None:
             return []
 
-        tools = await self._backend.list_tools(context)
-        if not isinstance(tools, list):
-            return []
-
+        tools = await self._safe_backend_tools(context)
         allowed_tools: list[dict[str, Any]] = []
+        allowed_tool_names: set[str] = set()
         for tool in tools:
             if not isinstance(tool, dict):
                 continue
-            if _tool_name(tool) is not None and _tool_allowed_by_profile(
-                profile_result.profile,
-                tool,
+            name = _tool_name(tool)
+            if (
+                name is not None
+                and _tool_allowed_by_profile(
+                    profile_result.profile,
+                    tool,
+                )
             ):
-                allowed_tools.append(tool)
-        return allowed_tools
+                allowed_tool_names.add(name)
+                allowed_tools.append(deepcopy(tool))
+        return [
+            *allowed_tools,
+            *_profile_bridge_tool_descriptors(
+                profile_result.profile,
+                suppressed_names=allowed_tool_names,
+            ),
+        ]
 
     async def call_tool(
         self,
@@ -96,29 +219,33 @@ class ProfileAwareGatewayRuntime:
         """Execute an allowed backend tool or raise a structured policy denial."""
 
         profile = await self._require_profile(context)
-        policy_result = _allowed_policy_result_for_tool(profile, name, None)
-        if _policy_needs_backend_tool_metadata(profile, policy_result):
+        if _is_bridge_tool_name(name):
             try:
-                tool = await self._find_backend_tool(name, context)
-            except Exception as exc:
-                raise GatewayPolicyDenied(
-                    "Gateway profile could not inspect backend tool metadata",
-                    reason_code="tool_metadata_unavailable",
-                    provenance={
-                        "tool_name": name,
-                        "backend_error": type(exc).__name__,
-                    },
-                ) from exc
-            policy_result = _allowed_policy_result_for_tool(profile, name, tool)
-        if policy_result.status != "resolved":
-            raise _policy_denied(
-                policy_result,
-                message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
+                backend_tools = await self._safe_backend_tools(context)
+            except Exception:
+                _validate_synthetic_bridge_arguments(name, arguments)
+                raise
+            collision_tool = _allowed_backend_tool_by_name(profile, backend_tools, name)
+            if collision_tool is not None:
+                return await self._call_backend_tool_through_policy(
+                    profile,
+                    name,
+                    arguments,
+                    context,
+                    tool=collision_tool,
+                )
+            return await self._call_bridge_tool(
+                profile,
+                name,
+                arguments,
+                context,
+                backend_tools=backend_tools,
             )
-        return await self._backend.call_tool(
+        return await self._call_backend_tool_through_policy(
+            profile,
             name,
             arguments,
-            _context_with_effective_policy(context, policy_result.policy),
+            context,
         )
 
     async def list_resources(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
@@ -198,6 +325,417 @@ class ProfileAwareGatewayRuntime:
             ),
             None,
         )
+
+    async def _safe_backend_tools(
+        self,
+        context: GatewayRequestContext,
+    ) -> list[Any]:
+        """Return backend discovery data for bridge catalog operations."""
+
+        tools = await self._backend.list_tools(context)
+        return tools if isinstance(tools, list) else []
+
+    async def _call_bridge_tool(
+        self,
+        profile: MCPProfile,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+        *,
+        backend_tools: list[Any],
+    ) -> dict[str, Any]:
+        """Execute one synthetic profile-scoped tool discovery helper."""
+
+        if name == _TOOL_CATEGORIES_LIST:
+            _validate_bridge_argument_keys(
+                name,
+                arguments,
+                _EMPTY_ARGUMENT_KEYS,
+                reason_code="invalid_tool_categories_arguments",
+            )
+            catalog = list_profile_tools(profile, backend_tools)
+            return {
+                "profile_id": catalog["profile_id"],
+                "categories": catalog["categories"],
+                "progressive_disclosure": catalog["progressive_disclosure"],
+            }
+        if name == _PROFILE_TOOLS_LIST:
+            _validate_bridge_argument_keys(
+                name,
+                arguments,
+                _EMPTY_ARGUMENT_KEYS,
+                reason_code="invalid_profile_tools_list_arguments",
+            )
+            return list_profile_tools(profile, backend_tools)
+        if name == _TOOL_SEARCH:
+            query, category, limit = _validated_tool_search_arguments(arguments)
+            return {
+                "tools": search_profile_tools(
+                    profile,
+                    backend_tools,
+                    query=query,
+                    category=category,
+                    limit=limit,
+                )
+            }
+        if name == _TOOL_DESCRIBE:
+            tool_id = _validated_tool_describe_arguments(arguments)
+            description = describe_profile_tool(profile, backend_tools, tool_id)
+            if description is None:
+                return _bridge_tool_error_payload(
+                    "tool_not_found",
+                    status="not_found",
+                    tool_id=tool_id,
+                )
+            return description
+        if name == _TOOL_CALL:
+            tool_id, delegated_arguments = _validated_tool_call_arguments(arguments)
+            if not _profile_has_deferred_categories(profile):
+                raise GatewayPolicyDenied(
+                    "Gateway profile denied tool execution: tool_not_allowed",
+                    reason_code="tool_not_allowed",
+                    provenance={"profile_id": profile.id, "tool_name": name},
+                )
+            resolution = resolve_profile_tool_call(profile, backend_tools, tool_id)
+            if resolution.get("status") == "not_found":
+                return _bridge_tool_error_payload(
+                    "tool_not_found",
+                    status="not_found",
+                    tool_id=str(resolution.get("tool_id", tool_id)),
+                )
+            if resolution.get("status") == "unavailable":
+                return _bridge_tool_error_payload(
+                    "tool_not_enabled",
+                    status="unavailable",
+                    tool_id=str(resolution.get("tool_id", tool_id)),
+                    installation_status=resolution.get("installation_status"),
+                    activation=resolution.get("activation"),
+                    unavailable_reason=resolution.get("unavailable_reason"),
+                )
+            resolved_name = resolution.get("tool_name")
+            if not isinstance(resolved_name, str) or not resolved_name.strip():
+                return _bridge_tool_error_payload(
+                    "tool_not_found",
+                    status="not_found",
+                    tool_id=tool_id,
+                )
+            return await self._call_backend_tool_through_policy(
+                profile,
+                resolved_name.strip(),
+                delegated_arguments,
+                context,
+                tool=resolution.get("tool"),
+            )
+
+        raise GatewayPolicyDenied(
+            "Gateway profile denied tool execution: tool_not_allowed",
+            reason_code="tool_not_allowed",
+            provenance={"profile_id": profile.id, "tool_name": name},
+        )
+
+    async def _call_backend_tool_through_policy(
+        self,
+        profile: MCPProfile,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+        *,
+        tool: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run profile policy for a real backend tool before delegation."""
+
+        policy_result = _allowed_policy_result_for_tool(profile, name, tool)
+        if tool is None and _policy_needs_backend_tool_metadata(profile, policy_result):
+            try:
+                tool = await self._find_backend_tool(name, context)
+            except Exception as exc:
+                raise GatewayPolicyDenied(
+                    "Gateway profile could not inspect backend tool metadata",
+                    reason_code="tool_metadata_unavailable",
+                    provenance={
+                        "tool_name": name,
+                        "backend_error": type(exc).__name__,
+                    },
+                ) from exc
+            policy_result = _allowed_policy_result_for_tool(profile, name, tool)
+        if policy_result.status != "resolved":
+            raise _policy_denied(
+                policy_result,
+                message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
+            )
+        return await self._backend.call_tool(
+            name,
+            arguments,
+            _context_with_effective_policy(context, policy_result.policy),
+        )
+
+
+def _validate_synthetic_bridge_arguments(name: str, arguments: Any) -> None:
+    """Validate bridge arguments without requiring backend discovery."""
+
+    if name == _TOOL_CATEGORIES_LIST:
+        _validate_bridge_argument_keys(
+            name,
+            arguments,
+            _EMPTY_ARGUMENT_KEYS,
+            reason_code="invalid_tool_categories_arguments",
+        )
+        return
+    if name == _PROFILE_TOOLS_LIST:
+        _validate_bridge_argument_keys(
+            name,
+            arguments,
+            _EMPTY_ARGUMENT_KEYS,
+            reason_code="invalid_profile_tools_list_arguments",
+        )
+        return
+    if name == _TOOL_SEARCH:
+        _validated_tool_search_arguments(arguments)
+        return
+    if name == _TOOL_DESCRIBE:
+        _validated_tool_describe_arguments(arguments)
+        return
+    if name == _TOOL_CALL:
+        _validated_tool_call_arguments(arguments)
+        return
+
+
+def _is_bridge_tool_name(name: str) -> bool:
+    """Return whether a tool name is reserved for profile discovery bridging."""
+
+    return name in _BRIDGE_TOOL_NAMES
+
+
+def _allowed_backend_tool_by_name(
+    profile: MCPProfile,
+    backend_tools: list[Any],
+    name: str,
+) -> dict[str, Any] | None:
+    """Return an allowed backend descriptor matching a bridge-reserved name."""
+
+    for tool in backend_tools:
+        if (
+            isinstance(tool, dict)
+            and _tool_name(tool) == name
+            and _tool_allowed_by_profile(profile, tool)
+        ):
+            return tool
+    return None
+
+
+def _profile_bridge_tool_descriptors(
+    profile: MCPProfile,
+    *,
+    suppressed_names: set[str],
+) -> list[dict[str, Any]]:
+    """Return caller-owned synthetic discovery tool descriptors for a profile."""
+
+    names = [
+        _TOOL_CATEGORIES_LIST,
+        _PROFILE_TOOLS_LIST,
+        _TOOL_SEARCH,
+        _TOOL_DESCRIBE,
+    ]
+    if _profile_has_deferred_categories(profile):
+        names.append(_TOOL_CALL)
+    return [
+        deepcopy(_BRIDGE_TOOL_DESCRIPTORS[name])
+        for name in names
+        if name not in suppressed_names
+    ]
+
+
+def _profile_has_deferred_categories(profile: MCPProfile) -> bool:
+    """Return whether profile tooling metadata defers any categories."""
+
+    metadata = profile.metadata if isinstance(profile.metadata, dict) else {}
+    tooling = metadata.get("tooling")
+    if not isinstance(tooling, dict):
+        return False
+    progressive = tooling.get("progressive_disclosure")
+    if not isinstance(progressive, dict):
+        return False
+    return any(
+        isinstance(category, str) and bool(category.strip())
+        for category in _as_sequence(progressive.get("deferred_categories"))
+    )
+
+
+def _validated_tool_search_arguments(
+    arguments: Any,
+) -> tuple[str, str | None, int]:
+    """Return normalized tool search arguments or raise policy-denied validation."""
+
+    _validate_bridge_argument_keys(
+        _TOOL_SEARCH,
+        arguments,
+        _TOOL_SEARCH_ARGUMENT_KEYS,
+        reason_code="invalid_tool_search_arguments",
+    )
+    query = arguments.get("query", "")
+    if not isinstance(query, str):
+        raise _invalid_bridge_arguments(
+            _TOOL_SEARCH,
+            reason_code="invalid_tool_search_arguments",
+            field="query",
+        )
+    category = arguments.get("category")
+    if category is not None and not isinstance(category, str):
+        raise _invalid_bridge_arguments(
+            _TOOL_SEARCH,
+            reason_code="invalid_tool_search_arguments",
+            field="category",
+        )
+    limit = arguments.get("limit", 20)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise _invalid_bridge_arguments(
+            _TOOL_SEARCH,
+            reason_code="invalid_tool_search_arguments",
+            field="limit",
+        )
+    return query, category, limit
+
+
+def _validated_tool_describe_arguments(arguments: Any) -> str:
+    """Return a normalized tool id for tool_describe."""
+
+    _validate_bridge_argument_keys(
+        _TOOL_DESCRIBE,
+        arguments,
+        _TOOL_DESCRIBE_ARGUMENT_KEYS,
+        reason_code="invalid_tool_describe_arguments",
+        required_keys=_TOOL_DESCRIBE_ARGUMENT_KEYS,
+    )
+    return _required_bridge_tool_id(
+        _TOOL_DESCRIBE,
+        arguments.get("tool_id"),
+        reason_code="invalid_tool_describe_arguments",
+    )
+
+
+def _validated_tool_call_arguments(arguments: Any) -> tuple[str, dict[str, Any]]:
+    """Return normalized installed-tool call arguments."""
+
+    _validate_bridge_argument_keys(
+        _TOOL_CALL,
+        arguments,
+        _TOOL_CALL_ARGUMENT_KEYS,
+        reason_code="invalid_tool_call_arguments",
+        required_keys=_TOOL_CALL_ARGUMENT_KEYS,
+    )
+    tool_id = _required_bridge_tool_id(
+        _TOOL_CALL,
+        arguments.get("tool_id"),
+        reason_code="invalid_tool_call_arguments",
+    )
+    delegated_arguments = arguments.get("arguments")
+    if not isinstance(delegated_arguments, dict):
+        raise _invalid_bridge_arguments(
+            _TOOL_CALL,
+            reason_code="invalid_tool_call_arguments",
+            field="arguments",
+        )
+    return tool_id, deepcopy(delegated_arguments)
+
+
+def _validate_bridge_argument_keys(
+    tool_name: str,
+    arguments: Any,
+    allowed_keys: frozenset[str],
+    *,
+    reason_code: str,
+    required_keys: frozenset[str] = frozenset(),
+) -> None:
+    """Validate bridge argument object shape and reject unknown fields."""
+
+    if not isinstance(arguments, dict):
+        raise _invalid_bridge_arguments(tool_name, reason_code=reason_code)
+    missing = sorted(key for key in required_keys if key not in arguments)
+    unknown = [
+        _bridge_argument_key_label(key)
+        for key in arguments
+        if key not in allowed_keys
+    ]
+    if missing or unknown:
+        raise _invalid_bridge_arguments(
+            tool_name,
+            reason_code=reason_code,
+            missing=missing,
+            unknown=unknown,
+        )
+
+
+def _bridge_argument_key_label(key: Any) -> str:
+    """Return a stable validation label for arbitrary mapping keys."""
+
+    return key if isinstance(key, str) else repr(key)
+
+
+def _required_bridge_tool_id(
+    tool_name: str,
+    value: Any,
+    *,
+    reason_code: str,
+) -> str:
+    """Return a non-empty tool id string for a bridge helper."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise _invalid_bridge_arguments(
+            tool_name,
+            reason_code=reason_code,
+            field="tool_id",
+        )
+    return value.strip()
+
+
+def _invalid_bridge_arguments(
+    tool_name: str,
+    *,
+    reason_code: str,
+    field: str | None = None,
+    missing: list[str] | None = None,
+    unknown: list[str] | None = None,
+) -> GatewayPolicyDenied:
+    """Build a structured policy denial for invalid synthetic tool arguments."""
+
+    provenance: dict[str, Any] = {"tool_name": tool_name}
+    if field is not None:
+        provenance["field"] = field
+    if missing:
+        provenance["missing_fields"] = missing
+    if unknown:
+        provenance["unknown_fields"] = unknown
+    return GatewayPolicyDenied(
+        f"Invalid arguments for profile discovery bridge tool: {tool_name}",
+        reason_code=reason_code,
+        provenance=provenance,
+    )
+
+
+def _bridge_tool_error_payload(
+    reason_code: str,
+    *,
+    status: str,
+    tool_id: str,
+    **details: Any,
+) -> dict[str, Any]:
+    """Return a normal tool result payload for profile bridge lookup failures."""
+
+    error = {
+        "status": status,
+        "reason_code": reason_code,
+        "tool_id": tool_id,
+    }
+    for key, value in details.items():
+        if value is not None:
+            error[key] = value
+    return {
+        "ok": False,
+        "status": status,
+        "reason_code": reason_code,
+        "tool_id": tool_id,
+        "error": error,
+    }
 
 
 def _context_profile_id(context: GatewayRequestContext) -> str | None:

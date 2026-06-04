@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ from mcp_unified.gateway.config import (
 from mcp_unified.gateway.profiles import GatewayProfileManager
 from mcp_unified.gateway.snapshots import GatewayConfigSnapshotManagementError
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.presets import ProfilePreset
 from mcp_unified.storage.models import (
     CredentialGrant,
     ExternalServerDefinition,
@@ -222,22 +226,99 @@ def test_gateway_cli_argument_errors_are_json(
 
 
 def test_gateway_cli_list_presets_reports_builtin_summary(
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """List bundled presets as a small JSON summary for front-end discovery."""
 
-    exit_code = gateway_cli.main(["list-presets"])
+    result = subprocess.run(
+        [sys.executable, "-m", "mcp_unified.gateway.cli", "list-presets"],
+        check=False,
+        cwd=_repo_root(),
+        env={**os.environ, "PYTHONWARNINGS": "ignore"},
+        text=True,
+        capture_output=True,
+    )
 
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
+    payload = json.loads(result.stdout)
     preset_ids = {preset["id"] for preset in payload["presets"]}
-    assert exit_code == 0
-    assert captured.err == ""
+    product_owner = next(
+        preset for preset in payload["presets"] if preset["id"] == "product-owner"
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
     assert "project-researcher" in preset_ids
     assert all(
         {"description", "id", "name", "version"} <= set(preset)
         for preset in payload["presets"]
     )
+    assert product_owner["tooling"]["direct_categories"]
+    assert product_owner["tooling"]["deferred_categories"]
+    assert product_owner["tooling"]["recommendation_catalog_patchable"] is True
+
+
+def test_gateway_cli_preset_tooling_summary_ignores_malformed_metadata() -> None:
+    """Malformed tooling metadata does not leak invalid category values."""
+
+    preset_with_missing_servers = ProfilePreset(
+        id="malformed",
+        version="test",
+        profile=MCPProfile(
+            id="malformed",
+            name="Malformed",
+            metadata={
+                "tooling": {
+                    "progressive_disclosure": {
+                        "direct_categories": "files",
+                        "deferred_categories": ("browser", 42, None),
+                    },
+                    "recommended_servers": None,
+                    "recommendation_catalog_patchable": True,
+                }
+            },
+        ),
+    )
+    preset_with_mixed_servers = preset_with_missing_servers.model_copy(
+        update={
+            "profile": preset_with_missing_servers.profile.model_copy(
+                update={
+                    "metadata": {
+                        "tooling": {
+                            "progressive_disclosure": {
+                                "direct_categories": ("files", 42),
+                                "deferred_categories": ["browser", None],
+                            },
+                            "recommended_servers": [
+                                {"category": "browser"},
+                                {"category": 7},
+                                object(),
+                                {"category": "search"},
+                            ],
+                            "recommendation_catalog_patchable": True,
+                        }
+                    }
+                }
+            )
+        }
+    )
+
+    missing_servers_summary = gateway_cli._preset_tooling_summary(
+        preset_with_missing_servers
+    )
+    mixed_servers_summary = gateway_cli._preset_tooling_summary(
+        preset_with_mixed_servers
+    )
+
+    assert missing_servers_summary == {
+        "direct_categories": [],
+        "deferred_categories": ["browser"],
+        "recommended_server_categories": [],
+        "recommendation_catalog_patchable": True,
+    }
+    assert mixed_servers_summary == {
+        "direct_categories": ["files"],
+        "deferred_categories": ["browser"],
+        "recommended_server_categories": ["browser", "search"],
+        "recommendation_catalog_patchable": True,
+    }
 
 
 def test_gateway_cli_show_preset_reports_full_builtin_profile(

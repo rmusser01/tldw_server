@@ -12,6 +12,8 @@ surface for early standalone gateway work.
 
 - JSON-RPC gateway runtime primitives for HTTP, WebSocket, and stdio entrypoints.
 - Profile presets, profile resolution, and policy result models.
+- Role presets with compact tooling discovery metadata and progressive
+  disclosure categories for suggested next-step tools.
 - Gateway-local profile, assignment, external-server, credential-grant, and
   audit storage interfaces.
 - Optional SQLite-backed stores for standalone gateway configuration.
@@ -124,4 +126,3 @@ python -m pytest \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_artifacts_include_package_docs \
   -q
 ```
-

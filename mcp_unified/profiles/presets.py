@@ -9,6 +9,13 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict
 
 from .models import MCPProfile, ProfilePolicy
+from .tooling import (
+    browser_server_recommendation,
+    issue_tracker_server_recommendation,
+    recommended_tool,
+    tooling_metadata,
+    web_search_server_recommendation,
+)
 
 PRESET_RELEASE_DATE = date(2026, 5, 27)
 PRESET_VERSION = PRESET_RELEASE_DATE.strftime("%Y.%m.%d")
@@ -32,11 +39,19 @@ _DESTRUCTIVE_FILESYSTEM_CAPABILITIES = {
 _EXTERNAL_NETWORK_CAPABILITIES = {
     "external.network",
 }
+_APPROVAL_REQUIRED_RISK_CLASSES = {
+    "browser_mutation",
+    "deployment_mutation",
+    "git_mutation",
+    "memory_mutation",
+    "test_execution",
+}
 _HIGH_RISK_RISK_CLASSES = {
     "credential_use",
     "destructive_filesystem",
     "external_network",
     "process_execution",
+    *_APPROVAL_REQUIRED_RISK_CLASSES,
 }
 
 
@@ -83,14 +98,18 @@ def _profile(
     requires_workspace_binding: bool = False,
     provenance: dict[str, Any] | None = None,
     agent_metadata: dict[str, Any] | None = None,
+    tooling_metadata_document: dict[str, Any] | None = None,
 ) -> MCPProfile:
     """Build an MCP profile template with preset provenance metadata."""
-    metadata = {
+    metadata: dict[str, Any] = {
         "agent_metadata": {
             "ui_label": name,
             **(agent_metadata or {}),
         }
     }
+    if tooling_metadata_document is not None:
+        metadata["tooling"] = tooling_metadata_document
+
     return MCPProfile(
         id=preset_id,
         name=name,
@@ -134,6 +153,7 @@ def _preset(
     requires_workspace_binding: bool = False,
     provenance: dict[str, Any] | None = None,
     agent_metadata: dict[str, Any] | None = None,
+    tooling_metadata_document: dict[str, Any] | None = None,
 ) -> ProfilePreset:
     """Build an immutable preset wrapper for a bundled MCP profile template."""
     return ProfilePreset(
@@ -150,6 +170,7 @@ def _preset(
             requires_workspace_binding=requires_workspace_binding,
             provenance=provenance,
             agent_metadata=agent_metadata,
+            tooling_metadata_document=tooling_metadata_document,
         ),
     )
 
@@ -158,6 +179,26 @@ _WRITE_APPROVAL_POLICY: dict[str, Any] = {
     "required_for": ["write", "mutating"],
     "reason": "Preset includes scoped write-oriented capabilities.",
 }
+
+_TOOL_DISCOVERY_TOOLS = [
+    "tool_categories.list",
+    "tool_search",
+    "tool_describe",
+    "profile.tools.list",
+]
+_FILES_READ_TOOLS = ["fs.list", "fs.read_text"]
+_FILES_WRITE_TOOLS = [*_FILES_READ_TOOLS, "fs.write_text"]
+_CODE_READ_TOOLS = ["code.search", "code.symbols", "code.references"]
+_DOCS_READ_TOOLS = ["docs.search", "docs.read"]
+_DOCS_WRITE_TOOLS = [*_DOCS_READ_TOOLS, "docs.write"]
+_GIT_READ_TOOLS = [
+    "git.status",
+    "git.diff",
+    "git.conflicts.list",
+    "git.conflicts.read",
+]
+_TEST_READ_TOOLS = ["tests.results.read", "tests.logs.read"]
+_TEST_REQUEST_TOOLS = [*_TEST_READ_TOOLS, "tests.request"]
 
 _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
     _preset(
@@ -177,12 +218,84 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                "fs.list",
+                "fs.read_text",
+                "fs.write_text",
+                "kanban.cards.create",
+                "memory.recall",
+            ],
+            enabled_capabilities=[
+                "filesystem.read",
+                "filesystem.write_scoped",
+                "issues.plan",
+                "stories.write",
+                "memory.read",
+            ],
+            direct_categories=["files", "tool_discovery", "issues", "memory"],
+            deferred_categories=[
+                "issue_tracker",
+                "docs_search",
+                "browser",
+            ],
+            recommended_tools=[
+                recommended_tool(
+                    "stories.acceptance_criteria.draft",
+                    category="issues",
+                    description="Draft acceptance criteria from scoped product notes.",
+                ),
+                recommended_tool(
+                    "requirements.traceability.map",
+                    category="docs",
+                    description="Prepare a requirements-to-story traceability map.",
+                ),
+            ],
+            recommended_servers=[
+                web_search_server_recommendation(),
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="architect",
         name="Architect",
         description="Reviews architecture with code search, documentation, and read-only filesystem access.",
         capabilities=["code_search", "docs.read", "filesystem.read"],
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_READ_TOOLS,
+                *_CODE_READ_TOOLS,
+                *_DOCS_READ_TOOLS,
+            ],
+            enabled_capabilities=[
+                "code_search",
+                "docs.read",
+                "filesystem.read",
+                "architecture.review",
+            ],
+            direct_categories=["files", "tool_discovery", "code", "docs"],
+            deferred_categories=["web_search", "browser", "diagramming"],
+            recommended_tools=[
+                recommended_tool(
+                    "architecture.decision_record.draft",
+                    category="docs",
+                    description="Draft architecture decision records from scoped context.",
+                ),
+                recommended_tool(
+                    "architecture.dependency_map.preview",
+                    category="code",
+                    description="Preview package and module dependency relationships.",
+                ),
+            ],
+            recommended_servers=[
+                web_search_server_recommendation(),
+                browser_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="merge-conflict-resolver",
@@ -195,6 +308,37 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             "reason": "Conflict resolution writes are repo-scoped and mutating.",
         },
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_GIT_READ_TOOLS,
+                *_FILES_WRITE_TOOLS,
+            ],
+            enabled_capabilities=[
+                "git.status",
+                "git.diff",
+                "filesystem.read",
+                "repo.write_scoped",
+            ],
+            direct_categories=["git", "files", "tool_discovery"],
+            deferred_categories=["safe_test_runner", "issue_tracker", "browser"],
+            recommended_tools=[
+                recommended_tool(
+                    "git.conflict_resolution.plan",
+                    category="git",
+                    description="Summarize conflict hunks and propose a resolution plan.",
+                ),
+                recommended_tool(
+                    "tests.impact.read",
+                    category="tests",
+                    description="Identify tests likely affected by conflict resolution.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="documentation-writer",
@@ -204,12 +348,73 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_WRITE_TOOLS,
+                *_DOCS_WRITE_TOOLS,
+                "memory.recall",
+            ],
+            enabled_capabilities=[
+                "docs.read",
+                "docs.write_scoped",
+                "filesystem.read",
+                "filesystem.write_scoped",
+                "memory.read",
+            ],
+            direct_categories=["files", "docs", "tool_discovery", "memory"],
+            deferred_categories=["web_search", "browser", "issue_tracker"],
+            recommended_tools=[
+                recommended_tool(
+                    "docs.link_check.request",
+                    category="docs",
+                    description="Request a scoped documentation link-check report.",
+                ),
+                recommended_tool(
+                    "docs.style_review.prepare",
+                    category="docs",
+                    description="Prepare style and consistency review notes.",
+                ),
+            ],
+            recommended_servers=[
+                web_search_server_recommendation(),
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="project-researcher",
         name="Project Researcher",
         description="Searches and reads the codebase without write or execution capabilities.",
         capabilities=["code_search", "filesystem.read", "docs.read"],
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_READ_TOOLS,
+                *_CODE_READ_TOOLS,
+                *_DOCS_READ_TOOLS,
+            ],
+            enabled_capabilities=["code_search", "filesystem.read", "docs.read"],
+            direct_categories=["files", "code", "docs", "tool_discovery"],
+            deferred_categories=["web_search", "browser", "citations"],
+            recommended_tools=[
+                recommended_tool(
+                    "project.map.generate",
+                    category="code",
+                    description="Generate a read-only project structure map.",
+                ),
+                recommended_tool(
+                    "citations.collect",
+                    category="citations",
+                    description="Collect citation candidates for later review.",
+                ),
+            ],
+            recommended_servers=[
+                web_search_server_recommendation(),
+                browser_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="deep-researcher",
@@ -237,6 +442,39 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         name="Code Reviewer",
         description="Reviews diffs, code, and test results without write access.",
         capabilities=["code_search", "diff.read", "tests.read", "filesystem.read"],
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_READ_TOOLS,
+                *_CODE_READ_TOOLS,
+                *_GIT_READ_TOOLS,
+                *_TEST_READ_TOOLS,
+            ],
+            enabled_capabilities=[
+                "code_search",
+                "diff.read",
+                "tests.read",
+                "filesystem.read",
+            ],
+            direct_categories=["files", "code", "git", "tests", "tool_discovery"],
+            deferred_categories=["browser", "issue_tracker", "safe_test_runner"],
+            recommended_tools=[
+                recommended_tool(
+                    "review.findings.draft",
+                    category="code",
+                    description="Draft review findings from scoped diffs and files.",
+                ),
+                recommended_tool(
+                    "tests.failure_summarize",
+                    category="tests",
+                    description="Summarize existing test failure output.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="devops-engineer",
@@ -249,6 +487,34 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             "reason": "Infrastructure changes require explicit approval.",
         },
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                "deploy.status",
+                "deploy.logs.read",
+                "infra.inspect",
+                "logs.search",
+            ],
+            enabled_capabilities=["deploy.inspect", "logs.read", "infra.read"],
+            direct_categories=["deployments", "logs", "infra", "tool_discovery"],
+            deferred_categories=["issue_tracker", "safe_test_runner", "browser"],
+            recommended_tools=[
+                recommended_tool(
+                    "deploy.plan.preview",
+                    category="deployments",
+                    description="Preview deployment plans without applying changes.",
+                ),
+                recommended_tool(
+                    "logs.incident_timeline.prepare",
+                    category="logs",
+                    description="Prepare an incident timeline from read-only logs.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="backend-engineer",
@@ -258,6 +524,51 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_WRITE_TOOLS,
+                *_CODE_READ_TOOLS,
+                *_TEST_REQUEST_TOOLS,
+                "api.schema.inspect",
+            ],
+            enabled_capabilities=[
+                "source.write_scoped",
+                "code_search",
+                "tests.request",
+                "backend.inspect",
+            ],
+            direct_categories=[
+                "files",
+                "code",
+                "tests",
+                "backend",
+                "tool_discovery",
+            ],
+            deferred_categories=[
+                "safe_test_runner",
+                "issue_tracker",
+                "browser",
+                "web_search",
+            ],
+            recommended_tools=[
+                recommended_tool(
+                    "api.contract.diff",
+                    category="backend",
+                    description="Compare API contract snapshots for review.",
+                ),
+                recommended_tool(
+                    "database.schema.inspect",
+                    category="backend",
+                    description="Inspect database schema metadata without mutation.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+                web_search_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="frontend-engineer",
@@ -267,12 +578,85 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_WRITE_TOOLS,
+                *_CODE_READ_TOOLS,
+                *_TEST_REQUEST_TOOLS,
+                "ui.components.inspect",
+            ],
+            enabled_capabilities=[
+                "source.write_scoped",
+                "frontend.inspect",
+                "tests.request",
+                "code_search",
+            ],
+            direct_categories=[
+                "files",
+                "code",
+                "tests",
+                "frontend",
+                "tool_discovery",
+            ],
+            deferred_categories=[
+                "browser",
+                "safe_test_runner",
+                "issue_tracker",
+                "web_search",
+            ],
+            recommended_tools=[
+                recommended_tool(
+                    "ui.accessibility.audit_request",
+                    category="frontend",
+                    description="Request accessibility audit guidance for scoped UI changes.",
+                ),
+                recommended_tool(
+                    "design.tokens.inspect",
+                    category="frontend",
+                    description="Inspect design token usage across scoped frontend files.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+                web_search_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="qa-engineer",
         name="QA Engineer",
         description="Debugs running applications with browser, logs, screenshots, and read-only app state.",
         capabilities=["browser.debug", "logs.read", "screenshots.capture", "app_state.read"],
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                "logs.search",
+                "screenshots.list",
+                "app_state.read",
+                "test_cases.read",
+            ],
+            enabled_capabilities=["logs.read", "screenshots.capture", "app_state.read"],
+            direct_categories=["logs", "screenshots", "app_state", "tool_discovery"],
+            deferred_categories=["browser", "safe_test_runner", "issue_tracker"],
+            recommended_tools=[
+                recommended_tool(
+                    "test_cases.generate",
+                    category="tests",
+                    description="Generate manual test case drafts from scoped requirements.",
+                ),
+                recommended_tool(
+                    "bug_report.draft",
+                    category="issues",
+                    description="Draft bug reports from logs and screenshots.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="sdet",
@@ -282,6 +666,39 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_FILES_WRITE_TOOLS,
+                *_CODE_READ_TOOLS,
+                *_TEST_REQUEST_TOOLS,
+            ],
+            enabled_capabilities=[
+                "tests.write_scoped",
+                "tests.request",
+                "code_search",
+                "filesystem.read",
+                "filesystem.write_scoped",
+            ],
+            direct_categories=["files", "code", "tests", "tool_discovery"],
+            deferred_categories=["safe_test_runner", "browser", "issue_tracker"],
+            recommended_tools=[
+                recommended_tool(
+                    "tests.plan.generate",
+                    category="tests",
+                    description="Generate test plan drafts for scoped code changes.",
+                ),
+                recommended_tool(
+                    "coverage.report.read",
+                    category="tests",
+                    description="Read and summarize coverage reports.",
+                ),
+            ],
+            recommended_servers=[
+                browser_server_recommendation(),
+                issue_tracker_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="memory-keeper",
@@ -371,6 +788,12 @@ def validate_preset_safety(preset: ProfilePreset) -> list[str]:
         if not _has_high_risk_provenance(profile, "external_network"):
             violations.append("high_risk_capability_requires_provenance")
 
+    for risk_class in sorted(risk_classes & _APPROVAL_REQUIRED_RISK_CLASSES):
+        if not _approval_required_for(profile, risk_class):
+            violations.append(f"{risk_class}_requires_approval")
+        if not _has_high_risk_provenance(profile, risk_class):
+            violations.append("high_risk_capability_requires_provenance")
+
     unknown_high_risk = risk_classes - _HIGH_RISK_RISK_CLASSES - {"mutating"}
     if unknown_high_risk:
         violations.append("unknown_high_risk_requires_review")
@@ -394,8 +817,8 @@ def _approval_required_for(profile: MCPProfile, risk_class: str) -> bool:
     else:
         required_for = []
 
-    if risk_class == "process_execution":
-        return "process_execution" in required_for
+    if risk_class == "process_execution" or risk_class in _APPROVAL_REQUIRED_RISK_CLASSES:
+        return risk_class in required_for
 
     return risk_class in required_for or "mutating" in required_for or "write" in required_for
 

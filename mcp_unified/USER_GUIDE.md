@@ -96,6 +96,29 @@ mcp-unified-gateway get-default-profile \
   --config ./gateway.json
 ```
 
+### Profile Tooling Discovery
+
+`list-presets` includes compact tooling discovery metadata for role presets.
+Direct categories describe tools the profile can expose immediately, subject to
+the profile policy and any assignment constraints. Deferred categories describe
+recommended unavailable tools or server-backed capabilities that may be useful
+for the role but are not executable until explicitly registered, granted, and
+allowed by policy.
+
+Profiles can expose progressive disclosure bridge tools such as
+`tool_categories.list`, `tool_search`, `tool_describe`, and
+`profile.tools.list`. These help clients inspect available direct tools first,
+then discover recommended next-step tools without expanding the executable tool
+surface by default.
+
+Recommendation catalog patches only change discovery metadata. They do not grant
+execution authority, start external servers, create credential grants, or bypass
+profile policy and approval requirements.
+
+For native browser inspection, prefer the Chrome DevTools Protocol path first.
+The stable exact target for that path is
+`ChromeDevTools/chrome-devtools-mcp`.
+
 ## 4. Register External Servers
 
 External servers describe upstream MCP servers that the gateway can manage and
@@ -275,4 +298,3 @@ Secrets appear in a config file
 
 : Remove them. Store only broker ids, credential slot names, scopes, and binding
   metadata in gateway configuration.
-
