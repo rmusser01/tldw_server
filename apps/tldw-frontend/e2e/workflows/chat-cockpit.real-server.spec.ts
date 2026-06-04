@@ -329,7 +329,6 @@ const seedRealServerConfig = async (
       const config = {
         serverUrl: configuredServerUrl,
         authMode: 'single-user',
-        // lgtm[js/clear-text-storage-of-sensitive-data] test-only browser auth seed for real-server E2E
         apiKey: configuredApiKey,
         requestTimeoutMs: 60_000,
         chatRequestTimeoutMs: 120_000,
@@ -337,13 +336,12 @@ const seedRealServerConfig = async (
         chatStreamIdleTimeoutMs: 120_000,
       };
 
-      localStorage.setItem('tldwConfig', JSON.stringify(config));
+      localStorage.setItem('tldwConfig', JSON.stringify(config)); // lgtm[js/clear-text-storage-of-sensitive-data] test-only browser auth seed for real-server E2E
       localStorage.setItem('serverUrl', configuredServerUrl);
       localStorage.setItem('tldwServerUrl', configuredServerUrl);
       localStorage.setItem('tldw-api-host', configuredServerUrl);
       localStorage.setItem('authMode', 'single-user');
-      // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
-      localStorage.setItem('apiKey', configuredApiKey);
+      localStorage.setItem('apiKey', configuredApiKey); // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
       localStorage.setItem('isMigrated', 'true');
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
