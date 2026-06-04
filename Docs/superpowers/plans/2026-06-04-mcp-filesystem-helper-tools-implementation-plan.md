@@ -314,7 +314,8 @@ Reject:
 
 Use `_setting_positive_int()` for `glob_result_limit`,
 `glob_walk_entry_limit`, `grep_result_limit`, `grep_walk_entry_limit`,
-`grep_max_file_bytes`, and `grep_max_pattern_length`.
+`grep_max_file_bytes`, `grep_max_total_bytes`, `grep_max_files`, and
+`grep_max_pattern_length`. Gate regex matching behind `grep_allow_regex`.
 
 - [ ] **Step 4: Implement `fs.glob` dispatch and worker**
 

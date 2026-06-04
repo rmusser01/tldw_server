@@ -150,7 +150,8 @@ Arguments:
 - `base_path: string` optional, default `"."`.
 - `include: list[string]` optional, default `["*", "**/*"]`.
 - `exclude: list[string]` optional, default `[]`.
-- `regex: boolean` optional, default `false`.
+- `regex: boolean` optional, default `false`; accepted only when the module
+  setting `grep_allow_regex` is enabled.
 - `case_sensitive: boolean` optional, default `true`.
 - `include_hidden: boolean` optional, default `false`.
 - `follow_symlinks: boolean` optional, default `false`.
@@ -158,6 +159,8 @@ Arguments:
   or `200`.
 - `max_file_bytes: integer` optional, capped by module setting
   `grep_max_file_bytes` or the current `max_read_bytes`.
+- Global scan limits come from module settings `grep_max_total_bytes`,
+  `grep_max_files`, and `grep_walk_entry_limit`.
 
 Response:
 
@@ -169,6 +172,10 @@ Response:
   - `match_text`
 - `truncated`: boolean.
 - `remaining_count`: count of additional matches skipped after the limit.
+- `remaining_count_known`: false when the scan stops early because a walk-entry,
+  file, or byte budget was exhausted.
+- `truncation_reasons`: zero or more of `walk_entry_limit`, `io_budget`,
+  `file_budget`, and `match_limit`.
 - `skipped`: counts for `binary`, `decode_error`, `too_large`,
   `permission_error`, and `unsupported_type`.
 

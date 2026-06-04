@@ -115,7 +115,9 @@ Filesystem-capable presets expose portable workspace-bounded helpers for common
 read workflows: `fs.stat` for metadata, `fs.glob` for cross-platform path
 matching, and `fs.grep` for UTF-8 text search. These helpers do not invoke a
 host shell and remain subject to the active profile policy and workspace path
-scope.
+scope. `fs.grep` uses literal matching by default; regex matching requires the
+filesystem module `grep_allow_regex` setting. Grep scans are also bounded by
+per-file, total-byte, total-file, and walk-entry limits.
 
 Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass

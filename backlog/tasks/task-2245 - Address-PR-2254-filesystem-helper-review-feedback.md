@@ -4,7 +4,7 @@ title: Address PR 2254 filesystem helper review feedback
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-04 01:40'
+updated_date: 2026-06-04 01:40
 labels: []
 dependencies: []
 ---
@@ -32,7 +32,7 @@ Verified all PR 2254 review findings against the rebased code and found them sti
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR 2254 review feedback after rebasing onto origin/dev. Filesystem fixes secure parent symlink handling for no-follow stats, cap double-star expansion, preserve symlink directory entries in fs.glob, and count directories toward grep walk caps. Bumped built-in preset release version to 2026.06.04. Validation passed: test_filesystem_module.py (30 passed), profile/discovery/gateway package tests (197 passed), runtime package boundary tests (27 passed), Bandit report /tmp/bandit_mcp_filesystem_helpers_pr2254_review.json, and git diff --check.
+Rebased PR 2254 onto origin/dev after PR 2251 merged, addressed all still-valid unresolved Qodo comments, and validated the filesystem helper changes. Validation: focused red tests failed before implementation, then passed; test_filesystem_module.py passed 33 tests; adjacent MCP profile/discovery/package suite passed 90 tests; Ruff passed for touched Python files; Bandit report /tmp/bandit_pr2254_filesystem_qodo.json had zero findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -44,3 +44,9 @@ Addressed PR 2254 review feedback after rebasing onto origin/dev. Filesystem fix
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Second PR review pass: verified Qodo's three new findings against current code and found all still valid. Fixed fs.glob to return size=null and size_unavailable=true when best-effort file size metadata cannot be read. Added grep_allow_regex gating so regex mode is disabled by default, and added grep_max_total_bytes / grep_max_files aggregate scan budgets with truncation_reasons and remaining_count_known metadata. Updated packaged docs and design/plan artifacts for the new settings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

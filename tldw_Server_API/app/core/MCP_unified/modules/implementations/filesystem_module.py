@@ -181,7 +181,11 @@ class FilesystemModule(BaseModule):
                     "base_path": {"type": "string", "description": "Workspace-relative base path"},
                     "include": {"type": "array", "items": {"type": "string"}},
                     "exclude": {"type": "array", "items": {"type": "string"}},
-                    "regex": {"type": "boolean", "default": False},
+                    "regex": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Requires the filesystem module grep_allow_regex setting.",
+                    },
                     "case_sensitive": {"type": "boolean", "default": True},
                     "include_hidden": {"type": "boolean", "default": False},
                     "follow_symlinks": {"type": "boolean", "default": False},
@@ -293,6 +297,10 @@ class FilesystemModule(BaseModule):
                 args.get("max_file_bytes"),
                 self._setting_positive_int("grep_max_file_bytes", self._max_read_bytes()),
             )
+            max_total_bytes = self._setting_positive_int(
+                "grep_max_total_bytes",
+                self._DEFAULT_MAX_READ_BYTES * 10,
+            )
             return await asyncio.to_thread(
                 self._grep_files,
                 workspace_root,
@@ -307,6 +315,8 @@ class FilesystemModule(BaseModule):
                 bool(args.get("follow_symlinks", False)),
                 limit,
                 max_file_bytes,
+                max_total_bytes,
+                self._setting_positive_int("grep_max_files", 1_000),
                 self._setting_positive_int("grep_walk_entry_limit", 50_000),
             )
 
@@ -336,9 +346,17 @@ class FilesystemModule(BaseModule):
             limit = default
         return max(1, limit)
 
+    def _setting_bool(self, name: str, default: bool = False) -> bool:
+        raw_value = self.config.settings.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            return raw_value.strip().lower() in {"1", "true", "yes", "on", "y"}
+        return bool(raw_value)
+
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "fs.list":
-            unknown = sorted({key for key in arguments.keys()} - {"path"})
+            unknown = sorted(set(arguments) - {"path"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -347,7 +365,7 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.read_text":
-            unknown = sorted({key for key in arguments.keys()} - {"path"})
+            unknown = sorted(set(arguments) - {"path"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -356,7 +374,7 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.write_text":
-            unknown = sorted({key for key in arguments.keys()} - {"path", "content"})
+            unknown = sorted(set(arguments) - {"path", "content"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -368,7 +386,7 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.stat":
-            unknown = sorted({key for key in arguments.keys()} - {"path", "follow_symlinks"})
+            unknown = sorted(set(arguments) - {"path", "follow_symlinks"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -379,7 +397,7 @@ class FilesystemModule(BaseModule):
 
         if tool_name == "fs.glob":
             unknown = sorted(
-                {key for key in arguments.keys()}
+                set(arguments)
                 - {
                     "pattern",
                     "base_path",
@@ -412,7 +430,7 @@ class FilesystemModule(BaseModule):
 
         if tool_name == "fs.grep":
             unknown = sorted(
-                {key for key in arguments.keys()}
+                set(arguments)
                 - {
                     "pattern",
                     "base_path",
@@ -449,6 +467,8 @@ class FilesystemModule(BaseModule):
             self._validate_positive_int_argument(arguments, "limit")
             self._validate_positive_int_argument(arguments, "max_file_bytes")
             if arguments.get("regex") is True:
+                if not self._setting_bool("grep_allow_regex", False):
+                    raise ValueError("regex grep is disabled by module configuration")
                 max_pattern_length = self._setting_positive_int("grep_max_pattern_length", 512)
                 if len(pattern) > max_pattern_length:
                     raise ValueError(
@@ -724,8 +744,11 @@ class FilesystemModule(BaseModule):
                     "type": candidate_type,
                 }
                 if candidate_kind == "file":
-                    with suppress(OSError):
+                    try:
                         record["size"] = candidate.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        record["size"] = None
+                        record["size_unavailable"] = True
                 matches.append(record)
 
             if walk_truncated:
@@ -756,6 +779,8 @@ class FilesystemModule(BaseModule):
         follow_symlinks: bool,
         limit: int,
         max_file_bytes: int,
+        max_total_bytes: int,
+        max_files: int,
         walk_entry_limit: int,
     ) -> dict[str, Any]:
         if not base.exists():
@@ -774,6 +799,10 @@ class FilesystemModule(BaseModule):
         }
         visited_entries = 0
         walk_truncated = False
+        io_truncated = False
+        file_budget_truncated = False
+        total_bytes_read = 0
+        files_read = 0
         seen_dirs: set[Path] = {base.resolve(strict=False)}
         file_candidates: list[tuple[str, Path]] = []
 
@@ -860,6 +889,12 @@ class FilesystemModule(BaseModule):
             if file_size > max_file_bytes:
                 skipped["too_large"] += 1
                 continue
+            if files_read >= max_files:
+                file_budget_truncated = True
+                break
+            if total_bytes_read + file_size > max_total_bytes:
+                io_truncated = True
+                break
             try:
                 payload = read_target.read_bytes()
             except PermissionError:
@@ -868,6 +903,8 @@ class FilesystemModule(BaseModule):
             except OSError:
                 skipped["unsupported_type"] += 1
                 continue
+            files_read += 1
+            total_bytes_read += len(payload)
             if b"\x00" in payload:
                 skipped["binary"] += 1
                 continue
@@ -899,11 +936,22 @@ class FilesystemModule(BaseModule):
                     remaining_count += 1
 
         matches.sort(key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)))
+        truncation_reasons = []
+        if walk_truncated:
+            truncation_reasons.append("walk_entry_limit")
+        if io_truncated:
+            truncation_reasons.append("io_budget")
+        if file_budget_truncated:
+            truncation_reasons.append("file_budget")
+        if remaining_count > 0:
+            truncation_reasons.append("match_limit")
         return {
             "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
             "matches": matches,
-            "truncated": walk_truncated or remaining_count > 0,
+            "truncated": bool(truncation_reasons),
             "remaining_count": remaining_count,
+            "remaining_count_known": not (walk_truncated or io_truncated or file_budget_truncated),
+            "truncation_reasons": truncation_reasons,
             "skipped": skipped,
         }
 

@@ -9,9 +9,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module import (
     FilesystemModule,
 )
-from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException
-from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException, MCPProtocol, RequestContext
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
 )
@@ -217,6 +215,7 @@ def test_filesystem_validates_new_filesystem_helper_arguments() -> None:
         ModuleConfig(
             name="filesystem",
             settings={
+                "grep_allow_regex": True,
                 "grep_max_pattern_length": 4,
             },
         ),
@@ -314,7 +313,7 @@ async def test_filesystem_list_read_and_write_text_within_workspace(tmp_path: Pa
         context=context,
     )
     assert write_result["path"] == "docs/new.txt"  # nosec B101
-    assert write_result["bytes_written"] == len("created by fs.write_text".encode("utf-8"))  # nosec B101
+    assert write_result["bytes_written"] == len(b"created by fs.write_text")  # nosec B101
     assert (docs_dir / "new.txt").read_text(encoding="utf-8") == "created by fs.write_text"  # nosec B101
     assert len(resolver.calls) == 3  # nosec B101
 
@@ -349,7 +348,7 @@ async def test_filesystem_stat_file_and_directory_metadata(tmp_path: Path) -> No
     assert file_stat["path"] == "docs/hello.txt"  # nosec B101
     assert file_stat["name"] == "hello.txt"  # nosec B101
     assert file_stat["type"] == "file"  # nosec B101
-    assert file_stat["size"] == len("hello world".encode("utf-8"))  # nosec B101
+    assert file_stat["size"] == len(b"hello world")  # nosec B101
     assert file_stat["is_symlink"] is False  # nosec B101
     assert isinstance(file_stat["modified_at"], str) and file_stat["modified_at"]  # nosec B101
     assert isinstance(file_stat.get("mode"), int)  # nosec B101
@@ -491,6 +490,53 @@ async def test_filesystem_glob_matches_sorted_paths_and_normalizes_patterns(tmp_
     assert result["base_path"] == "."  # nosec B101
     assert result["pattern"] == "**/*.py"  # nosec B101
     assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_marks_file_size_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    source_file = workspace_root / "unreadable-size.txt"
+    source_file.write_text("content", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-size-unavailable",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+    original_stat = Path.stat
+    stat_calls_by_path: dict[Path, int] = {}
+
+    def _raise_for_source_file(self: Path, *args: Any, **kwargs: Any):
+        stat_calls_by_path[self] = stat_calls_by_path.get(self, 0) + 1
+        if self == source_file and stat_calls_by_path[self] > 1:
+            raise OSError("metadata unavailable")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _raise_for_source_file)
+
+    result = await mod.execute_tool("fs.glob", {"pattern": "*.txt"}, context=context)
+
+    assert result["matches"] == [  # nosec B101
+        {
+            "path": "unreadable-size.txt",
+            "type": "file",
+            "size": None,
+            "size_unavailable": True,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -692,7 +738,10 @@ async def test_filesystem_grep_literal_regex_case_and_newlines(tmp_path: Path) -
             "reason": None,
         }
     )
-    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_allow_regex": True}),
+        workspace_root_resolver=resolver,
+    )
     context = RequestContext(
         request_id="req-filesystem-grep",
         user_id="7",
@@ -732,6 +781,30 @@ async def test_filesystem_grep_literal_regex_case_and_newlines(tmp_path: Path) -
     assert insensitive["matches"][0]["match_text"] == "Error"  # nosec B101
     assert newline["matches"][0]["line_number"] == 3  # nosec B101
     assert newline["matches"][0]["line"] == "third"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_rejects_regex_when_disabled_by_default(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-regex-disabled",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    with pytest.raises(ValueError, match="regex grep is disabled"):
+        await mod.execute_tool("fs.grep", {"pattern": "TODO", "regex": True}, context=context)
 
 
 @pytest.mark.asyncio
@@ -797,7 +870,10 @@ async def test_filesystem_grep_limits_and_regex_errors(tmp_path: Path, monkeypat
             "reason": None,
         }
     )
-    limit_mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    limit_mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_allow_regex": True}),
+        workspace_root_resolver=resolver,
+    )
     cap_mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"grep_walk_entry_limit": 2}),
         workspace_root_resolver=resolver,
@@ -824,6 +900,48 @@ async def test_filesystem_grep_limits_and_regex_errors(tmp_path: Path, monkeypat
     monkeypatch.setattr(Path, "read_bytes", _fail_read_bytes)
     with pytest.raises(ValueError, match="invalid regex pattern"):
         await limit_mod.execute_tool("fs.grep", {"pattern": "[", "regex": True}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_caps_global_io_budgets(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (workspace_root / name).write_text("TODO " + ("x" * 16), encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    byte_budget_mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_max_total_bytes": 24}),
+        workspace_root_resolver=resolver,
+    )
+    file_budget_mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_max_files": 1}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(
+        request_id="req-filesystem-grep-io-budget",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    byte_limited = await byte_budget_mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+    file_limited = await file_budget_mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+
+    assert [match["path"] for match in byte_limited["matches"]] == ["a.txt"]  # nosec B101
+    assert byte_limited["truncated"] is True  # nosec B101
+    assert byte_limited["remaining_count_known"] is False  # nosec B101
+    assert "io_budget" in byte_limited["truncation_reasons"]  # nosec B101
+    assert [match["path"] for match in file_limited["matches"]] == ["a.txt"]  # nosec B101
+    assert file_limited["truncated"] is True  # nosec B101
+    assert file_limited["remaining_count_known"] is False  # nosec B101
+    assert "file_budget" in file_limited["truncation_reasons"]  # nosec B101
 
 
 @pytest.mark.asyncio
