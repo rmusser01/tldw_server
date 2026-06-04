@@ -412,10 +412,15 @@ async def test_git_repository_resolution_runs_rev_parse_from_workspace_root(tmp_
             "reason": None,
         }
     )
-    runner = _RecordingGitRunner(result=_git_result(stdout=f"{workspace_root}\n"))
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="# branch.head main\0"),
+        ]
+    )
     module = _module(workspace_root_resolver=resolver, runner=runner)
 
-    result = await module.execute_tool("git.diff", {"scope": "staged"}, context=_context())
+    result = await module.execute_tool("git.status", {}, context=_context())
 
     assert resolver.calls[0]["session_id"] == "sess-1"  # nosec B101
     assert resolver.calls[0]["user_id"] == "7"  # nosec B101
@@ -428,7 +433,7 @@ async def test_git_repository_resolution_runs_rev_parse_from_workspace_root(tmp_
         "--show-toplevel",
     ]
     assert result["repository_root"] == "."  # nosec B101
-    assert result["reason_code"] == "not_implemented"  # nosec B101
+    assert result["ok"] is True  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -796,6 +801,475 @@ async def test_git_conflicts_list_respects_limit_and_marks_truncated(tmp_path: P
     assert result["ok"] is True  # nosec B101
     assert result["truncated"] is True  # nosec B101
     assert len(result["conflicts"]) == 1  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_diff_runs_unstaged_with_path_separator_and_dash_path(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    diff_text = "diff --git a/-danger.py b/-danger.py\n+changed\n"
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=diff_text),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.diff",
+        {"scope": "unstaged", "path": "-danger.py", "context_lines": 3, "max_bytes": 512},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--unified=3",
+        "--",
+        "-danger.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["scope"] == "unstaged"  # nosec B101
+    assert result["diff"] == diff_text  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+    assert result["limits"] == {"context_lines": 3, "max_bytes": 512}  # nosec B101
+    assert result["git"]["subcommand"] == "diff"  # nosec B101
+    assert result["eval"]["result_kind"] == "bounded_git_diff"  # nosec B101
+    assert result["eval"]["path_filter_used"] is True  # nosec B101
+    assert str(workspace_root) not in str(result["eval"])  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_diff_runs_staged_with_cached_scope(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="diff --git a/src/app.py b/src/app.py\n+staged\n"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.diff",
+        {"scope": "staged", "path": "src/app.py", "context_lines": 4},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--unified=4",
+        "--cached",
+        "--",
+        "src/app.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["scope"] == "staged"  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_diff_working_tree_returns_staged_and_unstaged_sections(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="staged-diff"),
+            _git_result(stdout="unstaged-diff"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.diff",
+        {"scope": "working_tree", "context_lines": 2, "max_bytes": 100},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--unified=2",
+        "--cached",
+    ]
+    assert runner.calls[2]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--unified=2",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["scope"] == "working_tree"  # nosec B101
+    assert result["sections"] == [  # nosec B101
+        {"scope": "staged", "diff": "staged-diff"},
+        {"scope": "unstaged", "diff": "unstaged-diff"},
+    ]
+    assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_diff_respects_max_bytes_truncation(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="0123456789"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.diff",
+        {"scope": "unstaged", "max_bytes": 4},
+        context=_context(),
+    )
+
+    assert result["ok"] is True  # nosec B101
+    assert result["diff"] == "0123"  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_log_parses_bounded_commits_with_path_filter_and_no_emails(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = (
+        "abcdef1234567890\x1fabcdef1\x1fAda Lovelace\x1f2026-06-01T10:00:00+00:00\x1fAdd feature\x1e"
+        "fedcba0987654321\x1ffedcba0\x1fGrace Hopper\x1f2026-06-02T11:00:00+00:00\x1fFix bug\x1e"
+        "1111111111111111\x1f1111111\x1fHidden Author <hidden@example.com>\x1f2026-06-03T12:00:00+00:00\x1fIgnored\x1e"
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.log",
+        {"limit": 2, "path": "src/app.py"},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "log",
+        "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e",
+        "-n",
+        "2",
+        "--",
+        "src/app.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["commits"] == [  # nosec B101
+        {
+            "hash": "abcdef1234567890",
+            "short_hash": "abcdef1",
+            "author_name": "Ada Lovelace",
+            "author_date": "2026-06-01T10:00:00+00:00",
+            "subject": "Add feature",
+        },
+        {
+            "hash": "fedcba0987654321",
+            "short_hash": "fedcba0",
+            "author_name": "Grace Hopper",
+            "author_date": "2026-06-02T11:00:00+00:00",
+            "subject": "Fix bug",
+        },
+    ]
+    assert result["truncated"] is True  # nosec B101
+    assert "email" not in str(result).lower()  # nosec B101
+    assert result["eval"]["result_kind"] == "bounded_git_log"  # nosec B101
+    assert result["eval"]["path_filter_used"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_blame_parses_line_porcelain_range_caps_lines_and_no_emails(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\n".join(
+        [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1",
+            "author Ada Lovelace",
+            "author-mail <ada@example.com>",
+            "author-time 1780000000",
+            "author-tz +0000",
+            "\tfirst line",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 2 2 1",
+            "author Grace Hopper",
+            "author-mail <grace@example.com>",
+            "author-time 1780000100",
+            "author-tz +0000",
+            "\tsecond line",
+        ]
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.blame",
+        {"path": "src/app.py", "start_line": 1, "end_line": 2, "limit": 1},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "blame",
+        "--line-porcelain",
+        "-L",
+        "1,2",
+        "--",
+        "src/app.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["lines"] == [  # nosec B101
+        {
+            "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "author_name": "Ada Lovelace",
+            "author_time": 1780000000,
+            "author_date": "2026-05-28T20:26:40+00:00",
+            "line_number": 1,
+            "text": "first line",
+        }
+    ]
+    assert result["truncated"] is True  # nosec B101
+    assert "email" not in str(result).lower()  # nosec B101
+    assert result["eval"]["result_kind"] == "bounded_git_blame"  # nosec B101
+    assert result["eval"]["path_filter_used"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_read_refuses_non_conflicted_path(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "src").mkdir()
+    (workspace_root / "src" / "clean.py").write_text("clean\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="100644 aaa 2\tsrc/conflict.py\0"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.conflicts.read",
+        {"path": "src/clean.py"},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "ls-files",
+        "-u",
+        "-z",
+    ]
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "path_not_conflicted"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_read_parses_bounded_hunks_for_conflicted_path(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    conflict_path = workspace_root / "src" / "conflict.py"
+    conflict_path.parent.mkdir()
+    conflict_path.write_text(
+        "\n".join(
+            [
+                "before",
+                "<<<<<<< HEAD",
+                "ours",
+                "=======",
+                "theirs",
+                ">>>>>>> feature",
+                "middle",
+                "<<<<<<< HEAD",
+                "ours 2",
+                "=======",
+                "theirs 2",
+                ">>>>>>> feature",
+                "after",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="100644 aaa 2\tsrc/conflict.py\0" "100644 bbb 3\tsrc/conflict.py\0"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.conflicts.read",
+        {"path": "src/conflict.py", "limit": 1, "max_bytes": 1_024},
+        context=_context(),
+    )
+
+    assert result["ok"] is True  # nosec B101
+    assert result["path"] == "src/conflict.py"  # nosec B101
+    assert result["hunks"] == [  # nosec B101
+        {
+            "start_line": 2,
+            "end_line": 6,
+            "labels": {"ours": "HEAD", "theirs": "feature"},
+            "text": "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature",
+        }
+    ]
+    assert result["truncated"] is True  # nosec B101
+    assert result["limits"] == {"limit": 1, "max_bytes": 1_024}  # nosec B101
+    assert result["git"]["subcommand"] == "ls-files"  # nosec B101
+    assert result["eval"]["result_kind"] == "bounded_git_conflict_hunks"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_read_respects_max_bytes(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    conflict_path = workspace_root / "src" / "conflict.py"
+    conflict_path.parent.mkdir()
+    conflict_path.write_text(
+        "<<<<<<< HEAD\nours-long\n=======\ntheirs-long\n>>>>>>> feature\n",
+        encoding="utf-8",
+    )
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="100644 aaa 2\tsrc/conflict.py\0"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.conflicts.read",
+        {"path": "src/conflict.py", "limit": 5, "max_bytes": 10},
+        context=_context(),
+    )
+
+    assert result["ok"] is True  # nosec B101
+    assert result["hunks"][0]["text"] == "<<<<<<< HE"  # nosec B101
+    assert len(result["hunks"][0]["text"].encode("utf-8")) <= 10  # nosec B101
+    assert result["truncated"] is True  # nosec B101
     assert result["eval"]["truncated"] is True  # nosec B101
 
 

@@ -6,8 +6,10 @@ import asyncio
 import contextlib
 import os
 import posixpath
+import re
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePath, PureWindowsPath
 from typing import Any, Protocol
 
@@ -505,28 +507,22 @@ class GitModule(BaseModule):
             return await self._execute_branches(repository, tool_name, args, context=context)
         if tool_name == _TOOL_CONFLICTS_LIST:
             return await self._execute_conflicts_list(repository, tool_name, args, context=context)
+        if tool_name == _TOOL_DIFF:
+            return await self._execute_diff(repository, tool_name, args, context=context)
+        if tool_name == _TOOL_LOG:
+            return await self._execute_log(repository, tool_name, args, context=context)
+        if tool_name == _TOOL_BLAME:
+            return await self._execute_blame(repository, tool_name, args, context=context)
+        if tool_name == _TOOL_CONFLICTS_READ:
+            return await self._execute_conflicts_read(repository, tool_name, args, context=context)
 
-        return {
-            "ok": False,
-            "reason_code": "not_implemented",
-            "message": "Git repository resolved; this read tool behavior is not implemented yet.",
-            "repository_root": repository.repository_root_relative,
-            "truncated": False,
-            "limits": self._effective_limits(tool_name, args),
-            "git": self._safe_git_metadata(
-                repository.discovery_result,
-                subcommand="rev-parse",
-            ),
-            "eval": self._execution_eval_metadata(
-                tool_name,
-                reason_code="not_implemented",
-                duration_ms=repository.discovery_result.duration_ms,
-                path_filter_used=bool(args.get("path")),
-                result_kind="git_repository_preparation",
-                truncated=False,
-                context=context,
-            ),
-        }
+        return self._error_result(
+            tool_name,
+            "unknown_tool",
+            "Unknown Git tool.",
+            path_filter_used=bool(args.get("path")),
+            context=context,
+        )
 
     async def _execute_status(
         self,
@@ -667,12 +663,372 @@ class GitModule(BaseModule):
             ),
         }
 
+    async def _execute_diff(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        scope = str(args.get("scope") or "unstaged")
+        path = self._optional_safe_path(args.get("path"))
+        context_lines = int(args.get("context_lines") or self._context_lines_maximum())
+        max_bytes = int(args.get("max_bytes") or self._diff_bytes_maximum())
+
+        if scope == "working_tree":
+            staged_result = await self._run_diff_command(
+                repository,
+                tool_name,
+                scope="staged",
+                context_lines=context_lines,
+                path=path,
+                context=context,
+            )
+            if isinstance(staged_result, dict):
+                staged_result["repository_root"] = repository.repository_root_relative
+                staged_result["limits"] = self._effective_limits(tool_name, args)
+                return staged_result
+            unstaged_result = await self._run_diff_command(
+                repository,
+                tool_name,
+                scope="unstaged",
+                context_lines=context_lines,
+                path=path,
+                context=context,
+            )
+            if isinstance(unstaged_result, dict):
+                unstaged_result["repository_root"] = repository.repository_root_relative
+                unstaged_result["limits"] = self._effective_limits(tool_name, args)
+                return unstaged_result
+
+            sections: list[dict[str, str]] = []
+            remaining = max_bytes
+            truncated = bool(staged_result.truncated or unstaged_result.truncated)
+            for section_scope, command_result in (
+                ("staged", staged_result),
+                ("unstaged", unstaged_result),
+            ):
+                diff_text, text_truncated = self._truncate_text_bytes(command_result.stdout, remaining)
+                remaining = max(0, remaining - len(diff_text.encode("utf-8")))
+                truncated = truncated or text_truncated
+                sections.append({"scope": section_scope, "diff": diff_text})
+
+            return {
+                "ok": True,
+                "repository_root": repository.repository_root_relative,
+                "scope": "working_tree",
+                "sections": sections,
+                "truncated": truncated,
+                "limits": self._effective_limits(tool_name, args),
+                "git": self._safe_git_metadata(unstaged_result, subcommand="diff"),
+                "eval": self._execution_eval_metadata(
+                    tool_name,
+                    reason_code=None,
+                    duration_ms=staged_result.duration_ms + unstaged_result.duration_ms,
+                    path_filter_used=path is not None,
+                    result_kind="bounded_git_diff",
+                    truncated=truncated,
+                    context=context,
+                ),
+            }
+
+        result = await self._run_diff_command(
+            repository,
+            tool_name,
+            scope=scope,
+            context_lines=context_lines,
+            path=path,
+            context=context,
+        )
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        diff_text, text_truncated = self._truncate_text_bytes(result.stdout, max_bytes)
+        truncated = bool(result.truncated or text_truncated)
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "scope": scope,
+            "diff": diff_text,
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="diff"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=path is not None,
+                result_kind="bounded_git_diff",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _execute_log(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        limit = int(args.get("limit") or self._log_limit_maximum())
+        path = self._optional_safe_path(args.get("path"))
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "log",
+            "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e",
+            "-n",
+            str(limit),
+        ]
+        if path is not None:
+            argv.extend(["--", path])
+
+        result = await self._run_read_command(
+            tool_name,
+            argv,
+            subcommand="log",
+            path_filter_used=path is not None,
+            context=context,
+        )
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        parsed = self._parse_log(result.stdout, limit=limit)
+        truncated = bool(result.truncated or parsed["truncated"])
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "commits": parsed["commits"],
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="log"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=path is not None,
+                result_kind="bounded_git_log",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _execute_blame(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        limit = int(args.get("limit") or self._blame_limit_maximum())
+        start_line = int(args.get("start_line") or 1)
+        end_line = int(args.get("end_line") or (start_line + limit - 1))
+        path = self._optional_safe_path(args.get("path"))
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "blame",
+            "--line-porcelain",
+            "-L",
+            f"{start_line},{end_line}",
+            "--",
+            str(path),
+        ]
+
+        result = await self._run_read_command(
+            tool_name,
+            argv,
+            subcommand="blame",
+            path_filter_used=True,
+            context=context,
+        )
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        parsed = self._parse_blame(result.stdout, limit=limit)
+        truncated = bool(result.truncated or parsed["truncated"])
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "path": path,
+            "lines": parsed["lines"],
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="blame"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=True,
+                result_kind="bounded_git_blame",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _execute_conflicts_read(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        path = self._optional_safe_path(args.get("path"))
+        limit = int(args.get("limit") or self._conflict_limit_maximum())
+        max_bytes = int(args.get("max_bytes") or self._conflict_read_bytes_maximum())
+
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "ls-files",
+            "-u",
+            "-z",
+        ]
+        result = await self._run_read_command(
+            tool_name,
+            argv,
+            subcommand="ls-files",
+            path_filter_used=True,
+            context=context,
+        )
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        conflicted_paths = self._conflicted_path_set(result.stdout)
+        if path not in conflicted_paths:
+            error = self._error_result(
+                tool_name,
+                "path_not_conflicted",
+                "The requested path is not currently conflicted.",
+                git_result=result,
+                subcommand="ls-files",
+                path_filter_used=True,
+                result_kind="bounded_git_conflict_hunks",
+                truncated=result.truncated,
+                context=context,
+            )
+            error["repository_root"] = repository.repository_root_relative
+            error["limits"] = self._effective_limits(tool_name, args)
+            return error
+
+        target = (repository.repository_root / str(path)).resolve(strict=False)
+        if not self._path_inside(target, repository.repository_root) or not self._path_inside(
+            target,
+            repository.workspace_root,
+        ):
+            error = self._error_result(
+                tool_name,
+                "path_outside_repository",
+                "The requested path resolves outside the active repository.",
+                git_result=result,
+                subcommand="ls-files",
+                path_filter_used=True,
+                result_kind="bounded_git_conflict_hunks",
+                truncated=result.truncated,
+                context=context,
+            )
+            error["repository_root"] = repository.repository_root_relative
+            error["limits"] = self._effective_limits(tool_name, args)
+            return error
+
+        try:
+            content, file_truncated = self._read_text_file_bounded(target, max_bytes=max_bytes)
+        except OSError:
+            error = self._error_result(
+                tool_name,
+                "conflicted_file_unreadable",
+                "The conflicted file could not be read.",
+                git_result=result,
+                subcommand="ls-files",
+                path_filter_used=True,
+                result_kind="bounded_git_conflict_hunks",
+                truncated=result.truncated,
+                context=context,
+            )
+            error["repository_root"] = repository.repository_root_relative
+            error["limits"] = self._effective_limits(tool_name, args)
+            return error
+
+        parsed = self._parse_conflict_hunks(content, limit=limit, max_bytes=max_bytes)
+        truncated = bool(result.truncated or file_truncated or parsed["truncated"])
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "path": path,
+            "hunks": parsed["hunks"],
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="ls-files"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=True,
+                result_kind="bounded_git_conflict_hunks",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _run_diff_command(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        *,
+        scope: str,
+        context_lines: int,
+        path: str | None,
+        context: Any | None,
+    ) -> GitCommandResult | dict[str, Any]:
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            f"--unified={context_lines}",
+        ]
+        if scope == "staged":
+            argv.append("--cached")
+        if path is not None:
+            argv.extend(["--", path])
+        return await self._run_read_command(
+            tool_name,
+            argv,
+            subcommand="diff",
+            path_filter_used=path is not None,
+            context=context,
+        )
+
     async def _run_read_command(
         self,
         tool_name: str,
         argv: list[str],
         *,
         subcommand: str,
+        path_filter_used: bool = False,
         context: Any | None,
     ) -> GitCommandResult | dict[str, Any]:
         try:
@@ -686,7 +1042,7 @@ class GitModule(BaseModule):
                 "git_command_timeout",
                 "Git command timed out.",
                 subcommand=subcommand,
-                path_filter_used=False,
+                path_filter_used=path_filter_used,
                 result_kind=self._result_kind_for_tool(tool_name),
                 truncated=False,
                 context=context,
@@ -699,7 +1055,7 @@ class GitModule(BaseModule):
                 "Git command timed out.",
                 git_result=result,
                 subcommand=subcommand,
-                path_filter_used=False,
+                path_filter_used=path_filter_used,
                 result_kind=self._result_kind_for_tool(tool_name),
                 truncated=result.truncated,
                 context=context,
@@ -711,7 +1067,7 @@ class GitModule(BaseModule):
                 "Git command failed.",
                 git_result=result,
                 subcommand=subcommand,
-                path_filter_used=False,
+                path_filter_used=path_filter_used,
                 result_kind=self._result_kind_for_tool(tool_name),
                 truncated=result.truncated,
                 context=context,
@@ -1003,6 +1359,14 @@ class GitModule(BaseModule):
             return "bounded_git_branches"
         if tool_name == _TOOL_CONFLICTS_LIST:
             return "structured_git_conflicts"
+        if tool_name == _TOOL_DIFF:
+            return "bounded_git_diff"
+        if tool_name == _TOOL_LOG:
+            return "bounded_git_log"
+        if tool_name == _TOOL_BLAME:
+            return "bounded_git_blame"
+        if tool_name == _TOOL_CONFLICTS_READ:
+            return "bounded_git_conflict_hunks"
         return "git_repository_preparation"
 
     def _parse_status_porcelain_v2(self, stdout: str, *, limit: int) -> dict[str, Any]:
@@ -1209,6 +1573,217 @@ class GitModule(BaseModule):
             "conflicts": conflicts,
             "truncated": len(ordered_paths) > limit,
         }
+
+    def _parse_log(self, stdout: str, *, limit: int) -> dict[str, Any]:
+        commits: list[dict[str, Any]] = []
+        total = 0
+
+        for record in stdout.split("\x1e"):
+            if not record:
+                continue
+            fields = record.strip("\n").split("\x1f", 4)
+            if len(fields) < 5:
+                continue
+            total += 1
+            if len(commits) >= limit:
+                continue
+            commit_hash, short_hash, author_name, author_date, subject = fields
+            commits.append(
+                {
+                    "hash": commit_hash,
+                    "short_hash": short_hash,
+                    "author_name": self._sanitize_author_name(author_name),
+                    "author_date": author_date,
+                    "subject": subject,
+                }
+            )
+
+        return {
+            "commits": commits,
+            "truncated": total > limit,
+        }
+
+    def _parse_blame(self, stdout: str, *, limit: int) -> dict[str, Any]:
+        lines: list[dict[str, Any]] = []
+        total = 0
+        current: dict[str, Any] | None = None
+
+        for raw_line in stdout.splitlines():
+            if raw_line.startswith("\t"):
+                if current is None:
+                    continue
+                total += 1
+                if len(lines) < limit:
+                    author_time = current.get("author_time")
+                    lines.append(
+                        {
+                            "commit": current.get("commit"),
+                            "author_name": self._sanitize_author_name(
+                                str(current.get("author_name") or "")
+                            ),
+                            "author_time": author_time,
+                            "author_date": self._author_date_from_timestamp(author_time),
+                            "line_number": current.get("line_number"),
+                            "text": raw_line[1:],
+                        }
+                    )
+                current = None
+                continue
+
+            header = self._parse_blame_header(raw_line)
+            if header is not None:
+                current = header
+                continue
+
+            if current is None:
+                continue
+            if raw_line.startswith("author "):
+                current["author_name"] = raw_line.removeprefix("author ")
+                continue
+            if raw_line.startswith("author-time "):
+                with contextlib.suppress(ValueError):
+                    current["author_time"] = int(raw_line.removeprefix("author-time "))
+
+        return {
+            "lines": lines,
+            "truncated": total > limit,
+        }
+
+    @staticmethod
+    def _parse_blame_header(raw_line: str) -> dict[str, Any] | None:
+        parts = raw_line.split()
+        if len(parts) < 4:
+            return None
+        commit_hash = parts[0]
+        if len(commit_hash) < 8 or not all(character in "0123456789abcdefABCDEF" for character in commit_hash):
+            return None
+        with contextlib.suppress(ValueError):
+            return {
+                "commit": commit_hash,
+                "line_number": int(parts[2]),
+                "author_name": None,
+                "author_time": None,
+            }
+        return None
+
+    @staticmethod
+    def _author_date_from_timestamp(value: Any) -> str | None:
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        return datetime.fromtimestamp(value, tz=UTC).isoformat()
+
+    @staticmethod
+    def _sanitize_author_name(value: str) -> str:
+        cleaned = re.sub(r"<[^<>\s@]+@[^<>\s@]+>", "", value)
+        cleaned = re.sub(r"\b\S+@\S+\b", "", cleaned)
+        return " ".join(cleaned.split())
+
+    def _conflicted_path_set(self, stdout: str) -> set[str]:
+        paths: set[str] = set()
+        for record in self._nul_records(stdout):
+            _, separator, path_raw = record.partition("\t")
+            if not separator:
+                continue
+            path = self._safe_response_path(path_raw)
+            if path is not None:
+                paths.add(path)
+        return paths
+
+    def _parse_conflict_hunks(self, content: str, *, limit: int, max_bytes: int) -> dict[str, Any]:
+        hunks: list[dict[str, Any]] = []
+        total_hunks = 0
+        remaining = max_bytes
+        active: dict[str, Any] | None = None
+        last_line_number = 1
+
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            last_line_number = line_number
+            if line.startswith("<<<<<<<"):
+                active = {
+                    "start_line": line_number,
+                    "lines": [line],
+                    "ours_label": line.removeprefix("<<<<<<<").strip() or None,
+                    "theirs_label": None,
+                }
+                continue
+            if active is None:
+                continue
+
+            active["lines"].append(line)
+            if line.startswith(">>>>>>>"):
+                active["end_line"] = line_number
+                active["theirs_label"] = line.removeprefix(">>>>>>>").strip() or None
+                total_hunks += 1
+                if len(hunks) < limit:
+                    text = "\n".join(active["lines"])
+                    hunk_text, text_truncated = self._truncate_text_bytes(text, remaining)
+                    remaining = max(0, remaining - len(hunk_text.encode("utf-8")))
+                    hunks.append(
+                        {
+                            "start_line": active["start_line"],
+                            "end_line": active["end_line"],
+                            "labels": {
+                                "ours": active["ours_label"],
+                                "theirs": active["theirs_label"],
+                            },
+                            "text": hunk_text,
+                        }
+                    )
+                    if text_truncated:
+                        return {
+                            "hunks": hunks,
+                            "truncated": True,
+                        }
+                active = None
+
+        if active is not None:
+            total_hunks += 1
+            if len(hunks) < limit:
+                text = "\n".join(active["lines"])
+                hunk_text, text_truncated = self._truncate_text_bytes(text, remaining)
+                hunks.append(
+                    {
+                        "start_line": active["start_line"],
+                        "end_line": last_line_number,
+                        "labels": {
+                            "ours": active["ours_label"],
+                            "theirs": active["theirs_label"],
+                        },
+                        "text": hunk_text,
+                    }
+                )
+                if text_truncated:
+                    return {
+                        "hunks": hunks,
+                        "truncated": True,
+                    }
+
+        return {
+            "hunks": hunks,
+            "truncated": total_hunks > limit,
+        }
+
+    @staticmethod
+    def _read_text_file_bounded(path: Path, *, max_bytes: int) -> tuple[str, bool]:
+        with path.open("rb") as handle:
+            data = handle.read(max_bytes + 1)
+        truncated = len(data) > max_bytes
+        return data[:max_bytes].decode("utf-8", errors="replace"), truncated
+
+    @staticmethod
+    def _truncate_text_bytes(value: str, max_bytes: int) -> tuple[str, bool]:
+        encoded = value.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return value, False
+        return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
+
+    def _optional_safe_path(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        path = self._safe_response_path(str(value))
+        if path is None:
+            raise ValueError("path resolves outside workspace")
+        return path
 
     @staticmethod
     def _conflict_xy_status(stages: list[int]) -> str:
