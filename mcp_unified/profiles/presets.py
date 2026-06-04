@@ -199,6 +199,15 @@ _GIT_READ_TOOLS = [
 ]
 _TEST_READ_TOOLS = ["tests.results.read", "tests.logs.read"]
 _TEST_REQUEST_TOOLS = [*_TEST_READ_TOOLS, "tests.request"]
+_BROWSER_READ_TOOLS = [
+    "browser.status",
+    "browser.pages.list",
+    "browser.snapshot",
+    "browser.page_state",
+    "browser.screenshot",
+    "browser.console",
+    "browser.network",
+]
 
 _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
     _preset(
@@ -582,6 +591,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
+                *_BROWSER_READ_TOOLS,
                 "ui.components.inspect",
             ],
             enabled_capabilities=[
@@ -589,16 +599,20 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "frontend.inspect",
                 "tests.request",
                 "code_search",
+                "browser.inspect",
+                "browser.debug",
+                "screenshots.capture",
+                "app_state.read",
             ],
             direct_categories=[
                 "files",
                 "code",
                 "tests",
+                "browser",
                 "frontend",
                 "tool_discovery",
             ],
             deferred_categories=[
-                "browser",
                 "safe_test_runner",
                 "issue_tracker",
                 "web_search",
@@ -630,14 +644,21 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
+                *_BROWSER_READ_TOOLS,
                 "logs.search",
                 "screenshots.list",
                 "app_state.read",
                 "test_cases.read",
             ],
-            enabled_capabilities=["logs.read", "screenshots.capture", "app_state.read"],
-            direct_categories=["logs", "screenshots", "app_state", "tool_discovery"],
-            deferred_categories=["browser", "safe_test_runner", "issue_tracker"],
+            enabled_capabilities=[
+                "browser.inspect",
+                "browser.debug",
+                "logs.read",
+                "screenshots.capture",
+                "app_state.read",
+            ],
+            direct_categories=["browser", "logs", "screenshots", "app_state", "tool_discovery"],
+            deferred_categories=["safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "test_cases.generate",
@@ -670,6 +691,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
+                *_BROWSER_READ_TOOLS,
             ],
             enabled_capabilities=[
                 "tests.write_scoped",
@@ -677,9 +699,13 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "code_search",
                 "filesystem.read",
                 "filesystem.write_scoped",
+                "browser.inspect",
+                "browser.debug",
+                "screenshots.capture",
+                "app_state.read",
             ],
-            direct_categories=["files", "code", "tests", "tool_discovery"],
-            deferred_categories=["safe_test_runner", "browser", "issue_tracker"],
+            direct_categories=["files", "code", "tests", "browser", "tool_discovery"],
+            deferred_categories=["safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "tests.plan.generate",

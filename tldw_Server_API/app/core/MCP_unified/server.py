@@ -586,6 +586,31 @@ class MCPServer:
                 })
                 logger.info("MCP_ENABLE_SANDBOX_MODULE=true; queuing SandboxModule for registration")
 
+            # 7) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
+            browser_cdp_url = os.getenv("MCP_BROWSER_CDP_URL", "").strip()
+            browser_cdp_disabled = self._env_flag_explicitly_disabled("MCP_ENABLE_BROWSER_CDP_MODULE")
+            browser_cdp_enabled = self._env_flag_enabled("MCP_ENABLE_BROWSER_CDP_MODULE")
+            if not browser_cdp_disabled and (browser_cdp_enabled or browser_cdp_url):
+                if not any(m.get("id") == "browser_cdp" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "browser_cdp",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.browser_cdp_module:BrowserCDPModule",
+                        "enabled": True,
+                        "name": "Browser CDP",
+                        "version": "1.0.0",
+                        "department": "browser",
+                        "settings": {
+                            "debugger_url": "${MCP_BROWSER_CDP_URL:-}",
+                            "request_timeout_seconds": "${MCP_BROWSER_CDP_REQUEST_TIMEOUT_SECONDS:-3.0}",
+                            "observation_window_ms": "${MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS:-250}",
+                            "max_events": "${MCP_BROWSER_CDP_MAX_EVENTS:-100}",
+                            "max_snapshot_nodes": "${MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES:-200}",
+                            "screenshot_max_bytes": "${MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES:-2000000}",
+                            "allow_non_loopback": "${MCP_BROWSER_CDP_ALLOW_NON_LOOPBACK:-false}",
+                        },
+                    })
+                    logger.info("MCP browser CDP module enabled/configured; queuing BrowserCDPModule for registration")
+
             # Register all specified modules
             from .modules.base import ModuleConfig  # Local import to avoid cycles
             for m in modules_to_load:

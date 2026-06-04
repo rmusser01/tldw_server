@@ -202,6 +202,24 @@ def test_browser_cdp_validates_read_only_tool_arguments() -> None:
             module.validate_tool_arguments(tool_name, args)
 
 
+def test_browser_cdp_config_parses_allow_non_loopback_safely() -> None:
+    disabled = _module(
+        settings={
+            "debugger_url": "http://127.0.0.1:9222",
+            "allow_non_loopback": "false",
+        }
+    )
+    enabled = _module(
+        settings={
+            "debugger_url": "http://127.0.0.1:9222",
+            "allow_non_loopback": "true",
+        }
+    )
+
+    assert disabled._client_config().allow_non_loopback is False  # noqa: SLF001  # nosec B101
+    assert enabled._client_config().allow_non_loopback is True  # noqa: SLF001  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_browser_status_reports_availability_and_missing_configuration() -> None:
     configured_module = _module()

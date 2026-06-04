@@ -323,7 +323,7 @@ class BrowserCDPModule(BaseModule):
             max_events=self._setting_positive_int("max_events", 100),
             max_snapshot_nodes=self._setting_positive_int("max_snapshot_nodes", 200),
             screenshot_max_bytes=self._setting_positive_int("screenshot_max_bytes", 2_000_000),
-            allow_non_loopback=bool(settings.get("allow_non_loopback", False)),
+            allow_non_loopback=self._setting_bool("allow_non_loopback", False),
         )
 
     def _tool(
@@ -446,3 +446,17 @@ class BrowserCDPModule(BaseModule):
         except (TypeError, ValueError):
             return default
         return result if result > 0 else default
+
+    def _setting_bool(self, name: str, default: bool) -> bool:
+        settings = self.config.settings if isinstance(self.config.settings, dict) else {}
+        value = settings.get(name, default)
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        text = str(value).strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+        return default
