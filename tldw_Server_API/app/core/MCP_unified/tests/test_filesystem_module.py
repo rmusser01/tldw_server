@@ -585,6 +585,192 @@ async def test_filesystem_glob_caps_walk_and_rejects_outside_symlink_dirs(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_filesystem_grep_literal_regex_case_and_newlines(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "app.py").write_text("alpha\nTODO: fix root\nError mixed\n", encoding="utf-8")
+    (docs_dir / "notes.txt").write_text("first\r\nTODO: docs\rthird\r", encoding="utf-8", newline="")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    literal = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "base_path": "docs", "include": ["**/*.py"]},
+        context=context,
+    )
+    regex = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": r"TODO:\s+\w+", "base_path": "docs", "regex": True},
+        context=context,
+    )
+    insensitive = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "error", "base_path": "docs", "case_sensitive": False},
+        context=context,
+    )
+    newline = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "third", "base_path": "docs"},
+        context=context,
+    )
+
+    assert literal["matches"] == [  # nosec B101
+        {
+            "path": "docs/app.py",
+            "line_number": 2,
+            "line": "TODO: fix root",
+            "match_text": "TODO",
+        }
+    ]
+    assert regex["matches"][0]["match_text"] == "TODO: fix"  # nosec B101
+    assert insensitive["matches"][0]["match_text"] == "Error"  # nosec B101
+    assert newline["matches"][0]["line_number"] == 3  # nosec B101
+    assert newline["matches"][0]["line"] == "third"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_skips_binary_decode_and_large_files(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    src_dir = workspace_root / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "a.py").write_text("TODO small\n", encoding="utf-8")
+    (src_dir / "b.md").write_text("TODO excluded\n", encoding="utf-8")
+    (src_dir / "large.txt").write_text("TODO " + ("x" * 64), encoding="utf-8")
+    (src_dir / "blob.bin").write_bytes(b"\x00TODO")
+    (src_dir / "bad.txt").write_bytes(b"\xffTODO")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-skips",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    result = await mod.execute_tool(
+        "fs.grep",
+        {
+            "pattern": "TODO",
+            "base_path": "src",
+            "include": ["**/*"],
+            "exclude": ["**/*.md"],
+            "max_file_bytes": 32,
+        },
+        context=context,
+    )
+
+    assert [match["path"] for match in result["matches"]] == ["src/a.py"]  # nosec B101
+    assert result["skipped"]["binary"] == 1  # nosec B101
+    assert result["skipped"]["decode_error"] == 1  # nosec B101
+    assert result["skipped"]["too_large"] == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_limits_and_regex_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    for index in range(5):
+        (workspace_root / f"file-{index}.txt").write_text("TODO\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    limit_mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    cap_mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_walk_entry_limit": 2}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(
+        request_id="req-filesystem-grep-limits",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    limited = await limit_mod.execute_tool("fs.grep", {"pattern": "TODO", "limit": 2}, context=context)
+    capped = await cap_mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+
+    assert limited["truncated"] is True  # nosec B101
+    assert len(limited["matches"]) == 2  # nosec B101
+    assert capped["truncated"] is True  # nosec B101
+    assert len(capped["matches"]) <= 2  # nosec B101
+
+    def _fail_read_bytes(self):  # noqa: ANN001
+        raise AssertionError("invalid regex should be rejected before file reads")
+
+    monkeypatch.setattr(Path, "read_bytes", _fail_read_bytes)
+    with pytest.raises(ValueError, match="invalid regex pattern"):
+        await limit_mod.execute_tool("fs.grep", {"pattern": "[", "regex": True}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_symlink_policy_and_loop_avoidance(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "root.txt").write_text("TODO root\n", encoding="utf-8")
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.txt").write_text("TODO secret\n", encoding="utf-8")
+    outside_link = workspace_root / "outside-link"
+    loop_link = workspace_root / "loop"
+    try:
+        outside_link.symlink_to(outside_dir, target_is_directory=True)
+        loop_link.symlink_to(workspace_root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-symlink",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    no_follow = await mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+    outside_link.unlink()
+    loop_safe = await mod.execute_tool("fs.grep", {"pattern": "TODO", "follow_symlinks": True}, context=context)
+
+    assert [match["path"] for match in no_follow["matches"]] == ["root.txt"]  # nosec B101
+    assert [match["path"] for match in loop_safe["matches"]] == ["root.txt"]  # nosec B101
+    outside_link.symlink_to(outside_dir, target_is_directory=True)
+    with pytest.raises(PermissionError, match="outside"):
+        await mod.execute_tool("fs.grep", {"pattern": "TODO", "follow_symlinks": True}, context=context)
+
+
+@pytest.mark.asyncio
 async def test_protocol_rejects_unknown_fs_read_text_arguments(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"

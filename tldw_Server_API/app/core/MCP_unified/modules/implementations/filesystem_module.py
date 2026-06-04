@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import os
+import re
 import stat as stat_module
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -260,6 +261,53 @@ class FilesystemModule(BaseModule):
                 bool(args.get("case_sensitive", True)),
                 limit,
                 self._setting_positive_int("glob_walk_entry_limit", 50_000),
+            )
+
+        if tool_name == "fs.grep":
+            base_path = str(args.get("base_path") or ".")
+            base = self._resolve_workspace_path(workspace_root, base_path)
+            pattern = str(args.get("pattern") or "")
+            regex = bool(args.get("regex", False))
+            case_sensitive = bool(args.get("case_sensitive", True))
+            regex_pattern = None
+            if regex:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                try:
+                    regex_pattern = re.compile(pattern, flags)
+                except re.error as exc:
+                    raise ValueError(f"invalid regex pattern: {exc}") from exc
+            include = [
+                self._normalize_portable_pattern(str(item))
+                for item in (args.get("include") if args.get("include") is not None else ["*", "**/*"])
+            ]
+            exclude = [
+                self._normalize_portable_pattern(str(item))
+                for item in (args.get("exclude") if args.get("exclude") is not None else [])
+            ]
+            for include_pattern in include:
+                self._reject_unsafe_pattern(include_pattern)
+            for exclude_pattern in exclude:
+                self._reject_unsafe_pattern(exclude_pattern)
+            limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("grep_result_limit", 200))
+            max_file_bytes = self._bounded_positive_int(
+                args.get("max_file_bytes"),
+                self._setting_positive_int("grep_max_file_bytes", self._max_read_bytes()),
+            )
+            return await asyncio.to_thread(
+                self._grep_files,
+                workspace_root,
+                base,
+                pattern,
+                regex_pattern,
+                regex,
+                case_sensitive,
+                include,
+                exclude,
+                bool(args.get("include_hidden", False)),
+                bool(args.get("follow_symlinks", False)),
+                limit,
+                max_file_bytes,
+                self._setting_positive_int("grep_walk_entry_limit", 50_000),
             )
 
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -685,6 +733,180 @@ class FilesystemModule(BaseModule):
             "truncated": walk_truncated or remaining_count > 0,
             "remaining_count": remaining_count,
         }
+
+    @staticmethod
+    def _grep_files(
+        workspace_root: Path,
+        base: Path,
+        pattern: str,
+        regex_pattern: re.Pattern[str] | None,
+        regex: bool,
+        case_sensitive: bool,
+        include: list[str],
+        exclude: list[str],
+        include_hidden: bool,
+        follow_symlinks: bool,
+        limit: int,
+        max_file_bytes: int,
+        walk_entry_limit: int,
+    ) -> dict[str, Any]:
+        if not base.exists():
+            raise FileNotFoundError(f"path not found: {base}")
+        if not base.is_dir():
+            raise NotADirectoryError(f"path is not a directory: {base}")
+
+        matches: list[dict[str, Any]] = []
+        remaining_count = 0
+        skipped = {
+            "binary": 0,
+            "decode_error": 0,
+            "too_large": 0,
+            "permission_error": 0,
+            "unsupported_type": 0,
+        }
+        visited_entries = 0
+        walk_truncated = False
+        seen_dirs: set[Path] = {base.resolve(strict=False)}
+
+        for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+            current_root = Path(root)
+            dirnames.sort()
+            filenames.sort()
+
+            for dirname in list(dirnames):
+                dir_path = current_root / dirname
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    dirnames.remove(dirname)
+                    continue
+                if dir_path.is_symlink():
+                    resolved_dir = dir_path.resolve(strict=False)
+                    if follow_symlinks:
+                        if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        if resolved_dir in seen_dirs:
+                            dirnames.remove(dirname)
+                            continue
+                        seen_dirs.add(resolved_dir)
+                    else:
+                        dirnames.remove(dirname)
+
+            for filename in filenames:
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+                candidate = current_root / filename
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    continue
+                if candidate.is_symlink():
+                    if not follow_symlinks:
+                        skipped["unsupported_type"] += 1
+                        continue
+                    resolved_file = candidate.resolve(strict=False)
+                    if resolved_file != workspace_root and workspace_root not in resolved_file.parents:
+                        raise PermissionError("path is outside workspace scope")
+                    read_target = resolved_file
+                else:
+                    read_target = candidate
+                if not any(
+                    FilesystemModule._portable_pattern_matches(rel_path, include_pattern, case_sensitive=True)
+                    for include_pattern in include
+                ):
+                    continue
+                if any(
+                    FilesystemModule._portable_pattern_matches(rel_path, exclude_pattern, case_sensitive=True)
+                    for exclude_pattern in exclude
+                ):
+                    continue
+                if not read_target.is_file():
+                    skipped["unsupported_type"] += 1
+                    continue
+                try:
+                    file_size = read_target.stat().st_size
+                except PermissionError:
+                    skipped["permission_error"] += 1
+                    continue
+                except OSError:
+                    skipped["unsupported_type"] += 1
+                    continue
+                if file_size > max_file_bytes:
+                    skipped["too_large"] += 1
+                    continue
+                try:
+                    payload = read_target.read_bytes()
+                except PermissionError:
+                    skipped["permission_error"] += 1
+                    continue
+                except OSError:
+                    skipped["unsupported_type"] += 1
+                    continue
+                if b"\x00" in payload:
+                    skipped["binary"] += 1
+                    continue
+                try:
+                    text = payload.decode("utf-8")
+                except UnicodeDecodeError:
+                    skipped["decode_error"] += 1
+                    continue
+
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    match_text = FilesystemModule._line_match_text(
+                        line,
+                        pattern,
+                        regex_pattern,
+                        regex=regex,
+                        case_sensitive=case_sensitive,
+                    )
+                    if match_text is None:
+                        continue
+                    match_record = {
+                        "path": rel_path,
+                        "line_number": line_number,
+                        "line": line,
+                        "match_text": match_text,
+                    }
+                    if len(matches) < limit:
+                        matches.append(match_record)
+                    else:
+                        remaining_count += 1
+
+            if walk_truncated:
+                break
+
+        matches.sort(key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)))
+        return {
+            "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "matches": matches,
+            "truncated": walk_truncated or remaining_count > 0,
+            "remaining_count": remaining_count,
+            "skipped": skipped,
+        }
+
+    @staticmethod
+    def _line_match_text(
+        line: str,
+        pattern: str,
+        regex_pattern: re.Pattern[str] | None,
+        *,
+        regex: bool,
+        case_sensitive: bool,
+    ) -> str | None:
+        if regex:
+            if regex_pattern is None:
+                return None
+            match = regex_pattern.search(line)
+            return match.group(0) if match else None
+
+        haystack = line if case_sensitive else line.lower()
+        needle = pattern if case_sensitive else pattern.lower()
+        index = haystack.find(needle)
+        if index < 0:
+            return None
+        return line[index : index + len(pattern)]
 
     @staticmethod
     def _list_directory(workspace_root: Path, target: Path, entry_limit: int) -> dict[str, Any]:
