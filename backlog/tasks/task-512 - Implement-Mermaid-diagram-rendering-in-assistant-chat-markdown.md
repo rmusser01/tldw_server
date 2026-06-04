@@ -24,6 +24,8 @@ modified_files:
 - apps/packages/ui/src/components/Common/Playground/CompactMessage.tsx
 - apps/packages/ui/src/components/Common/QuickChatHelper/QuickChatMessage.tsx
 - apps/packages/ui/src/components/Common/__tests__/Markdown.mermaid.test.tsx
+- apps/packages/ui/src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx
+- apps/packages/ui/src/components/Common/QuickChatHelper/__tests__/QuickChatMessage.mermaid.test.tsx
 ---
 
 ## Description
@@ -51,6 +53,15 @@ Verification:
 - Red: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx failed before the fix because the unclosed Mermaid fence still rendered mermaid-diagram-block.
 - Green: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx src/components/Common/__tests__/Markdown.github-code-blocks.test.tsx src/components/Common/__tests__/Markdown.flashcard-asset-image.test.tsx passed (3 files, 14 tests).
 - Diff check passed for Markdown.tsx and Markdown.mermaid.test.tsx.
+- Bandit skipped: frontend TypeScript-only change.
+
+Task 5 completed: assistant-facing chat renderers now read renderMermaidDiagrams with DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams as the default and pass enableMermaidDiagrams only to completed assistant Markdown surfaces. Streaming assistant output remains plain text or disables Mermaid, user messages remain unchanged, and ReasoningBlock suppresses Mermaid while reasoning is actively streaming.
+
+Verification:
+- Red: bunx vitest run src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx src/components/Common/QuickChatHelper/__tests__/QuickChatMessage.mermaid.test.tsx failed before implementation because completed assistant Markdown and ReasoningBlock calls did not pass enableMermaidDiagrams: true.
+- Green: bunx vitest run src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx src/components/Common/QuickChatHelper/__tests__/QuickChatMessage.mermaid.test.tsx passed (2 files, 10 tests).
+- Regression: bunx vitest run src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Common/Playground/__tests__/messageSuspenseGuard.test.ts passed (2 files, 7 tests).
+- Diff check passed for the Task 5 touched chat renderer and test files.
 - Bandit skipped: frontend TypeScript-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 

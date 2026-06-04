@@ -93,6 +93,7 @@ import {
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
 import type { DynamicUISurface } from "@/types/dynamic-ui"
+import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -348,6 +349,10 @@ export const PlaygroundMessage = (props: Props) => {
     moodConfidenceDefault
   )
   const [userPersonaImage] = useStorage("chatUserPersonaImage", "")
+  const [renderMermaidDiagrams] = useStorage(
+    "renderMermaidDiagrams",
+    DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
+  )
   const [ttsProvider] = useStorage("ttsProvider", DEFAULT_TTS_PROVIDER)
   const [tldwTtsModel] = useStorage("tldwTtsModel", DEFAULT_TLDW_TTS_MODEL)
   const { t } = useTranslation(["common", "playground"])
@@ -1200,6 +1205,11 @@ export const PlaygroundMessage = (props: Props) => {
     props.isStreaming &&
     !errorPayload &&
     !renderGreetingMarkdown
+  const enableAssistantMermaidDiagrams =
+    props.isBot &&
+    !isSystemMessage &&
+    renderMermaidDiagrams !== false &&
+    !props.isStreaming
   const dynamicUIEnvelope = normalizeDynamicUIEnvelope(
     props.metadataExtra?.dynamic_ui
   )
@@ -2552,6 +2562,7 @@ export const PlaygroundMessage = (props: Props) => {
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
                       codeBlockVariant="compact"
+                      enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                     />
                   </React.Suspense>
                 ) : (
@@ -2570,6 +2581,7 @@ export const PlaygroundMessage = (props: Props) => {
                             markdownBaseClasses={MARKDOWN_BASE_CLASSES}
                             searchQuery={props.searchQuery}
                             t={t}
+                            enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
                         )
                       }
@@ -2588,6 +2600,7 @@ export const PlaygroundMessage = (props: Props) => {
                             className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                             searchQuery={props.searchQuery}
                             codeBlockVariant="github"
+                            enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
                         </React.Suspense>
                       )

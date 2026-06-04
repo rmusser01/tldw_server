@@ -15,6 +15,7 @@ type ReasoningBlockProps = {
   markdownBaseClasses: string
   searchQuery?: string
   t: TFunction
+  enableMermaidDiagrams?: boolean
 }
 
 export function ReasoningBlock({
@@ -26,7 +27,8 @@ export function ReasoningBlock({
   assistantTextClass,
   markdownBaseClasses,
   searchQuery,
-  t
+  t,
+  enableMermaidDiagrams
 }: ReasoningBlockProps) {
   const isReasoningStreaming = isStreaming && Boolean(reasoningRunning)
   const shouldExpand = Boolean(openReasoning) || isReasoningStreaming
@@ -71,6 +73,9 @@ export function ReasoningBlock({
                   className={`${markdownBaseClasses} ${assistantTextClass}`}
                   searchQuery={searchQuery}
                   codeBlockVariant="github"
+                  enableMermaidDiagrams={
+                    Boolean(enableMermaidDiagrams) && !isReasoningStreaming
+                  }
                 />
                 {isReasoningStreaming && (
                   <span className="inline-block w-2 h-4 ml-1 bg-text-muted animate-pulse rounded-sm" />
