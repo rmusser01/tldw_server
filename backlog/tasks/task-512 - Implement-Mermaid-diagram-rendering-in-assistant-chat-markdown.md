@@ -23,6 +23,7 @@ modified_files:
 - apps/packages/ui/src/components/Common/Playground/ReasoningBlock.tsx
 - apps/packages/ui/src/components/Common/Playground/CompactMessage.tsx
 - apps/packages/ui/src/components/Common/QuickChatHelper/QuickChatMessage.tsx
+- apps/packages/ui/src/components/Common/__tests__/Markdown.mermaid.test.tsx
 ---
 
 ## Description
@@ -44,7 +45,13 @@ Implement the reviewed Mermaid chat PRD using the plan in Docs/superpowers/plans
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Task 4 completed: added opt-in enableMermaidDiagrams on Markdown, exact mermaid fence routing to MermaidDiagramBlock, ST-compatible HTML bypass only when enabled Mermaid fences are present, and regression coverage for disabled/default, mmd alias, GitHub code variant, and ST-compatible fallback behavior.
 
+Verification:
+- Red: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx failed before implementation because the Mermaid diagram block was absent and ST HTML path was still used.
+- Green: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx src/components/Common/__tests__/Markdown.github-code-blocks.test.tsx src/components/Common/__tests__/Markdown.flashcard-asset-image.test.tsx passed (3 files, 9 tests).
+- Diff check passed for touched Markdown files.
+- Bandit skipped: frontend TypeScript-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

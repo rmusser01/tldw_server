@@ -11,6 +11,7 @@ import React from "react"
 import { CodeBlock } from "./CodeBlock"
 import { TableBlock } from "./TableBlock"
 import { ManagedMarkdownImage } from "./ManagedMarkdownImage"
+import { MermaidDiagramBlock } from "./MermaidDiagramBlock"
 import { preprocessLaTeX } from "@/utils/latex"
 import { useStorage } from "@plasmohq/storage/hook"
 import { highlightText } from "@/utils/text-highlight"
@@ -35,6 +36,7 @@ const RICH_TEXT_ELEMENT_STYLE_CLASS =
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
+const MERMAID_FENCE_START = /^\s*```\s*mermaid\s*$/im
 
 const isManagedAssetReference = (url: string): boolean =>
   String(url || "").startsWith(MANAGED_ASSET_MARKER)
@@ -63,6 +65,9 @@ const transformMarkdownUrl = (url: string): string => {
   return ""
 }
 
+const containsMermaidFence = (markdown: string): boolean =>
+  MERMAID_FENCE_START.test(markdown)
+
 export function Markdown({
   message,
   className = "prose break-words dark:prose-invert prose-p:leading-relaxed prose-pre:p-0 dark:prose-dark",
@@ -71,6 +76,7 @@ export function Markdown({
   allowExternalImages,
   richTextModeOverride,
   headingAnchorIds,
+  enableMermaidDiagrams = false,
 }: {
   message: string
   className?: string
@@ -79,6 +85,7 @@ export function Markdown({
   allowExternalImages?: boolean
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
+  enableMermaidDiagrams?: boolean
 }) {
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [codeTheme] = useStorage("codeTheme", "auto")
@@ -230,8 +237,16 @@ export function Markdown({
     () => processedMessage.includes(MANAGED_ASSET_MARKER),
     [processedMessage]
   )
+  const shouldUseComponentMermaid = React.useMemo(
+    () => enableMermaidDiagrams && containsMermaidFence(processedMessage),
+    [enableMermaidDiagrams, processedMessage]
+  )
 
-  if (richTextMode === "st_compat" && !hasManagedAssetImages) {
+  if (
+    richTextMode === "st_compat" &&
+    !hasManagedAssetImages &&
+    !shouldUseComponentMermaid
+  ) {
     return (
       <div
         className={`${resolvedClassName} ${RICH_TEXT_ELEMENT_STYLE_CLASS} [&_.st-inline-spoiler]:rounded-sm [&_.st-inline-spoiler]:bg-surface2 [&_.st-inline-spoiler]:px-1 [&_.st-inline-spoiler]:py-0.5 [&_.st-inline-spoiler]:font-medium [&_.st-spoiler]:my-2 [&_.st-spoiler]:rounded-md [&_.st-spoiler]:border [&_.st-spoiler]:border-border [&_.st-spoiler]:bg-surface2/70 [&_.st-spoiler]:px-3 [&_.st-spoiler]:py-2 [&_.st-spoiler_>summary]:cursor-pointer [&_.st-spoiler_>summary]:font-medium [&_.st-external-image-blocked]:inline-flex [&_.st-external-image-blocked]:items-center [&_.st-external-image-blocked]:gap-2 [&_.st-external-image-blocked]:rounded-md [&_.st-external-image-blocked]:border [&_.st-external-image-blocked]:border-border [&_.st-external-image-blocked]:bg-surface2 [&_.st-external-image-blocked]:px-2 [&_.st-external-image-blocked]:py-1 [&_.st-external-image-blocked]:text-[11px] [&_.st-external-image-blocked]:text-text-muted`}
@@ -271,13 +286,23 @@ export function Markdown({
             const match = /language-([^\s]+)/.exec(codeClassName || "")
             const blockIndex = blockIndexRef.current++
             const value = String(codeChild.props?.children ?? "").replace(/\n$/, "")
+            const rawLanguage = match ? match[1] : ""
+            const normalizedLanguage = normalizeLanguage(rawLanguage)
+
+            if (
+              enableMermaidDiagrams &&
+              rawLanguage.trim().toLowerCase() === "mermaid" &&
+              normalizedLanguage === "mermaid"
+            ) {
+              return (
+                <MermaidDiagramBlock source={value} blockIndex={blockIndex} />
+              )
+            }
 
             if (codeBlockVariant === "plain") {
               return <div className="my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 text-xs font-mono leading-relaxed text-text whitespace-pre overflow-x-auto">{value}</div>
             }
             if (codeBlockVariant === "compact") {
-              const rawLanguage = match ? match[1] : ""
-              const normalizedLanguage = normalizeLanguage(rawLanguage)
               const highlightLanguage = rawLanguage ? normalizedLanguage : "plaintext"
               return (
                 <div className="not-prose my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 overflow-x-auto">
@@ -305,8 +330,6 @@ export function Markdown({
               )
             }
             if (codeBlockVariant === "github") {
-              const rawLanguage = match ? match[1] : ""
-              const normalizedLanguage = normalizeLanguage(rawLanguage)
               return (
                 <div className="not-prose my-2 overflow-x-auto rounded-md border border-border/80 bg-surface2/70 px-4 py-3">
                   <Highlight
