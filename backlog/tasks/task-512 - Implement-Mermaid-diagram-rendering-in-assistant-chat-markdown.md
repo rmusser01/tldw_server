@@ -45,12 +45,12 @@ Implement the reviewed Mermaid chat PRD using the plan in Docs/superpowers/plans
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 4 completed: added opt-in enableMermaidDiagrams on Markdown, exact mermaid fence routing to MermaidDiagramBlock, ST-compatible HTML bypass only when enabled Mermaid fences are present, and regression coverage for disabled/default, mmd alias, GitHub code variant, and ST-compatible fallback behavior.
+Task 4 follow-up completed: Mermaid rendering now requires a closed exact ```mermaid fence before bypassing ST-compatible HTML or routing through MermaidDiagramBlock. Unclosed streaming Mermaid fences fall through to normal code rendering, and aliases such as mmd and mermaid-js remain code. Test coverage now includes unclosed fences, blockIndex forwarding, disabled plain/compact/github variants, and alias rejection.
 
 Verification:
-- Red: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx failed before implementation because the Mermaid diagram block was absent and ST HTML path was still used.
-- Green: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx src/components/Common/__tests__/Markdown.github-code-blocks.test.tsx src/components/Common/__tests__/Markdown.flashcard-asset-image.test.tsx passed (3 files, 9 tests).
-- Diff check passed for touched Markdown files.
+- Red: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx failed before the fix because the unclosed Mermaid fence still rendered mermaid-diagram-block.
+- Green: bunx vitest run src/components/Common/__tests__/Markdown.mermaid.test.tsx src/components/Common/__tests__/Markdown.github-code-blocks.test.tsx src/components/Common/__tests__/Markdown.flashcard-asset-image.test.tsx passed (3 files, 14 tests).
+- Diff check passed for Markdown.tsx and Markdown.mermaid.test.tsx.
 - Bandit skipped: frontend TypeScript-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 

@@ -5,18 +5,25 @@ import Markdown from "../Markdown"
 
 const mermaidDiagramBlockMock = vi.hoisted(() => vi.fn())
 
+type MermaidDiagramBlockMockProps = {
+  source: string
+  blockIndex?: number
+}
+
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, defaultValue: unknown) =>
     React.useState(defaultValue)
 }))
 
 vi.mock("../MermaidDiagramBlock", () => ({
-  MermaidDiagramBlock: ({ source }: { source: string }) => {
-    mermaidDiagramBlockMock(source)
+  MermaidDiagramBlock: (props: MermaidDiagramBlockMockProps) => {
+    const { source } = props
+    mermaidDiagramBlockMock(props)
     return <div data-testid="mermaid-diagram-block">{source}</div>
   },
-  default: ({ source }: { source: string }) => {
-    mermaidDiagramBlockMock(source)
+  default: (props: MermaidDiagramBlockMockProps) => {
+    const { source } = props
+    mermaidDiagramBlockMock(props)
     return <div data-testid="mermaid-diagram-block">{source}</div>
   }
 }))
@@ -37,7 +44,48 @@ describe("Markdown Mermaid fences", () => {
     expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
       "graph TD\nA --> B"
     )
-    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith("graph TD\nA --> B")
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph TD\nA --> B",
+      blockIndex: 0
+    })
+  })
+
+  it("does not render unclosed Mermaid fences as diagrams", () => {
+    const { container } = render(
+      <Markdown
+        message={"```mermaid\ngraph TD\nA --> B"}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.queryByTestId("mermaid-diagram-block")).not.toBeInTheDocument()
+    expect(screen.getByText("graph TD")).toBeInTheDocument()
+    expect(screen.getByText("A --> B")).toBeInTheDocument()
+    expect(container.querySelector("pre")).toBeInTheDocument()
+    expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
+  })
+
+  it("forwards the code block index to enabled closed Mermaid fences", () => {
+    render(
+      <Markdown
+        message={[
+          "```text",
+          "first",
+          "```",
+          "",
+          "```mermaid",
+          "graph TD",
+          "A --> B",
+          "```"
+        ].join("\n")}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph TD\nA --> B",
+      blockIndex: 1
+    })
   })
 
   it("keeps Mermaid fences as normal code blocks when Mermaid rendering is disabled", () => {
@@ -78,6 +126,51 @@ describe("Markdown Mermaid fences", () => {
     expect(screen.queryByTestId("mermaid-diagram-block")).not.toBeInTheDocument()
     expect(screen.getByText("graph TD")).toBeInTheDocument()
     expect(container.querySelectorAll("pre")).toHaveLength(1)
+    expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
+  })
+
+  it("preserves plain code blocks when Mermaid rendering is disabled", () => {
+    const { container } = render(
+      <Markdown
+        message={"```mermaid\ngraph TD\nA --> B\n```"}
+        codeBlockVariant="plain"
+        enableMermaidDiagrams={false}
+      />
+    )
+
+    expect(screen.queryByTestId("mermaid-diagram-block")).not.toBeInTheDocument()
+    expect(container.textContent).toContain("graph TD\nA --> B")
+    expect(container.querySelector("pre")).not.toBeInTheDocument()
+    expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
+  })
+
+  it("preserves compact code blocks when Mermaid rendering is disabled", () => {
+    const { container } = render(
+      <Markdown
+        message={"```mermaid\ngraph TD\nA --> B\n```"}
+        codeBlockVariant="compact"
+        enableMermaidDiagrams={false}
+      />
+    )
+
+    expect(screen.queryByTestId("mermaid-diagram-block")).not.toBeInTheDocument()
+    expect(screen.getByText("graph TD")).toBeInTheDocument()
+    expect(screen.getByText("A --> B")).toBeInTheDocument()
+    expect(container.querySelector("pre")).toBeInTheDocument()
+    expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
+  })
+
+  it("does not treat mermaid-js fences as Mermaid diagrams", () => {
+    const { container } = render(
+      <Markdown
+        message={"```mermaid-js\ngraph TD\nA --> B\n```"}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.queryByTestId("mermaid-diagram-block")).not.toBeInTheDocument()
+    expect(screen.getByText("graph TD")).toBeInTheDocument()
+    expect(container.querySelector("pre")).toBeInTheDocument()
     expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
   })
 

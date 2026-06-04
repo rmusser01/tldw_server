@@ -36,7 +36,8 @@ const RICH_TEXT_ELEMENT_STYLE_CLASS =
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
-const MERMAID_FENCE_START = /^\s*```\s*mermaid\s*$/im
+const MERMAID_FENCE_START = /^(\s*)(`{3,})\s*mermaid\s*$/
+const BACKTICK_FENCE_CLOSE = /^\s*(`{3,})\s*$/
 
 const isManagedAssetReference = (url: string): boolean =>
   String(url || "").startsWith(MANAGED_ASSET_MARKER)
@@ -65,8 +66,29 @@ const transformMarkdownUrl = (url: string): string => {
   return ""
 }
 
-const containsMermaidFence = (markdown: string): boolean =>
-  MERMAID_FENCE_START.test(markdown)
+const collectClosedMermaidFenceSources = (markdown: string): string[] => {
+  const lines = markdown.split("\n")
+  const sources: string[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const startMatch = MERMAID_FENCE_START.exec(lines[index])
+    if (!startMatch) continue
+
+    const fenceLength = startMatch[2].length
+    const sourceStartIndex = index + 1
+
+    for (let closeIndex = sourceStartIndex; closeIndex < lines.length; closeIndex += 1) {
+      const closeMatch = BACKTICK_FENCE_CLOSE.exec(lines[closeIndex])
+      if (!closeMatch || closeMatch[1].length < fenceLength) continue
+
+      sources.push(lines.slice(sourceStartIndex, closeIndex).join("\n").replace(/\n$/, ""))
+      index = closeIndex
+      break
+    }
+  }
+
+  return sources
+}
 
 export function Markdown({
   message,
@@ -237,10 +259,16 @@ export function Markdown({
     () => processedMessage.includes(MANAGED_ASSET_MARKER),
     [processedMessage]
   )
-  const shouldUseComponentMermaid = React.useMemo(
-    () => enableMermaidDiagrams && containsMermaidFence(processedMessage),
+  const closedMermaidFenceSources = React.useMemo(
+    () =>
+      enableMermaidDiagrams
+        ? collectClosedMermaidFenceSources(processedMessage)
+        : [],
     [enableMermaidDiagrams, processedMessage]
   )
+  const closedMermaidFenceCursorRef = React.useRef(0)
+  closedMermaidFenceCursorRef.current = 0
+  const shouldUseComponentMermaid = closedMermaidFenceSources.length > 0
 
   if (
     richTextMode === "st_compat" &&
@@ -292,8 +320,10 @@ export function Markdown({
             if (
               enableMermaidDiagrams &&
               rawLanguage.trim().toLowerCase() === "mermaid" &&
-              normalizedLanguage === "mermaid"
+              normalizedLanguage === "mermaid" &&
+              closedMermaidFenceSources[closedMermaidFenceCursorRef.current] === value
             ) {
+              closedMermaidFenceCursorRef.current += 1
               return (
                 <MermaidDiagramBlock source={value} blockIndex={blockIndex} />
               )
