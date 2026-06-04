@@ -4,7 +4,7 @@ title: Implement MCP Git read-only inspection tools
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-04 19:20'
+updated_date: '2026-06-04 19:25'
 labels:
   - mcp
   - implementation
@@ -45,6 +45,8 @@ Final verification at head 9b97b0bdb9eba29d17e09504ee8c92896e763f5b: focused sui
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 PR #2266 review pass complete after rebasing onto latest origin/dev. Verified and fixed three still-valid review threads: Git runner no longer silently suppresses broad cleanup exceptions and logs unexpected process-wait failures; Git read commands now use separate git_command_timeout_seconds instead of repository discovery timeout; blame parsing caches author metadata by commit hash for repeated --line-porcelain commits. Also fixed the failing onboarding docs gate by restoring required user-guide index discoverability entries for benchmark, OpenWebUI import/hydration, and flashcards in source and published indexes. Validation: new RED tests failed for all three review findings before implementation; after fixes test_git_module.py -> 114 passed, related MCP/profile tests -> 37 passed, docs discoverability tests -> 9 passed, Bandit touched source -> 0 findings, git diff --check passed.
+
+Second PR #2266 review pass: CodeRabbit reported that the profile preset direct-tool budget test could undercount unmapped enabled-tool prefixes. Verified as still valid: the RED test exposed kanban, memory, and test_cases prefixes. Fixed by adding explicit mappings and changing direct-tool counting to index the mapping so future unmapped prefixes fail loudly. Targeted validation: profile preset prefix coverage/direct-category tests -> 2 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

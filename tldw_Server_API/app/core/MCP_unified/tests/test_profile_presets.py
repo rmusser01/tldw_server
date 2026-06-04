@@ -63,10 +63,13 @@ TOOL_CATEGORY_BY_PREFIX = {
     "fs": "files",
     "git": "git",
     "infra": "infra",
+    "kanban": "issues",
     "logs": "logs",
+    "memory": "memory",
     "profile": "tool_discovery",
     "screenshots": "screenshots",
     "tests": "tests",
+    "test_cases": "tests",
     "tool_categories": "tool_discovery",
     "tool_describe": "tool_discovery",
     "tool_search": "tool_discovery",
@@ -155,6 +158,25 @@ def test_role_presets_include_tooling_metadata() -> None:
         assert tooling["progressive_disclosure"]["max_direct_tools"] <= 24
 
 
+def test_tool_category_prefix_mapping_covers_all_enabled_tool_prefixes() -> None:
+    missing_by_preset: dict[str, list[str]] = {}
+    for preset in presets.list_builtin_presets():
+        tooling = preset.profile.metadata.get("tooling")
+        if not isinstance(tooling, dict):
+            continue
+        missing_prefixes = sorted(
+            {
+                str(tool).split(".", 1)[0]
+                for tool in tooling.get("enabled_tools") or []
+                if str(tool).split(".", 1)[0] not in TOOL_CATEGORY_BY_PREFIX
+            }
+        )
+        if missing_prefixes:
+            missing_by_preset[preset.id] = missing_prefixes
+
+    assert missing_by_preset == {}  # nosec B101
+
+
 def test_preset_direct_categories_do_not_exceed_max_direct_tools() -> None:
     bundled_by_id = {preset.id: preset for preset in presets.list_builtin_presets()}
 
@@ -165,7 +187,7 @@ def test_preset_direct_categories_do_not_exceed_max_direct_tools() -> None:
         direct_tools = [
             tool
             for tool in tooling["enabled_tools"]
-            if TOOL_CATEGORY_BY_PREFIX.get(tool.split(".", 1)[0]) in direct_categories
+            if TOOL_CATEGORY_BY_PREFIX[tool.split(".", 1)[0]] in direct_categories
         ]
 
         assert len(direct_tools) <= progressive_disclosure["max_direct_tools"], preset_id  # nosec B101
