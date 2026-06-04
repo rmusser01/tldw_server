@@ -174,3 +174,27 @@ def test_security_required_includes_dependency_review_gate() -> None:
 def test_legacy_ci_workflow_name_remains_stable_for_branch_protection() -> None:
     workflow = _load(".github/workflows/ci.yml")
     assert workflow["name"] == "CI"
+
+
+def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    jobs = workflow["jobs"]
+    step_names = {
+        "Run Python 3.11 compatibility smoke tests",
+        "Run shard tests",
+        "Run OS shard tests",
+        "Run release OS shard tests",
+        "Run legacy-free media checks",
+    }
+
+    checked = 0
+    for job in jobs.values():
+        for step in job.get("steps", []):
+            if step.get("name") not in step_names:
+                continue
+            run_script = str(step.get("run") or "")
+            assert 'export DATABASE_URL="sqlite:///./Databases/users.db"' in run_script
+            assert "unset TEST_DATABASE_URL POSTGRES_TEST_DB" in run_script
+            checked += 1
+
+    assert checked >= len(step_names)

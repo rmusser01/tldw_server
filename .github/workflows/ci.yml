@@ -384,6 +384,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results-linux-3.11-smoke
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/test_*.py \
@@ -750,6 +752,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -760,6 +764,8 @@ jobs:
         if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
@@ -1078,6 +1084,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -1088,6 +1096,8 @@ jobs:
         if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
@@ -1333,6 +1343,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -1343,6 +1355,8 @@ jobs:
         if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
@@ -1587,6 +1601,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -1597,6 +1613,8 @@ jobs:
         if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
@@ -1843,6 +1861,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -1853,6 +1873,8 @@ jobs:
         if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
+          export DATABASE_URL="sqlite:///./Databases/users.db"
+          unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \

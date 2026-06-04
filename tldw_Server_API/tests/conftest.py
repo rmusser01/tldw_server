@@ -573,6 +573,24 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
             # Never break collection on marker inspection
             _ = None
 
+
+@pytest.fixture(autouse=True)
+def _reset_main_app_lifecycle_state_between_tests():
+    """Keep TestClient lifespan shutdown from leaking drain state across tests."""
+
+    def _reset() -> None:
+        try:
+            from tldw_Server_API.app.main import app as fastapi_app
+            from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+            reset_lifecycle_state(fastapi_app)
+        except Exception:
+            _ = None
+
+    _reset()
+    yield
+    _reset()
+
 def pytest_configure(config):  # pragma: no cover - registration only
     try:
         config.addinivalue_line("markers", "evaluations: heavy Evaluations tests (opt-in via RUN_EVALUATIONS=1)")
