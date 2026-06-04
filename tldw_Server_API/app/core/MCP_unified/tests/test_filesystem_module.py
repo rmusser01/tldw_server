@@ -187,6 +187,96 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
 
 
 @pytest.mark.asyncio
+async def test_filesystem_tools_include_stat_glob_and_grep_metadata() -> None:
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": "/workspace/mcp-filesystem-workspace",
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+
+    tools = await mod.get_tools()
+    by_name = {tool["name"]: tool for tool in tools}
+
+    assert {"fs.stat", "fs.glob", "fs.grep"} <= set(by_name)  # nosec B101
+    for tool_name in ("fs.stat", "fs.glob", "fs.grep"):
+        schema = by_name[tool_name]["inputSchema"]
+        metadata = by_name[tool_name]["metadata"]
+        assert schema["additionalProperties"] is False  # nosec B101
+        assert metadata["uses_filesystem"] is True  # nosec B101
+        assert metadata["path_boundable"] is True  # nosec B101
+        assert "filesystem.read" in metadata["capabilities"]  # nosec B101
+        assert metadata["readOnlyHint"] is True  # nosec B101
+
+
+def test_filesystem_validates_new_filesystem_helper_arguments() -> None:
+    mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={
+                "grep_max_pattern_length": 4,
+            },
+        ),
+        workspace_root_resolver=_FakeWorkspaceRootResolver({"workspace_root": "/workspace/root"}),
+    )
+
+    mod.validate_tool_arguments("fs.stat", {"path": "docs/readme.md"})
+    mod.validate_tool_arguments("fs.glob", {"pattern": "**/*.py", "limit": 10})
+    mod.validate_tool_arguments(
+        "fs.grep",
+        {
+            "pattern": "TODO",
+            "include": ["*.py", "**/*.md"],
+            "exclude": ["**/.venv/**"],
+            "limit": 10,
+            "max_file_bytes": 1024,
+        },
+    )
+
+    invalid_cases = [
+        ("fs.stat", {"path": "docs/readme.md", "extra": True}, "unknown arguments"),
+        ("fs.stat", {}, "path is required"),
+        ("fs.stat", {"path": ""}, "path is required"),
+        ("fs.stat", {"path": "docs/readme.md", "follow_symlinks": "yes"}, "follow_symlinks must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "unknown": True}, "unknown arguments"),
+        ("fs.glob", {}, "pattern is required"),
+        ("fs.glob", {"pattern": ""}, "pattern is required"),
+        ("fs.glob", {"pattern": "**/*.py", "base_path": 7}, "base_path must be a string"),
+        ("fs.glob", {"pattern": "**/*.py", "include_hidden": "yes"}, "include_hidden must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "include_files": "yes"}, "include_files must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "include_directories": "yes"}, "include_directories must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "follow_symlinks": "yes"}, "follow_symlinks must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "case_sensitive": "yes"}, "case_sensitive must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "limit": 0}, "limit must be a positive integer"),
+        ("fs.grep", {"pattern": "TODO", "unknown": True}, "unknown arguments"),
+        ("fs.grep", {}, "pattern is required"),
+        ("fs.grep", {"pattern": ""}, "pattern is required"),
+        ("fs.grep", {"pattern": "TODO", "base_path": 7}, "base_path must be a string"),
+        ("fs.grep", {"pattern": "TODO", "include": "*.py"}, "include must be a list of strings"),
+        ("fs.grep", {"pattern": "TODO", "include": [1]}, "include must be a list of strings"),
+        ("fs.grep", {"pattern": "TODO", "exclude": "*.py"}, "exclude must be a list of strings"),
+        ("fs.grep", {"pattern": "TODO", "regex": "yes"}, "regex must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "case_sensitive": "yes"}, "case_sensitive must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "include_hidden": "yes"}, "include_hidden must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "follow_symlinks": "yes"}, "follow_symlinks must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "limit": 0}, "limit must be a positive integer"),
+        ("fs.grep", {"pattern": "TODO", "max_file_bytes": 0}, "max_file_bytes must be a positive integer"),
+        (
+            "fs.grep",
+            {"pattern": "abcde", "regex": True},
+            "pattern exceeds grep regex length limit",
+        ),
+    ]
+
+    for tool_name, arguments, expected_message in invalid_cases:
+        with pytest.raises(ValueError, match=expected_message):
+            mod.validate_tool_arguments(tool_name, arguments)
+
+
+@pytest.mark.asyncio
 async def test_filesystem_list_read_and_write_text_within_workspace(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"

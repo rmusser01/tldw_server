@@ -5,6 +5,9 @@ Exposes:
 - fs.list
 - fs.read_text
 - fs.write_text
+- fs.stat
+- fs.glob
+- fs.grep
 """
 
 from __future__ import annotations
@@ -58,6 +61,9 @@ class FilesystemModule(BaseModule):
         shared_fs_metadata = {
             "uses_filesystem": True,
             "path_boundable": True,
+        }
+        shared_path_metadata = {
+            **shared_fs_metadata,
             "path_argument_hints": ["path"],
         }
         list_tool = create_tool_definition(
@@ -72,7 +78,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
-                **shared_fs_metadata,
+                **shared_path_metadata,
             },
         )
         list_tool["inputSchema"]["additionalProperties"] = False
@@ -90,7 +96,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
-                **shared_fs_metadata,
+                **shared_path_metadata,
             },
         )
         read_text_tool["inputSchema"]["additionalProperties"] = False
@@ -108,12 +114,89 @@ class FilesystemModule(BaseModule):
             metadata={
                 "category": "management",
                 "capabilities": ["filesystem.write"],
-                **shared_fs_metadata,
+                **shared_path_metadata,
             },
         )
         write_text_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_text_tool, write_text_tool]
+        stat_tool = create_tool_definition(
+            name="fs.stat",
+            description="Return metadata for one path under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "follow_symlinks": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Follow a symlink after verifying the target remains in workspace scope.",
+                    },
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **shared_path_metadata,
+            },
+        )
+        stat_tool["inputSchema"]["additionalProperties"] = False
+
+        glob_tool = create_tool_definition(
+            name="fs.glob",
+            description="Find workspace paths matching a portable pattern without invoking a shell.",
+            parameters={
+                "properties": {
+                    "pattern": {"type": "string", "description": "Portable pattern using / separators"},
+                    "base_path": {"type": "string", "description": "Workspace-relative base path"},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "include_files": {"type": "boolean", "default": True},
+                    "include_directories": {"type": "boolean", "default": True},
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "case_sensitive": {"type": "boolean", "default": True},
+                    "limit": {"type": "integer", "minimum": 1},
+                },
+                "required": ["pattern"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **shared_fs_metadata,
+                "path_argument_hints": ["base_path"],
+            },
+        )
+        glob_tool["inputSchema"]["additionalProperties"] = False
+
+        grep_tool = create_tool_definition(
+            name="fs.grep",
+            description="Search UTF-8 text files under a workspace path without invoking a shell.",
+            parameters={
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "base_path": {"type": "string", "description": "Workspace-relative base path"},
+                    "include": {"type": "array", "items": {"type": "string"}},
+                    "exclude": {"type": "array", "items": {"type": "string"}},
+                    "regex": {"type": "boolean", "default": False},
+                    "case_sensitive": {"type": "boolean", "default": True},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "limit": {"type": "integer", "minimum": 1},
+                    "max_file_bytes": {"type": "integer", "minimum": 1},
+                },
+                "required": ["pattern"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **shared_fs_metadata,
+                "path_argument_hints": ["base_path"],
+            },
+        )
+        grep_tool["inputSchema"]["additionalProperties"] = False
+
+        return [list_tool, read_text_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -165,6 +248,14 @@ class FilesystemModule(BaseModule):
             limit = self._DEFAULT_MAX_READ_BYTES
         return max(1, limit)
 
+    def _setting_positive_int(self, name: str, default: int) -> int:
+        raw_limit = self.config.settings.get(name, default)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = default
+        return max(1, limit)
+
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "fs.list":
             unknown = sorted({key for key in arguments.keys()} - {"path"})
@@ -196,7 +287,108 @@ class FilesystemModule(BaseModule):
                 raise ValueError("content must be a string")
             return
 
+        if tool_name == "fs.stat":
+            unknown = sorted({key for key in arguments.keys()} - {"path", "follow_symlinks"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_bool_argument(arguments, "follow_symlinks")
+            return
+
+        if tool_name == "fs.glob":
+            unknown = sorted(
+                {key for key in arguments.keys()}
+                - {
+                    "pattern",
+                    "base_path",
+                    "include_hidden",
+                    "include_files",
+                    "include_directories",
+                    "follow_symlinks",
+                    "case_sensitive",
+                    "limit",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            pattern = arguments.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("pattern is required")
+            base_path = arguments.get("base_path")
+            if base_path is not None and not isinstance(base_path, str):
+                raise ValueError("base_path must be a string")
+            for key in (
+                "include_hidden",
+                "include_files",
+                "include_directories",
+                "follow_symlinks",
+                "case_sensitive",
+            ):
+                self._validate_bool_argument(arguments, key)
+            self._validate_positive_int_argument(arguments, "limit")
+            return
+
+        if tool_name == "fs.grep":
+            unknown = sorted(
+                {key for key in arguments.keys()}
+                - {
+                    "pattern",
+                    "base_path",
+                    "include",
+                    "exclude",
+                    "regex",
+                    "case_sensitive",
+                    "include_hidden",
+                    "follow_symlinks",
+                    "limit",
+                    "max_file_bytes",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            pattern = arguments.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("pattern is required")
+            base_path = arguments.get("base_path")
+            if base_path is not None and not isinstance(base_path, str):
+                raise ValueError("base_path must be a string")
+            include = arguments.get("include")
+            if include is not None and (
+                not isinstance(include, list) or not all(isinstance(item, str) for item in include)
+            ):
+                raise ValueError("include must be a list of strings")
+            exclude = arguments.get("exclude")
+            if exclude is not None and (
+                not isinstance(exclude, list) or not all(isinstance(item, str) for item in exclude)
+            ):
+                raise ValueError("exclude must be a list of strings")
+            for key in ("regex", "case_sensitive", "include_hidden", "follow_symlinks"):
+                self._validate_bool_argument(arguments, key)
+            self._validate_positive_int_argument(arguments, "limit")
+            self._validate_positive_int_argument(arguments, "max_file_bytes")
+            if arguments.get("regex") is True:
+                max_pattern_length = self._setting_positive_int("grep_max_pattern_length", 512)
+                if len(pattern) > max_pattern_length:
+                    raise ValueError(
+                        f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})"
+                    )
+            return
+
         raise ValueError(f"Unknown tool: {tool_name}")
+
+    @staticmethod
+    def _validate_bool_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError(f"{key} must be a boolean")
+
+    @staticmethod
+    def _validate_positive_int_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+            raise ValueError(f"{key} must be a positive integer")
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
