@@ -31,6 +31,8 @@ Docs/superpowers/specs/2026-06-04-mcp-git-read-tools-design.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Drafted the approved MCP Git read-only inspection tools design, including the active-repo-only default behavior and observability/evaluation metadata contract for standalone MCP tool-use comparisons.
+
+Manual spec review pass integrated fixes for: external diff/textconv execution risk, ambiguous `git.diff` `head` scope, default author email exposure, strict workspace-relative path handling, and missing `git.conflicts.read` alignment with `_GIT_READ_TOOLS`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

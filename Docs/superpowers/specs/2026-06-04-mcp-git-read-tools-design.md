@@ -30,16 +30,17 @@ The first Git slice should be easy for front-ends and models to discover as expl
 
 ## Tool Surface
 
-The module exposes six first-slice tools:
+The module exposes seven first-slice tools:
 
 | Tool | Purpose | Arguments |
 | --- | --- | --- |
 | `git.status` | Summarize current branch and working tree state. | `include_ignored?: bool`, `limit?: int` |
-| `git.diff` | Return bounded diff text. | `scope?: "unstaged" | "staged" | "head"`, `path?: string`, `context_lines?: int`, `max_bytes?: int` |
-| `git.log` | Return bounded commit metadata. | `limit?: int`, `path?: string` |
+| `git.diff` | Return bounded diff text. | `scope?: "unstaged" | "staged" | "working_tree"`, `path?: string`, `context_lines?: int`, `max_bytes?: int` |
+| `git.log` | Return bounded commit metadata. | `limit?: int`, `path?: string`, `include_author_email?: bool` |
 | `git.blame` | Return bounded blame metadata for one file. | `path: string`, `start_line?: int`, `end_line?: int`, `limit?: int` |
 | `git.branches` | List local branches and current branch. | `limit?: int` |
 | `git.conflicts.list` | List conflicted paths and Git conflict status codes. | `limit?: int` |
+| `git.conflicts.read` | Read bounded conflict hunks for one conflicted file. | `path: string`, `max_bytes?: int`, `limit?: int` |
 
 All schemas set `additionalProperties: false`. All tools are read-only and use metadata like:
 
@@ -78,6 +79,9 @@ Requirements:
 - Invoke only `git` with a fixed allowlist of subcommands and flags.
 - Always pass `-C <repo_root>` as argv, not through shell interpolation.
 - Never use `shell=True`.
+- Use `--no-pager` and `--no-color` where applicable.
+- Disable external diff and text conversion for diff-like commands with flags such as `--no-ext-diff` and `--no-textconv`.
+- Use a deterministic, minimal environment with `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, and no inherited `GIT_EXTERNAL_DIFF`.
 - Set a timeout for every process.
 - Capture stdout and stderr separately.
 - Decode as UTF-8 with replacement for invalid bytes.
@@ -89,7 +93,7 @@ Requirements:
 
 ## Path Handling
 
-Path-bearing tools accept workspace-relative paths only. Absolute paths are rejected unless existing project conventions already allow absolute workspace-contained paths for MCP filesystem tools and the implementation intentionally mirrors that behavior. In either case, the normalized target must stay under the active workspace root and the Git root.
+Path-bearing tools accept workspace-relative paths only. Absolute paths are rejected in this slice, even if other MCP filesystem helpers allow workspace-contained absolute paths. The normalized target must stay under the active workspace root and the Git root.
 
 Path validation should happen before invoking Git. A rejected path returns `reason_code: "path_outside_workspace"` or `reason_code: "path_outside_repository"` depending on where containment fails.
 
@@ -107,11 +111,12 @@ Every successful response should include:
 Tool-specific payloads:
 
 - `git.status`: `branch`, `upstream`, `ahead`, `behind`, `entries`, and counts grouped by `staged`, `unstaged`, `untracked`, `conflicted`, and `ignored`.
-- `git.diff`: `scope`, optional `path`, `text`, `bytes`, and `truncated`.
-- `git.log`: `commits` with `hash`, `short_hash`, `author_name`, `author_email`, `author_date`, and `subject`.
-- `git.blame`: `path`, `start_line`, `end_line`, `lines` with commit hash, author, timestamp, line number, and line text.
+- `git.diff`: `scope`, optional `path`, `text`, `bytes`, and `truncated`. `working_tree` means staged plus unstaged changes compared with `HEAD`.
+- `git.log`: `commits` with `hash`, `short_hash`, `author_name`, optional `author_email`, `author_date`, and `subject`. `author_email` is omitted unless requested.
+- `git.blame`: `path`, `start_line`, `end_line`, `lines` with commit hash, author name, timestamp, line number, and line text. Author email is not returned in the first slice.
 - `git.branches`: `current`, `branches`, and optional `truncated`.
 - `git.conflicts.list`: `conflicts` with `path`, `xy_status`, and `conflict_type` where derivable.
+- `git.conflicts.read`: `path`, `hunks`, `bytes`, and `truncated`. Hunks should preserve conflict labels when present and bound each side's text.
 
 Error results should use stable reason codes:
 
@@ -123,7 +128,7 @@ Error results should use stable reason codes:
 - `invalid_git_output`
 - `git_command_failed`
 - `git_command_timeout`
-- `output_truncated`
+Truncation is represented as `truncated: true` plus optional warning metadata, not as command failure.
 
 ## Profile Grants
 
@@ -140,7 +145,7 @@ Add the Git read tools to existing preset metadata where the workflow naturally 
 
 Product Owner and Documentation Writer should not receive Git read tools by default in this slice. They can still rely on filesystem and documentation tools. If later product workflows need changelog or history context, that can be a separate profile recommendation update.
 
-The built-in `_GIT_READ_TOOLS` constant already names the likely first Git tool family. The implementation should align the actual tool list with that constant and profile metadata.
+The built-in `_GIT_READ_TOOLS` constant already names the likely first Git tool family, including `git.conflicts.read`. The implementation should align the actual tool list with that constant and profile metadata.
 
 ## Observability And Evaluation Contract
 
@@ -199,11 +204,15 @@ This also supports A/B prompt tests for tool descriptions without changing execu
 - No mutating Git subcommands.
 - No environment variable passthrough except a minimal safe environment if needed to make Git deterministic.
 - Disable pagers with environment or flags such as `GIT_PAGER=cat` / `--no-pager`.
+- Disable external diff and text conversion helpers for diff output.
+- Disable interactive credential prompts with `GIT_TERMINAL_PROMPT=0`.
+- Prefer `GIT_OPTIONAL_LOCKS=0` so read commands avoid optional index writes.
 - Avoid network-capable Git operations.
 - Avoid config writes and hooks.
 - Bound process runtime and output.
 - Do not log raw diffs or absolute local paths.
 - Treat stderr as potentially sensitive and return bounded, sanitized text.
+- Treat author emails as personal data: omit them by default and never use them as metrics labels.
 
 ## Testing Strategy
 
@@ -216,12 +225,14 @@ Use TDD for implementation. Focused tests should cover:
 - Git root outside workspace failure.
 - Path containment and path normalization.
 - `git.status` porcelain parsing for staged, unstaged, untracked, ignored, and conflicted files.
-- `git.diff` scopes for unstaged, staged, and head.
+- `git.diff` scopes for unstaged, staged, and working tree.
 - Diff byte truncation.
 - `git.log` limit handling and path filtering.
+- `git.log` email omission by default.
 - `git.blame` line range validation and bounded results.
 - `git.branches` current branch parsing.
 - `git.conflicts.list` conflict status parsing.
+- `git.conflicts.read` bounded hunk parsing.
 - Profile preset grants.
 - Metrics/eval metadata presence without sensitive labels.
 
