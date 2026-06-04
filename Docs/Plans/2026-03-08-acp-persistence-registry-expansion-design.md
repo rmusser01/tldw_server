@@ -3,6 +3,8 @@
 **Date:** 2026-03-08
 **Status:** Approved
 
+**ADR coverage:** Backfilled by `Docs/ADR/016-acp-session-and-orchestration-persistence.md` for implemented shared ACP session/registry persistence and per-user orchestration persistence. Owner sign-off was recorded in TASK-520. The ADR intentionally excludes unverified setup-guide consolidation claims.
+
 ## Problem
 
 The ACP session store and orchestration service are entirely in-memory. On server restart, all session metadata, orchestration projects/tasks/runs, and review history are lost. The agent registry supports only 4 hardcoded agents with no runtime registration or health monitoring.
@@ -421,7 +423,7 @@ New endpoint:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Session DB location | Shared `Databases/acp_sessions.db` | Admin cross-user visibility, global cleanup |
-| Orchestration DB location | Per-user `user_databases/<id>/orchestration.db` | User-owned data, matches existing pattern |
+| Orchestration DB location | Per-user `Databases/user_databases/<id>/orchestration.db` by default, with the user DB base directory overrideable by configuration | User-owned data, matches existing pattern |
 | Message storage | Separate `session_messages` table | Fork slicing by index, unbounded growth |
 | Token usage | Denormalized on `sessions` table | Avoids join for quota checks |
 | Agent registry persistence | Table in `acp_sessions.db` | Shared resource, merged with YAML |

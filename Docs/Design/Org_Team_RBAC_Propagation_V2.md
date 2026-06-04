@@ -3,6 +3,8 @@
 ## Summary
 Introduce scoped RBAC propagation so organization/team membership roles map to permission grants and can be enforced per request using an active org/team context. The system remains backward-compatible via feature flags and defaults to legacy (global) permission resolution.
 
+**ADR coverage:** Backfilled by `Docs/ADR/017-scoped-org-team-rbac-core-semantics.md` for implemented core scoped RBAC semantics. Owner sign-off was recorded in TASK-520. The ADR intentionally excludes the unimplemented admin mapping endpoints, resolver metrics/failure flag, and the older invalid-claim fallback behavior from accepted current-architecture claims.
+
 ## Goals
 - Map org/team membership roles to permission grants without granting platform-wide admin powers.
 - Support active org/team scoping for permission checks (opt-in enforcement).

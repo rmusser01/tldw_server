@@ -12,8 +12,12 @@ This audit confirms whether `INV-023` and `INV-024` are current enough to backfi
 
 | Inventory ID | Disposition | Next action |
 | --- | --- | --- |
-| INV-023 | Current governing for implemented ACP persistence. | Backfill an ADR in TASK-520 for shared ACP session/registry persistence and per-user orchestration persistence. Do not claim the older setup-guide consolidation work unless separately confirmed. |
-| INV-024 | Current governing for core scoped Org/Team RBAC semantics. | Backfill an ADR in TASK-520 for feature-flagged scoped grants, `require_active` default scope mode, admin-level denylist filtering, JWT/API-key/default-membership scope sources, and MCP/tool eligibility. Do not claim missing admin mapping endpoints, resolver metrics, or the older invalid-claim fallback behavior. |
+| INV-023 | Current governing for implemented ACP persistence. | Backfilled by `Docs/ADR/016-acp-session-and-orchestration-persistence.md` via TASK-520. The ADR does not claim the older setup-guide consolidation work. |
+| INV-024 | Current governing for core scoped Org/Team RBAC semantics. | Backfilled by `Docs/ADR/017-scoped-org-team-rbac-core-semantics.md` via TASK-520. The ADR does not claim missing admin mapping endpoints, resolver metrics, or the older invalid-claim fallback behavior. |
+
+## Owner Sign-off
+
+TASK-520 recorded owner sign-off from the 2026-06-04 continuation instruction after the ACP/RBAC backfill scope and sign-off requirement were summarized.
 
 ## Evidence Reviewed
 
@@ -47,11 +51,11 @@ Caveats for TASK-520:
 - Resolver success/failure/latency metrics and an `AuthPrincipal.resolver_failure` flag were not found. The ADR should treat them as follow-up implementation gaps, not accepted current behavior.
 - The current JWT path rejects invalid active org/team claims with `403`; it does not implement the source design's default invalid-claim fallback with optional strict mode. The ADR should describe the implemented stricter behavior or omit the invalid-claim fallback.
 
-## Follow-up
+## Backfilled ADRs
 
-TASK-520 should draft two accepted ADRs from this audit:
+TASK-520 created two accepted ADRs from this audit:
 
-1. ACP persistence: shared `acp_sessions.db` plus per-user `Databases/user_databases/<id>/orchestration.db` by default.
-2. Scoped Org/Team RBAC core semantics: feature-flagged scoped permission overlays with `require_active` default and denylist-filtered grants.
+1. `Docs/ADR/016-acp-session-and-orchestration-persistence.md`: shared `acp_sessions.db` plus per-user `Databases/user_databases/<id>/orchestration.db` by default.
+2. `Docs/ADR/017-scoped-org-team-rbac-core-semantics.md`: feature-flagged scoped permission overlays with `require_active` default and denylist-filtered grants.
 
-Both ADRs should link this audit and the source design docs. Any missing operational surfaces should remain consequences or follow-up notes, not accepted claims.
+Both ADRs link this audit and the source design docs. Missing operational surfaces remain consequences or follow-up notes, not accepted claims.
