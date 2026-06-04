@@ -886,7 +886,8 @@ async def test_git_diff_runs_unstaged_with_path_separator_and_dash_path(tmp_path
     assert result["ok"] is True  # nosec B101
     assert result["scope"] == "unstaged"  # nosec B101
     assert result["path"] == "-danger.py"  # nosec B101
-    assert result["diff"] == diff_text  # nosec B101
+    assert result["text"] == diff_text  # nosec B101
+    assert "diff" not in result  # nosec B101
     assert result["bytes"] == len(diff_text.encode("utf-8"))  # nosec B101
     assert result["truncated"] is False  # nosec B101
     assert result["limits"] == {"context_lines": 3, "max_bytes": 512}  # nosec B101
@@ -939,7 +940,8 @@ async def test_git_diff_runs_staged_with_cached_scope(tmp_path: Path) -> None:
     assert result["ok"] is True  # nosec B101
     assert result["scope"] == "staged"  # nosec B101
     assert result["path"] == "src/app.py"  # nosec B101
-    assert result["bytes"] == len(result["diff"].encode("utf-8"))  # nosec B101
+    assert result["bytes"] == len(result["text"].encode("utf-8"))  # nosec B101
+    assert "diff" not in result  # nosec B101
     assert result["truncated"] is False  # nosec B101
 
 
@@ -988,6 +990,8 @@ async def test_git_diff_translates_workspace_relative_path_to_repo_relative_path
     assert result["ok"] is True  # nosec B101
     assert result["repository_root"] == "repo"  # nosec B101
     assert result["path"] == "repo/src/app.py"  # nosec B101
+    assert "text" in result  # nosec B101
+    assert "diff" not in result  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1042,11 +1046,13 @@ async def test_git_diff_working_tree_returns_staged_and_unstaged_sections(tmp_pa
     ]
     assert result["ok"] is True  # nosec B101
     assert result["scope"] == "working_tree"  # nosec B101
+    assert result["text"] == "staged-diff\nunstaged-diff"  # nosec B101
     assert result["sections"] == [  # nosec B101
-        {"scope": "staged", "diff": "staged-diff", "bytes": 11},
-        {"scope": "unstaged", "diff": "unstaged-diff", "bytes": 13},
+        {"scope": "staged", "text": "staged-diff", "bytes": 11},
+        {"scope": "unstaged", "text": "unstaged-diff", "bytes": 13},
     ]
     assert result["bytes"] == 24  # nosec B101
+    assert "diff" not in result  # nosec B101
     assert result["truncated"] is False  # nosec B101
 
 
@@ -1077,7 +1083,8 @@ async def test_git_diff_respects_max_bytes_truncation(tmp_path: Path) -> None:
     )
 
     assert result["ok"] is True  # nosec B101
-    assert result["diff"] == "0123"  # nosec B101
+    assert result["text"] == "0123"  # nosec B101
+    assert "diff" not in result  # nosec B101
     assert result["bytes"] == 4  # nosec B101
     assert result["truncated"] is True  # nosec B101
     assert result["eval"]["truncated"] is True  # nosec B101
@@ -1400,7 +1407,8 @@ async def test_git_conflicts_read_refuses_non_conflicted_path(tmp_path: Path) ->
         "-z",
     ]
     assert result["ok"] is False  # nosec B101
-    assert result["reason_code"] == "path_not_conflicted"  # nosec B101
+    assert result["reason_code"] == "git_command_failed"  # nosec B101
+    assert "not currently conflicted" in result["message"]  # nosec B101
     assert str(workspace_root) not in str(result)  # nosec B101
 
 
@@ -1433,6 +1441,49 @@ async def test_git_conflicts_read_rejects_repo_outside_path_before_conflict_memb
     assert result["ok"] is False  # nosec B101
     assert result["reason_code"] == "path_outside_repository"  # nosec B101
     assert result["repository_root"] == "repo"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_read_unreadable_file_uses_stable_git_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    conflict_path = workspace_root / "src" / "conflict.py"
+    conflict_path.parent.mkdir()
+    conflict_path.write_text("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="100644 aaa 2\tsrc/conflict.py\0"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    def _raise_os_error(path: Path, *, max_bytes: int) -> tuple[str, bool]:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(module, "_read_text_file_bounded", _raise_os_error)
+
+    result = await module.execute_tool(
+        "git.conflicts.read",
+        {"path": "src/conflict.py"},
+        context=_context(),
+    )
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "git_command_failed"  # nosec B101
+    assert "could not be read" in result["message"]  # nosec B101
     assert str(workspace_root) not in str(result)  # nosec B101
 
 

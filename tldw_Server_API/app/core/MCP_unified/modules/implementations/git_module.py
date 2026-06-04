@@ -726,6 +726,7 @@ class GitModule(BaseModule):
                 return unstaged_result
 
             sections: list[dict[str, Any]] = []
+            combined_parts: list[str] = []
             remaining = max_bytes
             truncated = bool(staged_result.truncated or unstaged_result.truncated)
             for section_scope, command_result in (
@@ -736,12 +737,15 @@ class GitModule(BaseModule):
                 byte_count = len(diff_text.encode("utf-8"))
                 remaining = max(0, remaining - len(diff_text.encode("utf-8")))
                 truncated = truncated or text_truncated
-                sections.append({"scope": section_scope, "diff": diff_text, "bytes": byte_count})
+                sections.append({"scope": section_scope, "text": diff_text, "bytes": byte_count})
+                if diff_text:
+                    combined_parts.append(diff_text)
 
             response: dict[str, Any] = {
                 "ok": True,
                 "repository_root": repository.repository_root_relative,
                 "scope": "working_tree",
+                "text": "\n".join(combined_parts),
                 "sections": sections,
                 "bytes": sum(section["bytes"] for section in sections),
                 "truncated": truncated,
@@ -780,7 +784,7 @@ class GitModule(BaseModule):
             "ok": True,
             "repository_root": repository.repository_root_relative,
             "scope": scope,
-            "diff": diff_text,
+            "text": diff_text,
             "bytes": len(diff_text.encode("utf-8")),
             "truncated": truncated,
             "limits": self._effective_limits(tool_name, args),
@@ -963,7 +967,7 @@ class GitModule(BaseModule):
         if path not in conflicted_paths:
             error = self._error_result(
                 tool_name,
-                "path_not_conflicted",
+                "git_command_failed",
                 "The requested path is not currently conflicted.",
                 git_result=result,
                 subcommand="ls-files",
@@ -981,7 +985,7 @@ class GitModule(BaseModule):
         except OSError:
             error = self._error_result(
                 tool_name,
-                "conflicted_file_unreadable",
+                "git_command_failed",
                 "The conflicted file could not be read.",
                 git_result=result,
                 subcommand="ls-files",
