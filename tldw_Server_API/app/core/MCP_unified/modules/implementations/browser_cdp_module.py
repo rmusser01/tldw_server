@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+from base64 import b64decode
+from binascii import Error as BinasciiError
 from collections.abc import Callable
 from typing import Any
 
 from tldw_Server_API.app.core.MCP_unified.browser_cdp import (
     CDPBrowserClient,
     CDPClientConfig,
+    CDPClientError,
+    CDPPageTarget,
 )
 
 from ..base import BaseModule, ModuleConfig, create_tool_definition
@@ -30,6 +34,19 @@ _ALL_TOOLS = {
     _TOOL_CONSOLE,
     _TOOL_NETWORK,
 }
+
+_PAGE_STATE_EXPRESSION = """
+(() => ({
+  url: document.URL,
+  title: document.title,
+  ready_state: document.readyState,
+  viewport: {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    device_scale_factor: window.devicePixelRatio,
+  },
+}))()
+""".strip()
 
 
 class BrowserCDPModule(BaseModule):
@@ -190,8 +207,108 @@ class BrowserCDPModule(BaseModule):
             )
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        self.validate_tool_arguments(tool_name, self.sanitize_input(arguments or {}))
-        raise NotImplementedError("Browser CDP tool execution is implemented in the execution slice")
+        args = self.sanitize_input(arguments or {})
+        self.validate_tool_arguments(tool_name, args)
+
+        config = self._client_config()
+        if not config.debugger_url:
+            if tool_name == _TOOL_STATUS:
+                return {
+                    "available": False,
+                    "configured": False,
+                    "reason_code": "cdp_not_configured",
+                    "message": "CDP debugger URL is not configured",
+                }
+            raise CDPClientError("cdp_not_configured", "CDP debugger URL is not configured")
+
+        client = self._client_factory(config)
+
+        if tool_name == _TOOL_STATUS:
+            return await self._execute_status(client)
+
+        if tool_name == _TOOL_PAGES_LIST:
+            pages = await client.list_pages()
+            return {
+                "count": len(pages),
+                "pages": [self._page_summary(page) for page in pages],
+            }
+
+        if tool_name == _TOOL_SNAPSHOT:
+            page = await self._resolve_page(client, args.get("target_id"))
+            limit = int(args.get("limit") or config.max_snapshot_nodes)
+            result = await client.send_command(page, "Accessibility.getFullAXTree", {})
+            nodes = result.get("nodes") if isinstance(result.get("nodes"), list) else []
+            bounded_nodes = nodes[:limit]
+            return {
+                "target": self._page_summary(page),
+                "nodes": bounded_nodes,
+                "total_nodes": len(nodes),
+                "limit": limit,
+                "truncated": len(nodes) > len(bounded_nodes),
+            }
+
+        if tool_name == _TOOL_PAGE_STATE:
+            page = await self._resolve_page(client, args.get("target_id"))
+            result = await client.send_command(
+                page,
+                "Runtime.evaluate",
+                {
+                    "expression": _PAGE_STATE_EXPRESSION,
+                    "returnByValue": True,
+                    "awaitPromise": False,
+                },
+            )
+            return {
+                "target": self._page_summary(page),
+                "state": self._runtime_value(result),
+            }
+
+        if tool_name == _TOOL_SCREENSHOT:
+            page = await self._resolve_page(client, args.get("target_id"))
+            image_format = args.get("format") or "png"
+            params: dict[str, Any] = {"format": image_format}
+            if image_format == "jpeg" and args.get("quality") is not None:
+                params["quality"] = args["quality"]
+            result = await client.send_command(page, "Page.captureScreenshot", params)
+            data = result.get("data")
+            if not isinstance(data, str) or not data:
+                raise CDPClientError("cdp_protocol_error", "CDP screenshot response did not include image data")
+            byte_estimate = self._base64_size(data)
+            if byte_estimate > config.screenshot_max_bytes:
+                raise CDPClientError(
+                    "payload_too_large",
+                    f"CDP screenshot payload exceeds {config.screenshot_max_bytes} bytes",
+                )
+            return {
+                "target": self._page_summary(page),
+                "mime_type": f"image/{image_format}",
+                "data": data,
+                "byte_estimate": byte_estimate,
+            }
+
+        if tool_name == _TOOL_CONSOLE:
+            page = await self._resolve_page(client, args.get("target_id"))
+            return await self._observe(
+                client,
+                page,
+                enable_methods=["Runtime.enable", "Log.enable"],
+                event_names={"Runtime.consoleAPICalled", "Log.entryAdded"},
+                window_ms=int(args.get("window_ms") or config.observation_window_ms),
+                max_events=int(args.get("max_events") or config.max_events),
+            )
+
+        if tool_name == _TOOL_NETWORK:
+            page = await self._resolve_page(client, args.get("target_id"))
+            return await self._observe(
+                client,
+                page,
+                enable_methods=["Network.enable"],
+                event_names={"Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed"},
+                window_ms=int(args.get("window_ms") or config.observation_window_ms),
+                max_events=int(args.get("max_events") or config.max_events),
+            )
+
+        raise ValueError(f"Unknown browser CDP tool: {tool_name}")
 
     def _client_config(self) -> CDPClientConfig:
         settings = self.config.settings if isinstance(self.config.settings, dict) else {}
@@ -225,6 +342,81 @@ class BrowserCDPModule(BaseModule):
             parameters={"properties": properties, "required": required},
             metadata={**metadata, "capabilities": capabilities},
         )
+
+    async def _execute_status(self, client: CDPBrowserClient) -> dict[str, Any]:
+        try:
+            version = await client.get_version()
+            pages = await client.list_pages()
+        except CDPClientError as exc:
+            return {
+                "available": False,
+                "configured": True,
+                "reason_code": exc.reason_code,
+                "message": exc.message,
+            }
+        return {
+            "available": True,
+            "configured": True,
+            "version": version,
+            "page_count": len(pages),
+        }
+
+    async def _resolve_page(self, client: CDPBrowserClient, target_id: Any) -> CDPPageTarget:
+        pages = await client.list_pages()
+        if target_id is None:
+            if pages:
+                return pages[0]
+            raise CDPClientError("target_not_found", "No inspectable CDP page targets are available")
+        for page in pages:
+            if page.target_id == target_id:
+                return page
+        raise CDPClientError("target_not_found", f"Inspectable CDP page target not found: {target_id}")
+
+    async def _observe(
+        self,
+        client: CDPBrowserClient,
+        page: CDPPageTarget,
+        *,
+        enable_methods: list[str],
+        event_names: set[str],
+        window_ms: int,
+        max_events: int,
+    ) -> dict[str, Any]:
+        result = await client.observe_events(
+            page,
+            enable_methods=enable_methods,
+            event_names=event_names,
+            window_ms=window_ms,
+            max_events=max_events,
+        )
+        return {
+            "target": self._page_summary(page),
+            "events": result.get("events", []),
+            "truncated": bool(result.get("truncated", False)),
+            "observed_for_ms": int(result.get("observed_for_ms", 0)),
+        }
+
+    def _page_summary(self, page: CDPPageTarget) -> dict[str, Any]:
+        return {
+            "target_id": page.target_id,
+            "title": page.title,
+            "url": page.url,
+            "type": page.type,
+            "attached": page.attached,
+        }
+
+    def _runtime_value(self, result: dict[str, Any]) -> dict[str, Any]:
+        runtime_result = result.get("result")
+        if not isinstance(runtime_result, dict):
+            return {}
+        value = runtime_result.get("value")
+        return value if isinstance(value, dict) else {}
+
+    def _base64_size(self, data: str) -> int:
+        try:
+            return len(b64decode(data, validate=True))
+        except (BinasciiError, ValueError) as exc:
+            raise CDPClientError("cdp_protocol_error", "CDP screenshot response contained invalid base64") from exc
 
     def _reject_unknown(self, args: dict[str, Any], allowed: set[str]) -> None:
         unknown = sorted(set(args) - allowed)
