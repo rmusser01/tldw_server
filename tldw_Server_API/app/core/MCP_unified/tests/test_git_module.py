@@ -944,6 +944,53 @@ async def test_git_diff_runs_staged_with_cached_scope(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_git_diff_translates_workspace_relative_path_to_repo_relative_pathspec(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = workspace_root / "repo"
+    repo_root.mkdir(parents=True)
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{repo_root}\n"),
+            _git_result(stdout="diff --git a/src/app.py b/src/app.py\n+changed\n"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.diff",
+        {"scope": "unstaged", "path": "repo/src/app.py", "context_lines": 3},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(repo_root),
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--unified=3",
+        "--",
+        "src/app.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["repository_root"] == "repo"  # nosec B101
+    assert result["path"] == "repo/src/app.py"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_git_diff_working_tree_returns_staged_and_unstaged_sections(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -1037,6 +1084,47 @@ async def test_git_diff_respects_max_bytes_truncation(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["git.diff", "git.log"])
+async def test_git_diff_log_reject_repo_outside_workspace_relative_path_before_path_command(
+    tool_name: str,
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = workspace_root / "repo"
+    repo_root.mkdir(parents=True)
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner([_git_result(stdout=f"{repo_root}\n")])
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+    args = {"path": "outside.txt"}
+    if tool_name == "git.diff":
+        args["scope"] = "unstaged"
+    else:
+        args["limit"] = 2
+
+    result = await module.execute_tool(tool_name, args, context=_context())
+
+    assert len(runner.calls) == 1  # nosec B101
+    assert runner.calls[0]["argv"] == [  # nosec B101
+        "git",
+        "-C",
+        str(workspace_root),
+        "rev-parse",
+        "--show-toplevel",
+    ]
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "path_outside_repository"  # nosec B101
+    assert result["repository_root"] == "repo"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_git_log_parses_bounded_commits_with_path_filter_and_no_emails(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -1100,6 +1188,52 @@ async def test_git_log_parses_bounded_commits_with_path_filter_and_no_emails(tmp
     assert "email" not in str(result).lower()  # nosec B101
     assert result["eval"]["result_kind"] == "bounded_git_log"  # nosec B101
     assert result["eval"]["path_filter_used"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_log_translates_workspace_relative_path_to_repo_relative_pathspec(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = workspace_root / "repo"
+    repo_root.mkdir(parents=True)
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "abcdef1234567890\x1fabcdef1\x1fAda Lovelace\x1f2026-06-01T10:00:00+00:00\x1fAdd feature\x1e"
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{repo_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.log",
+        {"limit": 1, "path": "repo/src/app.py"},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(repo_root),
+        "log",
+        "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e",
+        "-n",
+        "1",
+        "--",
+        "src/app.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["path"] == "repo/src/app.py"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1176,6 +1310,59 @@ async def test_git_blame_parses_line_porcelain_range_caps_lines_and_no_emails(tm
 
 
 @pytest.mark.asyncio
+async def test_git_blame_translates_workspace_relative_path_to_repo_relative_pathspec(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = workspace_root / "repo"
+    repo_root.mkdir(parents=True)
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\n".join(
+        [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1",
+            "author Ada Lovelace",
+            "author-time 1780000000",
+            "\tfirst line",
+        ]
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{repo_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.blame",
+        {"path": "repo/src/app.py", "start_line": 1, "end_line": 1, "limit": 1},
+        context=_context(),
+    )
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(repo_root),
+        "blame",
+        "--line-porcelain",
+        "-L",
+        "1,1",
+        "--",
+        "src/app.py",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["path"] == "repo/src/app.py"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_git_conflicts_read_refuses_non_conflicted_path(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -1214,6 +1401,38 @@ async def test_git_conflicts_read_refuses_non_conflicted_path(tmp_path: Path) ->
     ]
     assert result["ok"] is False  # nosec B101
     assert result["reason_code"] == "path_not_conflicted"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_read_rejects_repo_outside_path_before_conflict_membership(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = workspace_root / "repo"
+    repo_root.mkdir(parents=True)
+    (workspace_root / "outside.txt").write_text("outside\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner([_git_result(stdout=f"{repo_root}\n")])
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.conflicts.read",
+        {"path": "outside.txt"},
+        context=_context(),
+    )
+
+    assert len(runner.calls) == 1  # nosec B101
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "path_outside_repository"  # nosec B101
+    assert result["repository_root"] == "repo"  # nosec B101
     assert str(workspace_root) not in str(result)  # nosec B101
 
 

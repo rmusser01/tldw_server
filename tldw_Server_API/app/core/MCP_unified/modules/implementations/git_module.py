@@ -86,6 +86,13 @@ class _PreparedRepository:
     discovery_result: GitCommandResult
 
 
+@dataclass(frozen=True, slots=True)
+class _ResolvedPathFilter:
+    workspace_path: str
+    repo_path: str
+    target: Path
+
+
 class _GitToolError(Exception):
     def __init__(
         self,
@@ -685,7 +692,10 @@ class GitModule(BaseModule):
         context: Any | None,
     ) -> dict[str, Any]:
         scope = str(args.get("scope") or "unstaged")
-        path = self._optional_safe_path(args.get("path"))
+        path_filter = self._resolve_path_filter_or_error(repository, tool_name, args, context=context)
+        if isinstance(path_filter, dict):
+            return path_filter
+        path = path_filter.repo_path if path_filter is not None else None
         context_lines = int(args.get("context_lines") or self._context_lines_maximum())
         max_bytes = int(args.get("max_bytes") or self._diff_bytes_maximum())
 
@@ -715,7 +725,7 @@ class GitModule(BaseModule):
                 unstaged_result["limits"] = self._effective_limits(tool_name, args)
                 return unstaged_result
 
-            sections: list[dict[str, str]] = []
+            sections: list[dict[str, Any]] = []
             remaining = max_bytes
             truncated = bool(staged_result.truncated or unstaged_result.truncated)
             for section_scope, command_result in (
@@ -741,14 +751,14 @@ class GitModule(BaseModule):
                     tool_name,
                     reason_code=None,
                     duration_ms=staged_result.duration_ms + unstaged_result.duration_ms,
-                    path_filter_used=path is not None,
+                    path_filter_used=path_filter is not None,
                     result_kind="bounded_git_diff",
                     truncated=truncated,
                     context=context,
                 ),
             }
-            if path is not None:
-                response["path"] = path
+            if path_filter is not None:
+                response["path"] = path_filter.workspace_path
             return response
 
         result = await self._run_diff_command(
@@ -779,14 +789,14 @@ class GitModule(BaseModule):
                 tool_name,
                 reason_code=None,
                 duration_ms=result.duration_ms,
-                path_filter_used=path is not None,
+                path_filter_used=path_filter is not None,
                 result_kind="bounded_git_diff",
                 truncated=truncated,
                 context=context,
             ),
         }
-        if path is not None:
-            response["path"] = path
+        if path_filter is not None:
+            response["path"] = path_filter.workspace_path
         return response
 
     async def _execute_log(
@@ -798,7 +808,10 @@ class GitModule(BaseModule):
         context: Any | None,
     ) -> dict[str, Any]:
         limit = int(args.get("limit") or self._log_limit_maximum())
-        path = self._optional_safe_path(args.get("path"))
+        path_filter = self._resolve_path_filter_or_error(repository, tool_name, args, context=context)
+        if isinstance(path_filter, dict):
+            return path_filter
+        path = path_filter.repo_path if path_filter is not None else None
         argv = [
             "git",
             "--no-pager",
@@ -816,7 +829,7 @@ class GitModule(BaseModule):
             tool_name,
             argv,
             subcommand="log",
-            path_filter_used=path is not None,
+            path_filter_used=path_filter is not None,
             context=context,
         )
         if isinstance(result, dict):
@@ -826,7 +839,7 @@ class GitModule(BaseModule):
 
         parsed = self._parse_log(result.stdout, limit=limit)
         truncated = bool(result.truncated or parsed["truncated"])
-        return {
+        response = {
             "ok": True,
             "repository_root": repository.repository_root_relative,
             "commits": parsed["commits"],
@@ -837,12 +850,15 @@ class GitModule(BaseModule):
                 tool_name,
                 reason_code=None,
                 duration_ms=result.duration_ms,
-                path_filter_used=path is not None,
+                path_filter_used=path_filter is not None,
                 result_kind="bounded_git_log",
                 truncated=truncated,
                 context=context,
             ),
         }
+        if path_filter is not None:
+            response["path"] = path_filter.workspace_path
+        return response
 
     async def _execute_blame(
         self,
@@ -855,7 +871,10 @@ class GitModule(BaseModule):
         limit = int(args.get("limit") or self._blame_limit_maximum())
         start_line = int(args.get("start_line") or 1)
         end_line = int(args.get("end_line") or (start_line + limit - 1))
-        path = self._optional_safe_path(args.get("path"))
+        path_filter = self._resolve_path_filter_or_error(repository, tool_name, args, context=context)
+        if isinstance(path_filter, dict):
+            return path_filter
+        path = path_filter.repo_path if path_filter is not None else None
         argv = [
             "git",
             "--no-pager",
@@ -886,7 +905,7 @@ class GitModule(BaseModule):
         return {
             "ok": True,
             "repository_root": repository.repository_root_relative,
-            "path": path,
+            "path": path_filter.workspace_path if path_filter is not None else path,
             "start_line": start_line,
             "end_line": end_line,
             "lines": parsed["lines"],
@@ -912,7 +931,10 @@ class GitModule(BaseModule):
         *,
         context: Any | None,
     ) -> dict[str, Any]:
-        path = self._optional_safe_path(args.get("path"))
+        path_filter = self._resolve_path_filter_or_error(repository, tool_name, args, context=context)
+        if isinstance(path_filter, dict):
+            return path_filter
+        path = path_filter.repo_path if path_filter is not None else None
         limit = int(args.get("limit") or self._conflict_limit_maximum())
         max_bytes = int(args.get("max_bytes") or self._conflict_read_bytes_maximum())
 
@@ -954,28 +976,8 @@ class GitModule(BaseModule):
             error["limits"] = self._effective_limits(tool_name, args)
             return error
 
-        target = (repository.repository_root / str(path)).resolve(strict=False)
-        if not self._path_inside(target, repository.repository_root) or not self._path_inside(
-            target,
-            repository.workspace_root,
-        ):
-            error = self._error_result(
-                tool_name,
-                "path_outside_repository",
-                "The requested path resolves outside the active repository.",
-                git_result=result,
-                subcommand="ls-files",
-                path_filter_used=True,
-                result_kind="bounded_git_conflict_hunks",
-                truncated=result.truncated,
-                context=context,
-            )
-            error["repository_root"] = repository.repository_root_relative
-            error["limits"] = self._effective_limits(tool_name, args)
-            return error
-
         try:
-            content, file_truncated = self._read_text_file_bounded(target, max_bytes=max_bytes)
+            content, file_truncated = self._read_text_file_bounded(path_filter.target, max_bytes=max_bytes)
         except OSError:
             error = self._error_result(
                 tool_name,
@@ -997,7 +999,7 @@ class GitModule(BaseModule):
         return {
             "ok": True,
             "repository_root": repository.repository_root_relative,
-            "path": path,
+            "path": path_filter.workspace_path if path_filter is not None else path,
             "hunks": parsed["hunks"],
             "bytes": self._hunks_byte_count(parsed["hunks"]),
             "truncated": truncated,
@@ -1809,6 +1811,57 @@ class GitModule(BaseModule):
         if path is None:
             raise ValueError("path resolves outside workspace")
         return path
+
+    def _resolve_path_filter_or_error(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> _ResolvedPathFilter | dict[str, Any] | None:
+        workspace_path = self._optional_safe_path(args.get("path"))
+        if workspace_path is None:
+            return None
+
+        target = (repository.workspace_root / workspace_path).resolve(strict=False)
+        if not self._path_inside(target, repository.workspace_root) or not self._path_inside(
+            target,
+            repository.repository_root,
+        ):
+            error = self._error_result(
+                tool_name,
+                "path_outside_repository",
+                "The requested path resolves outside the active repository.",
+                path_filter_used=True,
+                result_kind=self._result_kind_for_tool(tool_name),
+                truncated=False,
+                context=context,
+            )
+            error["repository_root"] = repository.repository_root_relative
+            error["limits"] = self._effective_limits(tool_name, args)
+            return error
+
+        repo_path = target.relative_to(repository.repository_root).as_posix()
+        if not repo_path or repo_path == ".":
+            error = self._error_result(
+                tool_name,
+                "path_outside_repository",
+                "The requested path must resolve to a file inside the active repository.",
+                path_filter_used=True,
+                result_kind=self._result_kind_for_tool(tool_name),
+                truncated=False,
+                context=context,
+            )
+            error["repository_root"] = repository.repository_root_relative
+            error["limits"] = self._effective_limits(tool_name, args)
+            return error
+
+        return _ResolvedPathFilter(
+            workspace_path=workspace_path,
+            repo_path=repo_path,
+            target=target,
+        )
 
     @staticmethod
     def _conflict_xy_status(stages: list[int]) -> str:
