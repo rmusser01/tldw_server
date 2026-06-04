@@ -167,8 +167,10 @@ class CDPBrowserClient:
         truncated = False
         try:
             async with self._connect_websocket(page.websocket_url) as websocket:
+                pending_enable_ids: set[int] = set()
                 for method in enable_methods:
                     command_id = self._allocate_command_id()
+                    pending_enable_ids.add(command_id)
                     await websocket.send(
                         json.dumps({"id": command_id, "method": method, "params": {}})
                     )
@@ -182,6 +184,14 @@ class CDPBrowserClient:
                     except TimeoutError:
                         break
                     payload = _json_object(raw)
+                    payload_id = payload.get("id")
+                    if payload_id in pending_enable_ids:
+                        if isinstance(payload.get("error"), dict):
+                            error = payload["error"]
+                            message_text = _text(error.get("message")) or "CDP enable command failed"
+                            raise CDPClientError("cdp_protocol_error", message_text)
+                        pending_enable_ids.remove(payload_id)
+                        continue
                     method = _text(payload.get("method"))
                     if method not in event_names:
                         continue
@@ -219,6 +229,10 @@ class CDPBrowserClient:
         """Return a WebSocket async context manager for a CDP target."""
         import websockets
 
+        websocket_url = _validate_websocket_url(
+            websocket_url,
+            allow_non_loopback=self.config.allow_non_loopback,
+        )
         return websockets.connect(
             websocket_url,
             open_timeout=max(float(self.config.request_timeout_seconds), 0.1),
@@ -252,6 +266,24 @@ def _normalize_debugger_url(
     if path == "":
         path = ""
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _validate_websocket_url(
+    websocket_url: str,
+    *,
+    allow_non_loopback: bool,
+) -> str:
+    raw_url = str(websocket_url or "").strip()
+    parsed = urlsplit(raw_url)
+    if parsed.scheme not in {"ws", "wss"} or not parsed.netloc:
+        raise CDPClientError("cdp_endpoint_invalid", "CDP target WebSocket URL must be a WS(S) URL")
+    host = parsed.hostname or ""
+    if not allow_non_loopback and not _is_literal_loopback_host(host):
+        raise CDPClientError(
+            "cdp_endpoint_not_allowed",
+            "CDP target WebSocket URL must use a loopback host unless explicitly allowed",
+        )
+    return raw_url
 
 
 def _is_literal_loopback_host(host: str) -> bool:

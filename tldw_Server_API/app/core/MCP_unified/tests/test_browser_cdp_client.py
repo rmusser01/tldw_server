@@ -58,6 +58,24 @@ def test_cdp_client_can_allow_operator_configured_non_loopback_url() -> None:
     assert client.debugger_base_url == "http://browser-host.internal:9222"  # nosec B101
 
 
+def test_cdp_client_rejects_non_loopback_target_websocket_url() -> None:
+    client = CDPBrowserClient(CDPClientConfig(debugger_url="http://127.0.0.1:9222"))
+
+    with pytest.raises(CDPClientError) as exc_info:
+        client._connect_websocket("ws://example.com/devtools/page/1")  # noqa: SLF001
+
+    assert exc_info.value.reason_code == "cdp_endpoint_not_allowed"  # nosec B101
+
+
+def test_cdp_client_rejects_invalid_target_websocket_scheme() -> None:
+    client = CDPBrowserClient(CDPClientConfig(debugger_url="http://127.0.0.1:9222"))
+
+    with pytest.raises(CDPClientError) as exc_info:
+        client._connect_websocket("http://127.0.0.1:9222/devtools/page/1")  # noqa: SLF001
+
+    assert exc_info.value.reason_code == "cdp_endpoint_invalid"  # nosec B101
+
+
 class _HTTPFakeClient(CDPBrowserClient):
     def __init__(self, responses: dict[str, Any] | None = None, *, fail: bool = False) -> None:
         super().__init__(CDPClientConfig(debugger_url="http://127.0.0.1:9222"))
@@ -262,3 +280,27 @@ async def test_cdp_client_observes_bounded_events() -> None:
     assert observed["events"] == [  # nosec B101
         {"method": "Runtime.consoleAPICalled", "params": {"type": "log", "args": []}}
     ]
+
+
+@pytest.mark.asyncio
+async def test_cdp_client_observe_events_surfaces_enable_errors() -> None:
+    websocket = _FakeWebSocket(
+        [
+            {
+                "id": 1,
+                "error": {"code": -32601, "message": "Runtime disabled"},
+            }
+        ]
+    )
+    client = _WebSocketFakeClient(websocket)
+
+    with pytest.raises(CDPClientError) as exc_info:
+        await client.observe_events(
+            _page(),
+            enable_methods=["Runtime.enable"],
+            event_names={"Runtime.consoleAPICalled"},
+            window_ms=100,
+            max_events=1,
+        )
+
+    assert exc_info.value.reason_code == "cdp_protocol_error"  # nosec B101

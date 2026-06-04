@@ -62,12 +62,14 @@ Task 4 completed: added optional BrowserCDPModule default registration when MCP_
 Task 5 completed: documented CDP configuration, read-only tool list, loopback defaults, non-goals, and budget settings in mcp_unified/USER_GUIDE.md. Final verification: pytest focused Task 5 suite (83 passed); Bandit touched Python scope passed with report /tmp/bandit_mcp_cdp_browser_tools.json; ruff check touched files passed; git diff --check passed. Optional live CDP smoke skipped because no local listener was running on TCP port 9222.
 
 PR review follow-up completed after rebasing on latest dev: addressed Qodo items 1-4 by adding an overall send_command deadline, rejecting oversized screenshot base64 from decoded-size estimate before full decode, clamping default observation windows against max_observation_window_ms, and clearing MCP_BROWSER_CDP_URL in the unconfigured status test. Gemini's base64-size review overlapped Qodo item 2 and was addressed by the same change.
+
+CodeRabbit follow-up completed: aligned browser-capable preset policy capabilities with advertised native CDP read tooling, validated target WebSocket URLs with the same loopback policy as debugger URLs, and made observe_events surface CDP enable-command errors instead of silently continuing. Verification: pytest focused MCP/CDP suite (89 passed); ruff check touched scope passed; Bandit touched Python scope passed with report /tmp/bandit_mcp_cdp_browser_tools_coderabbit.json; git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added optional native CDP-backed read-only MCP browser inspection tools, with loopback-safe client validation, strict read-only tool schemas, bounded execution behavior, optional server registration, browser-capable preset discovery metadata, tests, and package-local user guide documentation. PR review follow-up added overall command deadlines, pre-decode screenshot payload rejection, observation-window clamping, and env-isolated status tests. Live browser smoke was skipped because no local CDP endpoint was already running.
+Added optional native CDP-backed read-only MCP browser inspection tools, with loopback-safe client validation, strict read-only tool schemas, bounded execution behavior, optional server registration, browser-capable preset discovery metadata, tests, and package-local user guide documentation. PR review follow-up added overall command deadlines, pre-decode screenshot payload rejection, observation-window clamping, env-isolated status tests, browser policy capability alignment, target WebSocket URL validation, and enable-command error propagation. Live browser smoke was skipped because no local CDP endpoint was already running.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

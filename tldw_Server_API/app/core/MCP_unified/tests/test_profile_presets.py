@@ -209,8 +209,13 @@ def test_browser_capable_presets_include_native_cdp_read_tools() -> None:
         assert preset is not None  # nosec B101
 
         tooling = preset.profile.metadata["tooling"]
+        policy_caps = set(preset.profile.policy_document.capabilities)
         assert browser_read_tools <= set(tooling["enabled_tools"])  # nosec B101
         assert {"browser.inspect", "browser.debug"} <= set(tooling["enabled_capabilities"])  # nosec B101
+        assert "browser.inspect" in policy_caps  # nosec B101
+        for capability in {"browser.debug", "screenshots.capture", "app_state.read"}:
+            if capability in tooling["enabled_capabilities"]:
+                assert capability in policy_caps  # nosec B101
         assert "browser" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
         assert "browser" not in tooling["progressive_disclosure"]["deferred_categories"]  # nosec B101
 
