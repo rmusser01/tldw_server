@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -115,21 +116,25 @@ def _module(
     *,
     workspace_root_resolver: Any | None = None,
     runner: Any | None = None,
+    settings: dict[str, Any] | None = None,
 ) -> GitModule:
+    module_settings = {
+        "max_status_entries": 5,
+        "max_log_entries": 5,
+        "max_blame_entries": 5,
+        "max_branch_entries": 5,
+        "max_conflict_entries": 5,
+        "max_diff_bytes": 1_024,
+        "max_conflict_read_bytes": 1_024,
+        "max_context_lines": 8,
+        "max_line_number": 10,
+    }
+    if settings is not None:
+        module_settings.update(settings)
     return GitModule(
         ModuleConfig(
             name="git",
-            settings={
-                "max_status_entries": 5,
-                "max_log_entries": 5,
-                "max_blame_entries": 5,
-                "max_branch_entries": 5,
-                "max_conflict_entries": 5,
-                "max_diff_bytes": 1_024,
-                "max_conflict_read_bytes": 1_024,
-                "max_context_lines": 8,
-                "max_line_number": 10,
-            },
+            settings=module_settings,
         ),
         workspace_root_resolver=workspace_root_resolver,
         runner=runner,
@@ -382,6 +387,12 @@ async def test_git_runner_uses_create_subprocess_exec_without_shell_and_safe_env
     assert result.stdout == "git version 2.45.0\n"  # nosec B101
     assert result.timed_out is False  # nosec B101
     assert result.truncated is False  # nosec B101
+
+
+def test_git_runner_does_not_broadly_suppress_cleanup_exceptions() -> None:
+    source = inspect.getsource(AsyncGitCommandRunner)
+
+    assert "suppress(Exception)" not in source  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1367,6 +1378,55 @@ async def test_git_blame_parses_line_porcelain_range_caps_lines_and_no_emails(tm
 
 
 @pytest.mark.asyncio
+async def test_git_blame_reuses_commit_metadata_when_line_porcelain_omits_repeated_commit_fields(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\n".join(
+        [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1",
+            "author Ada Lovelace",
+            "author-time 1780000000",
+            "\tfirst line",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 2 2 1",
+            "\tsecond line",
+        ]
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.blame",
+        {"path": "src/app.py", "start_line": 1, "end_line": 2, "limit": 5},
+        context=_context(),
+    )
+
+    assert result["ok"] is True  # nosec B101
+    assert [line["author_name"] for line in result["lines"]] == [  # nosec B101
+        "Ada Lovelace",
+        "Ada Lovelace",
+    ]
+    assert [line["author_time"] for line in result["lines"]] == [  # nosec B101
+        1780000000,
+        1780000000,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_git_blame_translates_workspace_relative_path_to_repo_relative_pathspec(
     tmp_path: Path,
 ) -> None:
@@ -1786,6 +1846,39 @@ async def test_git_repository_resolution_command_timeout_returns_structured_reas
     assert result["ok"] is False  # nosec B101
     assert result["reason_code"] == "git_command_timeout"  # nosec B101
     assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_uses_discovery_timeout_only_for_repository_resolution(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="# branch.oid abcdef\n"),
+        ]
+    )
+    module = _module(
+        workspace_root_resolver=resolver,
+        runner=runner,
+        settings={
+            "repository_discovery_timeout_seconds": 3.0,
+            "git_command_timeout_seconds": 22.0,
+        },
+    )
+
+    result = await module.execute_tool("git.status", {}, context=_context())
+
+    assert result["ok"] is True  # nosec B101
+    assert [call["timeout_seconds"] for call in runner.calls] == [3.0, 22.0]  # nosec B101
 
 
 @pytest.mark.asyncio

@@ -2,25 +2,18 @@
 id: TASK-2258
 title: Implement MCP Git read-only inspection tools
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-06-04 19:20'
 labels:
-- mcp
-- implementation
-- git
-- profiles
+  - mcp
+  - implementation
+  - git
+  - profiles
+dependencies: []
 references:
-- Docs/superpowers/specs/2026-06-04-mcp-git-read-tools-design.md
-- Docs/superpowers/plans/2026-06-04-mcp-git-read-tools-implementation-plan.md
-modified_files:
-- tldw_Server_API/app/core/MCP_unified/tool_observability.py
-- tldw_Server_API/app/core/MCP_unified/modules/implementations/git_module.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_git_module.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_git_module_registration.py
-- tldw_Server_API/app/core/MCP_unified/server.py
-- mcp_unified/profiles/presets.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py
-- tldw_Server_API/app/core/MCP_unified/README.md
-- mcp_unified/USER_GUIDE.md
+  - Docs/superpowers/specs/2026-06-04-mcp-git-read-tools-design.md
+  - Docs/superpowers/plans/2026-06-04-mcp-git-read-tools-implementation-plan.md
 ---
 
 ## Description
@@ -35,6 +28,7 @@ Implement the approved active-workspace Git read-only MCP tools with shared tool
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete. Added shared MCP tool observability/evaluation metadata helpers and tests in commit cb5568787d. RED: targeted pytest failed with missing module before implementation. GREEN: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py -q` -> 8 passed. `git diff --check` passed. Spec compliance review approved; code quality review approved with no findings.
 
@@ -49,6 +43,9 @@ Final review fix complete. Addressed whole-branch review findings in commit 9b97
 
 Final verification at head 9b97b0bdb9eba29d17e09504ee8c92896e763f5b: focused suite `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py tldw_Server_API/app/core/MCP_unified/tests/test_git_module.py tldw_Server_API/app/core/MCP_unified/tests/test_git_module_registration.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q` -> 148 passed, 4 warnings. Adjacent MCP regressions `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_server_registration.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q` -> 63 passed, 5 warnings. Bandit source scan `python -m bandit -r tldw_Server_API/app/core/MCP_unified/tool_observability.py tldw_Server_API/app/core/MCP_unified/modules/implementations/git_module.py tldw_Server_API/app/core/MCP_unified/server.py mcp_unified/profiles/presets.py -f json -o /tmp/bandit_mcp_git_read_tools.json` -> 0 findings. `git diff --check` passed. `git status --short --branch` clean, branch ahead of origin/dev.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+PR #2266 review pass complete after rebasing onto latest origin/dev. Verified and fixed three still-valid review threads: Git runner no longer silently suppresses broad cleanup exceptions and logs unexpected process-wait failures; Git read commands now use separate git_command_timeout_seconds instead of repository discovery timeout; blame parsing caches author metadata by commit hash for repeated --line-porcelain commits. Also fixed the failing onboarding docs gate by restoring required user-guide index discoverability entries for benchmark, OpenWebUI import/hydration, and flashcards in source and published indexes. Validation: new RED tests failed for all three review findings before implementation; after fixes test_git_module.py -> 114 passed, related MCP/profile tests -> 37 passed, docs discoverability tests -> 9 passed, Bandit touched source -> 0 findings, git diff --check passed.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

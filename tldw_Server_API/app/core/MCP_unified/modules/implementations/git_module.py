@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePath, PureWindowsPath
 from typing import Any, Protocol
 
+from loguru import logger
+
 from tldw_Server_API.app.core.MCP_unified.tool_observability import (
     build_execution_eval_metadata,
     build_tool_eval_metadata,
@@ -44,6 +46,7 @@ _ALL_TOOLS = {
 _DIFF_SCOPES = {"unstaged", "staged", "working_tree"}
 _TOOL_PROMPT_VERSION = "2026.06.04"
 _REPOSITORY_DISCOVERY_TIMEOUT_SECONDS = 5.0
+_GIT_COMMAND_TIMEOUT_SECONDS = 30.0
 _DEFAULT_GIT_OUTPUT_BYTES = 1_000_000
 _ALLOWED_GIT_SUBCOMMANDS = {
     "--version",
@@ -139,8 +142,7 @@ class AsyncGitCommandRunner:
             )
         except asyncio.TimeoutError:
             self._kill_process(process)
-            with contextlib.suppress(Exception):
-                await process.wait()
+            await self._wait_for_process_exit(process, cleanup_reason="timeout")
             return GitCommandResult(
                 argv=list(argv),
                 returncode=process.returncode if process.returncode is not None else -1,
@@ -195,8 +197,10 @@ class AsyncGitCommandRunner:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-            with contextlib.suppress(Exception):
-                await process.wait()
+            await self._wait_for_process_exit(
+                process,
+                cleanup_reason="output_truncation" if truncated else "completion",
+            )
             return outputs["stdout"], outputs["stderr"], truncated
         finally:
             for task in pending:
@@ -222,6 +226,22 @@ class AsyncGitCommandRunner:
     def _kill_process(process: Any) -> None:
         with contextlib.suppress(ProcessLookupError):
             process.kill()
+
+    @staticmethod
+    async def _wait_for_process_exit(process: Any, *, cleanup_reason: str) -> None:
+        try:
+            await process.wait()
+        except (ChildProcessError, ProcessLookupError) as exc:
+            logger.debug(
+                "Git process cleanup wait failed after {}: {}",
+                cleanup_reason,
+                exc,
+            )
+        except Exception:
+            logger.exception(
+                "Unexpected error waiting for Git process cleanup after {}",
+                cleanup_reason,
+            )
 
     @staticmethod
     def _git_environment() -> dict[str, str]:
@@ -1071,7 +1091,7 @@ class GitModule(BaseModule):
         try:
             result = await self._runner.run(
                 argv,
-                timeout_seconds=self._repository_discovery_timeout_seconds(),
+                timeout_seconds=self._git_command_timeout_seconds(),
             )
         except (asyncio.TimeoutError, TimeoutError):
             return self._error_result(
@@ -1646,6 +1666,7 @@ class GitModule(BaseModule):
         lines: list[dict[str, Any]] = []
         total = 0
         current: dict[str, Any] | None = None
+        commit_metadata: dict[str, dict[str, Any]] = {}
 
         for raw_line in stdout.splitlines():
             if raw_line.startswith("\t"):
@@ -1671,17 +1692,24 @@ class GitModule(BaseModule):
 
             header = self._parse_blame_header(raw_line)
             if header is not None:
+                cached_metadata = commit_metadata.get(str(header["commit"]))
+                if cached_metadata:
+                    header.update(cached_metadata)
                 current = header
                 continue
 
             if current is None:
                 continue
             if raw_line.startswith("author "):
-                current["author_name"] = raw_line.removeprefix("author ")
+                author_name = raw_line.removeprefix("author ")
+                current["author_name"] = author_name
+                commit_metadata.setdefault(str(current["commit"]), {})["author_name"] = author_name
                 continue
             if raw_line.startswith("author-time "):
                 with contextlib.suppress(ValueError):
-                    current["author_time"] = int(raw_line.removeprefix("author-time "))
+                    author_time = int(raw_line.removeprefix("author-time "))
+                    current["author_time"] = author_time
+                    commit_metadata.setdefault(str(current["commit"]), {})["author_time"] = author_time
 
         return {
             "lines": lines,
@@ -2077,14 +2105,26 @@ class GitModule(BaseModule):
         return self._setting_positive_int("max_runner_output_bytes", _DEFAULT_GIT_OUTPUT_BYTES)
 
     def _repository_discovery_timeout_seconds(self) -> float:
-        raw_value = self.config.settings.get(
+        return self._setting_positive_float(
             "repository_discovery_timeout_seconds",
             _REPOSITORY_DISCOVERY_TIMEOUT_SECONDS,
         )
+
+    def _git_command_timeout_seconds(self) -> float:
+        return self._setting_positive_float(
+            "git_command_timeout_seconds",
+            _GIT_COMMAND_TIMEOUT_SECONDS,
+        )
+
+    def _setting_positive_float(self, key: str, default: float) -> float:
+        raw_value = self.config.settings.get(
+            key,
+            default,
+        )
         if isinstance(raw_value, bool):
-            return _REPOSITORY_DISCOVERY_TIMEOUT_SECONDS
+            return default
         try:
             timeout = float(raw_value)
         except (TypeError, ValueError):
-            return _REPOSITORY_DISCOVERY_TIMEOUT_SECONDS
-        return timeout if timeout > 0 else _REPOSITORY_DISCOVERY_TIMEOUT_SECONDS
+            return default
+        return timeout if timeout > 0 else default
