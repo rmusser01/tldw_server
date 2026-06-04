@@ -135,6 +135,17 @@ def test_role_presets_include_tooling_metadata() -> None:
         assert tooling["progressive_disclosure"]["max_direct_tools"] <= 24
 
 
+def test_filesystem_read_presets_include_helper_tools() -> None:
+    expected = {"fs.stat", "fs.glob", "fs.grep"}
+    for preset in presets.list_builtin_presets():
+        tooling = preset.profile.metadata.get("tooling")
+        if not isinstance(tooling, dict):
+            continue
+        enabled_tools = set(tooling.get("enabled_tools") or [])
+        if {"fs.list", "fs.read_text"} <= enabled_tools:
+            assert expected <= enabled_tools
+
+
 def test_web_search_is_recommended_unavailable_not_enabled() -> None:
     product_owner = presets.get_builtin_preset("product-owner")
     assert product_owner is not None

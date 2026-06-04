@@ -111,6 +111,12 @@ Profiles can expose progressive disclosure bridge tools such as
 then discover recommended next-step tools without expanding the executable tool
 surface by default.
 
+Filesystem-capable presets expose portable workspace-bounded helpers for common
+read workflows: `fs.stat` for metadata, `fs.glob` for cross-platform path
+matching, and `fs.grep` for UTF-8 text search. These helpers do not invoke a
+host shell and remain subject to the active profile policy and workspace path
+scope.
+
 Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass
 profile policy and approval requirements.

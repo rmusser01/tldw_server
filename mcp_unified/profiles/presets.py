@@ -186,7 +186,7 @@ _TOOL_DISCOVERY_TOOLS = [
     "tool_describe",
     "profile.tools.list",
 ]
-_FILES_READ_TOOLS = ["fs.list", "fs.read_text"]
+_FILES_READ_TOOLS = ["fs.list", "fs.read_text", "fs.stat", "fs.glob", "fs.grep"]
 _FILES_WRITE_TOOLS = [*_FILES_READ_TOOLS, "fs.write_text"]
 _CODE_READ_TOOLS = ["code.search", "code.symbols", "code.references"]
 _DOCS_READ_TOOLS = ["docs.search", "docs.read"]
@@ -221,9 +221,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
-                "fs.list",
-                "fs.read_text",
-                "fs.write_text",
+                *_FILES_WRITE_TOOLS,
                 "kanban.cards.create",
                 "memory.recall",
             ],
