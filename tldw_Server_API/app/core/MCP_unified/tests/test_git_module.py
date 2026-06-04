@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module import (
+    AsyncGitCommandRunner,
     GitModule,
 )
+from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
 
 EXPECTED_GIT_TOOLS = {
@@ -19,7 +25,65 @@ EXPECTED_GIT_TOOLS = {
 }
 
 
-def _module() -> GitModule:
+class _FakeWorkspaceRootResolver:
+    def __init__(self, result: dict[str, Any]) -> None:
+        self.result = dict(result)
+        self.calls: list[dict[str, Any]] = []
+
+    async def resolve_for_context(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(dict(kwargs))
+        return dict(self.result)
+
+
+class _RecordingGitRunner:
+    def __init__(self, result: Any | None = None, exc: BaseException | None = None) -> None:
+        self.result = result
+        self.exc = exc
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(self, argv: list[str], *, timeout_seconds: float) -> Any:
+        self.calls.append({"argv": list(argv), "timeout_seconds": timeout_seconds})
+        if self.exc is not None:
+            raise self.exc
+        return self.result
+
+
+def _git_result(
+    *,
+    argv: list[str] | None = None,
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+    timed_out: bool = False,
+) -> Any:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module import (
+        GitCommandResult,
+    )
+
+    return GitCommandResult(
+        argv=argv or ["git", "rev-parse"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        duration_ms=12.5,
+        timed_out=timed_out,
+    )
+
+
+def _context() -> RequestContext:
+    return RequestContext(
+        request_id="req-git",
+        user_id="7",
+        session_id="sess-1",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+
+def _module(
+    *,
+    workspace_root_resolver: Any | None = None,
+    runner: Any | None = None,
+) -> GitModule:
     return GitModule(
         ModuleConfig(
             name="git",
@@ -34,7 +98,9 @@ def _module() -> GitModule:
                 "max_context_lines": 8,
                 "max_line_number": 10,
             },
-        )
+        ),
+        workspace_root_resolver=workspace_root_resolver,
+        runner=runner,
     )
 
 
@@ -195,3 +261,260 @@ def test_git_validates_rejects_numeric_values(
 
     with pytest.raises(ValueError, match=message):
         module.validate_tool_arguments(tool_name, args)
+
+
+@pytest.mark.asyncio
+async def test_git_runner_uses_create_subprocess_exec_without_shell_and_safe_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _FakeProcess:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"git version 2.45.0\n", b""
+
+    async def _fake_create_subprocess_exec(*argv: str, **kwargs: Any) -> _FakeProcess:
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    runner = AsyncGitCommandRunner()
+
+    result = await runner.run(["git", "--version"], timeout_seconds=2)
+
+    assert captured["argv"] == ("git", "--version")  # nosec B101
+    assert captured["kwargs"].get("shell") is None  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_TERMINAL_PROMPT"] == "0"  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_OPTIONAL_LOCKS"] == "0"  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_PAGER"] == "cat"  # nosec B101
+    assert captured["kwargs"]["env"]["GIT_EXTERNAL_DIFF"] == ""  # nosec B101
+    assert result.argv == ["git", "--version"]  # nosec B101
+    assert result.returncode == 0  # nosec B101
+    assert result.stdout == "git version 2.45.0\n"  # nosec B101
+    assert result.timed_out is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_repository_resolution_runs_rev_parse_from_workspace_root(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(result=_git_result(stdout=f"{workspace_root}\n"))
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {"limit": 5}, context=_context())
+
+    assert resolver.calls[0]["session_id"] == "sess-1"  # nosec B101
+    assert resolver.calls[0]["user_id"] == "7"  # nosec B101
+    assert resolver.calls[0]["workspace_id"] == "workspace-1"  # nosec B101
+    assert runner.calls[0]["argv"] == [  # nosec B101
+        "git",
+        "-C",
+        str(workspace_root),
+        "rev-parse",
+        "--show-toplevel",
+    ]
+    assert result["repository_root"] == "."  # nosec B101
+    assert result["reason_code"] == "not_implemented"  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", sorted(EXPECTED_GIT_TOOLS))
+async def test_git_runner_is_not_called_before_argument_validation_for_each_tool(
+    tool_name: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(result=_git_result(stdout=f"{workspace_root}\n"))
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+    original_validate = module.validate_tool_arguments
+
+    def _recording_validate(name: str, arguments: dict[str, Any]) -> None:
+        events.append(f"validate:{name}")
+        original_validate(name, arguments)
+
+    monkeypatch.setattr(module, "validate_tool_arguments", _recording_validate)
+    original_run = runner.run
+
+    async def _recording_run(argv: list[str], *, timeout_seconds: float) -> Any:
+        events.append("runner")
+        return await original_run(argv, timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr(runner, "run", _recording_run)
+
+    await module.execute_tool(tool_name, _valid_arguments_for(tool_name), context=_context())
+
+    assert events[:2] == [f"validate:{tool_name}", "runner"]  # nosec B101
+    assert runner.calls  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_repository_resolution_missing_git_binary_returns_structured_reason(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(exc=FileNotFoundError("git"))
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {}, context=_context())
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "git_not_available"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_repository_resolution_non_git_workspace_returns_structured_reason(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(
+        result=_git_result(
+            returncode=128,
+            stderr="fatal: not a git repository (or any of the parent directories): .git\n",
+        )
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {}, context=_context())
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "not_git_repository"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_repository_resolution_git_root_outside_workspace_returns_structured_reason(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    outside_root = tmp_path / "outside-repo"
+    workspace_root.mkdir()
+    outside_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(result=_git_result(stdout=f"{outside_root}\n"))
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {}, context=_context())
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "repo_outside_workspace"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+    assert str(outside_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_repository_resolution_command_timeout_returns_structured_reason(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _RecordingGitRunner(result=_git_result(timed_out=True))
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {}, context=_context())
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "git_command_timeout"  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_repository_resolution_rejects_session_only_context_without_user_binding(
+    tmp_path: Path,
+) -> None:
+    class _Resolver:
+        calls = 0
+
+        async def resolve_for_context(self, **kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            raise AssertionError("resolver should not be called for session-only non-shared contexts")
+
+    runner = _RecordingGitRunner(result=_git_result(stdout=f"{tmp_path}\n"))
+    resolver = _Resolver()
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+    context = RequestContext(
+        request_id="req-git-session-only",
+        session_id="sess-1",
+        user_id=None,
+        metadata={"session_id": "sess-1", "workspace_id": "workspace-1"},
+    )
+
+    result = await module.execute_tool("git.status", {}, context=context)
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "workspace_root_unavailable"  # nosec B101
+    assert resolver.calls == 0  # nosec B101
+    assert runner.calls == []  # nosec B101
+
+
+def _valid_arguments_for(tool_name: str) -> dict[str, Any]:
+    if tool_name == "git.status":
+        return {"limit": 5}
+    if tool_name == "git.diff":
+        return {"scope": "staged", "path": "src/app.py", "context_lines": 3, "max_bytes": 512}
+    if tool_name == "git.log":
+        return {"limit": 5, "path": "src/app.py"}
+    if tool_name == "git.blame":
+        return {"path": "src/app.py", "start_line": 1, "end_line": 3, "limit": 3}
+    if tool_name == "git.branches":
+        return {"limit": 5}
+    if tool_name == "git.conflicts.list":
+        return {"limit": 5}
+    if tool_name == "git.conflicts.read":
+        return {"path": "src/app.py", "max_bytes": 512, "limit": 3}
+    raise AssertionError(f"unexpected tool: {tool_name}")
