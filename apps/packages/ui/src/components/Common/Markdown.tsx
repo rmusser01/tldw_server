@@ -36,8 +36,8 @@ const RICH_TEXT_ELEMENT_STYLE_CLASS =
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
-const MERMAID_FENCE_START = /^(\s*)(`{3,})\s*mermaid\s*$/
-const BACKTICK_FENCE_CLOSE = /^\s*(`{3,})\s*$/
+const MERMAID_FENCE_START = /^(\s*)(`{3,}|~{3,})\s*mermaid\s*$/
+const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/
 
 const isManagedAssetReference = (url: string): boolean =>
   String(url || "").startsWith(MANAGED_ASSET_MARKER)
@@ -74,12 +74,21 @@ const collectClosedMermaidFenceSources = (markdown: string): string[] => {
     const startMatch = MERMAID_FENCE_START.exec(lines[index])
     if (!startMatch) continue
 
-    const fenceLength = startMatch[2].length
+    const openingFence = startMatch[2]
+    const fenceMarker = openingFence[0]
+    const fenceLength = openingFence.length
     const sourceStartIndex = index + 1
 
     for (let closeIndex = sourceStartIndex; closeIndex < lines.length; closeIndex += 1) {
-      const closeMatch = BACKTICK_FENCE_CLOSE.exec(lines[closeIndex])
-      if (!closeMatch || closeMatch[1].length < fenceLength) continue
+      const closeMatch = FENCE_CLOSE.exec(lines[closeIndex])
+      const closingFence = closeMatch?.[1]
+      if (
+        !closingFence ||
+        closingFence[0] !== fenceMarker ||
+        closingFence.length < fenceLength
+      ) {
+        continue
+      }
 
       sources.push(lines.slice(sourceStartIndex, closeIndex).join("\n").replace(/\n$/, ""))
       index = closeIndex

@@ -50,6 +50,23 @@ describe("Markdown Mermaid fences", () => {
     })
   })
 
+  it("renders enabled Mermaid tilde fences through the Mermaid diagram block", () => {
+    render(
+      <Markdown
+        message={"~~~mermaid\ngraph TD\nA --> B\n~~~"}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph TD\nA --> B",
+      blockIndex: 0
+    })
+  })
+
   it("does not render unclosed Mermaid fences as diagrams", () => {
     const { container } = render(
       <Markdown

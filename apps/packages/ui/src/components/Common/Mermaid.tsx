@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
+import DOMPurify from "dompurify"
 
 export type MermaidTheme =
   | "default"
@@ -153,15 +154,18 @@ export const Mermaid: React.FC<MermaidProps> = ({
         }
         const id = `mermaid-${hashCode(code)}-${renderIdRef.current++}`
         const { svg, bindFunctions } = await mermaid.render(id, code)
+        const sanitizedSvg = DOMPurify.sanitize(svg, {
+          USE_PROFILES: { svg: true }
+        })
 
         if (!isCurrentRender() || !containerRef.current) {
           return
         }
 
-        containerRef.current.innerHTML = svg
+        containerRef.current.innerHTML = sanitizedSvg
         bindFunctions?.(containerRef.current)
         setError(null)
-        reportRenderState({ status: "success", svg, theme })
+        reportRenderState({ status: "success", svg: sanitizedSvg, theme })
       } catch (err) {
         if (!isCurrentRender()) return
         const message =
