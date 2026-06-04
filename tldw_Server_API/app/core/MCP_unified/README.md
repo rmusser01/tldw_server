@@ -360,6 +360,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `run` is not a raw host shell. It compiles command steps into policy-checked MCP tool calls (`prepare_tool_call` / `execute_prepared_tool_call`) so approvals, RBAC, path scope, validation, and idempotency all still apply.
 
+`bash` and `shell` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`
@@ -367,10 +369,15 @@ Phase-1 command families:
   - `ls` -> `fs.list`
   - `cat` -> `fs.read_text`
   - `write` -> `fs.write_text`
+  - `stat` -> `fs.stat`
+  - `glob`, `find` -> `fs.glob`
+  - `rg`, `grep-files` -> `fs.grep`
   - `knowledge` -> `knowledge.search`, `knowledge.get`
   - `media` -> `media.search`, `media.get`
   - `mcp` -> `mcp.modules.list`, `mcp.tools.list`
   - `sandbox` -> `sandbox.run`
+
+Command aliases are policy-filtered by their backing MCP tools. For example, `rg` and `grep-files` are visible only when `fs.grep` is executable in the active profile. Plain `grep` remains a pure stdin filter for pipelines such as `cat app.log | grep ERROR`.
 
 Default `run_command` runtime settings in module inventory:
 

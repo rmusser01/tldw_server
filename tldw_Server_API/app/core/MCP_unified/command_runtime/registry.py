@@ -71,6 +71,31 @@ _DEFAULT_COMMANDS: Final[tuple[CommandDescriptor, ...]] = (
         pure_transform=True,
     ),
     CommandDescriptor(
+        name="stat",
+        summary="Inspect workspace file metadata.",
+        backend_tools=("fs.stat",),
+    ),
+    CommandDescriptor(
+        name="glob",
+        summary="Find workspace paths matching a portable pattern.",
+        backend_tools=("fs.glob",),
+    ),
+    CommandDescriptor(
+        name="find",
+        summary="Alias for glob over workspace paths.",
+        backend_tools=("fs.glob",),
+    ),
+    CommandDescriptor(
+        name="rg",
+        summary="Search workspace UTF-8 text files.",
+        backend_tools=("fs.grep",),
+    ),
+    CommandDescriptor(
+        name="grep-files",
+        summary="Alias for governed workspace file search.",
+        backend_tools=("fs.grep",),
+    ),
+    CommandDescriptor(
         name="head",
         summary="Keep the first lines of input.",
         backend_tools=(),
