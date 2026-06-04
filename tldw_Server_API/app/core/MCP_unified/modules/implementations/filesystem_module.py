@@ -5,13 +5,20 @@ Exposes:
 - fs.list
 - fs.read_text
 - fs.write_text
+- fs.stat
+- fs.glob
+- fs.grep
 """
 
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import os
+import re
+import stat as stat_module
 from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +65,9 @@ class FilesystemModule(BaseModule):
         shared_fs_metadata = {
             "uses_filesystem": True,
             "path_boundable": True,
+        }
+        shared_path_metadata = {
+            **shared_fs_metadata,
             "path_argument_hints": ["path"],
         }
         list_tool = create_tool_definition(
@@ -72,7 +82,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
-                **shared_fs_metadata,
+                **shared_path_metadata,
             },
         )
         list_tool["inputSchema"]["additionalProperties"] = False
@@ -90,7 +100,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
-                **shared_fs_metadata,
+                **shared_path_metadata,
             },
         )
         read_text_tool["inputSchema"]["additionalProperties"] = False
@@ -108,12 +118,93 @@ class FilesystemModule(BaseModule):
             metadata={
                 "category": "management",
                 "capabilities": ["filesystem.write"],
-                **shared_fs_metadata,
+                **shared_path_metadata,
             },
         )
         write_text_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_text_tool, write_text_tool]
+        stat_tool = create_tool_definition(
+            name="fs.stat",
+            description="Return metadata for one path under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "follow_symlinks": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Follow a symlink after verifying the target remains in workspace scope.",
+                    },
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **shared_path_metadata,
+            },
+        )
+        stat_tool["inputSchema"]["additionalProperties"] = False
+
+        glob_tool = create_tool_definition(
+            name="fs.glob",
+            description="Find workspace paths matching a portable pattern without invoking a shell.",
+            parameters={
+                "properties": {
+                    "pattern": {"type": "string", "description": "Portable pattern using / separators"},
+                    "base_path": {"type": "string", "description": "Workspace-relative base path"},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "include_files": {"type": "boolean", "default": True},
+                    "include_directories": {"type": "boolean", "default": True},
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "case_sensitive": {"type": "boolean", "default": True},
+                    "limit": {"type": "integer", "minimum": 1},
+                },
+                "required": ["pattern"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **shared_fs_metadata,
+                "path_argument_hints": ["base_path"],
+            },
+        )
+        glob_tool["inputSchema"]["additionalProperties"] = False
+
+        grep_tool = create_tool_definition(
+            name="fs.grep",
+            description="Search UTF-8 text files under a workspace path without invoking a shell.",
+            parameters={
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "base_path": {"type": "string", "description": "Workspace-relative base path"},
+                    "include": {"type": "array", "items": {"type": "string"}},
+                    "exclude": {"type": "array", "items": {"type": "string"}},
+                    "regex": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Requires the filesystem module grep_allow_regex setting.",
+                    },
+                    "case_sensitive": {"type": "boolean", "default": True},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "limit": {"type": "integer", "minimum": 1},
+                    "max_file_bytes": {"type": "integer", "minimum": 1},
+                },
+                "required": ["pattern"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **shared_fs_metadata,
+                "path_argument_hints": ["base_path"],
+            },
+        )
+        grep_tool["inputSchema"]["additionalProperties"] = False
+
+        return [list_tool, read_text_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -147,6 +238,88 @@ class FilesystemModule(BaseModule):
                 "bytes_written": write_result["bytes_written"],
             }
 
+        if tool_name == "fs.stat":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._stat_path,
+                workspace_root,
+                target,
+                bool(args.get("follow_symlinks", False)),
+            )
+
+        if tool_name == "fs.glob":
+            base_path = str(args.get("base_path") or ".")
+            base = self._resolve_workspace_path(workspace_root, base_path)
+            pattern = self._normalize_portable_pattern(str(args.get("pattern")))
+            self._reject_unsafe_pattern(pattern)
+            limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("glob_result_limit", 500))
+            return await asyncio.to_thread(
+                self._glob_paths,
+                workspace_root,
+                base,
+                pattern,
+                bool(args.get("include_hidden", False)),
+                bool(args.get("include_files", True)),
+                bool(args.get("include_directories", True)),
+                bool(args.get("follow_symlinks", False)),
+                bool(args.get("case_sensitive", True)),
+                limit,
+                self._setting_positive_int("glob_walk_entry_limit", 50_000),
+            )
+
+        if tool_name == "fs.grep":
+            base_path = str(args.get("base_path") or ".")
+            base = self._resolve_workspace_path(workspace_root, base_path)
+            pattern = str(args.get("pattern") or "")
+            regex = bool(args.get("regex", False))
+            case_sensitive = bool(args.get("case_sensitive", True))
+            regex_pattern = None
+            if regex:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                try:
+                    regex_pattern = re.compile(pattern, flags)
+                except re.error as exc:
+                    raise ValueError(f"invalid regex pattern: {exc}") from exc
+            include = [
+                self._normalize_portable_pattern(str(item))
+                for item in (args.get("include") if args.get("include") is not None else ["*", "**/*"])
+            ]
+            exclude = [
+                self._normalize_portable_pattern(str(item))
+                for item in (args.get("exclude") if args.get("exclude") is not None else [])
+            ]
+            for include_pattern in include:
+                self._reject_unsafe_pattern(include_pattern)
+            for exclude_pattern in exclude:
+                self._reject_unsafe_pattern(exclude_pattern)
+            limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("grep_result_limit", 200))
+            max_file_bytes = self._bounded_positive_int(
+                args.get("max_file_bytes"),
+                self._setting_positive_int("grep_max_file_bytes", self._max_read_bytes()),
+            )
+            max_total_bytes = self._setting_positive_int(
+                "grep_max_total_bytes",
+                self._DEFAULT_MAX_READ_BYTES * 10,
+            )
+            return await asyncio.to_thread(
+                self._grep_files,
+                workspace_root,
+                base,
+                pattern,
+                regex_pattern,
+                regex,
+                case_sensitive,
+                include,
+                exclude,
+                bool(args.get("include_hidden", False)),
+                bool(args.get("follow_symlinks", False)),
+                limit,
+                max_file_bytes,
+                max_total_bytes,
+                self._setting_positive_int("grep_max_files", 1_000),
+                self._setting_positive_int("grep_walk_entry_limit", 50_000),
+            )
+
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def _list_entry_limit(self) -> int:
@@ -165,9 +338,25 @@ class FilesystemModule(BaseModule):
             limit = self._DEFAULT_MAX_READ_BYTES
         return max(1, limit)
 
+    def _setting_positive_int(self, name: str, default: int) -> int:
+        raw_limit = self.config.settings.get(name, default)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = default
+        return max(1, limit)
+
+    def _setting_bool(self, name: str, default: bool = False) -> bool:
+        raw_value = self.config.settings.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            return raw_value.strip().lower() in {"1", "true", "yes", "on", "y"}
+        return bool(raw_value)
+
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "fs.list":
-            unknown = sorted({key for key in arguments.keys()} - {"path"})
+            unknown = sorted(set(arguments) - {"path"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -176,7 +365,7 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.read_text":
-            unknown = sorted({key for key in arguments.keys()} - {"path"})
+            unknown = sorted(set(arguments) - {"path"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -185,7 +374,7 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.write_text":
-            unknown = sorted({key for key in arguments.keys()} - {"path", "content"})
+            unknown = sorted(set(arguments) - {"path", "content"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -196,7 +385,124 @@ class FilesystemModule(BaseModule):
                 raise ValueError("content must be a string")
             return
 
+        if tool_name == "fs.stat":
+            unknown = sorted(set(arguments) - {"path", "follow_symlinks"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_bool_argument(arguments, "follow_symlinks")
+            return
+
+        if tool_name == "fs.glob":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "pattern",
+                    "base_path",
+                    "include_hidden",
+                    "include_files",
+                    "include_directories",
+                    "follow_symlinks",
+                    "case_sensitive",
+                    "limit",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            pattern = arguments.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("pattern is required")
+            base_path = arguments.get("base_path")
+            if base_path is not None and not isinstance(base_path, str):
+                raise ValueError("base_path must be a string")
+            for key in (
+                "include_hidden",
+                "include_files",
+                "include_directories",
+                "follow_symlinks",
+                "case_sensitive",
+            ):
+                self._validate_bool_argument(arguments, key)
+            self._validate_positive_int_argument(arguments, "limit")
+            return
+
+        if tool_name == "fs.grep":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "pattern",
+                    "base_path",
+                    "include",
+                    "exclude",
+                    "regex",
+                    "case_sensitive",
+                    "include_hidden",
+                    "follow_symlinks",
+                    "limit",
+                    "max_file_bytes",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            pattern = arguments.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("pattern is required")
+            base_path = arguments.get("base_path")
+            if base_path is not None and not isinstance(base_path, str):
+                raise ValueError("base_path must be a string")
+            include = arguments.get("include")
+            if include is not None and (
+                not isinstance(include, list) or not all(isinstance(item, str) for item in include)
+            ):
+                raise ValueError("include must be a list of strings")
+            exclude = arguments.get("exclude")
+            if exclude is not None and (
+                not isinstance(exclude, list) or not all(isinstance(item, str) for item in exclude)
+            ):
+                raise ValueError("exclude must be a list of strings")
+            for key in ("regex", "case_sensitive", "include_hidden", "follow_symlinks"):
+                self._validate_bool_argument(arguments, key)
+            self._validate_positive_int_argument(arguments, "limit")
+            self._validate_positive_int_argument(arguments, "max_file_bytes")
+            if arguments.get("regex") is True:
+                if not self._setting_bool("grep_allow_regex", False):
+                    raise ValueError("regex grep is disabled by module configuration")
+                max_pattern_length = self._setting_positive_int("grep_max_pattern_length", 512)
+                if len(pattern) > max_pattern_length:
+                    raise ValueError(
+                        f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})"
+                    )
+            return
+
         raise ValueError(f"Unknown tool: {tool_name}")
+
+    @staticmethod
+    def _validate_bool_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError(f"{key} must be a boolean")
+
+    @staticmethod
+    def _validate_positive_int_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+            raise ValueError(f"{key} must be a positive integer")
+
+    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
+        """Sanitize filesystem inputs while allowing portable glob syntax."""
+
+        if _depth > 20:
+            raise ValueError("Input too deeply nested")
+
+        if isinstance(input_data, str):
+            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
+        if isinstance(input_data, dict):
+            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
+        if isinstance(input_data, list):
+            return [self.sanitize_input(v, _depth + 1) for v in input_data]
+        return input_data
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
@@ -242,6 +548,434 @@ class FilesystemModule(BaseModule):
         if resolved != workspace_root and workspace_root not in resolved.parents:
             raise PermissionError("path is outside workspace scope")
         return resolved
+
+    @staticmethod
+    def _resolve_workspace_path_no_follow(workspace_root: Path, raw_path: str) -> Path:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace_root / candidate
+        normalized = Path(os.path.abspath(os.fspath(candidate)))
+        if normalized == workspace_root:
+            return workspace_root
+        parent_resolved = normalized.parent.resolve(strict=False)
+        if parent_resolved != workspace_root and workspace_root not in parent_resolved.parents:
+            raise PermissionError("path is outside workspace scope")
+        return parent_resolved / normalized.name
+
+    @staticmethod
+    def _resolved_path_within_workspace(workspace_root: Path, target: Path) -> Path:
+        resolved = target.resolve(strict=False)
+        if resolved != workspace_root and workspace_root not in resolved.parents:
+            raise PermissionError("path is outside workspace scope")
+        return resolved
+
+    @staticmethod
+    def _bounded_positive_int(value: Any, default: int) -> int:
+        if value is None:
+            return max(1, int(default))
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError("limit must be a positive integer")
+        return value
+
+    @staticmethod
+    def _normalize_portable_pattern(pattern: str) -> str:
+        normalized = pattern.strip().replace("\\", "/")
+        while "//" in normalized and not normalized.startswith("//"):
+            normalized = normalized.replace("//", "/")
+        return normalized
+
+    @staticmethod
+    def _reject_unsafe_pattern(pattern: str) -> None:
+        if not pattern:
+            raise ValueError("unsafe pattern: pattern is required")
+        if pattern.startswith("/") or pattern.startswith("//"):
+            raise ValueError("unsafe pattern: absolute patterns are not allowed")
+        if len(pattern) >= 2 and pattern[1] == ":" and pattern[0].isalpha():
+            raise ValueError("unsafe pattern: drive-qualified patterns are not allowed")
+        if any(part == ".." for part in pattern.split("/")):
+            raise ValueError("unsafe pattern: parent traversal is not allowed")
+        if pattern.count("**/") > 5:
+            raise ValueError("unsafe pattern: too many double-star wildcards")
+
+    @staticmethod
+    def _portable_pattern_matches(path: str, pattern: str, *, case_sensitive: bool) -> bool:
+        candidate = path if case_sensitive else path.lower()
+        patterns = FilesystemModule._expand_double_star_zero_dir_patterns(
+            pattern if case_sensitive else pattern.lower()
+        )
+        return any(fnmatch.fnmatchcase(candidate, candidate_pattern) for candidate_pattern in patterns)
+
+    @staticmethod
+    def _expand_double_star_zero_dir_patterns(pattern: str) -> set[str]:
+        patterns = {pattern}
+        queue = [pattern]
+        while queue:
+            current = queue.pop()
+            start = current.find("**/")
+            while start != -1:
+                collapsed = f"{current[:start]}{current[start + 3:]}"
+                if collapsed not in patterns:
+                    patterns.add(collapsed)
+                    queue.append(collapsed)
+                start = current.find("**/", start + 1)
+        return patterns
+
+    @staticmethod
+    def _is_hidden_relative_path(path: str) -> bool:
+        return any(part.startswith(".") and part not in {"."} for part in path.split("/"))
+
+    @staticmethod
+    def _stat_path(workspace_root: Path, target: Path, follow_symlinks: bool) -> dict[str, Any]:
+        if not target.exists() and not target.is_symlink():
+            raise FileNotFoundError(f"path not found: {target}")
+
+        if follow_symlinks:
+            stat_target = FilesystemModule._resolved_path_within_workspace(workspace_root, target)
+            stat_result = stat_target.stat()
+            is_symlink = target.is_symlink()
+            target_within_workspace = True
+        else:
+            stat_result = target.lstat()
+            is_symlink = stat_module.S_ISLNK(stat_result.st_mode)
+            target_within_workspace = None
+
+        mode = stat_result.st_mode
+        if is_symlink and not follow_symlinks:
+            entry_type = "symlink"
+        elif stat_module.S_ISDIR(mode):
+            entry_type = "directory"
+        elif stat_module.S_ISREG(mode):
+            entry_type = "file"
+        else:
+            entry_type = "other"
+
+        record: dict[str, Any] = {
+            "path": FilesystemModule._to_workspace_relative_path(workspace_root, target),
+            "name": target.name or ".",
+            "type": entry_type,
+            "size": stat_result.st_size,
+            "modified_at": datetime.fromtimestamp(stat_result.st_mtime, timezone.utc).isoformat(),
+            "mode": stat_module.S_IMODE(mode),
+            "is_symlink": is_symlink,
+        }
+        if target_within_workspace is not None:
+            record["target_within_workspace"] = target_within_workspace
+        return record
+
+    @staticmethod
+    def _glob_paths(
+        workspace_root: Path,
+        base: Path,
+        pattern: str,
+        include_hidden: bool,
+        include_files: bool,
+        include_directories: bool,
+        follow_symlinks: bool,
+        case_sensitive: bool,
+        limit: int,
+        walk_entry_limit: int,
+    ) -> dict[str, Any]:
+        if not base.exists():
+            raise FileNotFoundError(f"path not found: {base}")
+        if not base.is_dir():
+            raise NotADirectoryError(f"path is not a directory: {base}")
+
+        matches: list[dict[str, Any]] = []
+        visited_entries = 0
+        walk_truncated = False
+        seen_dirs: set[Path] = {base.resolve(strict=False)}
+
+        for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+            current_root = Path(root)
+            dirnames.sort()
+            filenames.sort()
+
+            symlink_dirs: list[str] = []
+            for dirname in list(dirnames):
+                dir_path = current_root / dirname
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    dirnames.remove(dirname)
+                    continue
+                if dir_path.is_symlink():
+                    resolved_dir = dir_path.resolve(strict=False)
+                    if follow_symlinks:
+                        if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        if resolved_dir in seen_dirs:
+                            dirnames.remove(dirname)
+                            continue
+                        seen_dirs.add(resolved_dir)
+                    else:
+                        dirnames.remove(dirname)
+                        symlink_dirs.append(dirname)
+
+            candidates: list[tuple[Path, str]] = [(current_root / dirname, "directory") for dirname in dirnames]
+            candidates.extend((current_root / dirname, "directory") for dirname in symlink_dirs)
+            candidates.extend((current_root / filename, "file") for filename in filenames)
+
+            for candidate, candidate_kind in candidates:
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    continue
+                is_symlink = candidate.is_symlink()
+                if is_symlink:
+                    candidate_type = "symlink"
+                else:
+                    candidate_type = candidate_kind
+
+                include_candidate = (
+                    (candidate_kind == "file" and include_files)
+                    or (candidate_kind == "directory" and include_directories)
+                )
+                if not include_candidate:
+                    continue
+                if not FilesystemModule._portable_pattern_matches(rel_path, pattern, case_sensitive=case_sensitive):
+                    continue
+
+                record: dict[str, Any] = {
+                    "path": rel_path,
+                    "type": candidate_type,
+                }
+                if candidate_kind == "file":
+                    try:
+                        record["size"] = candidate.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        record["size"] = None
+                        record["size_unavailable"] = True
+                matches.append(record)
+
+            if walk_truncated:
+                break
+
+        matches.sort(key=lambda item: str(item.get("path") or ""))
+        limited_matches = matches[:limit]
+        remaining_count = max(0, len(matches) - len(limited_matches))
+        return {
+            "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "pattern": pattern,
+            "matches": limited_matches,
+            "truncated": walk_truncated or remaining_count > 0,
+            "remaining_count": remaining_count,
+        }
+
+    @staticmethod
+    def _grep_files(
+        workspace_root: Path,
+        base: Path,
+        pattern: str,
+        regex_pattern: re.Pattern[str] | None,
+        regex: bool,
+        case_sensitive: bool,
+        include: list[str],
+        exclude: list[str],
+        include_hidden: bool,
+        follow_symlinks: bool,
+        limit: int,
+        max_file_bytes: int,
+        max_total_bytes: int,
+        max_files: int,
+        walk_entry_limit: int,
+    ) -> dict[str, Any]:
+        if not base.exists():
+            raise FileNotFoundError(f"path not found: {base}")
+        if not base.is_dir():
+            raise NotADirectoryError(f"path is not a directory: {base}")
+
+        matches: list[dict[str, Any]] = []
+        remaining_count = 0
+        skipped = {
+            "binary": 0,
+            "decode_error": 0,
+            "too_large": 0,
+            "permission_error": 0,
+            "unsupported_type": 0,
+        }
+        visited_entries = 0
+        walk_truncated = False
+        io_truncated = False
+        file_budget_truncated = False
+        total_bytes_read = 0
+        files_read = 0
+        seen_dirs: set[Path] = {base.resolve(strict=False)}
+        file_candidates: list[tuple[str, Path]] = []
+
+        for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+            current_root = Path(root)
+            dirnames.sort()
+            filenames.sort()
+
+            for dirname in list(dirnames):
+                dir_path = current_root / dirname
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    dirnames.remove(dirname)
+                    continue
+                if dir_path.is_symlink():
+                    resolved_dir = dir_path.resolve(strict=False)
+                    if follow_symlinks:
+                        if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        if resolved_dir in seen_dirs:
+                            dirnames.remove(dirname)
+                            continue
+                        seen_dirs.add(resolved_dir)
+                    else:
+                        dirnames.remove(dirname)
+                        continue
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+            if walk_truncated:
+                break
+
+            for filename in filenames:
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+                candidate = current_root / filename
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    continue
+                if candidate.is_symlink():
+                    if not follow_symlinks:
+                        skipped["unsupported_type"] += 1
+                        continue
+                    resolved_file = candidate.resolve(strict=False)
+                    if resolved_file != workspace_root and workspace_root not in resolved_file.parents:
+                        raise PermissionError("path is outside workspace scope")
+                    read_target = resolved_file
+                else:
+                    read_target = candidate
+                if not any(
+                    FilesystemModule._portable_pattern_matches(rel_path, include_pattern, case_sensitive=True)
+                    for include_pattern in include
+                ):
+                    continue
+                if any(
+                    FilesystemModule._portable_pattern_matches(rel_path, exclude_pattern, case_sensitive=True)
+                    for exclude_pattern in exclude
+                ):
+                    continue
+                if not read_target.is_file():
+                    skipped["unsupported_type"] += 1
+                    continue
+                file_candidates.append((rel_path, read_target))
+
+            if walk_truncated:
+                break
+
+        for rel_path, read_target in sorted(file_candidates, key=lambda item: item[0]):
+            try:
+                file_size = read_target.stat().st_size
+            except PermissionError:
+                skipped["permission_error"] += 1
+                continue
+            except OSError:
+                skipped["unsupported_type"] += 1
+                continue
+            if file_size > max_file_bytes:
+                skipped["too_large"] += 1
+                continue
+            if files_read >= max_files:
+                file_budget_truncated = True
+                break
+            if total_bytes_read + file_size > max_total_bytes:
+                io_truncated = True
+                break
+            try:
+                payload = read_target.read_bytes()
+            except PermissionError:
+                skipped["permission_error"] += 1
+                continue
+            except OSError:
+                skipped["unsupported_type"] += 1
+                continue
+            files_read += 1
+            total_bytes_read += len(payload)
+            if b"\x00" in payload:
+                skipped["binary"] += 1
+                continue
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                skipped["decode_error"] += 1
+                continue
+
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                match_text = FilesystemModule._line_match_text(
+                    line,
+                    pattern,
+                    regex_pattern,
+                    regex=regex,
+                    case_sensitive=case_sensitive,
+                )
+                if match_text is None:
+                    continue
+                match_record = {
+                    "path": rel_path,
+                    "line_number": line_number,
+                    "line": line,
+                    "match_text": match_text,
+                }
+                if len(matches) < limit:
+                    matches.append(match_record)
+                else:
+                    remaining_count += 1
+
+        matches.sort(key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)))
+        truncation_reasons = []
+        if walk_truncated:
+            truncation_reasons.append("walk_entry_limit")
+        if io_truncated:
+            truncation_reasons.append("io_budget")
+        if file_budget_truncated:
+            truncation_reasons.append("file_budget")
+        if remaining_count > 0:
+            truncation_reasons.append("match_limit")
+        return {
+            "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "matches": matches,
+            "truncated": bool(truncation_reasons),
+            "remaining_count": remaining_count,
+            "remaining_count_known": not (walk_truncated or io_truncated or file_budget_truncated),
+            "truncation_reasons": truncation_reasons,
+            "skipped": skipped,
+        }
+
+    @staticmethod
+    def _line_match_text(
+        line: str,
+        pattern: str,
+        regex_pattern: re.Pattern[str] | None,
+        *,
+        regex: bool,
+        case_sensitive: bool,
+    ) -> str | None:
+        if regex:
+            if regex_pattern is None:
+                return None
+            match = regex_pattern.search(line)
+            return match.group(0) if match else None
+
+        haystack = line if case_sensitive else line.lower()
+        needle = pattern if case_sensitive else pattern.lower()
+        index = haystack.find(needle)
+        if index < 0:
+            return None
+        return line[index : index + len(pattern)]
 
     @staticmethod
     def _list_directory(workspace_root: Path, target: Path, entry_limit: int) -> dict[str, Any]:
