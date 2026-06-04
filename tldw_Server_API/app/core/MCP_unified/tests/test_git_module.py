@@ -700,6 +700,10 @@ async def test_git_conflicts_list_runs_ls_files_and_groups_unmerged_stages(tmp_p
             "100644 ddd 2\tsrc/added-by-us.py",
             "100644 eee 2\tsrc/both-added.py",
             "100644 fff 3\tsrc/both-added.py",
+            "100644 111 1\tsrc/deleted-by-them.py",
+            "100644 222 2\tsrc/deleted-by-them.py",
+            "100644 333 1\tsrc/deleted-by-us.py",
+            "100644 444 3\tsrc/deleted-by-us.py",
         ]
     ) + "\0"
     runner = _SequenceGitRunner(
@@ -740,6 +744,18 @@ async def test_git_conflicts_list_runs_ls_files_and_groups_unmerged_stages(tmp_p
             "xy_status": "AA",
             "stages": [2, 3],
             "conflict_type": "both_added",
+        },
+        {
+            "path": "src/deleted-by-them.py",
+            "xy_status": "UD",
+            "stages": [1, 2],
+            "conflict_type": "deleted_by_them",
+        },
+        {
+            "path": "src/deleted-by-us.py",
+            "xy_status": "DU",
+            "stages": [1, 3],
+            "conflict_type": "deleted_by_us",
         },
     ]
     assert result["truncated"] is False  # nosec B101

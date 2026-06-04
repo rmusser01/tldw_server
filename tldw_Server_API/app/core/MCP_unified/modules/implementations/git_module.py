@@ -1222,9 +1222,9 @@ class GitModule(BaseModule):
         if stage_set == {3}:
             return "UA"
         if stage_set == {1, 2}:
-            return "DU"
-        if stage_set == {1, 3}:
             return "UD"
+        if stage_set == {1, 3}:
+            return "DU"
         return "UU"
 
     @staticmethod
