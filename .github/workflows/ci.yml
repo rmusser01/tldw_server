@@ -202,10 +202,17 @@ jobs:
       - name: Export PG env vars
         shell: bash
         run: |
-          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
-          echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+          PORT="${{ job.services.postgres.ports['5432'] }}"
+          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
+          DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
+          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
+          DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          {
+            echo "POSTGRES_TEST_PORT=${PORT}"
+            echo "TEST_DB_PORT=${PORT}"
+            echo "TEST_DATABASE_URL=${DB_URL}"
+            echo "DATABASE_URL=${DB_URL}"
+          } >> "$GITHUB_ENV"
 
       - name: Ensure base DB exists
         shell: bash
@@ -293,10 +300,17 @@ jobs:
       - name: Export PG env vars
         shell: bash
         run: |
-          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
-          echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+          PORT="${{ job.services.postgres.ports['5432'] }}"
+          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
+          DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
+          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
+          DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          {
+            echo "POSTGRES_TEST_PORT=${PORT}"
+            echo "TEST_DB_PORT=${PORT}"
+            echo "TEST_DATABASE_URL=${DB_URL}"
+            echo "DATABASE_URL=${DB_URL}"
+          } >> "$GITHUB_ENV"
 
       - name: Ensure base DB exists
         shell: bash
@@ -579,10 +593,17 @@ jobs:
       - name: Export PG env vars
         shell: bash
         run: |
-          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
-          echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+          PORT="${{ job.services.postgres.ports['5432'] }}"
+          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
+          DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
+          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
+          DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          {
+            echo "POSTGRES_TEST_PORT=${PORT}"
+            echo "TEST_DB_PORT=${PORT}"
+            echo "TEST_DATABASE_URL=${DB_URL}"
+            echo "DATABASE_URL=${DB_URL}"
+          } >> "$GITHUB_ENV"
 
       - name: Ensure base DB exists
         shell: bash
@@ -672,7 +693,6 @@ jobs:
           SERVER_LABEL: smoke-mu
           AUTH_MODE: multi_user
           JWT_SECRET_KEY: "test-ci-jwt-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-          DATABASE_URL: postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content
           E2E_TEST_BASE_URL: "http://127.0.0.1:8001"
           SERVER_PORT: '8001'
           PYTEST_CURRENT_TEST: "ci-smoke-linux-multi::startup"
@@ -957,10 +977,17 @@ jobs:
       - name: Export PG env vars
         shell: bash
         run: |
-          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
-          echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+          PORT="${{ job.services.postgres.ports['5432'] }}"
+          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
+          DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
+          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
+          DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          {
+            echo "POSTGRES_TEST_PORT=${PORT}"
+            echo "TEST_DB_PORT=${PORT}"
+            echo "TEST_DATABASE_URL=${DB_URL}"
+            echo "DATABASE_URL=${DB_URL}"
+          } >> "$GITHUB_ENV"
 
       - name: Ensure base DB exists
         shell: bash

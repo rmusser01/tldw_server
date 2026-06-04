@@ -9,8 +9,24 @@ labels:
 priority: high
 modified_files:
 - .github/workflows/ci.yml
+- .github/workflows/sbom.yml
 - Docs/Plans/2026-06-03-ci-full-suite-sharding-implementation-plan.md
+- Docs/Published/User_Guides/index.md
+- Docs/User_Guides/index.md
+- apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
+- apps/packages/ui/src/routes/option-setup.tsx
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
+- tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
+- tldw_Server_API/app/api/v1/endpoints/sync.py
+- tldw_Server_API/app/core/DB_Management/chacha/runtime.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/document_version_rollback_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/synced_document_update_ops.py
+- tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/tests/Collections/test_collections_close.py
+references:
+- https://github.com/rmusser01/tldw_server/pull/2258
 ---
 
 ## Description
@@ -39,13 +55,13 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Opened PR https://github.com/rmusser01/tldw_server/pull/2258 from codex/ci-full-suite-shards into dev.
+CI investigation on 2026-06-04 found PR #2258 failing because the branch was stale against dev and the initial shard path groups exposed isolated-fixture issues. Artifacts from run 26928302943 showed docs-index failures, import collection failures in auth-db/chat-llm shards, repeated app 503/shutdown_in_progress failures, Postgres client exhaustion, and a Windows file-lock permission failure. Follow-up work rebased the branch onto current dev, restored sync compatibility paths used by tests, isolated ChaCha runtime shutdown state, fixed Media FTS refresh behavior, hardened MCP AuthNZ-token detection, fixed /setup heading semantics for UX smoke, removed hard-coded PostgreSQL DSNs from CI env export scripts, and updated the SBOM workflow for the current pyproject-aware CycloneDX contract.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR review feedback. PR macOS/Windows Python 3.12 checks now use full shard jobs plus per-OS summary checks retaining the old required check names, instead of smoke-only subsets. The non-PR OS expansion now covers Python 3.13 release/main/manual shards. All macOS/Windows full shard jobs set TLDW_TEST_NO_DOCKER=1 so Postgres-backed suites skip quickly when no explicit Postgres service is provided, avoiding fixture Docker auto-start flakiness on non-Linux runners. Verification rerun locally: git diff --check passed; PyYAML parsed .github/workflows/ci.yml; a structural check verified all needs targets, shard paths, OS summary check names, and OS Docker-skip envs resolve; grep found no smoke-only OS PR job and no remaining invalid needs.<hyphenated-job-id> expressions. actionlint is not installed locally. Bandit remains skipped because this change only touches CI YAML and task/plan documentation.
+Follow-up CI remediation for PR #2258 after rebasing onto dev. Addressed failing full-suite shards by restoring sync compatibility helpers, adding a managed ChaCha runtime to prevent shutdown leakage between tests, fixing Media FTS update/delete refresh behavior, tightening MCP AuthNZ-token detection for revoked tokens, and correcting Collections test setup for backend runtime attributes. Addressed UX Smoke Gate by keeping /setup to a single semantic h1 and strengthening the readiness-route unit test mock. Addressed PR review comments by removing hard-coded PostgreSQL DSNs from CI env export scripts while keeping OS PR full-suite shard coverage intact. Updated the SBOM workflow to satisfy the current pyproject-aware CycloneDX contract. Verification on 2026-06-04: focused backend suites passed (Docs 82, MediaDB2 sync 15, External Sources sync coordinator 6, MCP auth paths 22, plus targeted collections/media/audio/audit/resource-governor/infrastructure tests); UX smoke focused /setup Playwright test passed; option setup unit test passed; CI workflow contract tests passed (40); compileall passed; Bandit on touched Python scope passed with no findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

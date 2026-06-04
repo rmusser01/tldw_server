@@ -18,6 +18,9 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import AuthenticationError
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
@@ -48,6 +51,7 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
     WebSocketDisconnect,
     RateLimitExceeded,
 )
+_AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS + (AuthenticationError,)
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
 
@@ -59,9 +63,16 @@ def _is_authnz_access_token(token: str) -> bool:
             TldwServerAuthProvider,
         )
 
-        return TldwServerAuthProvider().is_authnz_access_token(token)
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+        if TldwServerAuthProvider().is_authnz_access_token(token):
+            return True
+    except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
+        pass
+
+    try:
+        payload = get_jwt_service().decode_access_token(token)
+    except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
         return False
+    return isinstance(payload, dict) and bool(payload.get("sub"))
 
 
 def _resolve_env_placeholders(value: Any) -> Any:

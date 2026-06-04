@@ -22,6 +22,9 @@ def _update_fts_media(
     media_id: int,
     title: str,
     content: str | None,
+    *,
+    old_title: str | None = None,
+    old_content: str | None = None,
 ):
     if self.backend_type == BackendType.SQLITE:
         content = content or ""
@@ -53,6 +56,11 @@ def _update_fts_media(
 
         expansion_suffix = (" " + " ".join(expanded_terms)) if expanded_terms else ""
         try:
+            if old_title is not None or old_content is not None:
+                conn.execute(
+                    "INSERT INTO media_fts (media_fts, rowid, title, content) VALUES ('delete', ?, ?, ?)",
+                    (media_id, old_title or "", old_content or ""),
+                )
             conn.execute(
                 "INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)",
                 (media_id, title, f"{content}{expansion_suffix}"),

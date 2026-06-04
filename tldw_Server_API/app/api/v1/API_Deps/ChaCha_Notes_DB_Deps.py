@@ -30,6 +30,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
+    ChaChaRuntimeManager,
+    ChaChaRuntimeUnavailableError,
+)
 
 #
 #######################################################################################################################
@@ -67,6 +71,7 @@ _CHACHA_HEALTH: dict[str, Any] = {
 }
 _CHACHA_SHUTTING_DOWN = False
 _CHACHA_SHUTDOWN_LOCK = threading.Lock()
+_CHACHA_RUNTIME = ChaChaRuntimeManager()
 
 
 class ChaChaDatabaseCorruptionError(CharactersRAGDBError):
@@ -204,6 +209,7 @@ def _is_chacha_shutting_down() -> bool:
 
 def reset_chacha_shutdown_state() -> None:
     _set_chacha_shutting_down(False)
+    _CHACHA_RUNTIME.reset_for_tests()
 
 
 def _get_chacha_executor() -> ThreadPoolExecutor:
@@ -700,12 +706,23 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
             init_event.set()
 
 
+async def _get_or_init_db_instance_from_runtime(user_id: int, client_id: str) -> CharactersRAGDB:
+    """Return a DB instance through the runtime lifecycle gate."""
+    try:
+        return await _CHACHA_RUNTIME.get_or_create(_get_or_init_db_instance, user_id, client_id)
+    except ChaChaRuntimeUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc) or _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
+        ) from exc
+
+
 async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None:
     if _is_chacha_shutting_down():
         logger.debug("ChaChaNotes shutdown in progress; skipping warmup for user {}", user_id)
         return
     try:
-        db_instance = await _get_or_init_db_instance(user_id, client_id or str(user_id))
+        db_instance = await _get_or_init_db_instance_from_runtime(user_id, client_id or str(user_id))
         with _CHACHA_HEALTH_LOCK:
             _CHACHA_HEALTH["warm_startups"] += 1
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
@@ -728,7 +745,7 @@ async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) 
             detail="Invalid owner_user_id.",
         )
 
-    db_instance = await _get_or_init_db_instance(user_id, client_id or str(user_id))
+    db_instance = await _get_or_init_db_instance_from_runtime(user_id, client_id or str(user_id))
     if not _is_chacha_shutting_down():
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
@@ -773,7 +790,7 @@ async def get_chacha_db_for_user(current_user: User = Depends(get_request_user))
         )
 
     user_id = current_user.id
-    db_instance = await _get_or_init_db_instance(user_id, str(current_user.id))
+    db_instance = await _get_or_init_db_instance_from_runtime(user_id, str(current_user.id))
     if not _is_chacha_shutting_down():
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
@@ -793,7 +810,7 @@ async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid owner_user_id.",
         )
-    return await _get_or_init_db_instance(owner_user_id, str(owner_user_id))
+    return await _get_or_init_db_instance_from_runtime(owner_user_id, str(owner_user_id))
 
 
 def close_all_chacha_db_instances():
@@ -858,6 +875,7 @@ async def _drain_default_character_futures(timeout: float = 5.0) -> None:
 async def shutdown_chacha_resources(wait_timeout: float = 5.0) -> None:
     """Drain ChaChaNotes tasks and close resources without racing active threads."""
     _set_chacha_shutting_down(True)
+    _CHACHA_RUNTIME.shutdown()
     await _drain_default_character_tasks(timeout=wait_timeout)
     await _drain_default_character_futures(timeout=wait_timeout)
     # Block the shutdown path until worker threads complete to avoid closing
