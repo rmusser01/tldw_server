@@ -206,6 +206,10 @@ def test_git_validates_rejects_unknown_arguments() -> None:
         ("git.log", {"path": "/workspace/src/app.py"}),
         ("git.blame", {"path": "/workspace/src/app.py"}),
         ("git.conflicts.read", {"path": "/workspace/src/app.py"}),
+        ("git.diff", {"path": "\\foo"}),
+        ("git.log", {"path": "\\server\\share\\x"}),
+        ("git.blame", {"path": "\\foo"}),
+        ("git.conflicts.read", {"path": "\\server\\share\\x"}),
     ],
 )
 def test_git_validates_rejects_absolute_paths(tool_name: str, args: dict[str, object]) -> None:
@@ -242,6 +246,8 @@ def test_git_validates_rejects_paths_that_escape_workspace(
         ("git.log", {"path": "../outside.py"}),
         ("git.blame", {"path": "/workspace/src/app.py"}),
         ("git.conflicts.read", {"path": "../outside.py"}),
+        ("git.diff", {"path": "\\foo"}),
+        ("git.conflicts.read", {"path": "\\server\\share\\x"}),
     ],
 )
 async def test_git_diff_log_blame_conflicts_read_execute_returns_structured_path_errors_without_running_git(

@@ -1317,6 +1317,8 @@ class GitModule(BaseModule):
         if PurePath(cleaned).is_absolute() or windows_path.is_absolute() or windows_path.drive:
             raise ValueError("absolute paths are not allowed")
         normalized = posixpath.normpath(cleaned.replace("\\", "/"))
+        if normalized.startswith("/"):
+            raise ValueError("absolute paths are not allowed")
         if normalized in {"", "."}:
             raise ValueError("path must be a non-empty relative path")
         if normalized == ".." or normalized.startswith("../"):
