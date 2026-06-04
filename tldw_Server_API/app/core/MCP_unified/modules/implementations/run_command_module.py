@@ -247,6 +247,8 @@ class RunCommandModule(BaseModule):
         description: str,
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
+        """Build a run-compatible tool definition with the shared command schema."""
+
         tool = create_tool_definition(
             name=name,
             description=description,

@@ -4,10 +4,12 @@ title: Add governed shell facade aliases
 status: Done
 modified_files:
 - tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py
+- tldw_Server_API/app/core/MCP_unified/protocol.py
 - tldw_Server_API/app/core/MCP_unified/command_runtime/registry.py
 - tldw_Server_API/app/core/MCP_unified/command_runtime/adapters.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_run_command_module.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py
 - tldw_Server_API/app/core/MCP_unified/README.md
 ---
 
@@ -36,7 +38,7 @@ Docs/superpowers/plans/2026-06-04-mcp-filesystem-helper-tools-implementation-pla
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented governed shell facade aliases and filesystem command aliases. `run` remains canonical; `bash` and `shell` share the same RunCommandModule schema and execution path with descriptions that explicitly state they are not raw host shell surfaces. The command registry now exposes `stat`, `glob`/`find`, and `rg`/`grep-files` only when their backing filesystem MCP tools are executable, and adapters route them through prepared MCP calls. Plain `grep` remains a pure stdin transform.
+Implemented the Qodo follow-up items. Added protocol-level authorization alias mapping for lowercase `bash` and `shell` so context allowed-tools patterns, effective policy allowed/denied patterns, RBAC/scope tool permission checks, and tools/list `canExecute` can authorize those aliases through canonical `run` while preserving the invoked tool name for module routing. Added regression tests for context/RBAC and effective-policy/listing behavior. Added the missing test return type and `_create_run_tool_definition` docstring.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -44,12 +46,17 @@ Implemented governed shell facade aliases and filesystem command aliases. `run` 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added governed `bash` and `shell` compatibility tool aliases for `run`, policy-filtered filesystem command aliases for `fs.stat`, `fs.glob`, and `fs.grep`, regression coverage for visibility/routing/no-shell-delegation/pure-grep behavior, and README guidance for packaged users.
 
+Qodo follow-up:
+- Fixed alias authorization by mapping `bash`/`shell` to canonical `run` for context allowed-tools, effective policy allowed/denied checks, RBAC/scope permission checks, and tools/list `canExecute`, while preserving the invoked alias for routing.
+- Added regression coverage for canonical `run` grants authorizing `shell`/`bash` without raw shell delegation.
+- Added missing `-> None` on the new registry test and a docstring for `_create_run_tool_definition`.
+
 Verification:
-- RED before implementation: 7 expected failures in `test_command_runtime_registry.py` and `test_run_command_module.py`.
-- GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_nested_tool_preparation.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_parser.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_execution.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_presentation.py tldw_Server_API/app/core/MCP_unified/tests/test_run_command_module.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py -q` -> 133 passed, 4 warnings.
-- GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check ...` -> all checks passed.
+- RED before implementation: 2 expected failures for alias authorization regression tests.
+- GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_nested_tool_preparation.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_parser.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_execution.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_presentation.py tldw_Server_API/app/core/MCP_unified/tests/test_run_command_module.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py tldw_Server_API/app/core/MCP_unified/tests/test_scope_and_fallbacks.py -q` -> 140 passed, 4 warnings.
+- GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py` -> all checks passed.
 - GREEN: `git diff --check`.
-- GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/MCP_unified/command_runtime tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py -f json -o /tmp/bandit_mcp_governed_shell_aliases.json` -> 0 findings.
+- GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/command_runtime tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py -f json -o /tmp/bandit_mcp_governed_shell_aliases_qodo.json` -> 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

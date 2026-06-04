@@ -25,7 +25,7 @@ def test_registry_hides_commands_without_visible_backing_tools():
     assert "grep-files" not in visible
 
 
-def test_registry_exposes_filesystem_aliases_only_when_backing_tools_are_visible():
+def test_registry_exposes_filesystem_aliases_only_when_backing_tools_are_visible() -> None:
     registry = build_default_registry()
     visible = registry.visible_commands(allowed_tools={"fs.stat", "fs.grep"})
 

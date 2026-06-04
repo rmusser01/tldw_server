@@ -116,6 +116,10 @@ _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
 )
 
 _MCP_TOOL_EXECUTION_ERROR = "tool_execution_error"
+_TOOL_AUTHORIZATION_ALIASES = {
+    "bash": "run",
+    "shell": "run",
+}
 _TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
 
@@ -735,9 +739,15 @@ class MCPProtocol:
         return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
 
     async def _has_tool_permission(self, context: RequestContext, tool_name: str, *, is_write: Optional[bool] = None) -> bool:
-        if not await self._rbac_check(context.user_id, Resource.TOOL, Action.EXECUTE, tool_name):
-            return False
-        if not self._scope_allows(context, Resource.TOOL.value, tool_name):
+        has_named_permission = False
+        for auth_name in self._tool_authorization_names(tool_name):
+            if not await self._rbac_check(context.user_id, Resource.TOOL, Action.EXECUTE, auth_name):
+                continue
+            if not self._scope_allows(context, Resource.TOOL.value, auth_name):
+                continue
+            has_named_permission = True
+            break
+        if not has_named_permission:
             return False
         return self._api_key_allows(context, is_write=is_write)
 
@@ -1815,7 +1825,7 @@ class MCPProtocol:
                     name = tool_copy.get("name")
                     # Scoped tool permissions: when scopes are present, list only matching tools
                     if self._mcp_scopes(context) and isinstance(name, str):
-                        if not self._scope_allows(context, Resource.TOOL.value, name):
+                        if not self._scope_allows_tool_name(context, name):
                             continue
                     # Catalog filter: include only when in selected catalog
                     if catalog_filter is not None and isinstance(name, str):
@@ -1903,12 +1913,37 @@ class MCPProtocol:
         except re.error:
             return False
 
+    @staticmethod
+    def _tool_authorization_names(tool_name: str) -> tuple[str, ...]:
+        """Return invoked and canonical names that may authorize a tool call."""
+
+        canonical_name = _TOOL_AUTHORIZATION_ALIASES.get(tool_name)
+        if canonical_name and canonical_name != tool_name:
+            return (tool_name, canonical_name)
+        return (tool_name,)
+
+    def _matches_tool_authorization_pattern(self, tool_name: str, tool_args: Any, pattern: str) -> bool:
+        """Match a policy pattern against the invoked name and any canonical alias."""
+
+        return any(
+            self._matches_allowed_tool_pattern(auth_name, tool_args, pattern)
+            for auth_name in self._tool_authorization_names(tool_name)
+        )
+
+    def _scope_allows_tool_name(self, context: RequestContext, tool_name: str) -> bool:
+        """Return True when scopes allow the invoked tool name or canonical alias."""
+
+        return any(
+            self._scope_allows(context, Resource.TOOL.value, auth_name)
+            for auth_name in self._tool_authorization_names(tool_name)
+        )
+
     def _is_tool_allowed_by_context(self, tool_name: str, tool_args: Any, context: RequestContext) -> bool:
         """Return True when tool usage is allowed by context metadata."""
         allowed_tools = self._extract_allowed_tools(context)
         if not allowed_tools:
             return True
-        return any(self._matches_allowed_tool_pattern(tool_name, tool_args, pattern) for pattern in allowed_tools)
+        return any(self._matches_tool_authorization_pattern(tool_name, tool_args, pattern) for pattern in allowed_tools)
 
     async def _resolve_effective_tool_policy(self, context: RequestContext) -> dict[str, Any] | None:
         metadata = getattr(context, "metadata", None)
@@ -1953,7 +1988,7 @@ class MCPProtocol:
             for pattern in (policy.get("denied_tools") or [])
             if str(pattern).strip()
         ]
-        if any(self._matches_allowed_tool_pattern(tool_name, tool_args, pattern) for pattern in denied_tools):
+        if any(self._matches_tool_authorization_pattern(tool_name, tool_args, pattern) for pattern in denied_tools):
             return False
         allowed_tools = [
             str(pattern).strip()
@@ -1962,7 +1997,7 @@ class MCPProtocol:
         ]
         if not allowed_tools:
             return True
-        return any(self._matches_allowed_tool_pattern(tool_name, tool_args, pattern) for pattern in allowed_tools)
+        return any(self._matches_tool_authorization_pattern(tool_name, tool_args, pattern) for pattern in allowed_tools)
 
     async def _evaluate_runtime_approval(
         self,
