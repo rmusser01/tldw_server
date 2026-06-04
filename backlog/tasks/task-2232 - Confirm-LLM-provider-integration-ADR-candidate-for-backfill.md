@@ -51,10 +51,6 @@ Review INV-027 source docs and current LLM provider code paths, provider schemas
 Created the LLM provider integration confirmation audit and downgraded INV-027 to Needs owner review. No accepted ADR or follow-up backfill task was created because the local provider request-level api_url rejection claim is not confirmed by current code. Verification: git diff --check passed; Bandit not applicable for docs-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
