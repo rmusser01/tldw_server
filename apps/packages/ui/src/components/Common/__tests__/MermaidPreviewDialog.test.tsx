@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MermaidPreviewDialog } from "../MermaidPreviewDialog"
 
@@ -74,6 +74,32 @@ describe("MermaidPreviewDialog", () => {
     )
   })
 
+  it("sanitizes unsafe generated SVG before rendering and downloading", () => {
+    const unsafeSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><text>Safe diagram</text></svg>'
+
+    render(
+      <MermaidPreviewDialog
+        generatedSvg={unsafeSvg}
+        onClose={vi.fn()}
+        open
+        source={source}
+      />
+    )
+
+    const renderedSvg = screen.getByTestId("mermaid-preview-canvas").innerHTML
+    expect(renderedSvg).toContain("Safe diagram")
+    expect(renderedSvg).not.toContain("<script")
+    expect(renderedSvg).not.toContain("onload")
+
+    fireEvent.click(screen.getByRole("button", { name: "Download Mermaid SVG" }))
+
+    const downloadedSvg = blobParts?.join("")
+    expect(downloadedSvg).toContain("Safe diagram")
+    expect(downloadedSvg).not.toContain("<script")
+    expect(downloadedSvg).not.toContain("onload")
+  })
+
   it("updates the zoom label and transform, then resets them", () => {
     render(
       <MermaidPreviewDialog
@@ -118,6 +144,38 @@ describe("MermaidPreviewDialog", () => {
     expect(canvas).toHaveStyle("transform: translate(22px, 29px) scale(1)")
   })
 
+  it("makes the viewport focusable and pans with arrow keys", async () => {
+    render(
+      <MermaidPreviewDialog
+        generatedSvg={generatedSvg}
+        onClose={vi.fn()}
+        open
+        source={source}
+      />
+    )
+
+    const viewport = screen.getByLabelText("Mermaid diagram viewport")
+    const canvas = screen.getByTestId("mermaid-preview-canvas")
+
+    expect(viewport).toHaveAttribute("tabindex", "0")
+    fireEvent.keyDown(viewport, { key: "ArrowRight" })
+    fireEvent.keyDown(viewport, { key: "ArrowDown" })
+
+    expect(canvas).toHaveStyle("transform: translate(24px, 24px) scale(1)")
+
+    const arrowEvent = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "ArrowLeft"
+    })
+    await act(async () => {
+      viewport.dispatchEvent(arrowEvent)
+    })
+
+    expect(arrowEvent.defaultPrevented).toBe(true)
+    expect(canvas).toHaveStyle("transform: translate(0px, 24px) scale(1)")
+  })
+
   it("copies Mermaid source instead of generated SVG", async () => {
     render(
       <MermaidPreviewDialog
@@ -134,6 +192,55 @@ describe("MermaidPreviewDialog", () => {
       expect(writeText).toHaveBeenCalledWith(source)
     })
     expect(writeText).not.toHaveBeenCalledWith(generatedSvg)
+  })
+
+  it("does not show copied state when clipboard API is unavailable", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined
+    })
+
+    render(
+      <MermaidPreviewDialog
+        generatedSvg={generatedSvg}
+        onClose={vi.fn()}
+        open
+        source={source}
+      />
+    )
+
+    const copyButton = screen.getByRole("button", {
+      name: "Copy Mermaid source"
+    })
+    fireEvent.click(copyButton)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(copyButton.querySelector(".text-success")).not.toBeInTheDocument()
+  })
+
+  it("does not show copied state when clipboard write fails", async () => {
+    writeText.mockRejectedValueOnce(new Error("clipboard denied"))
+
+    render(
+      <MermaidPreviewDialog
+        generatedSvg={generatedSvg}
+        onClose={vi.fn()}
+        open
+        source={source}
+      />
+    )
+
+    const copyButton = screen.getByRole("button", {
+      name: "Copy Mermaid source"
+    })
+    fireEvent.click(copyButton)
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(source)
+    })
+    expect(copyButton.querySelector(".text-success")).not.toBeInTheDocument()
   })
 
   it("downloads the generated SVG", () => {

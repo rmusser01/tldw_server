@@ -71,8 +71,14 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   }, [])
 
   const handleCopySource = useCallback(async () => {
+    const writeText = navigator.clipboard?.writeText
+    if (!writeText) {
+      setCopied(false)
+      return
+    }
+
     try {
-      await navigator.clipboard?.writeText(source)
+      await writeText.call(navigator.clipboard, source)
       setCopied(true)
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current)

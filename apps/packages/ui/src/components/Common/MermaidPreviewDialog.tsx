@@ -10,6 +10,7 @@ import {
   ZoomOutIcon
 } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import DOMPurify from "dompurify"
 
 export type MermaidPreviewDialogProps = {
   open: boolean
@@ -21,6 +22,7 @@ export type MermaidPreviewDialogProps = {
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 4
 const ZOOM_STEP = 0.25
+const KEYBOARD_PAN_STEP = 24
 
 type PanState = {
   x: number
@@ -61,7 +63,14 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
   const [copied, setCopied] = useState(false)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragRef = useRef<DragState | null>(null)
-  const hasGeneratedSvg = Boolean(generatedSvg)
+  const sanitizedGeneratedSvg = useMemo(
+    () =>
+      generatedSvg
+        ? DOMPurify.sanitize(generatedSvg, { USE_PROFILES: { svg: true } })
+        : undefined,
+    [generatedSvg]
+  )
+  const hasGeneratedSvg = Boolean(sanitizedGeneratedSvg)
 
   useEffect(() => {
     if (!open) return
@@ -82,8 +91,14 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
   const canvasTransform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
 
   const handleCopySource = useCallback(async () => {
+    const writeText = navigator.clipboard?.writeText
+    if (!writeText) {
+      setCopied(false)
+      return
+    }
+
     try {
-      await navigator.clipboard?.writeText(source)
+      await writeText.call(navigator.clipboard, source)
       setCopied(true)
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current)
@@ -98,9 +113,9 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
   }, [source])
 
   const handleDownloadSvg = useCallback(() => {
-    if (!generatedSvg) return
-    downloadSvg(generatedSvg)
-  }, [generatedSvg])
+    if (!sanitizedGeneratedSvg) return
+    downloadSvg(sanitizedGeneratedSvg)
+  }, [sanitizedGeneratedSvg])
 
   const handleZoomIn = useCallback(() => {
     setZoom((current) => clampZoom(current + ZOOM_STEP))
@@ -151,6 +166,29 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
       event.currentTarget.releasePointerCapture?.(event.pointerId)
     },
     []
+  )
+
+  const handleViewportKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!hasGeneratedSvg) return
+
+      const step = event.shiftKey ? KEYBOARD_PAN_STEP * 2 : KEYBOARD_PAN_STEP
+      const movementByKey: Record<string, PanState> = {
+        ArrowDown: { x: 0, y: step },
+        ArrowLeft: { x: -step, y: 0 },
+        ArrowRight: { x: step, y: 0 },
+        ArrowUp: { x: 0, y: -step }
+      }
+      const movement = movementByKey[event.key]
+      if (!movement) return
+
+      event.preventDefault()
+      setPan((current) => ({
+        x: current.x + movement.x,
+        y: current.y + movement.y
+      }))
+    },
+    [hasGeneratedSvg]
   )
 
   return (
@@ -247,10 +285,12 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
           </div>
         </div>
 
-        {generatedSvg ? (
+        {sanitizedGeneratedSvg ? (
           <div
             aria-label="Mermaid diagram viewport"
             className="h-[70vh] min-h-[320px] cursor-grab overflow-auto rounded-md border border-border bg-surface p-4 active:cursor-grabbing"
+            tabIndex={0}
+            onKeyDown={handleViewportKeyDown}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={stopDragging}
@@ -260,7 +300,7 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
               data-testid="mermaid-preview-canvas"
               className="mx-auto flex min-h-full origin-center items-center justify-center transition-transform"
               style={{ transform: canvasTransform }}
-              dangerouslySetInnerHTML={{ __html: generatedSvg }}
+              dangerouslySetInnerHTML={{ __html: sanitizedGeneratedSvg }}
             />
           </div>
         ) : (

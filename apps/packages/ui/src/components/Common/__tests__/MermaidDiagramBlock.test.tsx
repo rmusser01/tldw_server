@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MermaidDiagramBlock } from "../MermaidDiagramBlock"
 import type { MermaidRenderState } from "../Mermaid"
@@ -120,6 +120,41 @@ describe("MermaidDiagramBlock", () => {
       expect(writeText).toHaveBeenCalledWith(source)
     })
     expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining("<svg"))
+  })
+
+  it("does not show copied state when clipboard API is unavailable", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined
+    })
+
+    render(<MermaidDiagramBlock source={source} />)
+
+    const copyButton = screen.getByRole("button", {
+      name: "Copy Mermaid source"
+    })
+    fireEvent.click(copyButton)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(copyButton.querySelector(".text-success")).not.toBeInTheDocument()
+  })
+
+  it("does not show copied state when clipboard write fails", async () => {
+    writeText.mockRejectedValueOnce(new Error("clipboard denied"))
+
+    render(<MermaidDiagramBlock source={source} />)
+
+    const copyButton = screen.getByRole("button", {
+      name: "Copy Mermaid source"
+    })
+    fireEvent.click(copyButton)
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(source)
+    })
+    expect(copyButton.querySelector(".text-success")).not.toBeInTheDocument()
   })
 
   it("downloads only the generated SVG after render success", async () => {
