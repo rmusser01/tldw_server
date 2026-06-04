@@ -96,6 +96,8 @@ export const ChatSettings = () => {
     setAutoCopyResponseToClipboard,
     useMarkdownForUserMessage,
     setUseMarkdownForUserMessage,
+    renderMermaidDiagrams,
+    setRenderMermaidDiagrams,
     chatRichTextMode,
     setChatRichTextMode,
     chatRichTextStylePreset,
@@ -815,6 +817,27 @@ export const ChatSettings = () => {
             checked={useMarkdownForUserMessage}
             onChange={setUseMarkdownForUserMessage}
             aria-label={t("generalSettings.settings.useMarkdownForUserMessage.label")}
+          />
+        }
+      />
+      <SettingRow
+        label={t(
+          "generalSettings.settings.renderMermaidDiagrams.label",
+          "Render Mermaid diagrams"
+        )}
+        {...getResetProps(
+          renderMermaidDiagrams,
+          DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams,
+          setRenderMermaidDiagrams
+        )}
+        control={
+          <Switch
+            checked={renderMermaidDiagrams}
+            onChange={(checked) => setRenderMermaidDiagrams(checked)}
+            aria-label={t(
+              "generalSettings.settings.renderMermaidDiagrams.label",
+              "Render Mermaid diagrams"
+            )}
           />
         }
       />
