@@ -4,7 +4,7 @@
 
 **Goal:** Add workspace-bounded, cross-platform `fs.stat`, `fs.glob`, and `fs.grep` MCP tools as the first native filesystem helper slice after profile tooling discovery.
 
-**Architecture:** Extend the existing `FilesystemModule` so all helpers reuse the current workspace-root resolver, path containment checks, argument validation, and `asyncio.to_thread` offloading. Implement portable glob/search logic in Python rather than delegating to OS shell commands, and update profile metadata so read-capable default profiles can discover the new helpers.
+**Architecture:** Extend the existing `FilesystemModule` so all helpers reuse the current workspace-root resolver, path containment checks, argument validation, and `asyncio.to_thread` offloading. Implement portable glob/search logic in Python rather than delegating to OS shell commands, and update profile metadata so read-capable default profiles can discover the new helpers. The existing governed `run(command=...)` command runtime remains the shell-shaped surface; `bash`/`shell` compatibility aliases and CLI aliases for these helpers are a follow-up task, not part of this native-tool slice.
 
 **Tech Stack:** Python 3.11, FastAPI-side MCP module framework, `pathlib`, `os.walk`, `fnmatch`, `re`, pytest, Bandit.
 
@@ -24,6 +24,10 @@
   - Add a short filesystem helper note under profile/tool discovery docs.
 - Modify `backlog/tasks/<task>.md`
   - Track implementation notes, verification, final summary, and Definition of Done for the implementation task created before coding.
+- Follow-up, not this slice: `tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py`,
+  `tldw_Server_API/app/core/MCP_unified/command_runtime/registry.py`,
+  `tldw_Server_API/app/core/MCP_unified/command_runtime/adapters.py`, and
+  command-runtime tests for governed CLI aliases.
 
 ## Task 0: Backlog And Baseline
 
@@ -134,6 +138,8 @@ Add tests that call `validate_tool_arguments()` directly for:
 - booleans must be booleans,
 - limits must be positive integers,
 - include/exclude must be lists of strings for `fs.grep`.
+- regex patterns above the configured maximum length are rejected before
+  compilation.
 
 - [ ] **Step 5: Run validation tests and verify RED**
 
@@ -156,6 +162,9 @@ Update `validate_tool_arguments()` with explicit allowed-key sets:
 - `fs.grep`: `pattern`, `base_path`, `include`, `exclude`, `regex`,
   `case_sensitive`, `include_hidden`, `follow_symlinks`, `limit`,
   `max_file_bytes`
+
+Do not expose walk-limit settings as caller arguments. Read them from module
+settings so users cannot raise traversal limits through a tool call.
 
 - [ ] **Step 7: Run Task 1 tests and verify GREEN**
 
@@ -265,8 +274,13 @@ Add tests for:
 - `case_sensitive=False` matches mixed-case file names,
 - hidden files are excluded by default and included when requested,
 - result limit sets `truncated=True` and `remaining_count`,
+- traversal cap stops broad walks even when the result limit is not reached,
 - absolute, drive-qualified, UNC, and parent-traversal patterns are rejected,
-- symlinked directories are not followed by default.
+- symlinked directories are not followed by default,
+- symlinked directories that resolve outside the workspace are rejected when
+  `follow_symlinks=true`,
+- hidden means a dot-prefixed workspace-relative segment, not platform hidden
+  attributes.
 
 - [ ] **Step 2: Run glob tests and verify RED**
 
@@ -288,6 +302,7 @@ Add helper methods:
 - `_portable_pattern_matches(path: str, pattern: str, *, case_sensitive: bool) -> bool`
 - `_is_hidden_relative_path(path: str) -> bool`
 - `_bounded_positive_int(value: Any, default: int) -> int`
+- `_setting_positive_int(name: str, default: int) -> int`
 
 Reject:
 
@@ -296,6 +311,10 @@ Reject:
 - Windows drive prefixes like `C:/...`,
 - UNC roots like `//server/share`,
 - `..` path segments.
+
+Use `_setting_positive_int()` for `glob_result_limit`,
+`glob_walk_entry_limit`, `grep_result_limit`, `grep_walk_entry_limit`,
+`grep_max_file_bytes`, and `grep_max_pattern_length`.
 
 - [ ] **Step 4: Implement `fs.glob` dispatch and worker**
 
@@ -310,6 +329,8 @@ For each candidate:
 - match with `_portable_pattern_matches()` so `**/*.py` matches both `app.py`
   and `pkg/app.py`,
 - lower pattern and candidate only when `case_sensitive=false`,
+- increment a visited-entry counter and stop with `truncated=True` once
+  `glob_walk_entry_limit` is reached,
 - sort by path,
 - return records capped by `limit`.
 
@@ -350,6 +371,12 @@ Add tests for:
 - oversized files are skipped without full read,
 - include/exclude glob filters apply,
 - limit truncates matches deterministically.
+- traversal cap stops broad walks deterministically,
+- overly long regex patterns raise a validation error,
+- invalid regex patterns return an actionable error without reading files,
+- symlinked files outside the workspace are rejected or skipped without leaking
+  targets,
+- symlink loops cannot cause unbounded traversal.
 
 - [ ] **Step 2: Run grep tests and verify RED**
 
@@ -379,6 +406,8 @@ Only files are searched.
 
 Implementation requirements:
 
+- reject overly long regex patterns before compiling,
+- report `re.error` messages as actionable tool errors,
 - read bytes only after checking file size,
 - skip NUL-containing files as binary,
 - decode UTF-8 only,
@@ -386,6 +415,8 @@ Implementation requirements:
 - default literal search via `str.find`,
 - regex search via compiled `re.Pattern`,
 - sort by normalized path and line number,
+- increment a visited-entry counter and stop with `truncated=True` once
+  `grep_walk_entry_limit` is reached,
 - cap returned matches by `limit`.
 
 - [ ] **Step 5: Run grep tests and verify GREEN**
@@ -405,6 +436,41 @@ Expected: PASS.
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py
 git commit -m "feat: add portable workspace grep"
 ```
+
+## Follow-Up Task: Governed Shell Facade Aliases
+
+**Status:** Not part of this implementation branch. Create a separate Backlog
+task and branch after the native filesystem helpers are merged.
+
+**Goal:** Let models use familiar shell-shaped commands while the backend still
+routes every action through profile-granted MCP tools.
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/command_runtime/registry.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/command_runtime/adapters.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_run_command_module.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/README.md`
+
+- [ ] Add a Backlog task such as `Add governed shell facade aliases`.
+- [ ] Keep `run` as the canonical MCP tool.
+- [ ] Optionally expose `bash` and/or `shell` as aliases that call the same
+  `RunCommandModule` implementation. Their descriptions must say they are
+  governed, shell-like facades and not host shell execution.
+- [ ] Add registry aliases after backing tools exist:
+  - `stat <path>` -> `fs.stat`
+  - `glob <pattern> [base]` or `find <pattern> [base]` -> `fs.glob`
+  - `rg <pattern> [base]` or `grep-files <pattern> [base]` -> `fs.grep`
+- [ ] Leave existing pure `grep` behavior unchanged for pipelines like
+  `cat app.log | grep ERROR`. Do not make hybrid stdin/file-backed `grep`
+  until command preflight can safely distinguish transform usage from backend
+  search usage.
+- [ ] Make aliases visible only when their backing MCP tools are executable for
+  the active profile.
+- [ ] Add tests for policy-filtered visibility, `run --help`, alias help/error
+  text, no raw shell delegation, and preservation of the existing presentation
+  footer/spill behavior.
 
 ## Task 5: Profile Metadata And Docs
 

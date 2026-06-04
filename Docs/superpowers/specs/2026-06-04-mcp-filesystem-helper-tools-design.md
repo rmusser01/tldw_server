@@ -11,6 +11,12 @@ process execution, shell globbing, or OS-specific command behavior. `fs.edit`
 and `fs.patch` remain separate follow-up work because write conflict handling,
 encoding preservation, and approval semantics need their own review.
 
+The existing governed `run(command=...)` virtual CLI is the right place for
+shell-shaped ergonomics. This filesystem slice should expose typed MCP tools
+first; command aliases such as `stat`, `find`/`glob`, `rg`, and optional
+`bash`/`shell` facade names should be handled as a follow-up over the governed
+command runtime, not by invoking a host shell.
+
 ## Goals
 
 - Provide portable filesystem inspection and text-search helpers for MCP/ACP
@@ -27,6 +33,8 @@ encoding preservation, and approval semantics need their own review.
 
 - No free-form shell, subprocess grep, `find`, PowerShell, or platform command
   delegation.
+- No new `bash`/`shell` tool alias in this implementation slice. A follow-up
+  may expose those names only as aliases for the governed `run` runtime.
 - No writes, patches, file deletion, renames, chmod/chown, or symlink creation.
 - No binary search, archive traversal, or repository indexing service.
 - No attempt to normalize filesystem case rules globally. The tools provide a
@@ -49,6 +57,14 @@ tool metadata used by policy/path-scope layers.
 
 This design extends that module rather than creating a second filesystem
 module.
+
+The codebase also already includes
+`tldw_Server_API/app/core/MCP_unified/modules/implementations/run_command_module.py`
+and `tldw_Server_API/app/core/MCP_unified/command_runtime/`. That runtime
+accepts CLI-shaped strings, parses pipes and chain operators, and routes
+commands through policy-checked MCP tool calls. It is intentionally not a raw
+host shell. New filesystem helpers should be designed so that a later command
+runtime task can safely map familiar command names to these typed tools.
 
 ## Tool Contracts
 
@@ -120,6 +136,9 @@ Matching behavior:
   cannot rely on raw `fnmatch.fnmatchcase` alone.
 - Absolute patterns, drive-qualified patterns, UNC-style roots, and parent
   traversal segments are rejected.
+- Directory traversal stops at a configurable `glob_walk_entry_limit` even
+  when the result limit has not been reached. This prevents a broad pattern
+  such as `**/*` from walking an unexpectedly large workspace forever.
 
 ### `fs.grep`
 
@@ -160,12 +179,15 @@ Search behavior:
 - Reads files as bytes, skips files containing NUL bytes, and decodes UTF-8.
 - Non-UTF-8 files are skipped with `decode_error`.
 - Literal search is the default. Regex search uses Python `re` with normal
-  module limits and bounded file size.
+  module limits, bounded pattern length, bounded file size, and explicit regex
+  compile-error responses.
 - Line numbers use universal newline handling via `splitlines()`, so CRLF,
   LF, and CR are reported consistently.
 - Results are sorted by normalized path and line number.
 - Include/exclude matching uses the same portable pattern helper as `fs.glob`,
   including `**/` matching zero or more directories.
+- Directory traversal stops at a configurable `grep_walk_entry_limit` even
+  when the match limit has not been reached.
 
 ## Cross-Platform Policy
 
@@ -180,10 +202,46 @@ All external MCP clients should see stable behavior independent of the host OS:
   escapes after normalization.
 - Case sensitivity is explicit. Defaults do not depend on NTFS, APFS, ext4, or
   network share behavior.
+- Hidden path handling is application-defined: a path is hidden when any
+  workspace-relative segment starts with `.`. The tools do not attempt to read
+  Windows hidden attributes or platform-specific metadata.
 - Symlink tests must handle platforms where symlink creation requires elevated
   privileges by using existing pytest skip patterns when necessary.
+- Symlink handling must cover symlinked files, symlinked directories, targets
+  outside the workspace, and loop avoidance. `follow_symlinks=true` is allowed
+  only after resolved targets are proven to stay within the workspace root.
 - File mode metadata is best-effort. Tests should assert stable fields such as
   path, type, and size, not exact platform-specific permission masks.
+
+## Governed Shell Facade Follow-Up
+
+The backend-lead note argues for a single CLI-shaped surface because models are
+good at composing terminal-like commands. This project already has that shape
+through `run(command=...)`: a parser/executor/presentation runtime that keeps
+pipe execution raw, applies truncation and binary guards only at presentation
+time, and routes backend actions through approved MCP tools.
+
+The safe follow-up is to improve that governed runtime rather than add real
+shell execution:
+
+- Keep `run` as the canonical tool name.
+- Optionally expose `bash` and/or `shell` as compatibility aliases that call
+  the same `RunCommandModule` implementation and clearly describe themselves
+  as governed, shell-like facades rather than host shells.
+- Add command aliases only after the typed tools exist, for example
+  `stat <path>` -> `fs.stat`, `glob <pattern> [base]` or
+  `find <pattern> [base]` -> `fs.glob`, and `rg <pattern> [base]` or
+  `grep-files <pattern> [base]` -> `fs.grep`.
+- Do not overload the existing pure `grep` command in this slice. It currently
+  filters stdin in pipelines. File-backed grep needs either a distinct command
+  name such as `rg`/`grep-files` or a later hybrid-command refactor that can
+  distinguish stdin transforms from backend filesystem searches during
+  preflight.
+- Keep command visibility policy-driven: aliases appear only when their backing
+  MCP tools are executable for the active profile.
+- Keep `--help`, usage errors, stderr, exit-code footer, spill handling, and
+  binary/truncation presentation behavior consistent with the existing command
+  runtime.
 
 ## Profile Metadata Changes
 
@@ -203,6 +261,7 @@ as read-only filesystem tools:
   filesystem.
 - Every candidate path must remain under the resolved workspace root.
 - Directory walks must have configurable caps to avoid unbounded traversal.
+- Regex mode must cap pattern length and return actionable compile errors.
 - Grep must not read files larger than its configured limit.
 - Binary and undecodable files are skipped, not returned partially.
 - Unknown arguments are rejected by both module validation and protocol
@@ -214,12 +273,18 @@ as read-only filesystem tools:
   `additionalProperties: false`.
 - Unit tests for `fs.stat` on files, directories, missing paths, and symlinks.
 - Unit tests for `fs.glob` deterministic sorting, limits, hidden handling,
-  case sensitivity, pattern validation, and workspace escape rejection.
+  case sensitivity, pattern validation, traversal caps, and workspace escape
+  rejection.
 - Unit tests for `fs.grep` literal search, regex search, UTF-8 handling,
-  binary/decode skips, file-size skips, result limits, and line numbering with
-  mixed newline styles.
+  binary/decode skips, file-size skips, regex pattern guards, result limits,
+  traversal caps, and line numbering with mixed newline styles.
+- Symlink regression tests for outside-workspace targets and symlinked
+  directory traversal behavior.
 - Protocol validation tests for unknown arguments.
 - Preset metadata test proving `_FILES_READ_TOOLS` exposes the new helpers.
+- Follow-up command-runtime tests should cover policy-filtered visibility and
+  help text for `stat`, `glob`/`find`, `rg`/`grep-files`, and any `bash`/`shell`
+  alias once that follow-up is implemented.
 - Cross-platform tests should avoid exact permission masks and skip symlink
   creation only when the OS denies it.
 
