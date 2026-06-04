@@ -175,7 +175,8 @@ These tools do not accept CDP URLs, navigation targets, selectors, custom
 scripts, expressions, clicks, typing, reloads, focus changes, or storage
 mutation arguments. Screenshot, snapshot, console, and network reads are bounded
 by module settings such as `MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES`,
-`MCP_BROWSER_CDP_MAX_EVENTS`, `MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS`, and
+`MCP_BROWSER_CDP_MAX_EVENTS`, `MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS`,
+`MCP_BROWSER_CDP_MAX_OBSERVATION_WINDOW_MS`, and
 `MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES`.
 
 ## 4. Register External Servers

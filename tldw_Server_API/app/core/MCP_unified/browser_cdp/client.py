@@ -124,14 +124,19 @@ class CDPBrowserClient:
             "method": method,
             "params": params or {},
         }
+        timeout_seconds = max(float(self.config.request_timeout_seconds), 0.1)
+        deadline = time.monotonic() + timeout_seconds
         try:
             async with self._connect_websocket(page.websocket_url) as websocket:
                 await websocket.send(json.dumps(message))
                 while True:
-                    raw = await asyncio.wait_for(
-                        websocket.recv(),
-                        timeout=max(float(self.config.request_timeout_seconds), 0.1),
-                    )
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise CDPClientError("cdp_command_timeout", "CDP command response timed out")
+                    try:
+                        raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+                    except TimeoutError as exc:
+                        raise CDPClientError("cdp_command_timeout", "CDP command response timed out") from exc
                     payload = _json_object(raw)
                     if payload.get("id") != command_id:
                         continue

@@ -144,9 +144,23 @@ class _FakeWebSocket:
         return json.dumps(message)
 
 
+class _DelayedFakeWebSocket(_FakeWebSocket):
+    def __init__(self, messages: list[dict[str, Any] | BaseException], *, delay_seconds: float) -> None:
+        super().__init__(messages)
+        self.delay_seconds = delay_seconds
+
+    async def recv(self) -> str:
+        await asyncio.sleep(self.delay_seconds)
+        return await super().recv()
+
+
 class _WebSocketFakeClient(CDPBrowserClient):
-    def __init__(self, websocket: _FakeWebSocket) -> None:
-        super().__init__(CDPClientConfig(debugger_url="http://127.0.0.1:9222"))
+    def __init__(
+        self,
+        websocket: _FakeWebSocket,
+        config: CDPClientConfig | None = None,
+    ) -> None:
+        super().__init__(config or CDPClientConfig(debugger_url="http://127.0.0.1:9222"))
         self.websocket = websocket
 
     def _connect_websocket(self, websocket_url: str) -> _FakeWebSocket:
@@ -178,6 +192,32 @@ async def test_cdp_client_sends_command_and_returns_matching_result() -> None:
 
     assert result == {"product": "Chrome/126.0"}  # nosec B101
     assert websocket.sent == [{"id": 1, "method": "Browser.getVersion", "params": {}}]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_cdp_client_send_command_enforces_overall_deadline() -> None:
+    websocket = _DelayedFakeWebSocket(
+        [
+            {"method": "Runtime.consoleAPICalled", "params": {"type": "log"}},
+            {"method": "Runtime.consoleAPICalled", "params": {"type": "log"}},
+            {"method": "Runtime.consoleAPICalled", "params": {"type": "log"}},
+            {"method": "Runtime.consoleAPICalled", "params": {"type": "log"}},
+            {"id": 1, "result": {"product": "Chrome/126.0"}},
+        ],
+        delay_seconds=0.03,
+    )
+    client = _WebSocketFakeClient(
+        websocket,
+        CDPClientConfig(
+            debugger_url="http://127.0.0.1:9222",
+            request_timeout_seconds=0.05,
+        ),
+    )
+
+    with pytest.raises(CDPClientError) as exc_info:
+        await client.send_command(_page(), "Browser.getVersion")
+
+    assert exc_info.value.reason_code == "cdp_command_timeout"  # nosec B101
 
 
 @pytest.mark.asyncio

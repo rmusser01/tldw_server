@@ -603,6 +603,7 @@ class MCPServer:
                             "debugger_url": "${MCP_BROWSER_CDP_URL:-}",
                             "request_timeout_seconds": "${MCP_BROWSER_CDP_REQUEST_TIMEOUT_SECONDS:-3.0}",
                             "observation_window_ms": "${MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS:-250}",
+                            "max_observation_window_ms": "${MCP_BROWSER_CDP_MAX_OBSERVATION_WINDOW_MS:-5000}",
                             "max_events": "${MCP_BROWSER_CDP_MAX_EVENTS:-100}",
                             "max_snapshot_nodes": "${MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES:-200}",
                             "screenshot_max_bytes": "${MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES:-2000000}",

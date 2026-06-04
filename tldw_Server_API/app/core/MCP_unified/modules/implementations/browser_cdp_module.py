@@ -273,12 +273,7 @@ class BrowserCDPModule(BaseModule):
             data = result.get("data")
             if not isinstance(data, str) or not data:
                 raise CDPClientError("cdp_protocol_error", "CDP screenshot response did not include image data")
-            byte_estimate = self._base64_size(data)
-            if byte_estimate > config.screenshot_max_bytes:
-                raise CDPClientError(
-                    "payload_too_large",
-                    f"CDP screenshot payload exceeds {config.screenshot_max_bytes} bytes",
-                )
+            byte_estimate = self._base64_size(data, maximum=config.screenshot_max_bytes)
             return {
                 "target": self._page_summary(page),
                 "mime_type": f"image/{image_format}",
@@ -316,10 +311,15 @@ class BrowserCDPModule(BaseModule):
             settings.get("debugger_url")
             or os.getenv("MCP_BROWSER_CDP_URL", "")
         ).strip() or None
+        max_observation_window_ms = self._setting_positive_int("max_observation_window_ms", 5_000)
+        observation_window_ms = min(
+            self._setting_positive_int("observation_window_ms", 250),
+            max_observation_window_ms,
+        )
         return CDPClientConfig(
             debugger_url=debugger_url,
             request_timeout_seconds=float(settings.get("request_timeout_seconds", 3.0)),
-            observation_window_ms=self._setting_positive_int("observation_window_ms", 250),
+            observation_window_ms=observation_window_ms,
             max_events=self._setting_positive_int("max_events", 100),
             max_snapshot_nodes=self._setting_positive_int("max_snapshot_nodes", 200),
             screenshot_max_bytes=self._setting_positive_int("screenshot_max_bytes", 2_000_000),
@@ -412,11 +412,22 @@ class BrowserCDPModule(BaseModule):
         value = runtime_result.get("value")
         return value if isinstance(value, dict) else {}
 
-    def _base64_size(self, data: str) -> int:
+    def _base64_size(self, data: str, *, maximum: int) -> int:
+        estimated_size = self._base64_size_estimate(data)
+        if estimated_size > maximum:
+            raise CDPClientError(
+                "payload_too_large",
+                f"CDP screenshot payload exceeds {maximum} bytes",
+            )
         try:
             return len(b64decode(data, validate=True))
         except (BinasciiError, ValueError) as exc:
             raise CDPClientError("cdp_protocol_error", "CDP screenshot response contained invalid base64") from exc
+
+    def _base64_size_estimate(self, data: str) -> int:
+        text = data.strip()
+        padding = len(text) - len(text.rstrip("="))
+        return max(0, (len(text) * 3) // 4 - min(padding, 2))
 
     def _reject_unknown(self, args: dict[str, Any], allowed: set[str]) -> None:
         unknown = sorted(set(args) - allowed)

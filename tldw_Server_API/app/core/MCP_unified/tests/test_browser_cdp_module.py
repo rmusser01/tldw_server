@@ -220,8 +220,22 @@ def test_browser_cdp_config_parses_allow_non_loopback_safely() -> None:
     assert enabled._client_config().allow_non_loopback is True  # noqa: SLF001  # nosec B101
 
 
+def test_browser_cdp_config_clamps_default_observation_window() -> None:
+    module = _module(
+        settings={
+            "debugger_url": "http://127.0.0.1:9222",
+            "observation_window_ms": 10_000,
+            "max_observation_window_ms": 750,
+        }
+    )
+
+    assert module._client_config().observation_window_ms == 750  # noqa: SLF001  # nosec B101
+
+
 @pytest.mark.asyncio
-async def test_browser_status_reports_availability_and_missing_configuration() -> None:
+async def test_browser_status_reports_availability_and_missing_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     configured_module = _module()
 
     configured = await configured_module.execute_tool("browser.status", {})
@@ -231,6 +245,7 @@ async def test_browser_status_reports_availability_and_missing_configuration() -
     assert configured["page_count"] == 1  # nosec B101
     assert configured["version"]["browser"] == "Chrome/125.0.0"  # nosec B101
 
+    monkeypatch.delenv("MCP_BROWSER_CDP_URL", raising=False)
     unconfigured = await _module(settings={}).execute_tool("browser.status", {})
 
     assert unconfigured == {  # nosec B101
@@ -319,6 +334,26 @@ async def test_browser_screenshot_returns_bounded_base64_payload() -> None:
 
     with pytest.raises(CDPClientError) as exc_info:
         await oversized_module.execute_tool("browser.screenshot", {})
+
+    assert exc_info.value.reason_code == "payload_too_large"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_browser_screenshot_rejects_oversized_payload_before_full_decode() -> None:
+    oversized_client = _FakeCDPClient(
+        CDPClientConfig(debugger_url="http://127.0.0.1:9222"),
+        screenshot_data="!" * 128,
+    )
+    module = _module(
+        settings={
+            "debugger_url": "http://127.0.0.1:9222",
+            "screenshot_max_bytes": 1,
+        },
+        client=oversized_client,
+    )
+
+    with pytest.raises(CDPClientError) as exc_info:
+        await module.execute_tool("browser.screenshot", {})
 
     assert exc_info.value.reason_code == "payload_too_large"  # nosec B101
 
