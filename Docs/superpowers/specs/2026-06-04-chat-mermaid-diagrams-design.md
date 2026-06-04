@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04
 **Surface:** Assistant-facing chat markdown surfaces in the WebUI and extension UI package
-**Status:** Approved in-session for PRD drafting
+**Status:** Reviewed and ready for implementation planning
 **Backlog:** TASK-510
 **Upstream reference:** [ggml-org/llama.cpp#24032](https://github.com/ggml-org/llama.cpp/pull/24032)
 
@@ -89,6 +89,8 @@ The local codebase already has most building blocks:
 - Server-side Mermaid rendering.
 - Backend API changes.
 - Mermaid syntax generation prompts.
+- Mermaid aliases such as `mmd` or `mermaid-js`, unfenced Mermaid-looking prose, and XML/SVG diagram blocks.
+- Unifying existing artifact Mermaid viewers with the new inline chat preview dialog.
 - Broad rendering changes for documentation, flashcards, notes, review, or other non-chat markdown consumers unless those consumers explicitly opt in later.
 - Graphviz/DOT rendering.
 
@@ -178,7 +180,9 @@ renderMermaidDiagrams: boolean
 
 Default: `true`.
 
-Recommended placement: chat or markdown display settings near existing rich text, code theme, and external image settings.
+Store this in `ChatSettingsConfig` / `DEFAULT_CHAT_SETTINGS` as `renderMermaidDiagrams`, defaulting to `true`.
+
+Surface it in `ChatSettings` near the existing rich text, code-theme, and external-image display controls.
 
 Behavior:
 
@@ -308,7 +312,8 @@ Do not silently hide invalid diagrams.
 
 - Mermaid must use `securityLevel: "strict"`.
 - Do not support raw SVG blocks in this release.
-- Do not use `dangerouslySetInnerHTML` for user/model-provided source except where the existing Mermaid renderer must insert Mermaid-generated SVG after strict-mode rendering.
+- Do not use `dangerouslySetInnerHTML` for user/model-provided source except where the Mermaid renderer or preview dialog inserts Mermaid-generated SVG after strict-mode rendering.
+- `MermaidPreviewDialog` may display captured generated SVG from the inline block; it must not treat raw model-provided SVG/XML as trusted preview content.
 - Preserve existing URL/image safeguards in Markdown.
 - SVG download should serialize only Mermaid-generated SVG, not arbitrary raw SVG supplied by the model.
 - Any future support for raw SVG/XML preview must go through a separate security review.
@@ -351,6 +356,7 @@ Do not silently hide invalid diagrams.
 - `Markdown` routes fenced `mermaid` code blocks to `MermaidDiagramBlock` when `enableMermaidDiagrams` is true.
 - `Markdown` routes the same fence to existing code block rendering when false.
 - `Markdown` does not render Mermaid from ST-compatible HTML mode when Mermaid component rendering is required.
+- Chat settings tests cover `renderMermaidDiagrams` defaulting on and being exposed in `ChatSettings`.
 - `MermaidDiagramBlock` shows rendered content on success.
 - `MermaidDiagramBlock` shows raw-source fallback on renderer error.
 - `MermaidDiagramBlock` copy action uses source text.
@@ -385,8 +391,7 @@ Keep the implementation PR small enough to review by avoiding unrelated markdown
 
 ## Open Questions
 
-- Should diagram artifacts and inline Mermaid blocks share one viewer component immediately, or should artifact viewer cleanup be a follow-up?
-- Should the setting live in chat settings only, or also in a general markdown display settings section if such a section becomes canonical?
+No open questions for the v1 PRD. Artifact viewer unification and broader markdown display settings can be revisited after the first chat implementation.
 
 ## Non-Goals For Follow-Up Tracking
 
@@ -397,4 +402,5 @@ These are useful but should not block the first PR:
 - real-time diagram rendering while a code fence is still streaming;
 - graphviz/DOT rendering;
 - Mermaid prompt templates;
+- unifying existing artifact Mermaid viewers with the inline chat preview dialog;
 - server-side diagram thumbnails.
