@@ -12,8 +12,10 @@ def test_claims_rebuild_health_reads_persisted(monkeypatch, tmp_path):
     base_dir = tmp_path / "user_dbs"
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.setenv("CLAIMS_MONITORING_SYSTEM_USER_ID", "1")
-    settings["USER_DB_BASE_DIR"] = str(base_dir)
-    settings["CLAIMS_MONITORING_SYSTEM_USER_ID"] = 1
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(base_dir))
+    monkeypatch.setitem(settings, "CLAIMS_MONITORING_SYSTEM_USER_ID", 1)
+    monkeypatch.setitem(claims_service.settings, "USER_DB_BASE_DIR", str(base_dir))
+    monkeypatch.setitem(claims_service.settings, "CLAIMS_MONITORING_SYSTEM_USER_ID", 1)
 
     @contextmanager
     def _managed_media_database(client_id, *, db_path=None, initialize=True, **_kwargs):
@@ -39,6 +41,13 @@ def test_claims_rebuild_health_reads_persisted(monkeypatch, tmp_path):
     )
 
     db_path = get_user_media_db_path(1)
+    monkeypatch.setattr(
+        claims_service,
+        "get_user_media_db_path",
+        lambda user_id: db_path if int(user_id) == 1 else get_user_media_db_path(user_id),
+        raising=False,
+    )
+
     db = MediaDatabase(db_path=db_path, client_id="test")
     db.initialize_db()
     db.upsert_claims_monitoring_health(

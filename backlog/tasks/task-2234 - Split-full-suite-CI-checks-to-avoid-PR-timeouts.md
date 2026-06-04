@@ -33,6 +33,7 @@ modified_files:
 - tldw_Server_API/app/core/AuthNZ/db_config.py
 - tldw_Server_API/app/core/MCP_unified/server.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
+- tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
 - tldw_Server_API/tests/AuthNZ/integration/test_jwt_refresh_rotation_blacklist.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_resource_governor_permissions_claims.py
 - tldw_Server_API/tests/Collections/test_collections_close.py
@@ -44,6 +45,7 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_workspace_set_objects.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
+- tldw_Server_API/tests/Media/test_json_url_download.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
@@ -87,6 +89,8 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-04 recheck after commit `7dd08107a3` found `build (webui)` failing in the container-build workflow because the Dockerfile rewrote `apps/package.json` workspaces before `bun install --frozen-lockfile`, producing a package graph that no longer matched `apps/bun.lock`.
 
 2026-06-04 recheck after commit `dc28e1f1e9` found `Full Suite shard (macos-latest / Python 3.12 / auth-db)` failing because `test_create_permission_sanitizes_backend_error` patches the legacy `admin_rbac.is_test_mode` test hook, but the split admin RBAC module no longer exposed that compatibility wrapper.
+
+2026-06-04 recheck after commit `3d3c796af9` found `Full Suite shard (macos-latest / Python 3.12 / media-audio)` failing because fake-client JSON download tests still hit global egress allowlist validation before streaming, and `Full Suite shard (macos-latest / Python 3.12 / product-modules)` failing because the claims rebuild health persistence test could read a stale module settings/path target and fall back to live service health instead of the inserted persisted row.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -101,6 +105,8 @@ Third recheck remediation for PR #2258: isolated Resource Governor app-state ove
 Fourth recheck remediation for PR #2258: restored frozen-lockfile-compatible WebUI Docker workspace setup by keeping the root workspace graph intact, copying only unrelated workspace manifests and the extension prepare shim, and removing the lockfile-breaking workspace rewrite. Verification on 2026-06-04: the WebUI Docker `bun install --frozen-lockfile` step was simulated locally with the same copied files and passed; Docker hardening pytest passed; frontend Docker/networking Vitest passed (14); compileall for the updated Python contract test passed; git diff --check passed.
 
 Fifth recheck remediation for PR #2258: restored the patchable `admin_rbac.is_test_mode()` compatibility wrapper by delegating to the shared core testing helper, keeping the admin RBAC error-mapping test hook available without changing endpoint behavior. Verification on 2026-06-04: the failing `test_create_permission_sanitizes_backend_error` was reproduced locally before the fix; the exact test passed after the fix; the full `test_admin_rbac_error_mapping.py` file passed (11); compileall passed for `admin_rbac.py`; Bandit on `admin_rbac.py` passed; git diff --check passed.
+
+Sixth recheck remediation for PR #2258: isolated fake-client JSON URL download tests from global egress allowlist validation, and hardened claims rebuild health persistence test setup to patch settings through `monkeypatch` plus the `claims_service` module's path hook. Verification on 2026-06-04: `test_download_url_json_content_type` reproduced the CI egress denial locally before the fix; the exact claims persistence test passed alone locally before the hardening; the full Claims folder passed locally on Python 3.11 before the hardening; after the fix, `test_json_url_download.py` passed under the restrictive CI allowlist (3), the exact claims persistence test passed, and the full Claims folder passed (166 passed, 1 skipped); compileall passed for the two touched test files; Bandit on the touched tests passed with test assert rule B101 skipped; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
