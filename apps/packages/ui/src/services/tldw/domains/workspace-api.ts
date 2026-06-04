@@ -460,6 +460,21 @@ export interface WorkspacePrimaryRootAttachRequest {
   strict_sandbox_validation?: boolean
 }
 
+export interface WorkspaceSandboxRootProvisionRequest {
+  display_name?: string | null
+  requested_runtime?: string | null
+  root_id?: string | null
+  replace_existing?: boolean
+  expected_workspace_version?: number | null
+}
+
+export interface WorkspaceSandboxRootProvisionResponse {
+  workspace_id: string
+  workspace_profile: WorkspaceProfile
+  operation: WorkspaceOperationResponse
+  primary_root: WorkspaceRootResponse | null
+}
+
 export type WorkspaceFileInventoryState =
   | "not_started"
   | "queued"
@@ -926,6 +941,40 @@ export const workspaceApiMethods = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
+    })
+  },
+
+  async provisionWorkspaceSandboxRoot(
+    workspaceId: string,
+    data: WorkspaceSandboxRootProvisionRequest,
+    idempotencyKey: string
+  ): Promise<WorkspaceSandboxRootProvisionResponse> {
+    const key = idempotencyKey.trim()
+    if (!key) {
+      throw new Error("idempotencyKey is required for sandbox root provisioning")
+    }
+    return await bgRequest<WorkspaceSandboxRootProvisionResponse>({
+      path: workspacePath(workspaceId, "/roots/primary/sandbox-volume"),
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": key
+      },
+      body: data
+    })
+  },
+
+  async getWorkspaceOperation(
+    workspaceId: string,
+    operationId: string
+  ): Promise<WorkspaceOperationResponse> {
+    const encodedOperationId = encodeWorkspacePathSegment(
+      operationId,
+      "operationId"
+    )
+    return await bgRequest<WorkspaceOperationResponse>({
+      path: workspacePath(workspaceId, `/operations/${encodedOperationId}`),
+      method: "GET"
     })
   },
 

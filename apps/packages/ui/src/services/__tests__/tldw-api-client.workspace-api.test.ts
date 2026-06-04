@@ -288,6 +288,9 @@ describe("workspace API domain contract", () => {
       workspaceApiMethods.deleteWorkspace("workspace/with/slash")
     ).rejects.toThrow("workspaceId")
     await expect(
+      workspaceApiMethods.getWorkspaceOperation("ws-1", "operation/with/slash")
+    ).rejects.toThrow("operationId")
+    await expect(
       workspaceApiMethods.updateWorkspaceSource("ws-1", "source/with/slash", {
         title: "Source",
         version: 1
@@ -523,6 +526,77 @@ describe("workspace API domain contract", () => {
           display_name: "Repo",
           expected_workspace_version: 2
         }
+      })
+    )
+  })
+
+  it("provisions sandbox-managed workspace roots with an idempotency key", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      workspace_id: "ws-1",
+      workspace_profile: "project",
+      operation: {
+        operation_id: "op-1",
+        workspace_id: "ws-1",
+        command: "provision_sandbox_root",
+        status: "running",
+        started_at: "2026-06-04T00:00:00Z",
+        updated_at: "2026-06-04T00:00:00Z",
+        retryable: false,
+        diagnostics: {},
+        poll_href: "/api/v1/workspaces/ws-1/operations/op-1"
+      },
+      primary_root: rootsResponse.primary_root
+    })
+
+    await workspaceApiMethods.provisionWorkspaceSandboxRoot(
+      "workspace with spaces",
+      {
+        display_name: "Project sandbox",
+        requested_runtime: "python",
+        expected_workspace_version: 2
+      },
+      "sandbox-root-idem-1"
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/workspaces/workspace%20with%20spaces/roots/primary/sandbox-volume",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "sandbox-root-idem-1"
+        },
+        body: {
+          display_name: "Project sandbox",
+          requested_runtime: "python",
+          expected_workspace_version: 2
+        }
+      })
+    )
+  })
+
+  it("fetches workspace operation status from the canonical operation endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      operation_id: "operation with spaces",
+      workspace_id: "ws-1",
+      command: "provision_sandbox_root",
+      status: "running",
+      started_at: "2026-06-04T00:00:00Z",
+      updated_at: "2026-06-04T00:00:00Z",
+      retryable: false,
+      diagnostics: {},
+      poll_href: "/api/v1/workspaces/ws-1/operations/operation%20with%20spaces"
+    })
+
+    await workspaceApiMethods.getWorkspaceOperation(
+      "ws-1",
+      "operation with spaces"
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/workspaces/ws-1/operations/operation%20with%20spaces",
+        method: "GET"
       })
     )
   })

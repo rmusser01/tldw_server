@@ -6,6 +6,8 @@ import type { WorkspaceManagerItem } from "./workspace-manager-models"
 
 type WorkspaceListProps = {
   items: WorkspaceManagerItem[]
+  selectedId?: string | null
+  onSelect?: (item: WorkspaceManagerItem) => void
   onOpen: (item: WorkspaceManagerItem) => void
   onEdit: (item: WorkspaceManagerItem) => void
   onArchive: (item: WorkspaceManagerItem) => void
@@ -65,6 +67,8 @@ const formatUpdatedAt = (value: string): string => {
 
 export const WorkspaceList = ({
   items,
+  selectedId,
+  onSelect,
   onOpen,
   onEdit,
   onArchive,
@@ -88,7 +92,12 @@ export const WorkspaceList = ({
           {items.map((item) => (
             <tr
               key={item.id}
-              className="border-b border-border/70 hover:bg-surface2/50"
+              className={[
+                "border-b border-border/70 hover:bg-surface2/50",
+                selectedId === item.id ? "bg-primary/5" : null
+              ]
+                .filter(Boolean)
+                .join(" ")}
             >
               <td className="px-3 py-3 align-top">
                 <div className="font-medium text-text">{item.name}</div>
@@ -122,6 +131,16 @@ export const WorkspaceList = ({
               </td>
               <td className="px-3 py-3 align-top">
                 <div className="flex justify-end gap-2">
+                  {onSelect && (
+                    <Button
+                      size="sm"
+                      variant={selectedId === item.id ? "primary" : "ghost"}
+                      ariaLabel={`Manage ${item.name}`}
+                      onClick={() => onSelect(item)}
+                    >
+                      Manage
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"

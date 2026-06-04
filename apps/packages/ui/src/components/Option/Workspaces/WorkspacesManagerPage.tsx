@@ -12,6 +12,7 @@ import type {
 import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog"
 import { WorkspaceList } from "./WorkspaceList"
 import { WorkspaceMetadataDialog } from "./WorkspaceMetadataDialog"
+import { WorkspaceProjectRootPanel } from "./WorkspaceProjectRootPanel"
 import {
   normalizeWorkspaceManagerItem,
   type WorkspaceManagerAttention,
@@ -80,6 +81,7 @@ export const WorkspacesManagerPage = () => {
   const [editingItem, setEditingItem] = React.useState<WorkspaceManagerItem | null>(
     null
   )
+  const [selectedItemId, setSelectedItemId] = React.useState<string | null>(null)
   const [mutationError, setMutationError] = React.useState<string | null>(null)
   const [mutating, setMutating] = React.useState(false)
 
@@ -105,9 +107,15 @@ export const WorkspacesManagerPage = () => {
         setPartialError("Some Workspace details could not load.")
       }
       setItems(normalized)
+      setSelectedItemId((current) =>
+        current && normalized.some((item) => item.id === current)
+          ? current
+          : normalized[0]?.id ?? null
+      )
     } catch (caught) {
       setError(errorText(caught))
       setItems([])
+      setSelectedItemId(null)
     } finally {
       setLoading(false)
     }
@@ -133,6 +141,13 @@ export const WorkspacesManagerPage = () => {
     })
   }, [attentionFilter, items, profileFilter, searchQuery, showArchived])
 
+  const selectedItem = React.useMemo(() => {
+    if (filteredItems.length === 0) return null
+    return (
+      filteredItems.find((item) => item.id === selectedItemId) ?? filteredItems[0]
+    )
+  }, [filteredItems, selectedItemId])
+
   const createWorkspace = async (
     name: string,
     profile: WorkspaceProfile
@@ -148,6 +163,7 @@ export const WorkspacesManagerPage = () => {
       setItems((current) =>
         mergeWorkspaceItem(current, workspace, { prependIfMissing: true })
       )
+      setSelectedItemId(workspace.id)
       setCreateProfile(null)
     } catch (caught) {
       setMutationError(errorText(caught))
@@ -168,6 +184,7 @@ export const WorkspacesManagerPage = () => {
         version: item.version
       })
       setItems((current) => mergeWorkspaceItem(current, workspace))
+      setSelectedItemId(workspace.id)
       setEditingItem(null)
     } catch (caught) {
       setMutationError(errorText(caught))
@@ -188,6 +205,7 @@ export const WorkspacesManagerPage = () => {
         version: item.version
       })
       setItems((current) => mergeWorkspaceItem(current, workspace))
+      setSelectedItemId(workspace.id)
     } catch (caught) {
       setMutationError(errorText(caught))
     } finally {
@@ -348,19 +366,34 @@ export const WorkspacesManagerPage = () => {
                 No Workspaces match the current filters.
               </div>
             ) : (
-              <WorkspaceList
-                items={filteredItems}
-                onOpen={(item) =>
-                  navigate(
-                    buildResearchWorkspaceReturnPath({
-                      sourceWorkspaceId: item.id
-                    })
-                  )
-                }
-                onEdit={setEditingItem}
-                onArchive={(item) => void updateArchived(item, true)}
-                onUnarchive={(item) => void updateArchived(item, false)}
-              />
+              <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+                <WorkspaceList
+                  items={filteredItems}
+                  selectedId={selectedItem?.id ?? null}
+                  onSelect={(item) => setSelectedItemId(item.id)}
+                  onOpen={(item) =>
+                    navigate(
+                      buildResearchWorkspaceReturnPath({
+                        sourceWorkspaceId: item.id
+                      })
+                    )
+                  }
+                  onEdit={setEditingItem}
+                  onArchive={(item) => void updateArchived(item, true)}
+                  onUnarchive={(item) => void updateArchived(item, false)}
+                />
+                {selectedItem && (
+                  <WorkspaceProjectRootPanel
+                    item={selectedItem}
+                    onWorkspaceUpdated={(workspace) => {
+                      setItems((current) => mergeWorkspaceItem(current, workspace))
+                      setSelectedItemId(workspace.id)
+                    }}
+                    onRootsUpdated={() => void loadWorkspaces()}
+                    onRefreshContext={() => void loadWorkspaces()}
+                  />
+                )}
+              </div>
             )}
           </>
         )}
