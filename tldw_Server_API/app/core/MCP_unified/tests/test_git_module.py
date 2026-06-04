@@ -48,6 +48,18 @@ class _RecordingGitRunner:
         return self.result
 
 
+class _SequenceGitRunner:
+    def __init__(self, results: list[Any]) -> None:
+        self.results = list(results)
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(self, argv: list[str], *, timeout_seconds: float) -> Any:
+        self.calls.append({"argv": list(argv), "timeout_seconds": timeout_seconds})
+        if not self.results:
+            raise AssertionError(f"unexpected git command: {argv}")
+        return self.results.pop(0)
+
+
 class _FakeStream:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
@@ -403,7 +415,7 @@ async def test_git_repository_resolution_runs_rev_parse_from_workspace_root(tmp_
     runner = _RecordingGitRunner(result=_git_result(stdout=f"{workspace_root}\n"))
     module = _module(workspace_root_resolver=resolver, runner=runner)
 
-    result = await module.execute_tool("git.status", {"limit": 5}, context=_context())
+    result = await module.execute_tool("git.diff", {"scope": "staged"}, context=_context())
 
     assert resolver.calls[0]["session_id"] == "sess-1"  # nosec B101
     assert resolver.calls[0]["user_id"] == "7"  # nosec B101
@@ -417,6 +429,352 @@ async def test_git_repository_resolution_runs_rev_parse_from_workspace_root(tmp_
     ]
     assert result["repository_root"] == "."  # nosec B101
     assert result["reason_code"] == "not_implemented"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_status_runs_porcelain_v2_and_returns_grouped_counts(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    porcelain = "\0".join(
+        [
+            "# branch.oid abc123",
+            "# branch.head main",
+            "# branch.upstream origin/main",
+            "# branch.ab +2 -1",
+            "1 M. N... 100644 100644 100644 aaa bbb src/staged.py",
+            "1 .M N... 100644 100644 100644 aaa bbb src/unstaged.py",
+            "? src/new.py",
+        ]
+    ) + "\0"
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(
+                argv=[
+                    "git",
+                    "--no-pager",
+                    "-C",
+                    str(workspace_root),
+                    "status",
+                    "--porcelain=v2",
+                    "-z",
+                    "--branch",
+                    "--untracked-files=all",
+                ],
+                stdout=porcelain,
+            ),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {"limit": 5}, context=_context())
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--branch",
+        "--untracked-files=all",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["repository_root"] == "."  # nosec B101
+    assert result["branch"] == {  # nosec B101
+        "branch": "main",
+        "upstream": "origin/main",
+        "ahead": 2,
+        "behind": 1,
+    }
+    assert result["counts"] == {  # nosec B101
+        "staged": 1,
+        "unstaged": 1,
+        "untracked": 1,
+        "conflicted": 0,
+    }
+    assert [entry["path"] for entry in result["entries"]] == [  # nosec B101
+        "src/staged.py",
+        "src/unstaged.py",
+        "src/new.py",
+    ]
+    assert result["truncated"] is False  # nosec B101
+    assert result["limits"] == {"limit": 5}  # nosec B101
+    assert result["git"]["subcommand"] == "status"  # nosec B101
+    assert result["git"]["exit_code"] == 0  # nosec B101
+    assert result["git"]["timed_out"] is False  # nosec B101
+    assert result["git"]["truncated"] is False  # nosec B101
+    assert result["eval"]["result_kind"] == "structured_git_status"  # nosec B101
+    assert result["eval"]["path_filter_used"] is False  # nosec B101
+    assert result["eval"]["truncated"] is False  # nosec B101
+    assert str(workspace_root) not in str(result["eval"])  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_status_skips_ignored_porcelain_entries_and_truncates(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    porcelain = "\0".join(
+        [
+            "# branch.head feature",
+            "! build/ignored.log",
+            "? src/new.py",
+            "1 .M N... 100644 100644 100644 aaa bbb src/unstaged.py",
+        ]
+    ) + "\0"
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=porcelain),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {"limit": 1}, context=_context())
+
+    assert result["ok"] is True  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert len(result["entries"]) <= 1  # nosec B101
+    assert "build/ignored.log" not in str(result)  # nosec B101
+    assert result["counts"]["untracked"] == 1  # nosec B101
+    assert result["counts"]["unstaged"] == 1  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_status_command_failure_returns_structured_error_without_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(returncode=128, stderr=f"fatal: cannot read {workspace_root}\n"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.status", {}, context=_context())
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "git_command_failed"  # nosec B101
+    assert result["git"]["subcommand"] == "status"  # nosec B101
+    assert result["git"]["exit_code"] == 128  # nosec B101
+    assert str(workspace_root) not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_branches_runs_branch_format_and_returns_current_branch(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\n".join(
+        [
+            "*\0main\0origin/main\0abc123",
+            " \0feature/no-upstream\0\0def456",
+        ]
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.branches", {"limit": 5}, context=_context())
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "branch",
+        "--format=%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(objectname)",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["current"] == "main"  # nosec B101
+    assert result["branches"] == [  # nosec B101
+        {
+            "name": "main",
+            "current": True,
+            "upstream": "origin/main",
+            "commit": "abc123",
+        },
+        {
+            "name": "feature/no-upstream",
+            "current": False,
+            "upstream": None,
+            "commit": "def456",
+        },
+    ]
+    assert result["truncated"] is False  # nosec B101
+    assert result["git"]["subcommand"] == "branch"  # nosec B101
+    assert result["eval"]["result_kind"] == "bounded_git_branches"  # nosec B101
+    assert result["eval"]["path_filter_used"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_branches_respects_limit_and_marks_truncated(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\n".join(
+        [
+            "*\0main\0origin/main\0abc123",
+            " \0feature/a\0\0def456",
+            " \0feature/b\0\0fedcba",
+        ]
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.branches", {"limit": 1}, context=_context())
+
+    assert result["ok"] is True  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert len(result["branches"]) == 1  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_list_runs_ls_files_and_groups_unmerged_stages(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\0".join(
+        [
+            "100644 aaa 1\tsrc/conflict.py",
+            "100644 bbb 2\tsrc/conflict.py",
+            "100644 ccc 3\tsrc/conflict.py",
+            "100644 ddd 2\tsrc/added-by-us.py",
+        ]
+    ) + "\0"
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.conflicts.list", {"limit": 5}, context=_context())
+
+    assert runner.calls[1]["argv"] == [  # nosec B101
+        "git",
+        "--no-pager",
+        "-C",
+        str(workspace_root),
+        "ls-files",
+        "-u",
+        "-z",
+    ]
+    assert result["ok"] is True  # nosec B101
+    assert result["conflicts"] == [  # nosec B101
+        {
+            "path": "src/conflict.py",
+            "xy_status": "UU",
+            "stages": [1, 2, 3],
+            "conflict_type": "both_modified",
+        },
+        {
+            "path": "src/added-by-us.py",
+            "xy_status": "AU",
+            "stages": [2],
+            "conflict_type": "added_by_us",
+        },
+    ]
+    assert result["truncated"] is False  # nosec B101
+    assert result["git"]["subcommand"] == "ls-files"  # nosec B101
+    assert result["eval"]["result_kind"] == "structured_git_conflicts"  # nosec B101
+    assert result["eval"]["path_filter_used"] is False  # nosec B101
+    assert str(workspace_root) not in str(result["eval"])  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_conflicts_list_respects_limit_and_marks_truncated(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    stdout = "\0".join(
+        [
+            "100644 aaa 2\tsrc/a.py",
+            "100644 bbb 3\tsrc/b.py",
+        ]
+    ) + "\0"
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout=stdout),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool("git.conflicts.list", {"limit": 1}, context=_context())
+
+    assert result["ok"] is True  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert len(result["conflicts"]) == 1  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
 
 
 @pytest.mark.asyncio

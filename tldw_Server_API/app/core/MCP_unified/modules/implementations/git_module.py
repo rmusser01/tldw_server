@@ -49,6 +49,7 @@ _ALLOWED_GIT_SUBCOMMANDS = {
     "branch",
     "diff",
     "log",
+    "ls-files",
     "rev-parse",
     "status",
 }
@@ -498,6 +499,13 @@ class GitModule(BaseModule):
                 context=context,
             )
 
+        if tool_name == _TOOL_STATUS:
+            return await self._execute_status(repository, tool_name, args, context=context)
+        if tool_name == _TOOL_BRANCHES:
+            return await self._execute_branches(repository, tool_name, args, context=context)
+        if tool_name == _TOOL_CONFLICTS_LIST:
+            return await self._execute_conflicts_list(repository, tool_name, args, context=context)
+
         return {
             "ok": False,
             "reason_code": "not_implemented",
@@ -514,9 +522,198 @@ class GitModule(BaseModule):
                 reason_code="not_implemented",
                 duration_ms=repository.discovery_result.duration_ms,
                 path_filter_used=bool(args.get("path")),
+                result_kind="git_repository_preparation",
+                truncated=False,
                 context=context,
             ),
         }
+
+    async def _execute_status(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=all",
+        ]
+        result = await self._run_read_command(tool_name, argv, subcommand="status", context=context)
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        limit = int(args.get("limit") or self._status_limit_maximum())
+        parsed = self._parse_status_porcelain_v2(result.stdout, limit=limit)
+        truncated = bool(result.truncated or parsed["truncated"])
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "branch": parsed["branch"],
+            "entries": parsed["entries"],
+            "counts": parsed["counts"],
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="status"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=False,
+                result_kind="structured_git_status",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _execute_branches(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "branch",
+            "--format=%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(objectname)",
+        ]
+        result = await self._run_read_command(tool_name, argv, subcommand="branch", context=context)
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        limit = int(args.get("limit") or self._branch_limit_maximum())
+        parsed = self._parse_branches(result.stdout, limit=limit)
+        truncated = bool(result.truncated or parsed["truncated"])
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "current": parsed["current"],
+            "branches": parsed["branches"],
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="branch"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=False,
+                result_kind="bounded_git_branches",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _execute_conflicts_list(
+        self,
+        repository: _PreparedRepository,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        argv = [
+            "git",
+            "--no-pager",
+            "-C",
+            str(repository.repository_root),
+            "ls-files",
+            "-u",
+            "-z",
+        ]
+        result = await self._run_read_command(tool_name, argv, subcommand="ls-files", context=context)
+        if isinstance(result, dict):
+            result["repository_root"] = repository.repository_root_relative
+            result["limits"] = self._effective_limits(tool_name, args)
+            return result
+
+        limit = int(args.get("limit") or self._conflict_limit_maximum())
+        parsed = self._parse_conflicts(result.stdout, limit=limit)
+        truncated = bool(result.truncated or parsed["truncated"])
+        return {
+            "ok": True,
+            "repository_root": repository.repository_root_relative,
+            "conflicts": parsed["conflicts"],
+            "truncated": truncated,
+            "limits": self._effective_limits(tool_name, args),
+            "git": self._safe_git_metadata(result, subcommand="ls-files"),
+            "eval": self._execution_eval_metadata(
+                tool_name,
+                reason_code=None,
+                duration_ms=result.duration_ms,
+                path_filter_used=False,
+                result_kind="structured_git_conflicts",
+                truncated=truncated,
+                context=context,
+            ),
+        }
+
+    async def _run_read_command(
+        self,
+        tool_name: str,
+        argv: list[str],
+        *,
+        subcommand: str,
+        context: Any | None,
+    ) -> GitCommandResult | dict[str, Any]:
+        try:
+            result = await self._runner.run(
+                argv,
+                timeout_seconds=self._repository_discovery_timeout_seconds(),
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            return self._error_result(
+                tool_name,
+                "git_command_timeout",
+                "Git command timed out.",
+                subcommand=subcommand,
+                path_filter_used=False,
+                result_kind=self._result_kind_for_tool(tool_name),
+                truncated=False,
+                context=context,
+            )
+
+        if result.timed_out:
+            return self._error_result(
+                tool_name,
+                "git_command_timeout",
+                "Git command timed out.",
+                git_result=result,
+                subcommand=subcommand,
+                path_filter_used=False,
+                result_kind=self._result_kind_for_tool(tool_name),
+                truncated=result.truncated,
+                context=context,
+            )
+        if result.returncode != 0:
+            return self._error_result(
+                tool_name,
+                "git_command_failed",
+                "Git command failed.",
+                git_result=result,
+                subcommand=subcommand,
+                path_filter_used=False,
+                result_kind=self._result_kind_for_tool(tool_name),
+                truncated=result.truncated,
+                context=context,
+            )
+        return result
 
     async def _prepare_repository(self, context: Any | None) -> _PreparedRepository:
         workspace_root = await self._resolve_workspace_root(context)
@@ -747,7 +944,10 @@ class GitModule(BaseModule):
         message: str,
         *,
         git_result: GitCommandResult | None = None,
+        subcommand: str = "rev-parse",
         path_filter_used: bool = False,
+        result_kind: str = "git_repository_preparation",
+        truncated: bool = False,
         context: Any | None = None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -759,11 +959,13 @@ class GitModule(BaseModule):
                 reason_code=reason_code,
                 duration_ms=git_result.duration_ms if git_result is not None else None,
                 path_filter_used=path_filter_used,
+                result_kind=result_kind,
+                truncated=truncated or bool(git_result.truncated if git_result is not None else False),
                 context=context,
             ),
         }
         if git_result is not None:
-            result["git"] = self._safe_git_metadata(git_result, subcommand="rev-parse")
+            result["git"] = self._safe_git_metadata(git_result, subcommand=subcommand)
         return result
 
     def _execution_eval_metadata(
@@ -773,6 +975,8 @@ class GitModule(BaseModule):
         reason_code: str | None,
         duration_ms: float | None,
         path_filter_used: bool,
+        result_kind: str,
+        truncated: bool,
         context: Any | None,
     ) -> dict[str, Any]:
         return build_execution_eval_metadata(
@@ -780,13 +984,272 @@ class GitModule(BaseModule):
             tool_prompt_id=f"mcp.{tool_name}.v1",
             tool_prompt_version=_TOOL_PROMPT_VERSION,
             action_family=self._action_family(tool_name),
-            result_kind="git_repository_preparation",
+            result_kind=result_kind,
             profile_id=self._profile_id_from_context_metadata(context),
             path_filter_used=path_filter_used,
-            truncated=False,
+            truncated=truncated,
             reason_code=reason_code,
             duration_ms=duration_ms,
         )
+
+    @staticmethod
+    def _result_kind_for_tool(tool_name: str) -> str:
+        if tool_name == _TOOL_STATUS:
+            return "structured_git_status"
+        if tool_name == _TOOL_BRANCHES:
+            return "bounded_git_branches"
+        if tool_name == _TOOL_CONFLICTS_LIST:
+            return "structured_git_conflicts"
+        return "git_repository_preparation"
+
+    def _parse_status_porcelain_v2(self, stdout: str, *, limit: int) -> dict[str, Any]:
+        branch: dict[str, Any] = {
+            "branch": None,
+            "upstream": None,
+            "ahead": None,
+            "behind": None,
+        }
+        entries: list[dict[str, Any]] = []
+        counts = {
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 0,
+            "conflicted": 0,
+        }
+        total_entries = 0
+
+        for record in self._nul_records(stdout):
+            if record.startswith("# "):
+                self._parse_status_branch_header(record, branch)
+                continue
+            if record.startswith("! "):
+                continue
+
+            entry = self._parse_status_entry(record)
+            if entry is None:
+                continue
+
+            total_entries += 1
+            category = entry["category"]
+            if category == "untracked":
+                counts["untracked"] += 1
+            elif category == "conflicted":
+                counts["conflicted"] += 1
+            else:
+                if entry["staged"]:
+                    counts["staged"] += 1
+                if entry["unstaged"]:
+                    counts["unstaged"] += 1
+
+            if len(entries) < limit:
+                entries.append(entry)
+
+        return {
+            "branch": branch,
+            "entries": entries,
+            "counts": counts,
+            "truncated": total_entries > limit,
+        }
+
+    @staticmethod
+    def _parse_status_branch_header(record: str, branch: dict[str, Any]) -> None:
+        if record.startswith("# branch.head "):
+            value = record.removeprefix("# branch.head ").strip()
+            branch["branch"] = None if value == "(detached)" else value or None
+            return
+        if record.startswith("# branch.upstream "):
+            branch["upstream"] = record.removeprefix("# branch.upstream ").strip() or None
+            return
+        if record.startswith("# branch.ab "):
+            parts = record.removeprefix("# branch.ab ").split()
+            for part in parts:
+                if part.startswith("+"):
+                    with contextlib.suppress(ValueError):
+                        branch["ahead"] = int(part[1:])
+                elif part.startswith("-"):
+                    with contextlib.suppress(ValueError):
+                        branch["behind"] = int(part[1:])
+
+    def _parse_status_entry(self, record: str) -> dict[str, Any] | None:
+        if record.startswith("? "):
+            path = self._safe_response_path(record[2:])
+            if path is None:
+                return None
+            return {
+                "path": path,
+                "xy": "??",
+                "category": "untracked",
+                "staged": False,
+                "unstaged": False,
+            }
+
+        if record.startswith("1 "):
+            parts = record.split(" ", 8)
+            if len(parts) < 9:
+                return None
+            return self._status_entry_from_xy(parts[1], parts[8])
+
+        if record.startswith("2 "):
+            parts = record.split(" ", 9)
+            if len(parts) < 10:
+                return None
+            return self._status_entry_from_xy(parts[1], parts[9])
+
+        if record.startswith("u "):
+            parts = record.split(" ", 10)
+            if len(parts) < 11:
+                return None
+            path = self._safe_response_path(parts[10])
+            if path is None:
+                return None
+            return {
+                "path": path,
+                "xy": parts[1],
+                "category": "conflicted",
+                "staged": False,
+                "unstaged": False,
+            }
+
+        return None
+
+    def _status_entry_from_xy(self, xy: str, path_raw: str) -> dict[str, Any] | None:
+        path = self._safe_response_path(path_raw)
+        if path is None or len(xy) < 2:
+            return None
+        staged = xy[0] not in {".", "?", "!"}
+        unstaged = xy[1] not in {".", "?", "!"}
+        return {
+            "path": path,
+            "xy": xy,
+            "category": self._status_category(staged, unstaged),
+            "staged": staged,
+            "unstaged": unstaged,
+        }
+
+    @staticmethod
+    def _status_category(staged: bool, unstaged: bool) -> str:
+        if staged and unstaged:
+            return "staged_and_unstaged"
+        if staged:
+            return "staged"
+        if unstaged:
+            return "unstaged"
+        return "clean"
+
+    def _parse_branches(self, stdout: str, *, limit: int) -> dict[str, Any]:
+        branches: list[dict[str, Any]] = []
+        current: str | None = None
+        total = 0
+
+        for line in stdout.splitlines():
+            if not line:
+                continue
+            parts = line.split("\0")
+            if len(parts) < 4:
+                continue
+            marker, name, upstream, commit = (part.strip() for part in parts[:4])
+            if not name:
+                continue
+            is_current = marker == "*"
+            if is_current:
+                current = name
+            branch = {
+                "name": name,
+                "current": is_current,
+                "upstream": upstream or None,
+                "commit": commit or None,
+            }
+            total += 1
+            if len(branches) < limit:
+                branches.append(branch)
+
+        return {
+            "current": current,
+            "branches": branches,
+            "truncated": total > limit,
+        }
+
+    def _parse_conflicts(self, stdout: str, *, limit: int) -> dict[str, Any]:
+        grouped: dict[str, set[int]] = {}
+        ordered_paths: list[str] = []
+
+        for record in self._nul_records(stdout):
+            metadata, separator, path_raw = record.partition("\t")
+            if not separator:
+                continue
+            metadata_parts = metadata.split()
+            if len(metadata_parts) < 3:
+                continue
+            with contextlib.suppress(ValueError):
+                stage = int(metadata_parts[2])
+                path = self._safe_response_path(path_raw)
+                if path is None:
+                    continue
+                if path not in grouped:
+                    grouped[path] = set()
+                    ordered_paths.append(path)
+                grouped[path].add(stage)
+
+        conflicts: list[dict[str, Any]] = []
+        for path in ordered_paths[:limit]:
+            stages = sorted(grouped[path])
+            conflicts.append(
+                {
+                    "path": path,
+                    "xy_status": self._conflict_xy_status(stages),
+                    "stages": stages,
+                    "conflict_type": self._conflict_type(stages),
+                }
+            )
+
+        return {
+            "conflicts": conflicts,
+            "truncated": len(ordered_paths) > limit,
+        }
+
+    @staticmethod
+    def _conflict_xy_status(stages: list[int]) -> str:
+        stage_set = set(stages)
+        if stage_set == {1, 2, 3}:
+            return "UU"
+        if stage_set == {2}:
+            return "AU"
+        if stage_set == {3}:
+            return "UA"
+        if stage_set == {1, 2}:
+            return "DU"
+        if stage_set == {1, 3}:
+            return "UD"
+        return "UU"
+
+    @staticmethod
+    def _conflict_type(stages: list[int]) -> str:
+        stage_set = set(stages)
+        if stage_set == {1, 2, 3}:
+            return "both_modified"
+        if stage_set == {2}:
+            return "added_by_us"
+        if stage_set == {3}:
+            return "added_by_them"
+        if stage_set == {1, 2}:
+            return "deleted_by_them"
+        if stage_set == {1, 3}:
+            return "deleted_by_us"
+        return "unmerged"
+
+    @staticmethod
+    def _nul_records(stdout: str) -> list[str]:
+        return [record for record in stdout.split("\0") if record]
+
+    def _safe_response_path(self, value: str) -> str | None:
+        raw_path = value.strip()
+        if not raw_path:
+            return None
+        try:
+            self._validate_relative_path(raw_path)
+        except ValueError:
+            return None
+        return posixpath.normpath(raw_path.replace("\\", "/"))
 
     @staticmethod
     def _profile_id_from_context_metadata(context: Any | None) -> str | None:
