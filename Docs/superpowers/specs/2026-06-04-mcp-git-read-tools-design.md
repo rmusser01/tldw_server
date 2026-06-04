@@ -8,7 +8,7 @@ Approved for specification. This spec covers the first read-only Git inspection 
 
 The MCP default profile work now includes profile-scoped tool discovery, native filesystem helpers, a governed `run`/`bash`/`shell` facade, and optional CDP browser inspection. The next missing native tool family is Git inspection for code review, merge-conflict triage, architecture review, and engineering workflows.
 
-The first Git slice should be easy for front-ends and models to discover as explicit tools. It should not rely on free-form shell commands as the primary interface. It also needs to leave a clean path for standalone MCP server evaluations: operators should be able to compare how well different models use tools, how well each tool description/prompt performs, and which profile grants lead to better or worse outcomes.
+The first Git slice should be easy for front-ends and models to discover as explicit tools. It should not rely on free-form shell commands as the primary interface. It also needs to adopt the shared MCP observability and evaluation contract so standalone MCP server operators can compare how well different models use tools, how well each tool description/prompt performs, and which profile grants lead to better or worse outcomes.
 
 ## Goals
 
@@ -18,7 +18,7 @@ The first Git slice should be easy for front-ends and models to discover as expl
 - Execute Git through a fixed argv allowlist, never through `shell=True`.
 - Bound runtime, output size, and result counts for every command.
 - Return stable response shapes and reason codes that are useful to front-ends, agents, tests, and evaluations.
-- Capture tool metadata and result metadata needed for future metrics, traces, and standalone MCP tool-use evaluations.
+- Adopt the shared MCP tool metadata and result metadata needed for future metrics, traces, and standalone MCP tool-use evaluations.
 
 ## Non-Goals
 
@@ -26,7 +26,8 @@ The first Git slice should be easy for front-ends and models to discover as expl
 - No caller-provided `repo_path` in the first slice. The default behavior is active workspace repo root only.
 - No arbitrary Git argv passthrough.
 - No shell facade changes in this slice. A future governed `run` mapping can route `git status` or similar commands to native tools after the native API lands.
-- No persistent evaluation store in this slice. The design only adds the metadata and event shape needed for a later eval surface.
+- No persistent evaluation store in this slice. The design only adds the shared metadata and event shape needed for a later eval surface.
+- No retrofitting of every existing MCP tool in this Git implementation slice. That is a required follow-up using the shared contract defined here.
 
 ## Tool Surface
 
@@ -34,9 +35,9 @@ The module exposes seven first-slice tools:
 
 | Tool | Purpose | Arguments |
 | --- | --- | --- |
-| `git.status` | Summarize current branch and working tree state. | `include_ignored?: bool`, `limit?: int` |
+| `git.status` | Summarize current branch and working tree state. | `limit?: int` |
 | `git.diff` | Return bounded diff text. | `scope?: "unstaged" | "staged" | "working_tree"`, `path?: string`, `context_lines?: int`, `max_bytes?: int` |
-| `git.log` | Return bounded commit metadata. | `limit?: int`, `path?: string`, `include_author_email?: bool` |
+| `git.log` | Return bounded commit metadata. | `limit?: int`, `path?: string` |
 | `git.blame` | Return bounded blame metadata for one file. | `path: string`, `start_line?: int`, `end_line?: int`, `limit?: int` |
 | `git.branches` | List local branches and current branch. | `limit?: int` |
 | `git.conflicts.list` | List conflicted paths and Git conflict status codes. | `limit?: int` |
@@ -82,6 +83,8 @@ Requirements:
 - Use `--no-pager` and `--no-color` where applicable.
 - Disable external diff and text conversion for diff-like commands with flags such as `--no-ext-diff` and `--no-textconv`.
 - Use a deterministic, minimal environment with `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, and no inherited `GIT_EXTERNAL_DIFF`.
+- Prefer machine-readable and NUL-delimited Git formats where available, such as `status --porcelain=v2 -z`.
+- Use `--` before pathspecs so user-supplied paths cannot be parsed as Git options.
 - Set a timeout for every process.
 - Capture stdout and stderr separately.
 - Decode as UTF-8 with replacement for invalid bytes.
@@ -110,9 +113,9 @@ Every successful response should include:
 
 Tool-specific payloads:
 
-- `git.status`: `branch`, `upstream`, `ahead`, `behind`, `entries`, and counts grouped by `staged`, `unstaged`, `untracked`, `conflicted`, and `ignored`.
+- `git.status`: `branch`, `upstream`, `ahead`, `behind`, `entries`, and counts grouped by `staged`, `unstaged`, `untracked`, and `conflicted`. Ignored files are excluded in the first slice because ignored paths frequently reveal local secrets or build artifacts.
 - `git.diff`: `scope`, optional `path`, `text`, `bytes`, and `truncated`. `working_tree` means staged plus unstaged changes compared with `HEAD`.
-- `git.log`: `commits` with `hash`, `short_hash`, `author_name`, optional `author_email`, `author_date`, and `subject`. `author_email` is omitted unless requested.
+- `git.log`: `commits` with `hash`, `short_hash`, `author_name`, `author_date`, and `subject`. Author email is not returned in the first slice.
 - `git.blame`: `path`, `start_line`, `end_line`, `lines` with commit hash, author name, timestamp, line number, and line text. Author email is not returned in the first slice.
 - `git.branches`: `current`, `branches`, and optional `truncated`.
 - `git.conflicts.list`: `conflicts` with `path`, `xy_status`, and `conflict_type` where derivable.
@@ -128,6 +131,7 @@ Error results should use stable reason codes:
 - `invalid_git_output`
 - `git_command_failed`
 - `git_command_timeout`
+
 Truncation is represented as `truncated: true` plus optional warning metadata, not as command failure.
 
 ## Profile Grants
@@ -147,9 +151,9 @@ Product Owner and Documentation Writer should not receive Git read tools by defa
 
 The built-in `_GIT_READ_TOOLS` constant already names the likely first Git tool family, including `git.conflicts.read`. The implementation should align the actual tool list with that constant and profile metadata.
 
-## Observability And Evaluation Contract
+## Shared Observability And Evaluation Contract
 
-This slice should make Git tool use easy to evaluate later without adding a full eval product now.
+This contract is not Git-specific. It should become the standard metadata and event shape for all MCP tools: built-in modules, governed virtual commands, external federated tools, and future standalone gateway tools. The Git module should be the first new tool family to adopt it cleanly, while a separate follow-up migrates existing tools.
 
 Each tool definition should include evaluation-oriented metadata under a stable metadata key, for example:
 
@@ -160,7 +164,8 @@ Each tool definition should include evaluation-oriented metadata under a stable 
     "tool_prompt_version": "2026.06.04",
     "task_families": ["code_review", "merge_conflict_triage", "repository_research"],
     "expected_result_kind": "structured_git_state",
-    "success_signals": ["used_bounded_path", "selected_correct_scope", "avoided_mutation"]
+    "success_signals": ["used_bounded_path", "selected_correct_scope", "avoided_mutation"],
+    "prompt_variant": "builtin"
   }
 }
 ```
@@ -172,6 +177,7 @@ The exact key names can be adjusted to match existing MCP metadata conventions, 
 - Task families where the tool is expected to help.
 - Machine-readable success signals for later eval labeling.
 - Risk and capability labels for profile comparison.
+- A prompt variant or catalog source when the description/recommendation has been patched separately from executable policy.
 
 Each execution result should include non-sensitive evaluation metadata:
 
@@ -186,16 +192,21 @@ Each execution result should include non-sensitive evaluation metadata:
 
 Do not include raw diff text, file contents, full local absolute paths, secrets, or author emails in metrics labels. Rich traces may include outputs only when an explicit eval capture mode is enabled by the host and redaction policy allows it.
 
+The shared contract should apply to all tools in later work. For non-Git tools, the same shape should describe the tool family, prompt/description id, profile/mode, requested action, result kind, safety/risk labels, output truncation, reason code, and latency without putting sensitive payload data into metrics labels.
+
 The later standalone MCP eval surface can use this contract to compare:
 
 - model success rate by profile and tool grant set
 - tool prompt variants for the same tool
 - misuse rate, such as calling `git.diff` when `git.status` was sufficient
+- tool discovery quality by category and profile grants
 - truncation and retry behavior
 - whether models avoid mutation requests when only read tools are granted
 - whether a profile overexposes tools and causes lower precision
 
 This also supports A/B prompt tests for tool descriptions without changing executable policy. Tool prompt metadata should be patchable separately from executable policy, consistent with the profile recommendation catalog direction.
+
+The implementation plan for the Git slice should not attempt to retrofit every existing tool. It should add the reusable helper shape or constants needed by `GitModule`, then create a separate follow-up task for full MCP-wide adoption.
 
 ## Security Considerations
 
@@ -210,9 +221,11 @@ This also supports A/B prompt tests for tool descriptions without changing execu
 - Avoid network-capable Git operations.
 - Avoid config writes and hooks.
 - Bound process runtime and output.
+- Keep ignored files out of `git.status` in this slice.
+- Bound `git.conflicts.read` by both file byte budget and hunk count before returning conflict text.
 - Do not log raw diffs or absolute local paths.
 - Treat stderr as potentially sensitive and return bounded, sanitized text.
-- Treat author emails as personal data: omit them by default and never use them as metrics labels.
+- Treat author emails as personal data: do not return them in the first slice and never use them as metrics labels.
 
 ## Testing Strategy
 
@@ -225,16 +238,18 @@ Use TDD for implementation. Focused tests should cover:
 - Git root outside workspace failure.
 - Path containment and path normalization.
 - `git.status` porcelain parsing for staged, unstaged, untracked, ignored, and conflicted files.
+- `git.status` ignores ignored files in first-slice output.
 - `git.diff` scopes for unstaged, staged, and working tree.
+- Pathspec separator handling for paths that start with `-`.
 - Diff byte truncation.
 - `git.log` limit handling and path filtering.
-- `git.log` email omission by default.
+- `git.log` and `git.blame` omit author emails.
 - `git.blame` line range validation and bounded results.
 - `git.branches` current branch parsing.
 - `git.conflicts.list` conflict status parsing.
 - `git.conflicts.read` bounded hunk parsing.
 - Profile preset grants.
-- Metrics/eval metadata presence without sensitive labels.
+- Shared metrics/eval metadata presence without sensitive labels.
 
 Verification should include:
 
@@ -267,3 +282,4 @@ A later PR can make the module default-on after the security and platform behavi
 - LSP/code-intelligence read tools.
 - Git mutation tools behind explicit approval and profile gates.
 - Standalone MCP eval endpoints for trace export, prompt variant comparison, and tool-use benchmark runs.
+- MCP-wide adoption of the shared tool observability/evaluation contract across all built-in, virtual, and external tools.
