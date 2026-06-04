@@ -726,7 +726,6 @@ class GitModule(BaseModule):
                 return unstaged_result
 
             sections: list[dict[str, Any]] = []
-            combined_parts: list[str] = []
             remaining = max_bytes
             truncated = bool(staged_result.truncated or unstaged_result.truncated)
             for section_scope, command_result in (
@@ -738,16 +737,19 @@ class GitModule(BaseModule):
                 remaining = max(0, remaining - len(diff_text.encode("utf-8")))
                 truncated = truncated or text_truncated
                 sections.append({"scope": section_scope, "text": diff_text, "bytes": byte_count})
-                if diff_text:
-                    combined_parts.append(diff_text)
+            combined_text, combined_truncated = self._combine_section_texts_bounded(
+                sections,
+                max_bytes=max_bytes,
+            )
+            truncated = truncated or combined_truncated
 
             response: dict[str, Any] = {
                 "ok": True,
                 "repository_root": repository.repository_root_relative,
                 "scope": "working_tree",
-                "text": "\n".join(combined_parts),
+                "text": combined_text,
                 "sections": sections,
-                "bytes": sum(section["bytes"] for section in sections),
+                "bytes": len(combined_text.encode("utf-8")),
                 "truncated": truncated,
                 "limits": self._effective_limits(tool_name, args),
                 "git": self._safe_git_metadata(unstaged_result, subcommand="diff"),
@@ -1807,6 +1809,37 @@ class GitModule(BaseModule):
         if len(encoded) <= max_bytes:
             return value, False
         return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
+
+    def _combine_section_texts_bounded(
+        self,
+        sections: list[dict[str, Any]],
+        *,
+        max_bytes: int,
+    ) -> tuple[str, bool]:
+        combined = ""
+        truncated = False
+
+        for section in sections:
+            section_text = str(section.get("text") or "")
+            if not section_text:
+                continue
+
+            prefix = "\n" if combined else ""
+            available = max_bytes - len(combined.encode("utf-8"))
+            if available <= 0:
+                truncated = True
+                break
+
+            next_text, text_truncated = self._truncate_text_bytes(
+                f"{prefix}{section_text}",
+                available,
+            )
+            combined += next_text
+            truncated = truncated or text_truncated
+            if text_truncated:
+                break
+
+        return combined, truncated
 
     def _optional_safe_path(self, value: Any) -> str | None:
         if value is None:

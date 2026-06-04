@@ -1051,9 +1051,49 @@ async def test_git_diff_working_tree_returns_staged_and_unstaged_sections(tmp_pa
         {"scope": "staged", "text": "staged-diff", "bytes": 11},
         {"scope": "unstaged", "text": "unstaged-diff", "bytes": 13},
     ]
-    assert result["bytes"] == 24  # nosec B101
+    assert result["bytes"] == len(result["text"].encode("utf-8"))  # nosec B101
+    assert result["bytes"] == 25  # nosec B101
     assert "diff" not in result  # nosec B101
     assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_diff_working_tree_bounds_combined_text_including_separator(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    runner = _SequenceGitRunner(
+        [
+            _git_result(stdout=f"{workspace_root}\n"),
+            _git_result(stdout="staged-diff"),
+            _git_result(stdout="unstaged-diff"),
+        ]
+    )
+    module = _module(workspace_root_resolver=resolver, runner=runner)
+
+    result = await module.execute_tool(
+        "git.diff",
+        {"scope": "working_tree", "context_lines": 2, "max_bytes": 12},
+        context=_context(),
+    )
+
+    assert result["ok"] is True  # nosec B101
+    assert result["text"] == "staged-diff\n"  # nosec B101
+    assert result["bytes"] == len(result["text"].encode("utf-8"))  # nosec B101
+    assert result["bytes"] == 12  # nosec B101
+    assert len(result["text"].encode("utf-8")) <= result["limits"]["max_bytes"]  # nosec B101
+    assert result["sections"] == [  # nosec B101
+        {"scope": "staged", "text": "staged-diff", "bytes": 11},
+        {"scope": "unstaged", "text": "u", "bytes": 1},
+    ]
+    assert result["truncated"] is True  # nosec B101
 
 
 @pytest.mark.asyncio
