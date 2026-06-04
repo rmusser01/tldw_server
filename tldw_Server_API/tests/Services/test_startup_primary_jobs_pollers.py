@@ -437,7 +437,7 @@ async def test_start_core_jobs_worker_registers_with_worker_inventory_when_enabl
         (
             "_start_workspace_file_inventory_jobs_worker",
             "WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED",
-            "workspaces",
+            "workspace_file_inventory_jobs_task",
             "workspace_file_inventory_jobs_task",
             "_run_workspace_file_inventory_jobs_worker_service",
         ),
@@ -573,6 +573,68 @@ async def test_start_workspace_file_inventory_jobs_worker_skips_when_disabled(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_workspace_file_inventory_jobs_worker_registers_legacy_enabled_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+    captured_stop_events: list[object] = []
+    created_coroutines: list[object] = []
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "workspace-inventory-stop")
+
+    def _create_task(coro: object) -> str:
+        created_coroutines.append(coro)
+        return "workspace-inventory-task"
+
+    monkeypatch.setattr(startup_pollers, "_create_task", _create_task)
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_workspace_file_inventory_jobs_worker_service",
+        lambda stop_event: captured_stop_events.append(stop_event) or "workspace-inventory-coro",
+    )
+
+    def _register_owned_job_poller(app, owned_job_pollers, *, name, task, stop_event):
+        registrations.append(
+            {
+                "app": app,
+                "owned_job_pollers": owned_job_pollers,
+                "name": name,
+                "task": task,
+                "stop_event": stop_event,
+            }
+        )
+
+    route_checks: list[tuple[str, str]] = []
+    owned_job_pollers: list[object] = []
+    stop_event, task = await startup_pollers._start_workspace_file_inventory_jobs_worker(
+        app="app",
+        owned_job_pollers=owned_job_pollers,
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route: route_checks.append((flag, route))
+        or (flag, route)
+        == ("WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED", "workspace_file_inventory_jobs_task"),
+    )
+
+    assert route_checks == [
+        ("WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED", "workspace_file_inventory_jobs_task")
+    ]
+    assert stop_event == "workspace-inventory-stop"
+    assert task == "workspace-inventory-task"
+    assert captured_stop_events == ["workspace-inventory-stop"]
+    assert created_coroutines == ["workspace-inventory-coro"]
+    assert registrations == [
+        {
+            "app": "app",
+            "owned_job_pollers": owned_job_pollers,
+            "name": "workspace_file_inventory_jobs_task",
+            "task": "workspace-inventory-task",
+            "stop_event": "workspace-inventory-stop",
+        }
+    ]
 
 
 @pytest.mark.asyncio

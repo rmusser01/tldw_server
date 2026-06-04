@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Workspaces.models import (
 
 _PROJECT_ROOT_BACKENDS = frozenset({"host_local", "sandbox_volume"})
 _PARTIAL_REASON = "dependency_resolution_partial"
+_PARTIAL_MESSAGE = "Workspace dependency resolution failed."
 
 
 def build_workspace_core_context(
@@ -151,6 +152,8 @@ def _redacted_path_hint(value: Any) -> str:
         if windows_path.is_absolute() or raw_value.startswith("\\\\"):
             return windows_path.name or "project_root"
         return PurePath(raw_value).name or "project_root"
+    if "/" in raw_value or "\\" in raw_value:
+        return windows_path.name or PurePath(raw_value).name or "project_root"
     return raw_value
 
 
@@ -191,29 +194,38 @@ def _partial_errors(partial_errors: Any) -> list[dict[str, Any]]:
     if not partial_errors:
         return []
     if isinstance(partial_errors, Mapping):
-        return [dict(partial_errors)]
+        return [_sanitized_partial_error(partial_errors)]
     if not isinstance(partial_errors, list):
         return [
             {
                 "scope": "workspace",
                 "code": _PARTIAL_REASON,
-                "message": "Workspace dependency resolution returned malformed errors.",
+                "message": _PARTIAL_MESSAGE,
             }
         ]
 
     errors: list[dict[str, Any]] = []
     for error in partial_errors:
         if isinstance(error, Mapping):
-            errors.append(dict(error))
+            errors.append(_sanitized_partial_error(error))
         else:
             errors.append(
                 {
                     "scope": "workspace",
                     "code": _PARTIAL_REASON,
-                    "message": "Workspace dependency resolution returned a malformed error.",
+                    "message": _PARTIAL_MESSAGE,
                 }
             )
     return errors
+
+
+def _sanitized_partial_error(error: Mapping[str, Any]) -> dict[str, Any]:
+    scope = str(error.get("scope") or "workspace").strip() or "workspace"
+    return {
+        "scope": scope,
+        "code": _PARTIAL_REASON,
+        "message": _PARTIAL_MESSAGE,
+    }
 
 
 def _workspace_services(service_capabilities: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:

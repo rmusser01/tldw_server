@@ -378,7 +378,10 @@ async def _start_workspace_file_inventory_jobs_worker(
     """Start the Workspace file inventory jobs poller and return its shutdown handles."""
 
     try:
-        enabled = should_start_worker("WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED", "workspaces")
+        enabled = should_start_worker(
+            "WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED",
+            "workspace_file_inventory_jobs_task",
+        )
         if not enabled:
             logger.info(
                 "Workspace file inventory Jobs worker disabled by flag "

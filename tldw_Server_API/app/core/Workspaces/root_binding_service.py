@@ -54,6 +54,13 @@ class WorkspaceRootConflictError(WorkspaceRootServiceError):
     code = "workspace_primary_root_exists"
 
 
+class WorkspaceRootNotFoundError(WorkspaceRootServiceError):
+    """Raised when the target workspace cannot be found."""
+
+    status_code = 404
+    code = "workspace_not_found"
+
+
 class WorkspaceRootConfigurationError(WorkspaceRootServiceError):
     """Raised when root validation cannot proceed because required config is missing."""
 
@@ -215,7 +222,7 @@ def _load_workspace_version_for_attach(db: Any, workspace_id: str) -> int:
         raise
 
     if workspace is None:
-        raise WorkspaceRootConflictError(
+        raise WorkspaceRootNotFoundError(
             "Workspace was not found.",
             code="workspace_not_found",
         )
@@ -448,11 +455,18 @@ def _resolve_sandbox_root_for_inventory_scan(
             code="sandbox_mount_not_ready",
             message="Workspace sandbox volume is not mounted.",
         )
-    mount = sandbox_mount_resolver.resolve_workspace_volume_mount(
-        workspace_id=str(root.get("workspace_id") or "").strip(),
-        root_id=str(root.get("root_id") or "").strip(),
-        sandbox_volume_id=sandbox_volume_id,
-    )
+    try:
+        mount = sandbox_mount_resolver.resolve_workspace_volume_mount(
+            workspace_id=str(root.get("workspace_id") or "").strip(),
+            root_id=str(root.get("root_id") or "").strip(),
+            sandbox_volume_id=sandbox_volume_id,
+        )
+    except Exception:
+        return _inventory_root_failure(
+            backend="sandbox_volume",
+            code="sandbox_mount_resolution_failed",
+            message="Workspace sandbox volume mount could not be resolved.",
+        )
     if mount.state != "ready" or not mount.local_path:
         return _inventory_root_failure(
             backend="sandbox_volume",
@@ -543,11 +557,19 @@ def _normalize_sandbox_volume_request(
         )
 
     resolver = sandbox_resolver or DefaultSandboxVolumeResolver()
-    binding = resolver.validate_workspace_volume(
-        workspace_id=workspace_id,
-        user_id=user_id,
-        sandbox_volume_id=sandbox_volume_id,
-    )
+    try:
+        binding = resolver.validate_workspace_volume(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            sandbox_volume_id=sandbox_volume_id,
+        )
+    except WorkspaceRootServiceError:
+        raise
+    except Exception as exc:
+        raise WorkspaceRootConfigurationError(
+            "Workspace sandbox volume resolver failed.",
+            code="workspace_sandbox_volume_resolver_failed",
+        ) from exc
     if str(binding.sandbox_volume_id or "").strip() != sandbox_volume_id:
         raise WorkspaceRootConfigurationError(
             "Workspace sandbox volume resolver returned a mismatched volume id.",

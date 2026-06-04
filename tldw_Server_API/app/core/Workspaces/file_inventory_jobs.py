@@ -1,3 +1,11 @@
+"""Jobs-backed enqueue helpers for Workspace file inventory scans.
+
+This module owns the small boundary between Workspace root state stored in
+ChaChaNotes and the shared Jobs manager. It creates durable scan records before
+enqueueing Jobs work, attaches the resulting Jobs row back to the scan record,
+and reports enqueue failures back into the Workspace inventory projection.
+"""
+
 from __future__ import annotations
 
 import os
@@ -10,6 +18,8 @@ WORKSPACE_FILE_INVENTORY_JOB_TYPE = "workspace_file_inventory_scan"
 
 
 class WorkspaceFileInventoryEnqueueError(RuntimeError):
+    """Raised when a Workspace inventory scan record cannot be queued as a Jobs task."""
+
     def __init__(
         self,
         message: str = "Failed to enqueue Workspace file inventory scan.",
@@ -21,6 +31,13 @@ class WorkspaceFileInventoryEnqueueError(RuntimeError):
 
 
 def workspace_file_inventory_jobs_queue() -> str:
+    """Return the Jobs queue name for Workspace file inventory scan work.
+
+    The queue defaults to ``"default"`` and can be overridden with the
+    ``WORKSPACE_FILE_INVENTORY_JOBS_QUEUE`` environment variable. Empty or
+    whitespace-only overrides are ignored so workers and enqueuers always share
+    a non-empty queue name.
+    """
     queue = (os.getenv("WORKSPACE_FILE_INVENTORY_JOBS_QUEUE") or "default").strip()
     return queue or "default"
 
@@ -34,6 +51,20 @@ def build_workspace_file_inventory_job_payload(
     policy_fingerprint: str,
     requested_by: str | None,
 ) -> dict[str, Any]:
+    """Build the durable Jobs payload for a Workspace inventory scan.
+
+    Args:
+        workspace_id: Workspace identifier whose primary root is being scanned.
+        root_id: Workspace project root identifier captured for the scan.
+        root_version: Project root version that the scan should operate on.
+        scan_id: Durable scan record identifier created before enqueue.
+        policy_fingerprint: Ignore-policy fingerprint used for idempotency and
+            stale-scan detection.
+        requested_by: Optional user or system actor that requested the scan.
+
+    Returns:
+        A JSON-serializable payload for ``JobManager.create_job``.
+    """
     payload: dict[str, Any] = {
         "workspace_id": str(workspace_id).strip(),
         "root_id": str(root_id).strip(),
@@ -57,6 +88,33 @@ def enqueue_workspace_file_inventory_scan_job(
     owner_user_id: str | None,
     job_manager: JobManager | None = None,
 ) -> dict[str, Any]:
+    """Create a scan record, enqueue Jobs work, and return the attached status.
+
+    Args:
+        db: CharactersRAGDB-like object that supports Workspace file inventory
+            scan persistence methods.
+        workspace_id: Workspace identifier whose root should be scanned.
+        root_id: Project root identifier to scan.
+        root_version: Version of the root snapshot requested by the caller.
+        policy_fingerprint: Ignore-policy fingerprint for this scan request.
+        requested_by: Optional user or system actor requesting the scan.
+        owner_user_id: Optional Jobs owner used for ownership/RLS attribution.
+        job_manager: Optional Jobs manager injection for tests; when omitted a
+            default ``JobManager`` is constructed.
+
+    Returns:
+        A mapping with ``scan``, ``job``, and ``status`` entries after the Jobs
+        row has been attached back to the scan record.
+
+    Raises:
+        WorkspaceFileInventoryEnqueueError: If ``JobManager.create_job`` fails.
+
+    Notes:
+        The scan record is created before enqueue so failure state can be
+        projected back to the Workspace. The Jobs idempotency key is based on the
+        durable scan id, so retries for the same scan do not create duplicate
+        Jobs rows.
+    """
     manager = job_manager or JobManager()
     scan = db.begin_workspace_file_inventory_scan(
         workspace_id,

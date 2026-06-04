@@ -120,6 +120,22 @@ def test_scanner_honors_builtin_ignore_policy_without_emitting_ignored_items(tmp
     assert result.counts["ignored"] == 2
 
 
+def test_scanner_ignores_paths_before_bounds_diagnostics(tmp_path: Path) -> None:
+    ignored_dir = tmp_path / "very-long-generated-directory-name"
+    ignored_dir.mkdir()
+
+    result = scan_workspace_file_inventory(
+        tmp_path,
+        policy=build_inventory_ignore_policy(workspace_patterns=["very-long-generated-directory-name/"]),
+        bounds=InventoryScanBounds(max_path_length=8),
+    )
+
+    assert result.items == ()
+    assert result.diagnostics == ()
+    assert result.coverage_complete is True
+    assert result.counts["ignored"] == 1
+
+
 def test_scanner_records_partial_diagnostics_for_directory_listing_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -9,7 +9,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 
 @pytest.fixture
 def db(tmp_path):
-    return CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    database = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    try:
+        yield database
+    finally:
+        database.close_connection()
 
 
 def test_workspace_defaults_to_research_profile(db):

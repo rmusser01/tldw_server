@@ -69,7 +69,7 @@ def test_diagnostics_are_bounded_and_absolute_paths_are_redacted() -> None:
 
     assert len(diagnostics) == MAX_INVENTORY_DIAGNOSTICS
     assert diagnostics[0]["code"] == "permission_denied"
-    assert diagnostics[0]["path_hint"] == "secret-0.txt"
+    assert "path_hint" not in diagnostics[0]
     assert "/home/alice" not in diagnostics[0]["message"]
 
 
@@ -92,8 +92,33 @@ def test_diagnostics_drop_malformed_entries_and_default_missing_fields() -> None
         },
         {
             "code": "scan_diagnostic",
-            "path_hint": "outside/.env",
             "message": "A path could not be inspected.",
+        },
+    ]
+
+
+def test_root_relative_diagnostics_omit_unsafe_path_hints() -> None:
+    diagnostics = bounded_inventory_diagnostics(
+        [
+            {"code": "scan_failed", "path_hint": "../outside/.env", "message": "failed"},
+            {"code": "scan_failed", "path_hint": "/Users/alice/project/.env", "message": "failed"},
+            {"code": "scan_failed", "path_hint": "src/app.py", "message": "failed"},
+        ]
+    )
+
+    assert diagnostics == [
+        {
+            "code": "scan_failed",
+            "message": "failed",
+        },
+        {
+            "code": "scan_failed",
+            "message": "failed",
+        },
+        {
+            "code": "scan_failed",
+            "path_hint": "src/app.py",
+            "message": "failed",
         },
     ]
 

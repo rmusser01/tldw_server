@@ -196,6 +196,8 @@ def _redacted_path_hint(value: Any) -> str:
         if windows_path.is_absolute() or raw_value.startswith("\\\\"):
             return windows_path.name or "project_root"
         return PurePath(raw_value).name or "project_root"
+    if "/" in raw_value or "\\" in raw_value:
+        return windows_path.name or PurePath(raw_value).name or "project_root"
     return raw_value
 
 

@@ -186,6 +186,19 @@ def scan_workspace_file_inventory(
                 break
 
             relative_path = _join_relative_path(parent_relative_path, entry.name)
+            try:
+                entry_is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                entry_is_dir = False
+            decision = should_ignore_inventory_path(
+                relative_path,
+                is_dir=entry_is_dir,
+                policy=policy,
+            )
+            if decision.ignored:
+                ignored_count += 1
+                continue
+
             if len(relative_path) > normalized_bounds.max_path_length:
                 coverage_complete = False
                 _add_diagnostic(
@@ -219,15 +232,6 @@ def scan_workspace_file_inventory(
                     path_hint=relative_path,
                     message="A path could not be inspected.",
                 )
-                continue
-
-            decision = should_ignore_inventory_path(
-                relative_path,
-                is_dir=metadata["entry_kind"] == "directory",
-                policy=policy,
-            )
-            if decision.ignored:
-                ignored_count += 1
                 continue
 
             if metadata["entry_kind"] == "file" and files_recorded >= normalized_bounds.max_files:

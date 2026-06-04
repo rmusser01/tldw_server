@@ -132,21 +132,56 @@ def test_context_resolution_becomes_partial_for_dependency_failures() -> None:
     assert context["resolution"] == {
         "status": "partial",
         "partial_errors": [
-            {"scope": "mcp", "code": "mcp_policy_resolution_failed", "message": "MCP unavailable"}
+            {
+                "scope": "mcp",
+                "code": "dependency_resolution_partial",
+                "message": "Workspace dependency resolution failed.",
+            }
         ],
     }
     assert context["allowed_actions"]["run_mcp_tools"] == {
         "allowed": False,
-        "reason_code": "mcp_policy_resolution_failed",
+        "reason_code": "dependency_resolution_partial",
     }
     assert context["allowed_actions"]["use_mcp_tools"] == {
         "allowed": False,
-        "reason_code": "mcp_policy_resolution_failed",
+        "reason_code": "dependency_resolution_partial",
     }
     assert context["allowed_actions"]["use_acp_agents"] == {
         "allowed": False,
         "reason_code": "dependency_resolution_partial",
     }
+
+
+def test_context_partial_errors_do_not_echo_upstream_messages() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root={"root_id": "root-1", "backend": "host_local", "root_state": "attached"},
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[
+            {
+                "scope": "mcp",
+                "code": "custom_backend_code",
+                "message": "/Users/alice/private/project failed",
+            },
+            "raw /Users/alice/private/project failure",
+        ],
+    )
+
+    assert context["resolution"]["partial_errors"] == [
+        {
+            "scope": "mcp",
+            "code": "dependency_resolution_partial",
+            "message": "Workspace dependency resolution failed.",
+        },
+        {
+            "scope": "workspace",
+            "code": "dependency_resolution_partial",
+            "message": "Workspace dependency resolution failed.",
+        },
+    ]
+    assert "/Users/alice" not in str(context["resolution"]["partial_errors"])
 
 
 def test_project_workspace_preview_and_file_indexing_fail_closed_until_ready() -> None:

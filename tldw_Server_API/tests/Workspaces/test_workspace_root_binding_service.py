@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Workspaces import root_binding_service
 from tldw_Server_API.app.core.Workspaces.root_binding_service import (
+    SandboxInventoryMount,
     SandboxVolumeBinding,
     WorkspaceRootAttachRequest,
     WorkspaceRootConfigurationError,
@@ -420,6 +421,18 @@ class _MismatchedSandboxResolver:
         return SandboxVolumeBinding(sandbox_volume_id="different", state="ready")
 
 
+@dataclass(frozen=True)
+class _FailingSandboxResolver:
+    def validate_workspace_volume(self, *, workspace_id, user_id, sandbox_volume_id):
+        raise RuntimeError("backend leaked /Users/alice/private/project")
+
+
+@dataclass(frozen=True)
+class _FailingSandboxMountResolver:
+    def resolve_workspace_volume_mount(self, *, workspace_id, root_id, sandbox_volume_id):
+        raise RuntimeError("mount leaked /Users/alice/private/project")
+
+
 def test_sandbox_resolver_invalid_state_is_rejected(db):
     db.upsert_workspace("ws-1", "Workspace")
 
@@ -455,6 +468,26 @@ def test_sandbox_resolver_volume_id_mismatch_is_rejected(db):
         )
 
     assert exc_info.value.code == "workspace_sandbox_volume_id_mismatch"
+    assert db.get_workspace_primary_root("ws-1") is None
+
+
+def test_sandbox_resolver_exception_is_wrapped_as_configuration_error(db):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
+        attach_primary_workspace_root(
+            db=db,
+            workspace_id="ws-1",
+            user_id="user-1",
+            request=WorkspaceRootAttachRequest(
+                backend="sandbox_volume",
+                sandbox_volume_id="volume-1",
+            ),
+            sandbox_resolver=_FailingSandboxResolver(),
+        )
+
+    assert exc_info.value.code == "workspace_sandbox_volume_resolver_failed"
+    assert "/Users/alice" not in str(exc_info.value)
     assert db.get_workspace_primary_root("ws-1") is None
 
 
@@ -594,7 +627,7 @@ def test_db_conflict_from_workspace_load_is_wrapped_as_version_mismatch():
 
 
 def test_missing_workspace_load_is_wrapped_as_workspace_not_found():
-    with pytest.raises(WorkspaceRootConflictError) as exc_info:
+    with pytest.raises(root_binding_service.WorkspaceRootNotFoundError) as exc_info:
         attach_primary_workspace_root(
             db=_MissingWorkspaceDB(),
             workspace_id="ws-missing",
@@ -606,6 +639,7 @@ def test_missing_workspace_load_is_wrapped_as_workspace_not_found():
         )
 
     assert exc_info.value.code == "workspace_not_found"
+    assert exc_info.value.status_code == 404
 
 
 def test_db_conflict_from_current_root_load_is_wrapped_as_version_mismatch():
@@ -662,3 +696,46 @@ def test_service_auto_expected_version_prevents_read_before_write_replacement_ra
 
     assert exc_info.value.code == "workspace_version_mismatch"
     assert db.get_workspace_primary_root("ws-1")["root_id"] == "other"
+
+
+def test_inventory_sandbox_mount_resolver_exception_returns_failure_result():
+    result = root_binding_service.resolve_workspace_root_for_inventory_scan(
+        root={
+            "workspace_id": "ws-1",
+            "root_id": "primary",
+            "backend": "sandbox_volume",
+            "sandbox_volume_id": "volume-1",
+        },
+        sandbox_mount_resolver=_FailingSandboxMountResolver(),
+    )
+
+    assert result.ok is False
+    assert result.backend == "sandbox_volume"
+    assert result.failure_code == "sandbox_mount_resolution_failed"
+    assert result.message == "Workspace sandbox volume mount could not be resolved."
+
+
+def test_inventory_sandbox_mount_ready_resolver_still_returns_local_path(tmp_path):
+    class _ReadySandboxMountResolver:
+        def resolve_workspace_volume_mount(self, *, workspace_id, root_id, sandbox_volume_id):
+            return SandboxInventoryMount(
+                sandbox_volume_id=sandbox_volume_id,
+                state="ready",
+                local_path=str(tmp_path),
+            )
+
+    result = root_binding_service.resolve_workspace_root_for_inventory_scan(
+        root={
+            "workspace_id": "ws-1",
+            "root_id": "primary",
+            "backend": "sandbox_volume",
+            "sandbox_volume_id": "volume-1",
+            "version": 7,
+        },
+        sandbox_mount_resolver=_ReadySandboxMountResolver(),
+    )
+
+    assert result.ok is True
+    assert result.local_path == tmp_path.resolve()
+    assert result.root_snapshot_token is not None
+    assert result.root_snapshot_token.startswith("primary:7:")

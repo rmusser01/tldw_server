@@ -106,6 +106,26 @@ def test_unsupported_gitignore_constructs_produce_diagnostics_and_fail_closed() 
     assert should_ignore_inventory_path("src/cache", is_dir=True, policy=policy).reason == "gitignore:**/cache"
 
 
+def test_unsupported_recursive_glob_patterns_remain_conservative() -> None:
+    policy = build_inventory_ignore_policy(
+        gitignore_texts=[
+            (
+                ".gitignore",
+                """
+                src/**/cache
+                """,
+            )
+        ]
+    )
+
+    assert should_ignore_inventory_path("src/pkg/cache", is_dir=True, policy=policy).reason == (
+        "gitignore:src/**/cache"
+    )
+    assert should_ignore_inventory_path("src/pkg/cache/file.txt", is_dir=False, policy=policy).reason == (
+        "gitignore:src/**/cache"
+    )
+
+
 def test_malformed_and_oversized_gitignore_inputs_produce_diagnostics_without_crashing() -> None:
     policy = build_inventory_ignore_policy(
         gitignore_texts=[

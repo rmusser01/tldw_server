@@ -187,8 +187,6 @@ def _parse_ignore_pattern(
         match_source = match_source.rstrip("/")
     anchored = match_source.startswith("/")
     match_pattern = match_source.lstrip("/")
-    if unsupported:
-        match_pattern = match_pattern.replace("**/", "").replace("**", "*")
     if not match_pattern:
         return None
 
@@ -225,18 +223,12 @@ def _rule_matches(
         return any(fnmatchcase(segment, pattern) for segment in segments[:-1])
 
     if rule.anchored:
-        return (
-            fnmatchcase(relative_path, pattern)
-            or relative_path == pattern
-            or relative_path.startswith(f"{pattern}/")
-        )
+        return _path_or_parent_matches_pattern(relative_path, pattern)
 
     if "/" in pattern:
         return (
-            fnmatchcase(relative_path, pattern)
-            or relative_path == pattern
+            _path_or_parent_matches_pattern(relative_path, pattern)
             or relative_path.endswith(f"/{pattern}")
-            or relative_path.startswith(f"{pattern}/")
         )
 
     basename = segments[-1]
@@ -245,6 +237,20 @@ def _rule_matches(
     if is_dir and fnmatchcase(relative_path, pattern):
         return True
     return any(segment == pattern for segment in segments[:-1])
+
+
+def _path_or_parent_matches_pattern(relative_path: str, pattern: str) -> bool:
+    if fnmatchcase(relative_path, pattern) or relative_path == pattern:
+        return True
+    if relative_path.startswith(f"{pattern}/"):
+        return True
+
+    parent = relative_path
+    while "/" in parent:
+        parent = parent.rsplit("/", 1)[0]
+        if fnmatchcase(parent, pattern) or parent == pattern:
+            return True
+    return False
 
 
 def _is_unsupported_pattern(pattern: str) -> bool:

@@ -113,7 +113,10 @@ def bounded_inventory_diagnostics(
             "code": _sanitize_diagnostic_code(item.get("code")),
             "message": _sanitize_diagnostic_message(item.get("message")),
         }
-        path_hint = redact_inventory_path_hint(item.get("path_hint"))
+        if root_relative_only:
+            path_hint = _normalize_inventory_relative_path(item.get("path_hint"))
+        else:
+            path_hint = redact_inventory_path_hint(item.get("path_hint"))
         if path_hint:
             diagnostic["path_hint"] = path_hint
         diagnostics.append(diagnostic)

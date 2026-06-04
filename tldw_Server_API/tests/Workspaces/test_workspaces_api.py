@@ -159,6 +159,11 @@ def _put_workspace_primary_root_response(
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
 
+def test_root_path_hint_redacts_relative_path_segments() -> None:
+    assert workspaces_endpoint._root_path_hint({"path_hint": "client/acme/repo"}) == "repo"
+    assert workspaces_endpoint._root_path_hint({"display_name": "client\\acme\\repo"}) == "repo"
+
+
 class TestWorkspaceLifecycle:
     def test_upsert_then_get(self, db):
         ws = db.upsert_workspace("ws-1", "My Workspace", study_materials_policy="workspace")

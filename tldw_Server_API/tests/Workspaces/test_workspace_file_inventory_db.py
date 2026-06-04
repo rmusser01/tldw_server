@@ -160,7 +160,7 @@ def test_enqueue_failure_marks_scan_and_root_failed_and_allows_retry(db: Charact
     )
 
     assert failed["state"] == "failed"
-    assert json.loads(failed["diagnostics_json"])[0]["path_hint"] == "private.txt"
+    assert "path_hint" not in json.loads(failed["diagnostics_json"])[0]
     assert db.get_workspace_primary_root("ws-1")["file_inventory_state"] == "queued"
     assert retry["scan_id"] != scan["scan_id"]
 
