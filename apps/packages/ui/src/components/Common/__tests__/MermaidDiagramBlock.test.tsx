@@ -172,6 +172,25 @@ describe("MermaidDiagramBlock", () => {
     expect(clickSpy).toHaveBeenCalled()
   })
 
+  it("sanitizes unsafe generated SVG before inline download", async () => {
+    mermaidMock.renderState = {
+      status: "success",
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><text>Safe inline diagram</text></svg>'
+    }
+
+    render(<MermaidDiagramBlock source={source} />)
+
+    const downloadButton = await screen.findByRole("button", {
+      name: "Download Mermaid SVG"
+    })
+    fireEvent.click(downloadButton)
+
+    const downloadedSvg = blobParts?.join("")
+    expect(downloadedSvg).toContain("Safe inline diagram")
+    expect(downloadedSvg).not.toContain("<script")
+    expect(downloadedSvg).not.toContain("onload")
+  })
+
   it("opens the Mermaid preview dialog with the generated SVG", async () => {
     render(<MermaidDiagramBlock source={source} />)
 

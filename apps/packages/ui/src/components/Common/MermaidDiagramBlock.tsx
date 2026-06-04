@@ -7,6 +7,7 @@ import {
   WorkflowIcon
 } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import DOMPurify from "dompurify"
 import Mermaid, { type MermaidRenderState } from "./Mermaid"
 import { MermaidPreviewDialog } from "./MermaidPreviewDialog"
 
@@ -39,7 +40,14 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   const [previewOpen, setPreviewOpen] = useState(false)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const previousSourceRef = useRef(source)
-  const hasGeneratedSvg = Boolean(generatedSvg)
+  const sanitizedGeneratedSvg = useMemo(
+    () =>
+      generatedSvg
+        ? DOMPurify.sanitize(generatedSvg, { USE_PROFILES: { svg: true } })
+        : undefined,
+    [generatedSvg]
+  )
+  const hasGeneratedSvg = Boolean(sanitizedGeneratedSvg)
   const isRenderError = renderStatus === "error"
 
   useEffect(() => {
@@ -93,9 +101,9 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   }, [source])
 
   const handleDownloadSvg = useCallback(() => {
-    if (!generatedSvg) return
-    downloadSvg(generatedSvg, blockIndex)
-  }, [blockIndex, generatedSvg])
+    if (!sanitizedGeneratedSvg) return
+    downloadSvg(sanitizedGeneratedSvg, blockIndex)
+  }, [blockIndex, sanitizedGeneratedSvg])
 
   const headerId = useMemo(() => {
     if (typeof blockIndex === "number") {
