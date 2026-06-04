@@ -239,7 +239,7 @@ def _recommended_entry(
         return None
 
     tool_id = _first_text(recommendation, "id", "tool_id", "name")
-    if tool_id is None or not _recommendation_visible(profile, recommendation, tool_id):
+    if tool_id is None:
         return None
 
     metadata = (
@@ -314,27 +314,6 @@ def _installed_tool_allowed(profile: MCPProfile, tool: dict[str, Any]) -> bool:
         capability_result = build_effective_policy_result(
             profile,
             tool_name=tool_name,
-            capability=capability,
-        )
-        if capability_result.status == "resolved":
-            return True
-    return False
-
-
-def _recommendation_visible(
-    profile: MCPProfile,
-    recommendation: dict[str, Any],
-    tool_id: str,
-) -> bool:
-    """Return whether recommendation metadata is visible for this profile."""
-
-    if build_effective_policy_result(profile, tool_name=tool_id).status == "resolved":
-        return True
-
-    for capability in _recommendation_capabilities(recommendation):
-        capability_result = build_effective_policy_result(
-            profile,
-            tool_name=tool_id,
             capability=capability,
         )
         if capability_result.status == "resolved":

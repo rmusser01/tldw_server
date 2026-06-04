@@ -215,7 +215,7 @@ def test_resolve_profile_tool_call_resolves_installed_and_rejects_recommended() 
     }
 
 
-def test_ungranted_recommended_tools_are_not_discoverable() -> None:
+def test_recommendations_without_executable_grants_are_discoverable_not_callable() -> None:
     profile = _profile(
         capabilities=["code_search"],
         recommended_tools=[
@@ -237,23 +237,23 @@ def test_ungranted_recommended_tools_are_not_discoverable() -> None:
 
     results = search_profile_tools(profile, [], query="index shell")
     no_capability_description = describe_profile_tool(profile, [], "code.index")
-    denied_capability_description = describe_profile_tool(profile, [], "shell.run")
+    ungranted_capability_description = describe_profile_tool(profile, [], "shell.run")
     no_capability_resolution = resolve_profile_tool_call(profile, [], "code.index")
-    denied_capability_resolution = resolve_profile_tool_call(profile, [], "shell.run")
+    ungranted_capability_resolution = resolve_profile_tool_call(profile, [], "shell.run")
 
-    assert results == []
-    assert no_capability_description is None
-    assert denied_capability_description is None
-    assert no_capability_resolution == {
-        "status": "not_found",
-        "reason_code": "tool_not_found",
-        "tool_id": "code.index",
-    }
-    assert denied_capability_resolution == {
-        "status": "not_found",
-        "reason_code": "tool_not_found",
-        "tool_id": "shell.run",
-    }
+    assert {item["tool_id"] for item in results} == {"code.index", "shell.run"}
+    assert no_capability_description is not None
+    assert no_capability_description["installation_status"] == "recommended_unavailable"
+    assert no_capability_description["capabilities"] == []
+    assert ungranted_capability_description is not None
+    assert ungranted_capability_description["installation_status"] == "recommended_unavailable"
+    assert ungranted_capability_description["capabilities"] == ["process.execute"]
+    assert no_capability_resolution["status"] == "unavailable"
+    assert no_capability_resolution["reason_code"] == "tool_not_enabled"
+    assert no_capability_resolution["tool_id"] == "code.index"
+    assert ungranted_capability_resolution["status"] == "unavailable"
+    assert ungranted_capability_resolution["reason_code"] == "tool_not_enabled"
+    assert ungranted_capability_resolution["tool_id"] == "shell.run"
 
 
 def test_recommended_tools_preserve_explicit_allowed_tools_semantics() -> None:
@@ -278,16 +278,21 @@ def test_recommended_tools_preserve_explicit_allowed_tools_semantics() -> None:
 
     results = search_profile_tools(profile, [], query="browser code")
     allowed = describe_profile_tool(profile, [], "browser.trace")
-    denied = describe_profile_tool(profile, [], "code.index")
+    recommended = describe_profile_tool(profile, [], "code.index")
     resolved = resolve_profile_tool_call(profile, [], "browser.trace")
+    inactive = resolve_profile_tool_call(profile, [], "code.index")
 
-    assert [item["tool_id"] for item in results] == ["browser.trace"]
+    assert [item["tool_id"] for item in results] == ["browser.trace", "code.index"]
     assert allowed is not None
     assert allowed["installation_status"] == "recommended_unavailable"
-    assert denied is None
+    assert recommended is not None
+    assert recommended["installation_status"] == "recommended_unavailable"
     assert resolved["status"] == "unavailable"
     assert resolved["reason_code"] == "tool_not_enabled"
     assert resolved["tool_id"] == "browser.trace"
+    assert inactive["status"] == "unavailable"
+    assert inactive["reason_code"] == "tool_not_enabled"
+    assert inactive["tool_id"] == "code.index"
 
 
 def test_unknown_backend_descriptors_do_not_crash_or_leak() -> None:
