@@ -220,6 +220,59 @@ def test_browser_capable_presets_include_native_cdp_read_tools() -> None:
         assert "browser" not in tooling["progressive_disclosure"]["deferred_categories"]  # nosec B101
 
 
+def test_git_capable_presets_include_native_read_tools() -> None:
+    git_read_tools = {
+        "git.status",
+        "git.diff",
+        "git.log",
+        "git.blame",
+        "git.branches",
+        "git.conflicts.list",
+        "git.conflicts.read",
+    }
+
+    for preset_id in (
+        "architect",
+        "merge-conflict-resolver",
+        "code-reviewer",
+        "devops-engineer",
+        "backend-engineer",
+        "frontend-engineer",
+        "qa-engineer",
+        "sdet",
+    ):
+        preset = presets.get_builtin_preset(preset_id)
+        assert preset is not None  # nosec B101
+
+        tooling = preset.profile.metadata["tooling"]
+        assert git_read_tools <= set(tooling["enabled_tools"])  # nosec B101
+        assert "git.read" in tooling["enabled_capabilities"]  # nosec B101
+        assert "git.read" in preset.profile.policy_document.capabilities  # nosec B101
+        assert "git" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
+
+
+def test_product_owner_and_documentation_writer_do_not_enable_git_by_default() -> None:
+    git_read_tools = {
+        "git.status",
+        "git.diff",
+        "git.log",
+        "git.blame",
+        "git.branches",
+        "git.conflicts.list",
+        "git.conflicts.read",
+    }
+
+    for preset_id in ("product-owner", "documentation-writer"):
+        preset = presets.get_builtin_preset(preset_id)
+        assert preset is not None  # nosec B101
+
+        tooling = preset.profile.metadata["tooling"]
+        assert git_read_tools.isdisjoint(tooling["enabled_tools"])  # nosec B101
+        assert "git.read" not in tooling["enabled_capabilities"]  # nosec B101
+        assert "git.read" not in preset.profile.policy_document.capabilities  # nosec B101
+        assert "git" not in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
+
+
 def test_recommendation_catalog_patch_does_not_grant_authority() -> None:
     from mcp_unified.profiles.tooling import merge_tooling_recommendations
 
