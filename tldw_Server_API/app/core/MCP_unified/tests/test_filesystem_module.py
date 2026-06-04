@@ -30,7 +30,7 @@ class _FakeWorkspaceRootResolver:
 class _FilesystemRegistry:
     def __init__(self, module: FilesystemModule) -> None:
         self.module = module
-        self._tool_names = {"fs.list", "fs.read_text", "fs.write_text"}
+        self._tool_names = {"fs.list", "fs.read_text", "fs.write_text", "fs.stat", "fs.glob", "fs.grep"}
 
     async def find_module_for_tool(self, tool_name: str):  # noqa: ANN001
         if tool_name in self._tool_names:
@@ -689,7 +689,11 @@ async def test_filesystem_grep_skips_binary_decode_and_large_files(tmp_path: Pat
 @pytest.mark.asyncio
 async def test_filesystem_grep_limits_and_regex_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace_root = tmp_path / "workspace"
+    nested_dir = workspace_root / "a"
     workspace_root.mkdir(parents=True, exist_ok=True)
+    nested_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "z-root.txt").write_text("TODO root\n", encoding="utf-8")
+    (nested_dir / "a-nested.txt").write_text("TODO nested\n", encoding="utf-8")
     for index in range(5):
         (workspace_root / f"file-{index}.txt").write_text("TODO\n", encoding="utf-8")
 
@@ -713,10 +717,12 @@ async def test_filesystem_grep_limits_and_regex_errors(tmp_path: Path, monkeypat
     )
 
     limited = await limit_mod.execute_tool("fs.grep", {"pattern": "TODO", "limit": 2}, context=context)
+    sorted_limited = await limit_mod.execute_tool("fs.grep", {"pattern": "TODO", "limit": 1}, context=context)
     capped = await cap_mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
 
     assert limited["truncated"] is True  # nosec B101
     assert len(limited["matches"]) == 2  # nosec B101
+    assert sorted_limited["matches"][0]["path"] == "a/a-nested.txt"  # nosec B101
     assert capped["truncated"] is True  # nosec B101
     assert len(capped["matches"]) <= 2  # nosec B101
 
@@ -813,6 +819,58 @@ async def test_protocol_rejects_unknown_fs_read_text_arguments(tmp_path: Path) -
             {"name": "fs.read_text", "arguments": {"path": "docs/hello.txt", "unknown": "boom"}},
             context,
         )
+
+
+@pytest.mark.asyncio
+async def test_protocol_rejects_unknown_new_filesystem_helper_arguments(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "hello.txt").write_text("hello world", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+
+    protocol = MCPProtocol()
+    protocol.module_registry = _FilesystemRegistry(mod)
+
+    async def _resolve_effective_policy(_context):
+        return {
+            "enabled": True,
+            "allowed_tools": ["fs.stat", "fs.glob", "fs.grep"],
+            "policy_document": {"path_scope_mode": "none"},
+        }
+
+    async def _allow(*_args, **_kwargs) -> bool:
+        return True
+
+    protocol._resolve_effective_tool_policy = _resolve_effective_policy  # type: ignore[method-assign]
+    protocol._has_module_permission = _allow  # type: ignore[method-assign]
+    protocol._has_tool_permission = _allow  # type: ignore[method-assign]
+    protocol._is_tool_allowed_by_context = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+
+    context = RequestContext(
+        request_id="req-fs-new-helper-unknown-arg",
+        user_id="7",
+        session_id="sess-1",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    cases = [
+        ("fs.stat", {"path": "docs/hello.txt", "unknown": "boom"}),
+        ("fs.glob", {"pattern": "**/*.txt", "unknown": "boom"}),
+        ("fs.grep", {"pattern": "hello", "unknown": "boom"}),
+    ]
+    for tool_name, arguments in cases:
+        with pytest.raises(InvalidParamsException, match="Unknown parameters"):
+            await protocol._handle_tools_call({"name": tool_name, "arguments": arguments}, context)
 
 
 @pytest.mark.asyncio

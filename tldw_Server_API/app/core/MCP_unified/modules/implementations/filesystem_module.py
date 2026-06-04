@@ -767,6 +767,7 @@ class FilesystemModule(BaseModule):
         visited_entries = 0
         walk_truncated = False
         seen_dirs: set[Path] = {base.resolve(strict=False)}
+        file_candidates: list[tuple[str, Path]] = []
 
         for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
             current_root = Path(root)
@@ -825,57 +826,60 @@ class FilesystemModule(BaseModule):
                 if not read_target.is_file():
                     skipped["unsupported_type"] += 1
                     continue
-                try:
-                    file_size = read_target.stat().st_size
-                except PermissionError:
-                    skipped["permission_error"] += 1
-                    continue
-                except OSError:
-                    skipped["unsupported_type"] += 1
-                    continue
-                if file_size > max_file_bytes:
-                    skipped["too_large"] += 1
-                    continue
-                try:
-                    payload = read_target.read_bytes()
-                except PermissionError:
-                    skipped["permission_error"] += 1
-                    continue
-                except OSError:
-                    skipped["unsupported_type"] += 1
-                    continue
-                if b"\x00" in payload:
-                    skipped["binary"] += 1
-                    continue
-                try:
-                    text = payload.decode("utf-8")
-                except UnicodeDecodeError:
-                    skipped["decode_error"] += 1
-                    continue
-
-                for line_number, line in enumerate(text.splitlines(), start=1):
-                    match_text = FilesystemModule._line_match_text(
-                        line,
-                        pattern,
-                        regex_pattern,
-                        regex=regex,
-                        case_sensitive=case_sensitive,
-                    )
-                    if match_text is None:
-                        continue
-                    match_record = {
-                        "path": rel_path,
-                        "line_number": line_number,
-                        "line": line,
-                        "match_text": match_text,
-                    }
-                    if len(matches) < limit:
-                        matches.append(match_record)
-                    else:
-                        remaining_count += 1
+                file_candidates.append((rel_path, read_target))
 
             if walk_truncated:
                 break
+
+        for rel_path, read_target in sorted(file_candidates, key=lambda item: item[0]):
+            try:
+                file_size = read_target.stat().st_size
+            except PermissionError:
+                skipped["permission_error"] += 1
+                continue
+            except OSError:
+                skipped["unsupported_type"] += 1
+                continue
+            if file_size > max_file_bytes:
+                skipped["too_large"] += 1
+                continue
+            try:
+                payload = read_target.read_bytes()
+            except PermissionError:
+                skipped["permission_error"] += 1
+                continue
+            except OSError:
+                skipped["unsupported_type"] += 1
+                continue
+            if b"\x00" in payload:
+                skipped["binary"] += 1
+                continue
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                skipped["decode_error"] += 1
+                continue
+
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                match_text = FilesystemModule._line_match_text(
+                    line,
+                    pattern,
+                    regex_pattern,
+                    regex=regex,
+                    case_sensitive=case_sensitive,
+                )
+                if match_text is None:
+                    continue
+                match_record = {
+                    "path": rel_path,
+                    "line_number": line_number,
+                    "line": line,
+                    "match_text": match_text,
+                }
+                if len(matches) < limit:
+                    matches.append(match_record)
+                else:
+                    remaining_count += 1
 
         matches.sort(key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)))
         return {
