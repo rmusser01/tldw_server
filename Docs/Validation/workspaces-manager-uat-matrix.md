@@ -32,7 +32,7 @@ This matrix is an evidence tracker. Do not mark a row verified unless it was exe
 | WM-UAT-010 | Research Workspace to manager | Return from `/research-workspace` to canonical management | Existing settings menu has `Manage in Workspaces`; navigation saves local state then opens `/workspaces` | `WorkspaceHeader.test.tsx` | 2026-06-04 Playwright/CDP live run passed against `http://127.0.0.1:18001` backend and `http://localhost:8080` WebUI | Verified live |
 | WM-UAT-011 | MCP Hub guardrail | Understand that Shared Workspaces are path-trust records, not the canonical manager | Shared Workspaces tab links to `/workspaces` and explains ownership boundary | `SharedWorkspacesTab.test.tsx` | Not run in this slice | Automated only |
 | WM-UAT-012 | ACP guardrail | Understand that ACP terminal/session state depends on Workspace project-root setup | No-session terminal state links to `/workspaces` and explains project-root setup | `ACPWorkspacePanel.test.tsx` | Not run in this slice | Automated only |
-| WM-UAT-013 | Live backend smoke | Prove manager and handoffs work against an actual backend/WebUI | `apps/tldw-frontend/e2e/workflows/workspaces-manager.spec.ts` | 2026-06-04 run skipped because backend preflight was unavailable on `127.0.0.1:8000`; 2026-06-04 rerun passed with backend `127.0.0.1:18001` and webpack WebUI `localhost:8080` | Verified live |
+| WM-UAT-013 | Live backend smoke | Prove manager and handoffs work against an actual backend/WebUI | `apps/tldw-frontend/e2e/workflows/workspaces-manager.spec.ts` | 2026-06-04 run skipped because backend preflight was unavailable on `127.0.0.1:8000`; 2026-06-04 rerun passed with backend `127.0.0.1:18001` and webpack WebUI `localhost:8080`; final verification rerun passed with `2 passed (39.8s)` | Verified live |
 
 ## Live Run Notes
 
@@ -55,6 +55,14 @@ Record each live run with:
 - Initial live run failed because `/workspaces` returned the WebUI 404 page; root cause was a missing Next.js `pages/workspaces.tsx` wrapper despite package route metadata coverage.
 - Fix added: `apps/tldw-frontend/pages/workspaces.tsx` plus `apps/tldw-frontend/__tests__/navigation/workspaces-page-wrapper.test.ts`.
 - Rerun result: `2 passed (34.8s)`.
+
+### 2026-06-04 Final Verification Run
+
+- Backend focused verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces tldw_Server_API/tests/sandbox/test_workspace_volumes.py -v` passed with `292 passed, 8 warnings`.
+- Frontend focused verification: `./node_modules/.bin/vitest run src/services/__tests__/tldw-api-client.workspace-api.test.ts src/components/Option/Workspaces src/routes/__tests__/option-workspaces.route.test.tsx src/routes/__tests__/route-metadata.coverage.test.ts` passed with `8 files / 50 tests`.
+- Route/product-state guard: `./node_modules/.bin/vitest run src/design-system/__tests__/product-state-guard.mcp-acp-workspace-baseline.test.ts` passed with `1 file / 1 test`.
+- Live WebUI/backend smoke: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' TLDW_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line` passed with `2 passed (39.8s)` after rerunning outside the filesystem sandbox for local port binding.
+- Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Workspaces tldw_Server_API/app/core/Sandbox tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspaces_manager_final.json` exited `1` because the broad Sandbox tree contains 119 existing low-severity subprocess/start-process findings in runner/network/pool files. The report contains no findings in the Workspaces endpoint/schema or backend files changed by this Workspaces manager branch.
 
 ## Known Baseline Blockers At Creation
 
