@@ -7,17 +7,6 @@ on:
       - dev
     paths:
       - "apps/test-utils/research-workspace/**"
-      - "apps/packages/ui/src/**"
-      - "apps/tldw-frontend/components/**"
-      - "apps/tldw-frontend/extension/**"
-      - "apps/tldw-frontend/hooks/**"
-      - "apps/tldw-frontend/lib/**"
-      - "apps/tldw-frontend/pages/**"
-      - "apps/tldw-frontend/styles/**"
-      - "apps/extension/entrypoints/**"
-      - "apps/extension/public/**"
-      - "apps/extension/scripts/**"
-      - "apps/extension/tests/e2e/**"
       - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"
       - "apps/extension/tests/e2e/research-workspace.parity.spec.ts"
       - "apps/packages/ui/src/components/Option/ResearchWorkspace/**"
@@ -35,17 +24,6 @@ on:
       - main
     paths:
       - "apps/test-utils/research-workspace/**"
-      - "apps/packages/ui/src/**"
-      - "apps/tldw-frontend/components/**"
-      - "apps/tldw-frontend/extension/**"
-      - "apps/tldw-frontend/hooks/**"
-      - "apps/tldw-frontend/lib/**"
-      - "apps/tldw-frontend/pages/**"
-      - "apps/tldw-frontend/styles/**"
-      - "apps/extension/entrypoints/**"
-      - "apps/extension/public/**"
-      - "apps/extension/scripts/**"
-      - "apps/extension/tests/e2e/**"
       - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"
       - "apps/extension/tests/e2e/research-workspace.parity.spec.ts"
       - "apps/packages/ui/src/components/Option/ResearchWorkspace/**"
@@ -164,7 +142,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: research-workspace-extension-parity-artifacts
-          include-hidden-files: true
           if-no-files-found: ignore
           path: |
             apps/extension/.workspace-parity-e2e-report.json

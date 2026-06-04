@@ -156,12 +156,7 @@ vi.mock("@/store/workspace", () => ({
       focusChatMessageById: testState.focusChatMessageById,
       focusWorkspaceNote: testState.focusWorkspaceNote,
       setSourceStatusByMediaId: testState.setSourceStatusByMediaId
-    }),
-  createWorkspaceStorage: () => ({
-    getItem: vi.fn().mockResolvedValue("1"),
-    setItem: vi.fn().mockResolvedValue(undefined),
-    removeItem: vi.fn().mockResolvedValue(undefined)
-  })
+    })
 }))
 
 vi.mock("@/utils/research-workspace-prefill", () => ({

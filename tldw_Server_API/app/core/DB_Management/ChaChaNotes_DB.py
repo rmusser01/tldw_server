@@ -13637,7 +13637,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_study_pack_schema_postgres(conn)
             self._ensure_study_assistant_schema_postgres(conn)
             self._ensure_workspace_study_material_schema_postgres(conn)
-            self._ensure_workspace_migration_schema_postgres(conn)
             self._ensure_quiz_remediation_conversion_schema_postgres(conn)
             self._ensure_postgres_flashcards_tsvector(conn)
             self._ensure_recent_persona_schema_postgres(conn)
@@ -15902,10 +15901,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         row = cursor.fetchone()
         return dict(row) if row else None
-
-    def get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:
-        """Return one workspace source by id, or None when it does not exist."""
-        return self._get_workspace_source(workspace_id, source_id)
 
     def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all sources for a workspace ordered by position."""

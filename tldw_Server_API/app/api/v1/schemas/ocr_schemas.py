@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, RootModel
 
@@ -12,8 +12,6 @@ class OCRBackendDiscoveryEntry(BaseModel):
 
     available: Optional[bool] = None
     mode: Optional[str] = None
-    runtime_family: Optional[str] = None
-    configured_family: Optional[str] = None
     configured_mode: Optional[str] = None
     model: Optional[str] = None
     configured: Optional[bool] = None
@@ -51,8 +49,6 @@ class OCRBackendDiscoveryEntry(BaseModel):
     device: Optional[str] = None
     dtype: Optional[str] = None
     attn_impl: Optional[str] = None
-    native: Optional[dict[str, Any]] = None
-    llamacpp: Optional[dict[str, Any]] = None
     error: Optional[str] = None
 
 

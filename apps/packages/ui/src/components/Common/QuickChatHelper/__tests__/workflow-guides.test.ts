@@ -48,6 +48,9 @@ describe("quick chat workflow guides", () => {
       maxResults: 8
     })
     expect(recommendations.length).toBeGreaterThan(0)
+    expect(recommendations.some((item) => item.route === "/evaluations")).toBe(
+      true
+    )
     expect(
       recommendations.some(
         (item) =>

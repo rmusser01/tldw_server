@@ -10,15 +10,6 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
-- **Writing Suite Phases 2-4** — Expanded the writing stack beyond the initial manuscript editor with structured planning, review, and workflow surfaces. (PRs #999, #1001, #1002)
-- **Persona Buddy Track-a-Plan Backend** — Added backend support for persona-guided plan tracking. (PR #949)
-- **Persona-Routed Onboarding** — Added onboarding flows that route users through persona-aware setup paths. (PR #1000)
-- **Mission Control Home and Storage Quotas** — Added Mission Control home surfaces and storage quota visibility. (PR #1004)
-- **Browser Web Clipper** — Added the browser clipping workflow for capturing web content into tldw_server. (PR #1005)
-- **Study Suggestions Engine** — Added study suggestion generation and related handoff flows. (PR #1014)
-- **Sandbox and ACP Improvements** — Expanded sandbox handling and ACP integration hardening. (PR #1023)
-- **Hunyuan GGUF llama.cpp OCR Runtime** — Added runtime-family selection and llama.cpp-backed GGUF orchestration for Hunyuan OCR across remote, managed, and CLI modes so deployments can choose native compatibility or local GGUF execution without changing ingestion callers. (PR #1103)
-
 ### Changed
 
 - Expanded ACP release-signoff evidence for permission denial, reconnect, and
@@ -36,9 +27,6 @@ and this project adheres to Some kind of Versioning
   retention is not yet a release-certified claim.
 
 ### Fixed
-
-- **FTUE Follow-Through** — Addressed first-time-user experience follow-up issues across onboarding and handoff flows. (PR #1009)
-- **UX Audit Remediation** — Fixed UX audit findings across affected surfaces. (PR #1039)
 
 ### Removed
 

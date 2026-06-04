@@ -168,7 +168,7 @@
       "refersTo": "badge-status",
       "description": "Compact readable status label, optionally with a dot.",
       "html": "<span class=\"ds-badge-status\"><span aria-hidden=\"true\"></span>Ready</span>",
-      "css": ".ds-badge-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: #f0ede7; color: #5b6472; font-size: 12px; font-weight: 500; } .ds-badge-status span { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }"
+      "css": ".ds-badge-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: rgba(34,160,123,0.1); color: #22a07b; font-size: 12px; font-weight: 500; } .ds-badge-status span { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }"
     },
     {
       "name": "Recovery Callout",

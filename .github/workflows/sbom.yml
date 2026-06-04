@@ -122,21 +122,12 @@ jobs:
             return 1
           }
 
-          if [ -f "$repo_root/pyproject.toml" ]; then
-            if ! gen_requirements_from_pyproject "$repo_root/pyproject.toml"; then
-              echo "pyproject extraction failed; falling back to requirements.txt sources" >&2
-              if [ -f "$repo_root/tldw_Server_API/requirements.txt" ]; then
-                gen_from_requirements "$repo_root/tldw_Server_API/requirements.txt"
-              elif [ -f "$repo_root/requirements.txt" ]; then
-                gen_from_requirements "$repo_root/requirements.txt"
-              else
-                exit 1
-              fi
-            fi
-          elif [ -f "$repo_root/tldw_Server_API/requirements.txt" ]; then
+          if [ -f "$repo_root/tldw_Server_API/requirements.txt" ]; then
             gen_from_requirements "$repo_root/tldw_Server_API/requirements.txt"
           elif [ -f "$repo_root/requirements.txt" ]; then
             gen_from_requirements "$repo_root/requirements.txt"
+          elif [ -f "$repo_root/pyproject.toml" ]; then
+            gen_requirements_from_pyproject "$repo_root/pyproject.toml"
           else
             echo "No Python dependency source found; cannot generate SBOM" >&2
             exit 1

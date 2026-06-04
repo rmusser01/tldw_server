@@ -61,7 +61,6 @@ import { WorkspaceBanner } from "./WorkspaceBanner"
 import { SharedWorkspaceBanner } from "./SharedWorkspaceBanner"
 import { SharedWorkspaceProvider } from "./SharedWorkspaceContext"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
-import { WorkspaceTrustPanel } from "./WorkspaceTrustPanel"
 import { ChatPane } from "./ChatPane"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import {
@@ -1134,14 +1133,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     accountUsedBytes: null,
     accountQuotaBytes: null
   })
-  const [workspaceSourceStatus, setWorkspaceSourceStatus] =
+  const [, setWorkspaceSourceStatus] =
     React.useState<WorkspaceSourceStatusListResponse | null>(null)
   const [workspaceCapabilities, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
-  const [
-    workspaceStatusProjectionLoading,
-    setWorkspaceStatusProjectionLoading
-  ] = React.useState(false)
+  const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
   const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
   const [workspaceMigrationResult, setWorkspaceMigrationResult] =
@@ -3564,14 +3560,6 @@ const ResearchWorkspaceBody: React.FC = () => {
           <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
 
-          <WorkspaceTrustPanel
-            sourceStatus={workspaceSourceStatus}
-            capabilities={workspaceCapabilities}
-            loading={workspaceStatusProjectionLoading}
-            errorMessage={workspaceStatusProjectionError}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-          />
-
           {tutorialPromptBanner}
 
           <WorkspaceStatusBar
@@ -3623,14 +3611,6 @@ const ResearchWorkspaceBody: React.FC = () => {
           />
           <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
-
-          <WorkspaceTrustPanel
-            sourceStatus={workspaceSourceStatus}
-            capabilities={workspaceCapabilities}
-            loading={workspaceStatusProjectionLoading}
-            errorMessage={workspaceStatusProjectionError}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-          />
 
           {tutorialPromptBanner}
 

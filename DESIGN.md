@@ -261,7 +261,7 @@ Buttons are compact, direct, and stateful. They should look like controls for wo
 
 Chips and badges communicate status, filters, counts, and compact labels.
 
-- **Style:** Rounded pills by default, medium-weight text, 10px to 12px label sizes.
+- **Style:** Rounded pills by default, medium weight text, 10px to 12px label sizes.
 - **State:** Filled status chips use 10 percent tint backgrounds with colored text. Outline chips use 30 percent borders.
 - **Dot:** Dot badges should reinforce status with shape, not replace readable text.
 
