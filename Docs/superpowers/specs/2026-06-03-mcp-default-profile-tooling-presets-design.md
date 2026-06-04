@@ -123,17 +123,20 @@ Sources:
 ## Goals
 
 - Define default role profile presets for:
+  - Orchestrator
   - Product Owner
   - Architect
   - Merge Conflict Resolver
   - Documentation Writer
   - Project Researcher
+  - Deep Researcher
   - Code Reviewer
   - DevOps Engineer
   - Backend Engineer
   - Frontend Engineer
   - QA Engineer
   - Software Development Engineer in Test
+  - Memory Keeper
 - Keep defaults vendor-neutral while surfacing recommended concrete bindings.
 - Split immediately enabled tools from recommended inactive tools/servers.
 - Add progressive-disclosure metadata for category browsing and profile-scoped
@@ -143,6 +146,10 @@ Sources:
 - Preserve the existing `MCPProfile` model shape where possible by placing
   richer setup metadata under `profile.metadata["tooling"]`.
 - Maintain conservative approvals and auditability for all risky behavior.
+
+This scope covers the existing built-in role-like presets in
+`mcp_unified/profiles/presets.py`; none of `Orchestrator`, `Deep Researcher`,
+or `Memory Keeper` are deprecated or intentionally excluded.
 
 ## Non-Goals
 
@@ -284,6 +291,12 @@ Profiles should expose tools in layers.
    Approvals, path scope, credential grants, external-server grants, and audit
    run against the resolved underlying tool, not against the generic bridge
    name.
+   `tool_not_enabled` and `tool_not_found` are normal bridge tool results with
+   `ok: false`, top-level `status`, `reason_code`, and `tool_id` fields, plus an
+   `error` object carrying the same structured values and any setup details such
+   as `installation_status`, `activation`, or `unavailable_reason`. Malformed
+   bridge arguments and profile/policy denials remain transport-level gateway
+   policy errors.
 
 ### Tool Search Ranking
 
@@ -309,7 +322,7 @@ The existing `MCPProfile` and `ProfilePolicy` fields should remain the
 enforcement source of truth. Rich tooling setup metadata should live under
 `profile.metadata["tooling"]`.
 
-Example:
+Example of the `profile.metadata["tooling"]` structure:
 
 ```json
 {
@@ -332,13 +345,17 @@ Example:
           "id": "jira",
           "kind": "external_mcp",
           "install_target": null,
-          "credential_slots": ["jira_api_token"]
+          "credential_slots": ["jira_api_token"],
+          "required_scopes": ["read", "write"],
+          "maturity": "documented_candidate"
         },
         {
           "id": "linear",
           "kind": "external_mcp",
           "install_target": null,
-          "credential_slots": ["linear_api_key"]
+          "credential_slots": ["linear_api_key"],
+          "required_scopes": ["read", "write"],
+          "maturity": "documented_candidate"
         }
       ]
     }
@@ -374,17 +391,20 @@ setup metadata until converted into real profile policy/grants by an operator.
 
 | Profile | Enabled by default | Recommended inactive | External binding categories |
 | --- | --- | --- | --- |
+| Orchestrator | Tool discovery, profile-aware delegation, planning/subtask helpers, memory recall, file read/search | Subagent launch, workflow mutation, workspace writes | `subagents`, `workflow`, `repo_host` |
 | Product Owner | File read/search/write markdown, native Kanban/cards, docs search, memory recall, tool discovery | Browser inspect, web fetch/search, issue tracker create/update | `issue_tracker`, `web_search`, `docs_search`, `browser` |
 | Architect | File read/search, CodeGraph read/context, docs search, git inspect, memory recall, tool discovery, subtask planning | LSP full graph, diagram generation, web research | `repo_host`, `docs_search`, `diagram`, `web_search` |
 | Merge Conflict Resolver | File read, git status/diff/conflict inspect, CodeGraph read, scoped file patch/edit, checkpoint | Git add/commit/rebase/merge, test runner | `repo_host`, `git_provider`, `test_runner` |
 | Documentation Writer | File read/search/write markdown, docs search, memory recall, tool discovery | Browser inspect, web fetch/search, diagram generation, docs publishing | `docs_search`, `web_search`, `browser`, `diagram`, `cms_docs_publisher` |
 | Project Researcher | File read/search, CodeGraph read/context, knowledge/media/notes/prompts/chats search, docs search, memory recall | Browser inspect, web fetch/search, deep research/citation tools | `web_search`, `docs_search`, `browser`, `citation_manager` |
+| Deep Researcher | Web research/fetch when explicitly granted, citation/source management, knowledge search, memory recall, tool discovery | Browser inspect, external research databases, long-running research jobs | `web_search`, `browser`, `citation_manager`, `research_database` |
 | Code Reviewer | File read/search, CodeGraph read/context, git diff/log/blame inspect, test result read, memory recall, tool discovery | PR review/comment tools, LSP diagnostics, CI read | `repo_host`, `pr_review`, `ci_cd`, `lsp` |
 | DevOps Engineer | Config file read, git inspect, native logs/service/runtime status, memory recall, tool discovery | CI/CD read, deploy/restart/rollback, cloud resource mutation, SSH, shell | `ci_cd`, `cloud_provider`, `ssh`, `secrets_manager`, `observability` |
 | Backend Engineer | File read/search/write scoped, CodeGraph read/index, LSP diagnostics, git inspect, safe test runner, checkpoint, memory recall | Git mutate, shell, debugger, DB migration runner | `repo_host`, `test_runner`, `debugger`, `database`, `api_docs` |
 | Frontend Engineer | File read/search/write scoped, browser inspect/screenshots/console read, LSP diagnostics, git inspect, safe test runner, checkpoint | Browser interact, visual regression, shell, design asset tools | `browser`, `visual_regression`, `design_assets`, `test_runner` |
 | QA Engineer | Browser inspect/screenshots/console/network read, app state read, logs read, safe test runner, file read/search, memory recall | Browser interact, bug filing, trace/video capture | `browser`, `issue_tracker`, `observability`, `test_runner` |
 | SDET | File read/search/write test files, safe test runner, CodeGraph read, LSP diagnostics, git inspect, checkpoint, memory recall | CI mutation, browser interact, shell, debugger | `test_runner`, `browser`, `ci_cd`, `debugger`, `repo_host` |
+| Memory Keeper | Memory/context recall, knowledge graph read, profile/tool discovery | Long-term memory writes/reflections with approval | `memory_graph`, `knowledge_graph` |
 
 ## Approval And Risk Defaults
 
@@ -409,6 +429,7 @@ Default presets should use conservative approval rules.
 Suggested risk classes:
 
 - `mutating`
+- `destructive_filesystem`
 - `external_network`
 - `process_execution`
 - `credential_use`
@@ -428,6 +449,7 @@ not as accidental unknowns, and each must map to approval and provenance rules.
 | Risk class | Default enablement | Required approval/provenance behavior | Validator change |
 | --- | --- | --- | --- |
 | `mutating` | Allowed by scoped-write roles | Approval required for writes/mutations. | Existing behavior remains valid. |
+| `destructive_filesystem` | Not enabled by default | Approval and high-risk provenance required for deletes, unscoped writes, recursive edits, or irreversible filesystem mutations. Use `mutating` for routine scoped writes and `destructive_filesystem` for destructive or unscoped filesystem authority. | Existing behavior remains valid. |
 | `external_network` | Not enabled in packaged defaults unless configured | Requires provenance explaining provider/binding and external-server grant; credential grant when secrets are needed. | Existing behavior remains valid, but web-search presets must not claim enabled access without grants. |
 | `process_execution` | Not enabled by default | Approval and high-risk provenance required. | Existing behavior remains valid. |
 | `credential_use` | Not enabled by default | High-risk provenance and credential-grant metadata required; never stores secret values. | Existing behavior remains valid. |

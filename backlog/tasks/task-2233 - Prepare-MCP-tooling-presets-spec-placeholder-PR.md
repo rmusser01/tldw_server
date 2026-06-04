@@ -22,6 +22,12 @@ Review the MCP default profile tooling presets spec for placeholder-PR readiness
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- Placeholder PR scope is explicit and communicates that active MCP/ACP work may
+  require later reconciliation before implementation.
+- Settled and provisional design decisions are separated so reviewers can
+  identify which choices are ready to implement.
+- Draft PR creation and documentation-only validation evidence are recorded in
+  the task summary.
 <!-- AC:END -->
 
 ## Implementation Notes

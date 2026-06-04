@@ -3,7 +3,7 @@ id: TASK-2232
 title: Design MCP default profile tooling presets
 status: Done
 assignee: []
-created_date: ''
+created_date: 2026-06-03T07:43:00Z
 updated_date: 2026-06-03 07:43
 labels:
 - mcp-unified
@@ -25,17 +25,23 @@ Write the approved design spec for default MCP role profile tooling, progressive
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- MCP default profile tooling preset scope is documented, including role coverage,
+  progressive disclosure, native/default tool candidates, external binding
+  categories, and approval/risk defaults.
+- The spec records review outcomes and validation evidence for the design pass.
+- Documentation-only security validation is explicitly recorded with the Bandit
+  skip rationale.
 <!-- AC:END -->
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Drafted the approved brainstorming design into the repo's superpowers spec format. The spec covers researched agent-harness prior art, the default tool substrate, progressive disclosure, role preset matrix, metadata.tooling schema, native tool backlog, external binding categories, runtime enforcement, ACP implications, and testing requirements.
 
 Spec review pass 1 found four issues: unresolved public/internal tool_call semantics, web-search default conflict with vendor-neutral/external-network policy, missing risk-class validator compatibility details, and underspecified safe test-runner command-source constraints. Revised the spec to make tool_call a public profile-scoped bridge with fixed schema and authorization path; make web search recommended-unavailable until configured with grants/provenance; add a risk-class compatibility table and validator requirements; and define safe test runner command identity, args/env/cwd, approval, and audit constraints.
 
 Spec review pass 2 returned APPROVED.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
