@@ -11,6 +11,8 @@ on:
       - main
       - dev
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -226,15 +228,12 @@ jobs:
             tldw_Server_API/tests/wizard \
             --cov=tldw_Server_API/cli/wizard --cov-report=term-missing --cov-fail-under=70
 
-  full-suite-linux:
-    name: Full Suite (Ubuntu / Python ${{ matrix.python }})
+
+  full-suite-linux-311-smoke:
+    name: Full Suite (Ubuntu / Python 3.11)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 25
     needs: [lint, syntax-check]
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ['3.11', '3.12', '3.13']
     services:
       postgres:
         image: postgres:18-bookworm
@@ -250,17 +249,11 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # Ensure Python can import the top-level package `tldw_Server_API` and scripts
-      # by including the repository root on sys.path.
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: 'true'
       DISABLE_HEAVY_STARTUP: '1'
-      # Work around protobuf/opentelemetry runtime incompatibilities in CI runners.
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
-      # Enable pytest-xdist parallelism for this heavy suite
-      PYTEST_ADDOPTS: "-p xdist.plugin -n auto"
-      # Expose Postgres service to tests
       POSTGRES_TEST_HOST: 127.0.0.1
       POSTGRES_TEST_DB: tldw_content
       POSTGRES_TEST_USER: tldw_user
@@ -268,12 +261,8 @@ jobs:
       TEST_DB_HOST: 127.0.0.1
       TEST_DB_USER: tldw_user
       TEST_DB_PASSWORD: TestPassword123!
-      # Align AuthNZ_Postgres conftest default DB name with tests
       TEST_DB_NAME: tldw_test
       TLDW_TEST_POSTGRES_REQUIRED: '1'
-      REDIS_URL: redis://127.0.0.1:6379/0
-      EMBEDDINGS_REDIS_URL: redis://127.0.0.1:6379/0
-      # Allow mock-host test URLs in strict egress environments
       WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
     steps:
       - name: Checkout
@@ -287,29 +276,12 @@ jobs:
       - name: Setup Python and deps (with uv)
         uses: ./.github/actions/setup-python-deps
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.11'
           use-uv: 'true'
           cache-dependency-path: |
             pyproject.toml
             uv.lock
           extras: dev,multiplayer
-
-      - name: Verify core e2e fixtures are discoverable
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Collect fixtures from the entire tests tree so top-level conftest is loaded
-          FIXTURES_OUTPUT="$(pytest --fixtures -q tldw_Server_API/tests || true)"
-          echo "Checking for 'test_user_credentials' fixture in e2e suite..."
-          TMPFILE=$(mktemp)
-          # Write to a temp file to avoid SIGPIPE issues with set -o pipefail when using -q matchers
-          printf "%s\n" "$FIXTURES_OUTPUT" > "$TMPFILE"
-          if command -v rg >/dev/null 2>&1; then
-            rg -q '^test_user_credentials\b' "$TMPFILE" || { echo 'Fixture test_user_credentials not found'; rm -f "$TMPFILE"; exit 1; }
-          else
-            grep -q '^test_user_credentials\b' "$TMPFILE" || { echo 'Fixture test_user_credentials not found'; rm -f "$TMPFILE"; exit 1; }
-          fi
-          rm -f "$TMPFILE"
 
       - name: Install pg client and wait for PG
         uses: ./.github/actions/wait-for-postgres
@@ -323,20 +295,17 @@ jobs:
         run: |
           echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
           echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-          # Provide a unified DSN so any test preferring TEST_DATABASE_URL uses the right DB
           echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
           echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
 
       - name: Ensure base DB exists
         shell: bash
         env:
-          # Use the same env vars tests read
           PGPASSWORD: ${{ env.POSTGRES_TEST_PASSWORD }}
         run: |
           PORT="${{ job.services.postgres.ports['5432'] }}"
           DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
           DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
-          echo "Ensuring database '$DB_NAME' exists on port $PORT as user $DB_USER"
           psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
             psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE ${DB_NAME}"
 
@@ -345,33 +314,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install "psycopg[binary]>=3.1" pytest pytest-asyncio
 
-      - name: Verify pytest-asyncio import (Linux matrix)
-        shell: bash
-        run: |
-          python - <<'PY'
-          try:
-              import pytest_asyncio
-              import importlib
-              m = importlib.import_module('pytest_asyncio.plugin')
-              print('pytest_asyncio OK:', getattr(pytest_asyncio, '__version__', 'unknown'))
-          except Exception as e:
-              print('pytest_asyncio import failed:', e)
-              raise
-          PY
-
-      - name: Verify pytest-benchmark import (Linux matrix)
-        shell: bash
-        run: |
-          python - <<'PY'
-          try:
-              import importlib
-              m = importlib.import_module('pytest_benchmark.plugin')
-              print('pytest-benchmark OK')
-          except Exception as e:
-              print('pytest-benchmark import failed:', e)
-              raise
-          PY
-
       - name: Smoke start server (single-user)
         env:
           SERVER_LABEL: smoke
@@ -379,16 +321,13 @@ jobs:
           DATABASE_URL: sqlite:///./Databases/users.db
           SINGLE_USER_API_KEY: "smoke-ci-key-12345"
           E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
-          # CI smoke boot runs outside pytest; mark explicit test runtime for startup guard.
-          PYTEST_CURRENT_TEST: "ci-smoke-linux-single::startup"
+          PYTEST_CURRENT_TEST: "ci-smoke-linux-py311-single::startup"
           TEST_MODE: 'true'
           DISABLE_HEAVY_STARTUP: '0'
           DEFER_HEAVY_STARTUP: '1'
           STARTUP_TRACE: '1'
           MCP_DEBUG: '1'
-          # Start an ultra-minimal app profile for smoke liveness only.
           ULTRA_MINIMAL_APP: '1'
-          # Skip strict privilege catalog validation in smoke
           PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
         shell: bash
         run: |
@@ -412,7 +351,7 @@ jobs:
         run: |
           python - <<'PY'
           import os, pathlib
-          label = os.environ.get('SERVER_LABEL','smoke')
+          label = os.environ.get('SERVER_LABEL', 'smoke')
           p = pathlib.Path(f'server-{label}.log')
           if p.exists():
               print('===== smoke server log =====')
@@ -427,38 +366,331 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
-      # --- Multi-user smoke (Postgres-backed) ---
+      - name: Run Python 3.11 compatibility smoke tests
+        shell: bash
+        run: |
+          mkdir -p test-results-linux-3.11-smoke
+          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            tldw_Server_API/tests/test_*.py \
+            tldw_Server_API/tests/AuthNZ_Unit \
+            tldw_Server_API/tests/Config \
+            tldw_Server_API/tests/Health \
+            tldw_Server_API/tests/Utils \
+            tldw_Server_API/tests/http_client \
+            tldw_Server_API/tests/sanity_tests \
+            tldw_Server_API/tests/schemas \
+            tldw_Server_API/tests/unit \
+            --durations=50 \
+            --junit-xml="test-results-linux-3.11-smoke/smoke.xml"
+
+      - name: Upload test results (Linux 3.11 smoke)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-suite-ubuntu-py3.11-smoke
+          path: test-results-linux-3.11-smoke
+
+  full-suite-linux-312-shards:
+    name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [lint, syntax-check]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: core-smoke
+            paths: >-
+              tldw_Server_API/tests/test_*.py
+              tldw_Server_API/tests/Admin
+              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Config
+              tldw_Server_API/tests/Health
+              tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Logging
+              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Setup
+              tldw_Server_API/tests/Usage
+              tldw_Server_API/tests/Utils
+              tldw_Server_API/tests/helpers
+              tldw_Server_API/tests/http_client
+              tldw_Server_API/tests/lint
+              tldw_Server_API/tests/sanity_tests
+              tldw_Server_API/tests/schemas
+              tldw_Server_API/tests/unit
+          - name: auth-db
+            paths: >-
+              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ_Postgres
+              tldw_Server_API/tests/AuthNZ_SQLite
+              tldw_Server_API/tests/AuthNZ_Unit
+              tldw_Server_API/tests/ChaChaNotesDB
+              tldw_Server_API/tests/DB
+              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/PrivilegeCatalog
+              tldw_Server_API/tests/Privileges
+          - name: ai-retrieval
+            paths: >-
+              tldw_Server_API/tests/ChromaDB
+              tldw_Server_API/tests/Chunking
+              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/PaperSearch
+              tldw_Server_API/tests/RAG
+              tldw_Server_API/tests/RAG_NEW
+              tldw_Server_API/tests/Research
+              tldw_Server_API/tests/VectorStores
+              tldw_Server_API/tests/WebSearch
+          - name: media-audio
+            paths: >-
+              tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media_Ingestion_Modification
+              tldw_Server_API/tests/STT
+              tldw_Server_API/tests/TTS
+              tldw_Server_API/tests/TTS_NEW
+              tldw_Server_API/tests/VLM
+          - name: chat-llm
+            paths: >-
+              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat_NEW
+              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Chat
+              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/LLM_Adapters
+              tldw_Server_API/tests/LLM_Calls
+              tldw_Server_API/tests/LLM_Local
+              tldw_Server_API/tests/LLamaCpp
+              tldw_Server_API/tests/Local_LLM
+              tldw_Server_API/tests/Streaming
+          - name: product-modules
+            paths: >-
+              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Collections
+              tldw_Server_API/tests/Evaluations
+              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Notes
+              tldw_Server_API/tests/Notes_NEW
+              tldw_Server_API/tests/Persona
+              tldw_Server_API/tests/Personalization
+              tldw_Server_API/tests/Prompt_Management
+              tldw_Server_API/tests/Prompt_Management_NEW
+              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/prompt_studio
+          - name: platform-mcp
+            paths: >-
+              tldw_Server_API/tests/Infrastructure
+              tldw_Server_API/tests/MCP
+              tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Metrics
+              tldw_Server_API/tests/Monitoring
+              tldw_Server_API/tests/Resource_Governance
+              tldw_Server_API/tests/Services
+              tldw_Server_API/tests/sandbox
+          - name: integrations
+            paths: >-
+              tldw_Server_API/tests/External_Sources
+              tldw_Server_API/tests/Notifications
+              tldw_Server_API/tests/Tools
+              tldw_Server_API/tests/WebScraping
+              tldw_Server_API/tests/Web_Scraping
+              tldw_Server_API/tests/integration
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: tldw_user
+          POSTGRES_PASSWORD: TestPassword123!
+          POSTGRES_DB: tldw_content
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U tldw_user -d tldw_content"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      POSTGRES_TEST_HOST: 127.0.0.1
+      POSTGRES_TEST_DB: tldw_content
+      POSTGRES_TEST_USER: tldw_user
+      POSTGRES_TEST_PASSWORD: TestPassword123!
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_USER: tldw_user
+      TEST_DB_PASSWORD: TestPassword123!
+      TEST_DB_NAME: tldw_test
+      TLDW_TEST_POSTGRES_REQUIRED: '1'
+      REDIS_URL: redis://127.0.0.1:6379/0
+      EMBEDDINGS_REDIS_URL: redis://127.0.0.1:6379/0
+      WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
+      SHARD_NAME: ${{ matrix.shard.name }}
+      TEST_PATHS: ${{ matrix.shard.paths }}
+      RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-portaudio: 'true'
+
+      - name: Setup Python and deps (with uv)
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.12'
+          use-uv: 'true'
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev,multiplayer
+
+      - name: Verify core e2e fixtures are discoverable
+        if: matrix.shard.name == 'core-smoke'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIXTURES_OUTPUT="$(pytest --fixtures -q tldw_Server_API/tests || true)"
+          TMPFILE=$(mktemp)
+          printf "%s\n" "$FIXTURES_OUTPUT" > "$TMPFILE"
+          if command -v rg >/dev/null 2>&1; then
+            rg -q '^test_user_credentials\b' "$TMPFILE" || { echo 'Fixture test_user_credentials not found'; rm -f "$TMPFILE"; exit 1; }
+          else
+            grep -q '^test_user_credentials\b' "$TMPFILE" || { echo 'Fixture test_user_credentials not found'; rm -f "$TMPFILE"; exit 1; }
+          fi
+          rm -f "$TMPFILE"
+
+      - name: Install pg client and wait for PG
+        uses: ./.github/actions/wait-for-postgres
+        with:
+          host: 127.0.0.1
+          port: ${{ job.services.postgres.ports['5432'] }}
+          user: tldw_user
+
+      - name: Export PG env vars
+        shell: bash
+        run: |
+          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+
+      - name: Ensure base DB exists
+        shell: bash
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_TEST_PASSWORD }}
+        run: |
+          PORT="${{ job.services.postgres.ports['5432'] }}"
+          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
+          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
+          psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
+            psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE ${DB_NAME}"
+
+      - name: Install additional deps for PG tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install "psycopg[binary]>=3.1" pytest pytest-asyncio
+
+      - name: Verify pytest plugins import
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib
+          import pytest_asyncio
+          importlib.import_module('pytest_asyncio.plugin')
+          importlib.import_module('pytest_benchmark.plugin')
+          print('pytest_asyncio OK:', getattr(pytest_asyncio, '__version__', 'unknown'))
+          print('pytest-benchmark OK')
+          PY
+
+      - name: Smoke start server (single-user)
+        if: matrix.shard.name == 'core-smoke'
+        env:
+          SERVER_LABEL: smoke
+          AUTH_MODE: single_user
+          DATABASE_URL: sqlite:///./Databases/users.db
+          SINGLE_USER_API_KEY: "smoke-ci-key-12345"
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          PYTEST_CURRENT_TEST: "ci-smoke-linux-single::startup"
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '0'
+          DEFER_HEAVY_STARTUP: '1'
+          STARTUP_TRACE: '1'
+          MCP_DEBUG: '1'
+          ULTRA_MINIMAL_APP: '1'
+          PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py start
+
+      - name: Smoke health check
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          SMOKE_STARTUP_TIMEOUT_SECONDS: '240'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Print smoke server log on failure
+        if: ${{ failure() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib
+          label = os.environ.get('SERVER_LABEL', 'smoke')
+          p = pathlib.Path(f'server-{label}.log')
+          if p.exists():
+              print('===== smoke server log =====')
+              print(p.read_text(encoding='utf-8'))
+          PY
+
+      - name: Smoke stop server
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
+
       - name: Smoke start server (multi-user, Postgres)
+        if: matrix.shard.name == 'core-smoke'
         continue-on-error: true
         env:
           SERVER_LABEL: smoke-mu
           AUTH_MODE: multi_user
-          # Strong test secret (>=32 chars) for JWT; ephemeral in CI
           JWT_SECRET_KEY: "test-ci-jwt-secret-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-          # Bind directly to the Actions Postgres service port
           DATABASE_URL: postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content
           E2E_TEST_BASE_URL: "http://127.0.0.1:8001"
           SERVER_PORT: '8001'
-          # CI smoke boot runs outside pytest; mark explicit test runtime for startup guard.
           PYTEST_CURRENT_TEST: "ci-smoke-linux-multi::startup"
           TEST_MODE: 'true'
           DISABLE_HEAVY_STARTUP: '0'
           DEFER_HEAVY_STARTUP: '1'
           STARTUP_TRACE: '1'
-          # Keep content (media/notes) on SQLite for smoke to avoid PG content migrations
           TLDW_CONTENT_DB_BACKEND: 'sqlite'
           MCP_DEBUG: '1'
-          # Start an ultra-minimal app profile for smoke liveness only.
           ULTRA_MINIMAL_APP: '1'
-          # Skip strict privilege catalog validation in smoke
           PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
         shell: bash
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py start
 
       - name: Smoke health check (multi-user)
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
         continue-on-error: true
-        if: always()
         env:
           SERVER_LABEL: smoke-mu
           E2E_TEST_BASE_URL: "http://127.0.0.1:8001"
@@ -467,23 +699,8 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
 
-      - name: Print smoke (multi-user) server log on failure
-        if: failure()
-        env:
-          SERVER_LABEL: smoke-mu
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, pathlib
-          label = os.environ.get('SERVER_LABEL','smoke-mu')
-          p = pathlib.Path(f'server-{label}.log')
-          if p.exists():
-              print('===== smoke (multi-user) server log =====')
-              print(p.read_text(encoding='utf-8'))
-          PY
-
       - name: Smoke stop server (multi-user)
-        if: always()
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
         env:
           SERVER_LABEL: smoke-mu
         shell: bash
@@ -491,6 +708,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
+        if: matrix.shard.name == 'ai-retrieval'
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -499,6 +717,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
+        if: matrix.shard.name == 'ai-retrieval'
         continue-on-error: true
         shell: bash
         run: |
@@ -507,1115 +726,491 @@ jobs:
           python Helper_Scripts/download_embedding_models.py --target models/embeddings
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
-      - name: Prepare test outputs directory (Linux ${{ matrix.python }})
+      - name: Run shard tests
         shell: bash
         run: |
-          rm -f .coverage coverage.xml || true
-          mkdir -p "test-results-linux-${{ matrix.python }}"
-
-      - name: Run tests (root-level files) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="root"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin \
+          mkdir -p "$RESULTS_DIR"
+          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
-            tldw_Server_API/tests/test_*.py \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/root.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
+            $TEST_PATHS \
+            --durations=50 \
+            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
 
-      - name: Run tests (Admin) [Linux ${{ matrix.python }}]
-        continue-on-error: true
+      - name: Run legacy-free media checks
+        if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Admin"; set +e
-          PYTEST_ADDOPTS='' pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Admin \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Admin.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Audio) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Audio"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Audio \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Audio.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AudioJobs) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="AudioJobs"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AudioJobs \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AudioJobs.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Audit) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Audit"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Audit \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Audit.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="AuthNZ"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ_Postgres) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="AuthNZ_Postgres"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ_Postgres \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ_Postgres.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ_SQLite) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="AuthNZ_SQLite"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ_SQLite \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ_SQLite.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ_Unit) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="AuthNZ_Unit"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ_Unit \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ_Unit.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (ChaChaNotesDB) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="ChaChaNotesDB"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/ChaChaNotesDB \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/ChaChaNotesDB.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Character_Chat) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Character_Chat"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Character_Chat \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Character_Chat.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Character_Chat_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Character_Chat_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Character_Chat_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Character_Chat_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Characters) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Characters"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Characters \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Characters.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chat) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Chat"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chat \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chat.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chat_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Chat_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chat_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chat_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chatbooks) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Chatbooks"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chatbooks \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chatbooks.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (ChromaDB) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="ChromaDB"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/ChromaDB \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/ChromaDB.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chunking) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Chunking"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chunking \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chunking.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Claims) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Claims"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Claims \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Claims.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Collections) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Collections"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Collections \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Collections.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Config) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Config"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Config \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Config.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (DB) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="DB"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/DB \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/DB.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (DB_Management) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="DB_Management"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/DB_Management \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/DB_Management.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Embeddings) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Embeddings"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Embeddings \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Embeddings.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Embeddings_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Embeddings_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Embeddings_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Embeddings_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Evaluations) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Evaluations"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Evaluations \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Evaluations.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (External_Sources) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="External_Sources"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/External_Sources \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/External_Sources.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Flashcards) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Flashcards"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Flashcards \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Flashcards.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Health) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Health"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Health \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Health.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Helper_Scripts) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Helper_Scripts"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Helper_Scripts \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Helper_Scripts.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Infrastructure) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Infrastructure"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Infrastructure \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Infrastructure.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLM_Adapters) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="LLM_Adapters"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLM_Adapters \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLM_Adapters.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLM_Calls) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="LLM_Calls"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLM_Calls \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLM_Calls.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLM_Local) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="LLM_Local"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLM_Local \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLM_Local.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLamaCpp) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="LLamaCpp"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLamaCpp \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLamaCpp.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Local_LLM) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Local_LLM"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Local_LLM \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Local_LLM.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Logging) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Logging"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Logging \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Logging.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MCP) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="MCP"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MCP \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MCP.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MCP_unified) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="MCP_unified"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MCP_unified \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MCP_unified.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Media) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Media"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Media.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MediaDB2) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="MediaDB2"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MediaDB2 \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MediaDB2.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MediaIngestion_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="MediaIngestion_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
             tldw_Server_API/tests/MediaIngestion_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MediaIngestion_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
+            --durations=25 \
+            --junit-xml="$RESULTS_DIR/media-legacy-free.xml"
 
-      - name: Run tests (Media, legacy-free) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Media-legacy-free"; set +e
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Media \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Media_legacy_free.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MediaIngestion_NEW, legacy-free) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="MediaIngestion_NEW-legacy-free"; set +e
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MediaIngestion_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MediaIngestion_NEW_legacy_free.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Media_Ingestion_Modification) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Media_Ingestion_Modification"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Media_Ingestion_Modification \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Media_Ingestion_Modification.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Metrics) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Metrics"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Metrics \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Metrics.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Monitoring) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Monitoring"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Monitoring \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Monitoring.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Notes) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Notes"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Notes \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Notes.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Notes_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Notes_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Notes_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Notes_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Notifications) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Notifications"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Notifications \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Notifications.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (PaperSearch) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="PaperSearch"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/PaperSearch \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/PaperSearch.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Persona) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Persona"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Persona \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Persona.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Personalization) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Personalization"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Personalization \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Personalization.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (PrivilegeCatalog) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="PrivilegeCatalog"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/PrivilegeCatalog \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/PrivilegeCatalog.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Privileges) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Privileges"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Privileges \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Privileges.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Prompt_Management) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Prompt_Management"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Prompt_Management \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Prompt_Management.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Prompt_Management_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Prompt_Management_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Prompt_Management_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Prompt_Management_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (RAG) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="RAG"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/RAG \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/RAG.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (RAG_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="RAG_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/RAG_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/RAG_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Research) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Research"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Research \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Research.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Resource_Governance) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Resource_Governance"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Resource_Governance \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Resource_Governance.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (STT) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="STT"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/STT \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/STT.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Security) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Security"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Security \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Security.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Services) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Services"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Services \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Services.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Setup) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Setup"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Setup \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Setup.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Streaming) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Streaming"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Streaming \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Streaming.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (TTS) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="TTS"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/TTS \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/TTS.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (TTS_NEW) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="TTS_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/TTS_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/TTS_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Tools) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Tools"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Tools \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Tools.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Usage) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Usage"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Usage \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Usage.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Utils) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Utils"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Utils \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Utils.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (VLM) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="VLM"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/VLM \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/VLM.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (VectorStores) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="VectorStores"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/VectorStores \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/VectorStores.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Watchlists) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Watchlists"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Watchlists \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Watchlists.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (WebScraping) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="WebScraping"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/WebScraping \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/WebScraping.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (WebSearch) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="WebSearch"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/WebSearch \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/WebSearch.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Web_Scraping) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Web_Scraping"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Web_Scraping \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Web_Scraping.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Workflows) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Workflows"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Workflows \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Workflows.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (helpers) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="helpers"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/helpers \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/helpers.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (http_client) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="http_client"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/http_client \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/http_client.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (integration) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="integration"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/integration \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/integration.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (lint) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="lint"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/lint \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/lint.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (prompt_studio) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="prompt_studio"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/prompt_studio \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/prompt_studio.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (sandbox) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="sandbox"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/sandbox \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/sandbox.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (sanity_tests) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="sanity_tests"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/sanity_tests \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/sanity_tests.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (schemas) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="schemas"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/schemas \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/schemas.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (unit) [Linux ${{ matrix.python }}]
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="unit"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/unit \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/unit.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Upload test results (Linux ${{ matrix.python }})
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: full-suite-ubuntu-py${{ matrix.python }}
-          path: test-results-linux-${{ matrix.python }}
+          name: full-suite-ubuntu-py3.12-${{ matrix.shard.name }}
+          path: ${{ env.RESULTS_DIR }}
 
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-ubuntu-py${{ matrix.python }}
-          path: coverage.xml
-
-      - name: Upload coverage to Codecov (Ubuntu 3.12)
-        if: matrix.python == '3.12'
-        uses: codecov/codecov-action@v6
-        with:
-          files: ./coverage.xml
-          flags: fullsuite
-          name: codecov-linux-py312
-          fail_ci_if_error: false
-
-      - name: Fail if any module failed (Linux ${{ matrix.python }})
-        if: always()
+  full-suite-linux-312-summary:
+    name: Full Suite (Ubuntu / Python 3.12)
+    runs-on: ubuntu-latest
+    needs: [full-suite-linux-312-shards]
+    if: always()
+    steps:
+      - name: Check Python 3.12 shard result
         shell: bash
         run: |
-          RESULTS_DIR="test-results-linux-${{ matrix.python }}"
-          if [ -s "$RESULTS_DIR/failures.txt" ]; then
-            echo "Modules with failing tests (Linux ${{ matrix.python }}):"
-            cat "$RESULTS_DIR/failures.txt"
+          if [ "${{ needs['full-suite-linux-312-shards'].result }}" != "success" ]; then
+            echo "Python 3.12 full-suite shards finished with: ${{ needs['full-suite-linux-312-shards'].result }}"
             exit 1
           fi
-          echo "All modules passed (Linux ${{ matrix.python }})."
+          echo "Python 3.12 full-suite shards passed."
 
-
-  full-suite-os:
-    name: Full Suite (${{ matrix.os }} / Python 3.12)
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+  full-suite-linux-313-shards:
+    name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     needs: [lint, syntax-check]
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        shard:
+          - name: core-smoke
+            paths: >-
+              tldw_Server_API/tests/test_*.py
+              tldw_Server_API/tests/Admin
+              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Config
+              tldw_Server_API/tests/Health
+              tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Logging
+              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Setup
+              tldw_Server_API/tests/Usage
+              tldw_Server_API/tests/Utils
+              tldw_Server_API/tests/helpers
+              tldw_Server_API/tests/http_client
+              tldw_Server_API/tests/lint
+              tldw_Server_API/tests/sanity_tests
+              tldw_Server_API/tests/schemas
+              tldw_Server_API/tests/unit
+          - name: auth-db
+            paths: >-
+              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ_Postgres
+              tldw_Server_API/tests/AuthNZ_SQLite
+              tldw_Server_API/tests/AuthNZ_Unit
+              tldw_Server_API/tests/ChaChaNotesDB
+              tldw_Server_API/tests/DB
+              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/PrivilegeCatalog
+              tldw_Server_API/tests/Privileges
+          - name: ai-retrieval
+            paths: >-
+              tldw_Server_API/tests/ChromaDB
+              tldw_Server_API/tests/Chunking
+              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/PaperSearch
+              tldw_Server_API/tests/RAG
+              tldw_Server_API/tests/RAG_NEW
+              tldw_Server_API/tests/Research
+              tldw_Server_API/tests/VectorStores
+              tldw_Server_API/tests/WebSearch
+          - name: media-audio
+            paths: >-
+              tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media_Ingestion_Modification
+              tldw_Server_API/tests/STT
+              tldw_Server_API/tests/TTS
+              tldw_Server_API/tests/TTS_NEW
+              tldw_Server_API/tests/VLM
+          - name: chat-llm
+            paths: >-
+              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat_NEW
+              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Chat
+              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/LLM_Adapters
+              tldw_Server_API/tests/LLM_Calls
+              tldw_Server_API/tests/LLM_Local
+              tldw_Server_API/tests/LLamaCpp
+              tldw_Server_API/tests/Local_LLM
+              tldw_Server_API/tests/Streaming
+          - name: product-modules
+            paths: >-
+              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Collections
+              tldw_Server_API/tests/Evaluations
+              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Notes
+              tldw_Server_API/tests/Notes_NEW
+              tldw_Server_API/tests/Persona
+              tldw_Server_API/tests/Personalization
+              tldw_Server_API/tests/Prompt_Management
+              tldw_Server_API/tests/Prompt_Management_NEW
+              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/prompt_studio
+          - name: platform-mcp
+            paths: >-
+              tldw_Server_API/tests/Infrastructure
+              tldw_Server_API/tests/MCP
+              tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Metrics
+              tldw_Server_API/tests/Monitoring
+              tldw_Server_API/tests/Resource_Governance
+              tldw_Server_API/tests/Services
+              tldw_Server_API/tests/sandbox
+          - name: integrations
+            paths: >-
+              tldw_Server_API/tests/External_Sources
+              tldw_Server_API/tests/Notifications
+              tldw_Server_API/tests/Tools
+              tldw_Server_API/tests/WebScraping
+              tldw_Server_API/tests/Web_Scraping
+              tldw_Server_API/tests/integration
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: tldw_user
+          POSTGRES_PASSWORD: TestPassword123!
+          POSTGRES_DB: tldw_content
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U tldw_user -d tldw_content"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      # Ensure Python can import the top-level package `tldw_Server_API` and scripts
-      # by including the repository root on sys.path.
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: 'true'
       DISABLE_HEAVY_STARTUP: '1'
-      # Work around protobuf/opentelemetry runtime incompatibilities in CI runners.
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
-      # Enable pytest-xdist parallelism for this heavy suite
-      PYTEST_ADDOPTS: "-p xdist.plugin -n auto"
-      # Allow mock-host test URLs in strict egress environments
+      POSTGRES_TEST_HOST: 127.0.0.1
+      POSTGRES_TEST_DB: tldw_content
+      POSTGRES_TEST_USER: tldw_user
+      POSTGRES_TEST_PASSWORD: TestPassword123!
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_USER: tldw_user
+      TEST_DB_PASSWORD: TestPassword123!
+      TEST_DB_NAME: tldw_test
+      TLDW_TEST_POSTGRES_REQUIRED: '1'
+      REDIS_URL: redis://127.0.0.1:6379/0
+      EMBEDDINGS_REDIS_URL: redis://127.0.0.1:6379/0
       WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
+      SHARD_NAME: ${{ matrix.shard.name }}
+      TEST_PATHS: ${{ matrix.shard.paths }}
+      RESULTS_DIR: test-results-linux-3.13-${{ matrix.shard.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-portaudio: 'true'
+
+      - name: Setup Python and deps (with uv)
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.13'
+          use-uv: 'true'
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev,multiplayer
+
+      - name: Verify core e2e fixtures are discoverable
+        if: matrix.shard.name == 'core-smoke'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIXTURES_OUTPUT="$(pytest --fixtures -q tldw_Server_API/tests || true)"
+          TMPFILE=$(mktemp)
+          printf "%s\n" "$FIXTURES_OUTPUT" > "$TMPFILE"
+          if command -v rg >/dev/null 2>&1; then
+            rg -q '^test_user_credentials\b' "$TMPFILE" || { echo 'Fixture test_user_credentials not found'; rm -f "$TMPFILE"; exit 1; }
+          else
+            grep -q '^test_user_credentials\b' "$TMPFILE" || { echo 'Fixture test_user_credentials not found'; rm -f "$TMPFILE"; exit 1; }
+          fi
+          rm -f "$TMPFILE"
+
+      - name: Install pg client and wait for PG
+        uses: ./.github/actions/wait-for-postgres
+        with:
+          host: 127.0.0.1
+          port: ${{ job.services.postgres.ports['5432'] }}
+          user: tldw_user
+
+      - name: Export PG env vars
+        shell: bash
+        run: |
+          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "TEST_DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_content" >> "$GITHUB_ENV"
+
+      - name: Ensure base DB exists
+        shell: bash
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_TEST_PASSWORD }}
+        run: |
+          PORT="${{ job.services.postgres.ports['5432'] }}"
+          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
+          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
+          psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
+            psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE ${DB_NAME}"
+
+      - name: Install additional deps for PG tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install "psycopg[binary]>=3.1" pytest pytest-asyncio
+
+      - name: Verify pytest plugins import
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib
+          import pytest_asyncio
+          importlib.import_module('pytest_asyncio.plugin')
+          importlib.import_module('pytest_benchmark.plugin')
+          print('pytest_asyncio OK:', getattr(pytest_asyncio, '__version__', 'unknown'))
+          print('pytest-benchmark OK')
+          PY
+
+      - name: Smoke start server (single-user)
+        if: matrix.shard.name == 'core-smoke'
+        env:
+          SERVER_LABEL: smoke
+          AUTH_MODE: single_user
+          DATABASE_URL: sqlite:///./Databases/users.db
+          SINGLE_USER_API_KEY: "smoke-ci-key-12345"
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          PYTEST_CURRENT_TEST: "ci-smoke-linux-single::startup"
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '0'
+          DEFER_HEAVY_STARTUP: '1'
+          STARTUP_TRACE: '1'
+          MCP_DEBUG: '1'
+          ULTRA_MINIMAL_APP: '1'
+          PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py start
+
+      - name: Smoke health check
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          SMOKE_STARTUP_TIMEOUT_SECONDS: '240'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Smoke stop server
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
+
+      - name: Cache embedding models
+        if: matrix.shard.name == 'ai-retrieval'
+        uses: actions/cache@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
+      - name: Pre-download embedding models
+        if: matrix.shard.name == 'ai-retrieval'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
+
+      - name: Run shard tests
+        shell: bash
+        run: |
+          mkdir -p "$RESULTS_DIR"
+          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            $TEST_PATHS \
+            --durations=50 \
+            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
+
+      - name: Run legacy-free media checks
+        if: matrix.shard.name == 'media-audio'
+        shell: bash
+        run: |
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            tldw_Server_API/tests/Media \
+            tldw_Server_API/tests/MediaIngestion_NEW \
+            --durations=25 \
+            --junit-xml="$RESULTS_DIR/media-legacy-free.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-suite-ubuntu-py3.13-${{ matrix.shard.name }}
+          path: ${{ env.RESULTS_DIR }}
+
+  full-suite-linux-313-summary:
+    name: Full Suite (Ubuntu / Python 3.13)
+    runs-on: ubuntu-latest
+    needs: [full-suite-linux-313-shards]
+    if: always()
+    steps:
+      - name: Check Python 3.13 shard result
+        shell: bash
+        run: |
+          if [ "${{ needs['full-suite-linux-313-shards'].result }}" != "success" ]; then
+            echo "Python 3.13 full-suite shards finished with: ${{ needs['full-suite-linux-313-shards'].result }}"
+            exit 1
+          fi
+          echo "Python 3.13 full-suite shards passed."
+
+
+  full-suite-macos-312-shards:
+    name: Full Suite shard (macos-latest / Python 3.12 / ${{ matrix.shard.name }})
+    runs-on: macos-latest
+    timeout-minutes: 35
+    needs: [lint, syntax-check]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: core-smoke
+            paths: >-
+              tldw_Server_API/tests/test_*.py
+              tldw_Server_API/tests/Admin
+              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Config
+              tldw_Server_API/tests/Health
+              tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Logging
+              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Setup
+              tldw_Server_API/tests/Usage
+              tldw_Server_API/tests/Utils
+              tldw_Server_API/tests/helpers
+              tldw_Server_API/tests/http_client
+              tldw_Server_API/tests/lint
+              tldw_Server_API/tests/sanity_tests
+              tldw_Server_API/tests/schemas
+              tldw_Server_API/tests/unit
+          - name: auth-db
+            paths: >-
+              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ_Postgres
+              tldw_Server_API/tests/AuthNZ_SQLite
+              tldw_Server_API/tests/AuthNZ_Unit
+              tldw_Server_API/tests/ChaChaNotesDB
+              tldw_Server_API/tests/DB
+              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/PrivilegeCatalog
+              tldw_Server_API/tests/Privileges
+          - name: ai-retrieval
+            paths: >-
+              tldw_Server_API/tests/ChromaDB
+              tldw_Server_API/tests/Chunking
+              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/PaperSearch
+              tldw_Server_API/tests/RAG
+              tldw_Server_API/tests/RAG_NEW
+              tldw_Server_API/tests/Research
+              tldw_Server_API/tests/VectorStores
+              tldw_Server_API/tests/WebSearch
+          - name: media-audio
+            paths: >-
+              tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media_Ingestion_Modification
+              tldw_Server_API/tests/STT
+              tldw_Server_API/tests/TTS
+              tldw_Server_API/tests/TTS_NEW
+              tldw_Server_API/tests/VLM
+          - name: chat-llm
+            paths: >-
+              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat_NEW
+              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Chat
+              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/LLM_Adapters
+              tldw_Server_API/tests/LLM_Calls
+              tldw_Server_API/tests/LLM_Local
+              tldw_Server_API/tests/LLamaCpp
+              tldw_Server_API/tests/Local_LLM
+              tldw_Server_API/tests/Streaming
+          - name: product-modules
+            paths: >-
+              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Collections
+              tldw_Server_API/tests/Evaluations
+              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Notes
+              tldw_Server_API/tests/Notes_NEW
+              tldw_Server_API/tests/Persona
+              tldw_Server_API/tests/Personalization
+              tldw_Server_API/tests/Prompt_Management
+              tldw_Server_API/tests/Prompt_Management_NEW
+              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/prompt_studio
+          - name: platform-mcp
+            paths: >-
+              tldw_Server_API/tests/Infrastructure
+              tldw_Server_API/tests/MCP
+              tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Metrics
+              tldw_Server_API/tests/Monitoring
+              tldw_Server_API/tests/Resource_Governance
+              tldw_Server_API/tests/Services
+              tldw_Server_API/tests/sandbox
+          - name: integrations
+            paths: >-
+              tldw_Server_API/tests/External_Sources
+              tldw_Server_API/tests/Notifications
+              tldw_Server_API/tests/Tools
+              tldw_Server_API/tests/WebScraping
+              tldw_Server_API/tests/Web_Scraping
+              tldw_Server_API/tests/integration
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      TLDW_TEST_NO_DOCKER: '1'
+      WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
+      SHARD_NAME: ${{ matrix.shard.name }}
+      TEST_PATHS: ${{ matrix.shard.paths }}
+      RESULTS_DIR: test-results-macos-latest-3.12-${{ matrix.shard.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -1629,8 +1224,7 @@ jobs:
         uses: ./.github/actions/setup-python-deps
         with:
           python-version: '3.12'
-          # Use uv on macOS, pip on Windows (leveraging pip cache on runners)
-          use-uv: ${{ matrix.os != 'windows-latest' }}
+          use-uv: ${{ runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -1642,56 +1236,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio
 
-      - name: Verify pytest-asyncio import (OS matrix)
-        shell: bash
-        run: |
-          python - <<'PY'
-          try:
-              import pytest_asyncio
-              import importlib
-              m = importlib.import_module('pytest_asyncio.plugin')
-              print('pytest_asyncio OK:', getattr(pytest_asyncio, '__version__', 'unknown'))
-          except Exception as e:
-              print('pytest_asyncio import failed:', e)
-              raise
-          PY
-
-      - name: Verify pytest-benchmark import (OS matrix)
-        shell: bash
-        run: |
-          python - <<'PY'
-          try:
-              import importlib
-              m = importlib.import_module('pytest_benchmark.plugin')
-              print('pytest-benchmark OK')
-          except Exception as e:
-              print('pytest-benchmark import failed:', e)
-              raise
-          PY
-
       - name: Smoke start server (single-user)
+        if: matrix.shard.name == 'core-smoke'
         env:
           SERVER_LABEL: smoke
           AUTH_MODE: single_user
           DATABASE_URL: sqlite:///./Databases/users.db
           SINGLE_USER_API_KEY: "smoke-ci-key-12345"
           E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
-          # CI smoke boot runs outside pytest; mark explicit test runtime for startup guard.
           PYTEST_CURRENT_TEST: "ci-smoke-cross-os-single::startup"
           TEST_MODE: 'true'
           DISABLE_HEAVY_STARTUP: '1'
           STARTUP_TRACE: '1'
           MCP_DEBUG: '1'
-          # Start an ultra-minimal app profile for smoke liveness only.
           ULTRA_MINIMAL_APP: '1'
-          # Skip strict privilege catalog validation in smoke
           PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
         shell: bash
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py start
 
       - name: Smoke health check (Windows, 15 min)
-        if: ${{ always() && matrix.os == 'windows-latest' }}
+        if: ${{ always() && matrix.shard.name == 'core-smoke' && runner.os == 'Windows' }}
         env:
           SERVER_LABEL: smoke
           E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
@@ -1701,7 +1266,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
 
       - name: Smoke health check (non-Windows)
-        if: ${{ always() && matrix.os != 'windows-latest' }}
+        if: ${{ always() && matrix.shard.name == 'core-smoke' && runner.os != 'Windows' }}
         env:
           SERVER_LABEL: smoke
           E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
@@ -1710,23 +1275,8 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
 
-      - name: Print smoke server log on failure
-        if: failure()
-        env:
-          SERVER_LABEL: smoke
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, pathlib
-          label = os.environ.get('SERVER_LABEL','smoke')
-          p = pathlib.Path(f'server-{label}.log')
-          if p.exists():
-              print('===== smoke server log =====')
-              print(p.read_text(encoding='utf-8'))
-          PY
-
       - name: Smoke stop server
-        if: always()
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
         env:
           SERVER_LABEL: smoke
         shell: bash
@@ -1734,6 +1284,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
+        if: matrix.shard.name == 'ai-retrieval'
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1742,6 +1293,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
+        if: matrix.shard.name == 'ai-retrieval'
         continue-on-error: true
         shell: bash
         run: |
@@ -1750,1091 +1302,549 @@ jobs:
           python Helper_Scripts/download_embedding_models.py --target models/embeddings
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
-      - name: Prepare test outputs directory
+      - name: Run OS shard tests
         shell: bash
         run: |
-          rm -f .coverage coverage.xml || true
-          mkdir -p "test-results-${{ matrix.os }}-3.12"
-
-      - name: Run tests (root-level files)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"
-          MOD="root"
-          set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin \
+          mkdir -p "$RESULTS_DIR"
+          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
-            tldw_Server_API/tests/test_*.py \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/root.xml"
-          status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
+            $TEST_PATHS \
+            --durations=50 \
+            --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
 
-      - name: Run tests (Admin)
-        continue-on-error: true
+      - name: Run legacy-free media checks
+        if: matrix.shard.name == 'media-audio'
         shell: bash
         run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Admin"; set +e
-          PYTEST_ADDOPTS='' pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Admin \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Admin.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Audio)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Audio"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Audio \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Audio.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AudioJobs)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="AudioJobs"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AudioJobs \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AudioJobs.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Audit)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Audit"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Audit \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Audit.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="AuthNZ"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ_Postgres)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="AuthNZ_Postgres"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ_Postgres \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ_Postgres.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ_SQLite)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="AuthNZ_SQLite"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ_SQLite \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ_SQLite.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (AuthNZ_Unit)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="AuthNZ_Unit"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/AuthNZ_Unit \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/AuthNZ_Unit.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (ChaChaNotesDB)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="ChaChaNotesDB"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/ChaChaNotesDB \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/ChaChaNotesDB.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Character_Chat)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Character_Chat"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Character_Chat \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Character_Chat.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Character_Chat_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Character_Chat_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Character_Chat_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Character_Chat_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Characters)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Characters"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Characters \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Characters.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chat)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Chat"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chat \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chat.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chat_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Chat_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chat_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chat_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chatbooks)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Chatbooks"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chatbooks \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chatbooks.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (ChromaDB)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="ChromaDB"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/ChromaDB \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/ChromaDB.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Chunking)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Chunking"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Chunking \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Chunking.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Claims)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Claims"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Claims \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Claims.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Collections)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Collections"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Collections \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Collections.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Config)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Config"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Config \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Config.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (DB)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="DB"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/DB \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/DB.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (DB_Management)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="DB_Management"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/DB_Management \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/DB_Management.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Embeddings)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Embeddings"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Embeddings \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Embeddings.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Embeddings_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Embeddings_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Embeddings_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Embeddings_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Evaluations)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Evaluations"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Evaluations \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Evaluations.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (External_Sources)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="External_Sources"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/External_Sources \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/External_Sources.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Flashcards)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Flashcards"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Flashcards \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Flashcards.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Health)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Health"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Health \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Health.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Helper_Scripts)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Helper_Scripts"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Helper_Scripts \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Helper_Scripts.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Infrastructure)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Infrastructure"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Infrastructure \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Infrastructure.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLM_Adapters)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="LLM_Adapters"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLM_Adapters \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLM_Adapters.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLM_Calls)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="LLM_Calls"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLM_Calls \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLM_Calls.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLM_Local)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="LLM_Local"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLM_Local \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLM_Local.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (LLamaCpp)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="LLamaCpp"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/LLamaCpp \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/LLamaCpp.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Local_LLM)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Local_LLM"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Local_LLM \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Local_LLM.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Logging)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Logging"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Logging \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Logging.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MCP)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="MCP"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MCP \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MCP.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MCP_unified)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="MCP_unified"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MCP_unified \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MCP_unified.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Media)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Media"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Media.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MediaDB2)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="MediaDB2"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MediaDB2 \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MediaDB2.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MediaIngestion_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="MediaIngestion_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
             tldw_Server_API/tests/MediaIngestion_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MediaIngestion_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Media, legacy-free)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Media-legacy-free"; set +e
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Media \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Media_legacy_free.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (MediaIngestion_NEW, legacy-free)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="MediaIngestion_NEW-legacy-free"; set +e
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/MediaIngestion_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/MediaIngestion_NEW_legacy_free.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Media_Ingestion_Modification)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Media_Ingestion_Modification"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Media_Ingestion_Modification \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Media_Ingestion_Modification.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Metrics)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Metrics"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Metrics \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Metrics.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Monitoring)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Monitoring"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Monitoring \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Monitoring.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Notes)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Notes"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Notes \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Notes.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Notes_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Notes_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Notes_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Notes_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Notifications)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Notifications"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Notifications \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Notifications.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (PaperSearch)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="PaperSearch"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/PaperSearch \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/PaperSearch.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Persona)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Persona"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Persona \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Persona.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Personalization)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Personalization"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Personalization \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Personalization.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (PrivilegeCatalog)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="PrivilegeCatalog"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/PrivilegeCatalog \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/PrivilegeCatalog.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Privileges)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Privileges"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Privileges \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Privileges.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Prompt_Management)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Prompt_Management"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Prompt_Management \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Prompt_Management.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Prompt_Management_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Prompt_Management_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Prompt_Management_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Prompt_Management_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (RAG)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="RAG"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/RAG \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/RAG.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (RAG_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="RAG_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/RAG_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/RAG_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Research)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Research"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Research \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Research.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Resource_Governance)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Resource_Governance"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Resource_Governance \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Resource_Governance.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (STT)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="STT"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/STT \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/STT.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Security)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Security"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Security \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Security.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Services)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Services"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Services \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Services.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Setup)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Setup"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Setup \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Setup.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Streaming)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Streaming"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Streaming \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Streaming.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (TTS)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="TTS"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/TTS \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/TTS.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (TTS_NEW)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="TTS_NEW"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/TTS_NEW \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/TTS_NEW.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Tools)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Tools"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Tools \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Tools.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Usage)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Usage"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Usage \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Usage.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Utils)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Utils"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Utils \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Utils.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (VLM)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="VLM"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/VLM \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/VLM.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (VectorStores)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="VectorStores"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/VectorStores \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/VectorStores.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Watchlists)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Watchlists"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Watchlists \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Watchlists.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (WebScraping)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="WebScraping"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/WebScraping \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/WebScraping.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (WebSearch)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="WebSearch"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/WebSearch \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/WebSearch.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Web_Scraping)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Web_Scraping"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Web_Scraping \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Web_Scraping.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (Workflows)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Workflows"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/Workflows \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/Workflows.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (helpers)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="helpers"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/helpers \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/helpers.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (http_client)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="http_client"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/http_client \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/http_client.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (integration)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="integration"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/integration \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/integration.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (lint)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="lint"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/lint \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/lint.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (prompt_studio)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="prompt_studio"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/prompt_studio \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/prompt_studio.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (sandbox)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="sandbox"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/sandbox \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/sandbox.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (sanity_tests)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="sanity_tests"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/sanity_tests \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/sanity_tests.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (schemas)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="schemas"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/schemas \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/schemas.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
-
-      - name: Run tests (unit)
-        continue-on-error: true
-        shell: bash
-        run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="unit"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
-            tldw_Server_API/tests/unit \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
-            --junit-xml="$RESULTS_DIR/unit.xml"; status=$?
-          if [ $status -ne 0 ]; then echo "$MOD" >> "$RESULTS_DIR/failures.txt"; fi
-          exit $status
+            --durations=25 \
+            --junit-xml="$RESULTS_DIR/media-legacy-free.xml"
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: full-suite-${{ matrix.os }}-py3.12
-          path: test-results-${{ matrix.os }}-3.12
+          name: full-suite-macos-latest-py3.12-${{ matrix.shard.name }}
+          path: ${{ env.RESULTS_DIR }}
 
-      - name: Upload coverage artifact
+  full-suite-macos-312-summary:
+    name: Full Suite (macos-latest / Python 3.12)
+    runs-on: ubuntu-latest
+    needs: [full-suite-macos-312-shards]
+    if: always()
+    steps:
+      - name: Check macos-latest Python 3.12 shard result
+        shell: bash
+        run: |
+          if [ "${{ needs['full-suite-macos-312-shards'].result }}" != "success" ]; then
+            echo "macos-latest Python 3.12 full-suite shards finished with: ${{ needs['full-suite-macos-312-shards'].result }}"
+            exit 1
+          fi
+          echo "macos-latest Python 3.12 full-suite shards passed."
+
+  full-suite-windows-312-shards:
+    name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    needs: [lint, syntax-check]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: core-smoke
+            paths: >-
+              tldw_Server_API/tests/test_*.py
+              tldw_Server_API/tests/Admin
+              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Config
+              tldw_Server_API/tests/Health
+              tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Logging
+              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Setup
+              tldw_Server_API/tests/Usage
+              tldw_Server_API/tests/Utils
+              tldw_Server_API/tests/helpers
+              tldw_Server_API/tests/http_client
+              tldw_Server_API/tests/lint
+              tldw_Server_API/tests/sanity_tests
+              tldw_Server_API/tests/schemas
+              tldw_Server_API/tests/unit
+          - name: auth-db
+            paths: >-
+              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ_Postgres
+              tldw_Server_API/tests/AuthNZ_SQLite
+              tldw_Server_API/tests/AuthNZ_Unit
+              tldw_Server_API/tests/ChaChaNotesDB
+              tldw_Server_API/tests/DB
+              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/PrivilegeCatalog
+              tldw_Server_API/tests/Privileges
+          - name: ai-retrieval
+            paths: >-
+              tldw_Server_API/tests/ChromaDB
+              tldw_Server_API/tests/Chunking
+              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/PaperSearch
+              tldw_Server_API/tests/RAG
+              tldw_Server_API/tests/RAG_NEW
+              tldw_Server_API/tests/Research
+              tldw_Server_API/tests/VectorStores
+              tldw_Server_API/tests/WebSearch
+          - name: media-audio
+            paths: >-
+              tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media_Ingestion_Modification
+              tldw_Server_API/tests/STT
+              tldw_Server_API/tests/TTS
+              tldw_Server_API/tests/TTS_NEW
+              tldw_Server_API/tests/VLM
+          - name: chat-llm
+            paths: >-
+              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat_NEW
+              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Chat
+              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/LLM_Adapters
+              tldw_Server_API/tests/LLM_Calls
+              tldw_Server_API/tests/LLM_Local
+              tldw_Server_API/tests/LLamaCpp
+              tldw_Server_API/tests/Local_LLM
+              tldw_Server_API/tests/Streaming
+          - name: product-modules
+            paths: >-
+              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Collections
+              tldw_Server_API/tests/Evaluations
+              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Notes
+              tldw_Server_API/tests/Notes_NEW
+              tldw_Server_API/tests/Persona
+              tldw_Server_API/tests/Personalization
+              tldw_Server_API/tests/Prompt_Management
+              tldw_Server_API/tests/Prompt_Management_NEW
+              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/prompt_studio
+          - name: platform-mcp
+            paths: >-
+              tldw_Server_API/tests/Infrastructure
+              tldw_Server_API/tests/MCP
+              tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Metrics
+              tldw_Server_API/tests/Monitoring
+              tldw_Server_API/tests/Resource_Governance
+              tldw_Server_API/tests/Services
+              tldw_Server_API/tests/sandbox
+          - name: integrations
+            paths: >-
+              tldw_Server_API/tests/External_Sources
+              tldw_Server_API/tests/Notifications
+              tldw_Server_API/tests/Tools
+              tldw_Server_API/tests/WebScraping
+              tldw_Server_API/tests/Web_Scraping
+              tldw_Server_API/tests/integration
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      TLDW_TEST_NO_DOCKER: '1'
+      WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
+      SHARD_NAME: ${{ matrix.shard.name }}
+      TEST_PATHS: ${{ matrix.shard.paths }}
+      RESULTS_DIR: test-results-windows-latest-3.12-${{ matrix.shard.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install FFmpeg (multi-OS)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-portaudio: 'true'
+
+      - name: Setup Python and deps (with uv)
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.12'
+          use-uv: ${{ runner.os != 'Windows' }}
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Ensure pytest-asyncio installed (OS matrix)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio
+
+      - name: Smoke start server (single-user)
+        if: matrix.shard.name == 'core-smoke'
+        env:
+          SERVER_LABEL: smoke
+          AUTH_MODE: single_user
+          DATABASE_URL: sqlite:///./Databases/users.db
+          SINGLE_USER_API_KEY: "smoke-ci-key-12345"
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          PYTEST_CURRENT_TEST: "ci-smoke-cross-os-single::startup"
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '1'
+          STARTUP_TRACE: '1'
+          MCP_DEBUG: '1'
+          ULTRA_MINIMAL_APP: '1'
+          PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py start
+
+      - name: Smoke health check (Windows, 15 min)
+        if: ${{ always() && matrix.shard.name == 'core-smoke' && runner.os == 'Windows' }}
+        env:
+          SERVER_LABEL: smoke
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          SMOKE_STARTUP_TIMEOUT_SECONDS: '900'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Smoke health check (non-Windows)
+        if: ${{ always() && matrix.shard.name == 'core-smoke' && runner.os != 'Windows' }}
+        env:
+          SERVER_LABEL: smoke
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          SMOKE_STARTUP_TIMEOUT_SECONDS: '180'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Smoke stop server
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
+
+      - name: Cache embedding models
+        if: matrix.shard.name == 'ai-retrieval'
+        uses: actions/cache@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
+      - name: Pre-download embedding models
+        if: matrix.shard.name == 'ai-retrieval'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
+
+      - name: Run OS shard tests
+        shell: bash
+        run: |
+          mkdir -p "$RESULTS_DIR"
+          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            $TEST_PATHS \
+            --durations=50 \
+            --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
+
+      - name: Run legacy-free media checks
+        if: matrix.shard.name == 'media-audio'
+        shell: bash
+        run: |
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            tldw_Server_API/tests/Media \
+            tldw_Server_API/tests/MediaIngestion_NEW \
+            --durations=25 \
+            --junit-xml="$RESULTS_DIR/media-legacy-free.xml"
+
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-${{ matrix.os }}-py3.12
-          path: coverage.xml
+          name: full-suite-windows-latest-py3.12-${{ matrix.shard.name }}
+          path: ${{ env.RESULTS_DIR }}
 
-      - name: Fail if any module failed (OS 3.12)
-        if: always()
+  full-suite-windows-312-summary:
+    name: Full Suite (windows-latest / Python 3.12)
+    runs-on: ubuntu-latest
+    needs: [full-suite-windows-312-shards]
+    if: always()
+    steps:
+      - name: Check windows-latest Python 3.12 shard result
         shell: bash
         run: |
-          RESULTS_DIR="test-results-${{ matrix.os }}-3.12"
-          if [ -s "$RESULTS_DIR/failures.txt" ]; then
-            echo "Modules with failing tests:"
-            cat "$RESULTS_DIR/failures.txt"
+          if [ "${{ needs['full-suite-windows-312-shards'].result }}" != "success" ]; then
+            echo "windows-latest Python 3.12 full-suite shards finished with: ${{ needs['full-suite-windows-312-shards'].result }}"
             exit 1
           fi
-          echo "All modules passed (OS 3.12)."
+          echo "windows-latest Python 3.12 full-suite shards passed."
+
+  full-suite-os-313-release-shards:
+    name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    needs: [lint, syntax-check]
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        shard:
+          - name: core-smoke
+            paths: >-
+              tldw_Server_API/tests/test_*.py
+              tldw_Server_API/tests/Admin
+              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Config
+              tldw_Server_API/tests/Health
+              tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Logging
+              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Setup
+              tldw_Server_API/tests/Usage
+              tldw_Server_API/tests/Utils
+              tldw_Server_API/tests/helpers
+              tldw_Server_API/tests/http_client
+              tldw_Server_API/tests/lint
+              tldw_Server_API/tests/sanity_tests
+              tldw_Server_API/tests/schemas
+              tldw_Server_API/tests/unit
+          - name: auth-db
+            paths: >-
+              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ_Postgres
+              tldw_Server_API/tests/AuthNZ_SQLite
+              tldw_Server_API/tests/AuthNZ_Unit
+              tldw_Server_API/tests/ChaChaNotesDB
+              tldw_Server_API/tests/DB
+              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/MediaDB2
+              tldw_Server_API/tests/PrivilegeCatalog
+              tldw_Server_API/tests/Privileges
+          - name: ai-retrieval
+            paths: >-
+              tldw_Server_API/tests/ChromaDB
+              tldw_Server_API/tests/Chunking
+              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/PaperSearch
+              tldw_Server_API/tests/RAG
+              tldw_Server_API/tests/RAG_NEW
+              tldw_Server_API/tests/Research
+              tldw_Server_API/tests/VectorStores
+              tldw_Server_API/tests/WebSearch
+          - name: media-audio
+            paths: >-
+              tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/AudioJobs
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media_Ingestion_Modification
+              tldw_Server_API/tests/STT
+              tldw_Server_API/tests/TTS
+              tldw_Server_API/tests/TTS_NEW
+              tldw_Server_API/tests/VLM
+          - name: chat-llm
+            paths: >-
+              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat_NEW
+              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Chat
+              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/LLM_Adapters
+              tldw_Server_API/tests/LLM_Calls
+              tldw_Server_API/tests/LLM_Local
+              tldw_Server_API/tests/LLamaCpp
+              tldw_Server_API/tests/Local_LLM
+              tldw_Server_API/tests/Streaming
+          - name: product-modules
+            paths: >-
+              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Collections
+              tldw_Server_API/tests/Evaluations
+              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Notes
+              tldw_Server_API/tests/Notes_NEW
+              tldw_Server_API/tests/Persona
+              tldw_Server_API/tests/Personalization
+              tldw_Server_API/tests/Prompt_Management
+              tldw_Server_API/tests/Prompt_Management_NEW
+              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/prompt_studio
+          - name: platform-mcp
+            paths: >-
+              tldw_Server_API/tests/Infrastructure
+              tldw_Server_API/tests/MCP
+              tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Metrics
+              tldw_Server_API/tests/Monitoring
+              tldw_Server_API/tests/Resource_Governance
+              tldw_Server_API/tests/Services
+              tldw_Server_API/tests/sandbox
+          - name: integrations
+            paths: >-
+              tldw_Server_API/tests/External_Sources
+              tldw_Server_API/tests/Notifications
+              tldw_Server_API/tests/Tools
+              tldw_Server_API/tests/WebScraping
+              tldw_Server_API/tests/Web_Scraping
+              tldw_Server_API/tests/integration
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      TLDW_TEST_NO_DOCKER: '1'
+      WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
+      SHARD_NAME: ${{ matrix.shard.name }}
+      TEST_PATHS: ${{ matrix.shard.paths }}
+      RESULTS_DIR: test-results-${{ matrix.os }}-3.13-${{ matrix.shard.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install FFmpeg (multi-OS)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-portaudio: 'true'
+
+      - name: Setup Python and deps (with uv)
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.13'
+          use-uv: ${{ runner.os != 'Windows' }}
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Ensure pytest-asyncio installed (OS matrix)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio
+
+      - name: Smoke start server (single-user)
+        if: matrix.shard.name == 'core-smoke'
+        env:
+          SERVER_LABEL: smoke
+          AUTH_MODE: single_user
+          DATABASE_URL: sqlite:///./Databases/users.db
+          SINGLE_USER_API_KEY: "smoke-ci-key-12345"
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          PYTEST_CURRENT_TEST: "ci-smoke-release-cross-os-single::startup"
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '1'
+          STARTUP_TRACE: '1'
+          MCP_DEBUG: '1'
+          ULTRA_MINIMAL_APP: '1'
+          PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py start
+
+      - name: Smoke health check (Windows, 15 min)
+        if: ${{ always() && matrix.shard.name == 'core-smoke' && runner.os == 'Windows' }}
+        env:
+          SERVER_LABEL: smoke
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          SMOKE_STARTUP_TIMEOUT_SECONDS: '900'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Smoke health check (non-Windows)
+        if: ${{ always() && matrix.shard.name == 'core-smoke' && runner.os != 'Windows' }}
+        env:
+          SERVER_LABEL: smoke
+          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
+          SMOKE_STARTUP_TIMEOUT_SECONDS: '180'
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Smoke stop server
+        if: ${{ always() && matrix.shard.name == 'core-smoke' }}
+        env:
+          SERVER_LABEL: smoke
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
+
+      - name: Cache embedding models
+        if: matrix.shard.name == 'ai-retrieval'
+        uses: actions/cache@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
+      - name: Pre-download embedding models
+        if: matrix.shard.name == 'ai-retrieval'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
+
+      - name: Run release OS shard tests
+        shell: bash
+        run: |
+          mkdir -p "$RESULTS_DIR"
+          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            $TEST_PATHS \
+            --durations=50 \
+            --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
+
+      - name: Run legacy-free media checks
+        if: matrix.shard.name == 'media-audio'
+        shell: bash
+        run: |
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+            -m "not jobs and not e2e" \
+            tldw_Server_API/tests/Media \
+            tldw_Server_API/tests/MediaIngestion_NEW \
+            --durations=25 \
+            --junit-xml="$RESULTS_DIR/media-legacy-free.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-suite-${{ matrix.os }}-py3.13-${{ matrix.shard.name }}
+          path: ${{ env.RESULTS_DIR }}
 
   character-chat-rate-limits:
     name: Character Chat Rate-Limits (TEST_MODE=0)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [full-suite-linux]
+    needs: [full-suite-linux-312-summary, full-suite-linux-313-summary]
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
