@@ -123,6 +123,20 @@ Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass
 profile policy and approval requirements.
 
+### Git Inspection Tools
+
+The `tldw-server` MCP host can expose optional native Git inspection tools when
+the operator enables them with `MCP_ENABLE_GIT_MODULE=true`. These tools are for
+reading the active workspace repository only; users cannot point them at another
+repository path, and they do not check out branches, stage files, commit, merge,
+rebase, stash, reset, clean, push, pull, run arbitrary Git commands, or invoke a
+shell.
+
+When enabled by the host, the bundled Architect, Merge Conflict Resolver, Code
+Reviewer, DevOps Engineer, Backend Engineer, Frontend Engineer, QA Engineer, and
+SDET profiles receive the Git inspection tools by default. Product Owner and
+Documentation Writer do not receive Git tools by default.
+
 For native browser inspection, prefer the Chrome DevTools Protocol path first.
 The stable exact target for that path is
 `ChromeDevTools/chrome-devtools-mcp`.
