@@ -42,6 +42,7 @@ _ALL_TOOLS = {
 _DIFF_SCOPES = {"unstaged", "staged", "working_tree"}
 _TOOL_PROMPT_VERSION = "2026.06.04"
 _REPOSITORY_DISCOVERY_TIMEOUT_SECONDS = 5.0
+_DEFAULT_GIT_OUTPUT_BYTES = 1_000_000
 _ALLOWED_GIT_SUBCOMMANDS = {
     "--version",
     "blame",
@@ -71,6 +72,7 @@ class GitCommandResult:
     stderr: str
     duration_ms: float
     timed_out: bool = False
+    truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +107,11 @@ class GitCommandRunner(Protocol):
 class AsyncGitCommandRunner:
     """Async Git runner based on fixed argv subprocess execution."""
 
+    def __init__(self, *, max_output_bytes: int = _DEFAULT_GIT_OUTPUT_BYTES) -> None:
+        if not isinstance(max_output_bytes, int) or isinstance(max_output_bytes, bool) or max_output_bytes <= 0:
+            max_output_bytes = _DEFAULT_GIT_OUTPUT_BYTES
+        self._max_output_bytes = max_output_bytes
+
     async def run(self, argv: list[str], *, timeout_seconds: float) -> GitCommandResult:
         self._validate_argv(argv)
         started_at = time.perf_counter()
@@ -116,13 +123,12 @@ class AsyncGitCommandRunner:
             env=self._git_environment(),
         )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
+            stdout_bytes, stderr_bytes, truncated = await asyncio.wait_for(
+                self._communicate_bounded(process),
                 timeout=float(timeout_seconds),
             )
         except asyncio.TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
+            self._kill_process(process)
             with contextlib.suppress(Exception):
                 await process.wait()
             return GitCommandResult(
@@ -132,6 +138,7 @@ class AsyncGitCommandRunner:
                 stderr="",
                 duration_ms=(time.perf_counter() - started_at) * 1000,
                 timed_out=True,
+                truncated=False,
             )
 
         return GitCommandResult(
@@ -141,7 +148,70 @@ class AsyncGitCommandRunner:
             stderr=stderr_bytes.decode("utf-8", errors="replace"),
             duration_ms=(time.perf_counter() - started_at) * 1000,
             timed_out=False,
+            truncated=truncated,
         )
+
+    async def _communicate_bounded(self, process: Any) -> tuple[bytes, bytes, bool]:
+        stdout_task = asyncio.create_task(
+            self._read_bounded_stream(getattr(process, "stdout", None))
+        )
+        stderr_task = asyncio.create_task(
+            self._read_bounded_stream(getattr(process, "stderr", None))
+        )
+        pending: set[asyncio.Task[tuple[bytes, bool]]] = {stdout_task, stderr_task}
+        task_names = {stdout_task: "stdout", stderr_task: "stderr"}
+        outputs: dict[str, bytes] = {"stdout": b"", "stderr": b""}
+        truncated = False
+
+        try:
+            await asyncio.sleep(0)
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
+                    name = task_names[task]
+                    data, stream_truncated = task.result()
+                    outputs[name] = data
+                    truncated = truncated or stream_truncated
+                if truncated:
+                    self._kill_process(process)
+                    break
+
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            with contextlib.suppress(Exception):
+                await process.wait()
+            return outputs["stdout"], outputs["stderr"], truncated
+        finally:
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+
+    async def _read_bounded_stream(self, stream: Any | None) -> tuple[bytes, bool]:
+        if stream is None:
+            return b"", False
+
+        output = bytearray()
+        while len(output) <= self._max_output_bytes:
+            read_size = min(8192, self._max_output_bytes + 1 - len(output))
+            chunk = await stream.read(read_size)
+            if not chunk:
+                return bytes(output), False
+            output.extend(chunk)
+            if len(output) > self._max_output_bytes:
+                return bytes(output[: self._max_output_bytes]), True
+        return bytes(output[: self._max_output_bytes]), True
+
+    @staticmethod
+    def _kill_process(process: Any) -> None:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
 
     @staticmethod
     def _git_environment() -> dict[str, str]:
@@ -167,23 +237,29 @@ class AsyncGitCommandRunner:
     def _validate_argv(argv: list[str]) -> None:
         if not argv or argv[0] != "git":
             raise ValueError("git runner only executes git")
-        subcommand = AsyncGitCommandRunner._extract_subcommand(argv)
+        subcommand = AsyncGitCommandRunner._extract_subcommand_and_validate_globals(argv)
         if subcommand not in _ALLOWED_GIT_SUBCOMMANDS:
             raise ValueError("git subcommand is not allowlisted")
 
     @staticmethod
-    def _extract_subcommand(argv: list[str]) -> str | None:
+    def _extract_subcommand_and_validate_globals(argv: list[str]) -> str | None:
         index = 1
         while index < len(argv):
             value = argv[index]
             if value == "--version":
+                if len(argv) != 2:
+                    raise ValueError("git global option --version must be used alone")
                 return value
             if value == "-C":
+                if index + 1 >= len(argv):
+                    raise ValueError("git global option -C requires a workspace path")
                 index += 2
                 continue
-            if value.startswith("--") or value.startswith("-"):
+            if value == "--no-pager":
                 index += 1
                 continue
+            if value.startswith("-"):
+                raise ValueError(f"git global option is not allowlisted: {value}")
             return value
         return None
 
@@ -200,7 +276,7 @@ class GitModule(BaseModule):
     ) -> None:
         super().__init__(config)
         self._workspace_root_resolver = workspace_root_resolver or McpHubWorkspaceRootResolver()
-        self._runner = runner or AsyncGitCommandRunner()
+        self._runner = runner or AsyncGitCommandRunner(max_output_bytes=self._git_output_bytes_maximum())
 
     async def on_initialize(self) -> None:
         return None
@@ -489,6 +565,13 @@ class GitModule(BaseModule):
                 git_result=result,
             )
 
+        if result.truncated:
+            raise _GitToolError(
+                "invalid_git_output",
+                "Git returned truncated repository information.",
+                git_result=result,
+            )
+
         repository_root_raw = self._first_stdout_line(result.stdout)
         if repository_root_raw is None:
             raise _GitToolError(
@@ -729,6 +812,7 @@ class GitModule(BaseModule):
             "exit_code": result.returncode,
             "duration_ms": result.duration_ms,
             "timed_out": result.timed_out,
+            "truncated": result.truncated,
         }
 
     def _effective_limits(self, tool_name: str, args: dict[str, Any]) -> dict[str, int]:
@@ -811,6 +895,9 @@ class GitModule(BaseModule):
 
     def _line_number_maximum(self) -> int:
         return self._setting_positive_int("max_line_number", 1_000_000)
+
+    def _git_output_bytes_maximum(self) -> int:
+        return self._setting_positive_int("max_runner_output_bytes", _DEFAULT_GIT_OUTPUT_BYTES)
 
     def _repository_discovery_timeout_seconds(self) -> float:
         raw_value = self.config.settings.get(

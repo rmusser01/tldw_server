@@ -48,6 +48,24 @@ class _RecordingGitRunner:
         return self.result
 
 
+class _FakeStream:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+        self.read_sizes: list[int] = []
+
+    async def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if not self._payload:
+            return b""
+        if size is None or size < 0:
+            chunk = self._payload
+            self._payload = b""
+            return chunk
+        chunk = self._payload[:size]
+        self._payload = self._payload[size:]
+        return chunk
+
+
 def _git_result(
     *,
     argv: list[str] | None = None,
@@ -55,6 +73,7 @@ def _git_result(
     stdout: str = "",
     stderr: str = "",
     timed_out: bool = False,
+    truncated: bool = False,
 ) -> Any:
     from tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module import (
         GitCommandResult,
@@ -67,6 +86,7 @@ def _git_result(
         stderr=stderr,
         duration_ms=12.5,
         timed_out=timed_out,
+        truncated=truncated,
     )
 
 
@@ -270,10 +290,16 @@ async def test_git_runner_uses_create_subprocess_exec_without_shell_and_safe_env
     captured: dict[str, Any] = {}
 
     class _FakeProcess:
-        returncode = 0
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = _FakeStream(b"git version 2.45.0\n")
+            self.stderr = _FakeStream(b"")
 
         async def communicate(self) -> tuple[bytes, bytes]:
-            return b"git version 2.45.0\n", b""
+            raise AssertionError("runner must not use unbounded communicate()")
+
+        async def wait(self) -> int:
+            return self.returncode
 
     async def _fake_create_subprocess_exec(*argv: str, **kwargs: Any) -> _FakeProcess:
         captured["argv"] = argv
@@ -295,6 +321,71 @@ async def test_git_runner_uses_create_subprocess_exec_without_shell_and_safe_env
     assert result.returncode == 0  # nosec B101
     assert result.stdout == "git version 2.45.0\n"  # nosec B101
     assert result.timed_out is False  # nosec B101
+    assert result.truncated is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_git_runner_bounds_stdout_and_stderr_and_marks_truncation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = _FakeStream(b"0123456789abcdef")
+            self.stderr = _FakeStream(b"abcdefghijklmnop")
+            self.killed = False
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            raise AssertionError("runner must not use unbounded communicate()")
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    fake_process = _FakeProcess()
+
+    async def _fake_create_subprocess_exec(*argv: str, **kwargs: Any) -> _FakeProcess:
+        return fake_process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    runner = AsyncGitCommandRunner(max_output_bytes=8)
+
+    result = await runner.run(["git", "status"], timeout_seconds=2)
+
+    assert result.truncated is True  # nosec B101
+    assert len(result.stdout.encode("utf-8")) <= 8  # nosec B101
+    assert len(result.stderr.encode("utf-8")) <= 8  # nosec B101
+    assert max(fake_process.stdout.read_sizes) <= 9  # nosec B101
+    assert max(fake_process.stderr.read_sizes) <= 9  # nosec B101
+    assert fake_process.killed is True  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["git", "--git-dir=/tmp/outside.git", "status"],
+        ["git", "--work-tree=/tmp/outside", "status"],
+        ["git", "--exec-path=/tmp/git-core", "status"],
+        ["git", "-c", "core.pager=cat", "status"],
+        ["git", "--config-env=core.sshCommand=GIT_SSH_COMMAND", "status"],
+    ],
+)
+async def test_git_runner_rejects_unsafe_global_options_before_spawn(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _unexpected_create_subprocess_exec(*args: str, **kwargs: Any) -> object:
+        raise AssertionError("unsafe argv must be rejected before process spawn")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _unexpected_create_subprocess_exec)
+    runner = AsyncGitCommandRunner()
+
+    with pytest.raises(ValueError, match="global option"):
+        await runner.run(argv, timeout_seconds=2)
 
 
 @pytest.mark.asyncio
