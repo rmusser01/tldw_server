@@ -36,8 +36,15 @@ const RICH_TEXT_ELEMENT_STYLE_CLASS =
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
-const MERMAID_FENCE_START = /^(\s*)(`{3,}|~{3,})\s*mermaid\s*$/
+const FENCE_START = /^(\s*)(`{3,}|~{3,})([^\n]*)$/
 const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/
+
+type ClosedMermaidFenceSource = {
+  blockIndex: number
+  closingLine: number
+  openingLine: number
+  source: string
+}
 
 const isManagedAssetReference = (url: string): boolean =>
   String(url || "").startsWith(MANAGED_ASSET_MARKER)
@@ -66,17 +73,24 @@ const transformMarkdownUrl = (url: string): string => {
   return ""
 }
 
-const collectClosedMermaidFenceSources = (markdown: string): string[] => {
-  const lines = markdown.split("\n")
-  const sources: string[] = []
+const getFenceLanguage = (infoString: string): string =>
+  infoString.trim().split(/\s+/)[0]?.toLowerCase() || ""
+
+const collectClosedMermaidFenceSources = (
+  markdown: string
+): ClosedMermaidFenceSource[] => {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n")
+  const sources: ClosedMermaidFenceSource[] = []
+  let fencedBlockIndex = 0
 
   for (let index = 0; index < lines.length; index += 1) {
-    const startMatch = MERMAID_FENCE_START.exec(lines[index])
+    const startMatch = FENCE_START.exec(lines[index])
     if (!startMatch) continue
 
     const openingFence = startMatch[2]
     const fenceMarker = openingFence[0]
     const fenceLength = openingFence.length
+    const language = getFenceLanguage(startMatch[3] || "")
     const sourceStartIndex = index + 1
 
     for (let closeIndex = sourceStartIndex; closeIndex < lines.length; closeIndex += 1) {
@@ -90,7 +104,18 @@ const collectClosedMermaidFenceSources = (markdown: string): string[] => {
         continue
       }
 
-      sources.push(lines.slice(sourceStartIndex, closeIndex).join("\n").replace(/\n$/, ""))
+      if (language === "mermaid") {
+        sources.push({
+          blockIndex: fencedBlockIndex,
+          closingLine: closeIndex + 1,
+          openingLine: index + 1,
+          source: lines
+            .slice(sourceStartIndex, closeIndex)
+            .join("\n")
+            .replace(/\n$/, "")
+        })
+      }
+      fencedBlockIndex += 1
       index = closeIndex
       break
     }
@@ -322,17 +347,37 @@ export function Markdown({
             const codeClassName = codeChild.props?.className as string | undefined
             const match = /language-([^\s]+)/.exec(codeClassName || "")
             const blockIndex = blockIndexRef.current++
-            const value = String(codeChild.props?.children ?? "").replace(/\n$/, "")
+            const value = String(codeChild.props?.children ?? "")
+              .replace(/\r\n?/g, "\n")
+              .replace(/\n$/, "")
             const rawLanguage = match ? match[1] : ""
             const normalizedLanguage = normalizeLanguage(rawLanguage)
+            const nodePosition = codeChild.props?.node?.position
+            const startLine = Number(nodePosition?.start?.line)
+            const endLine = Number(nodePosition?.end?.line)
+            const hasNodeLinePosition =
+              Number.isFinite(startLine) && Number.isFinite(endLine)
+            const closedMermaidFenceIndex = closedMermaidFenceSources.findIndex(
+              (fence, fenceIndex) => {
+                if (fenceIndex < closedMermaidFenceCursorRef.current) return false
+                if (fence.source !== value) return false
+                if (hasNodeLinePosition) {
+                  return (
+                    fence.openingLine === startLine &&
+                    fence.closingLine === endLine
+                  )
+                }
+                return fence.blockIndex === blockIndex
+              }
+            )
 
             if (
               enableMermaidDiagrams &&
               rawLanguage.trim().toLowerCase() === "mermaid" &&
               normalizedLanguage === "mermaid" &&
-              closedMermaidFenceSources[closedMermaidFenceCursorRef.current] === value
+              closedMermaidFenceIndex !== -1
             ) {
-              closedMermaidFenceCursorRef.current += 1
+              closedMermaidFenceCursorRef.current = closedMermaidFenceIndex + 1
               return (
                 <MermaidDiagramBlock source={value} blockIndex={blockIndex} />
               )

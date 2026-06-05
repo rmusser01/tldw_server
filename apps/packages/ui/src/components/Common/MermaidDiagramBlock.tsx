@@ -6,8 +6,14 @@ import {
   EyeIcon,
   WorkflowIcon
 } from "lucide-react"
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import DOMPurify from "dompurify"
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState
+} from "react"
 import Mermaid, { type MermaidRenderState } from "./Mermaid"
 import { MermaidPreviewDialog } from "./MermaidPreviewDialog"
 
@@ -38,27 +44,18 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   const [generatedSvg, setGeneratedSvg] = useState<string | undefined>()
   const [copied, setCopied] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [previousSource, setPreviousSource] = useState(source)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const previousSourceRef = useRef(source)
-  const sanitizedGeneratedSvg = useMemo(
-    () =>
-      generatedSvg
-        ? DOMPurify.sanitize(generatedSvg, { USE_PROFILES: { svg: true } })
-        : undefined,
-    [generatedSvg]
-  )
-  const hasGeneratedSvg = Boolean(sanitizedGeneratedSvg)
+  const componentId = useId()
+  const hasGeneratedSvg = Boolean(generatedSvg)
   const isRenderError = renderStatus === "error"
 
-  useEffect(() => {
-    if (previousSourceRef.current === source) {
-      return
-    }
-    previousSourceRef.current = source
+  if (previousSource !== source) {
+    setPreviousSource(source)
     setRenderStatus("idle")
     setGeneratedSvg(undefined)
     setPreviewOpen(false)
-  }, [source])
+  }
 
   useEffect(() => {
     return () => {
@@ -101,16 +98,17 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   }, [source])
 
   const handleDownloadSvg = useCallback(() => {
-    if (!sanitizedGeneratedSvg) return
-    downloadSvg(sanitizedGeneratedSvg, blockIndex)
-  }, [blockIndex, sanitizedGeneratedSvg])
+    if (!generatedSvg) return
+    downloadSvg(generatedSvg, blockIndex)
+  }, [blockIndex, generatedSvg])
 
   const headerId = useMemo(() => {
+    const safeComponentId = componentId.replace(/:/g, "")
     if (typeof blockIndex === "number") {
-      return `mermaid-diagram-${blockIndex}`
+      return `mermaid-diagram-${safeComponentId}-${blockIndex}`
     }
-    return undefined
-  }, [blockIndex])
+    return `mermaid-diagram-${safeComponentId}`
+  }, [blockIndex, componentId])
 
   return (
     <>

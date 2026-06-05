@@ -67,6 +67,94 @@ describe("Markdown Mermaid fences", () => {
     })
   })
 
+  it("renders Mermaid fences case-insensitively", () => {
+    render(
+      <Markdown
+        message={"```Mermaid\ngraph TD\nA --> B\n```"}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph TD\nA --> B",
+      blockIndex: 0
+    })
+  })
+
+  it("renders Mermaid fences with CRLF line endings", () => {
+    render(
+      <Markdown
+        message={"```mermaid\r\ngraph TD\r\nA --> B\r\n```"}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph TD\nA --> B",
+      blockIndex: 0
+    })
+  })
+
+  it("ignores literal Mermaid fences inside non-Mermaid code blocks", () => {
+    render(
+      <Markdown
+        message={[
+          "````markdown",
+          "```mermaid",
+          "graph TD",
+          "A --> B",
+          "```",
+          "````",
+          "",
+          "```mermaid",
+          "graph LR",
+          "C --> D",
+          "```"
+        ].join("\n")}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph LR\nC --> D"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledTimes(1)
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph LR\nC --> D",
+      blockIndex: 1
+    })
+  })
+
+  it("renders Mermaid fences after indented code blocks", () => {
+    render(
+      <Markdown
+        message={[
+          "    indented code",
+          "",
+          "```mermaid",
+          "graph TD",
+          "A --> B",
+          "```"
+        ].join("\n")}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith({
+      source: "graph TD\nA --> B",
+      blockIndex: 1
+    })
+  })
+
   it("does not render unclosed Mermaid fences as diagrams", () => {
     const { container } = render(
       <Markdown

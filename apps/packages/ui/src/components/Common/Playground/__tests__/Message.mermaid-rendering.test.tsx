@@ -4,6 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundMessage } from "../Message"
+import { CompactMessage } from "../CompactMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 
 const markdownCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
@@ -402,5 +403,26 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
     await screen.findByTestId("mock-markdown")
 
     expect(markdownCalls[0]?.enableMermaidDiagrams).not.toBe(true)
+  })
+
+  it("keeps Mermaid enabled for completed compact rows while a later row streams", async () => {
+    render(
+      <CompactMessage
+        message="```mermaid\ngraph TD\n  A-->B\n```"
+        isBot
+        name="Assistant"
+        currentMessageIndex={0}
+        totalMessages={2}
+        isStreaming
+      />
+    )
+
+    await screen.findByTestId("mock-markdown")
+
+    expect(markdownCalls[0]).toEqual(
+      expect.objectContaining({
+        enableMermaidDiagrams: true
+      })
+    )
   })
 })

@@ -74,13 +74,13 @@ describe("MermaidPreviewDialog", () => {
     )
   })
 
-  it("sanitizes unsafe generated SVG before rendering and downloading", () => {
-    const unsafeSvg =
-      '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><text>Safe diagram</text></svg>'
+  it("renders and downloads the already sanitized generated SVG", () => {
+    const sanitizedSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><text>Safe diagram</text></svg>'
 
     render(
       <MermaidPreviewDialog
-        generatedSvg={unsafeSvg}
+        generatedSvg={sanitizedSvg}
         onClose={vi.fn()}
         open
         source={source}
@@ -89,15 +89,13 @@ describe("MermaidPreviewDialog", () => {
 
     const renderedSvg = screen.getByTestId("mermaid-preview-canvas").innerHTML
     expect(renderedSvg).toContain("Safe diagram")
-    expect(renderedSvg).not.toContain("<script")
-    expect(renderedSvg).not.toContain("onload")
+    expect(renderedSvg).toBe(sanitizedSvg)
 
     fireEvent.click(screen.getByRole("button", { name: "Download Mermaid SVG" }))
 
     const downloadedSvg = blobParts?.join("")
     expect(downloadedSvg).toContain("Safe diagram")
-    expect(downloadedSvg).not.toContain("<script")
-    expect(downloadedSvg).not.toContain("onload")
+    expect(downloadedSvg).toBe(sanitizedSvg)
   })
 
   it("updates the zoom label and transform, then resets them", () => {

@@ -172,10 +172,10 @@ describe("MermaidDiagramBlock", () => {
     expect(clickSpy).toHaveBeenCalled()
   })
 
-  it("sanitizes unsafe generated SVG before inline download", async () => {
+  it("uses the already sanitized generated SVG for inline download", async () => {
     mermaidMock.renderState = {
       status: "success",
-      svg: '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><text>Safe inline diagram</text></svg>'
+      svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Safe inline diagram</text></svg>'
     }
 
     render(<MermaidDiagramBlock source={source} />)
@@ -187,8 +187,30 @@ describe("MermaidDiagramBlock", () => {
 
     const downloadedSvg = blobParts?.join("")
     expect(downloadedSvg).toContain("Safe inline diagram")
-    expect(downloadedSvg).not.toContain("<script")
-    expect(downloadedSvg).not.toContain("onload")
+    expect(downloadedSvg).toBe(mermaidMock.renderState.svg)
+  })
+
+  it("uses unique header ids even when block indexes repeat across messages", () => {
+    render(
+      <>
+        <MermaidDiagramBlock blockIndex={0} source={source} />
+        <MermaidDiagramBlock blockIndex={0} source="graph TD\n  C-->D" />
+      </>
+    )
+
+    const labelledBlocks = Array.from(
+      document.querySelectorAll("[aria-labelledby]")
+    )
+    const headerIds = labelledBlocks.map((block) =>
+      block.getAttribute("aria-labelledby")
+    )
+
+    expect(headerIds).toHaveLength(2)
+    expect(new Set(headerIds).size).toBe(2)
+    headerIds.forEach((headerId) => {
+      expect(headerId).toBeTruthy()
+      expect(document.getElementById(headerId || "")).toBeInTheDocument()
+    })
   })
 
   it("opens the Mermaid preview dialog with the generated SVG", async () => {

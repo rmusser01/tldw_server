@@ -10,7 +10,6 @@ import {
   ZoomOutIcon
 } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import DOMPurify from "dompurify"
 
 export type MermaidPreviewDialogProps = {
   open: boolean
@@ -63,14 +62,7 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
   const [copied, setCopied] = useState(false)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragRef = useRef<DragState | null>(null)
-  const sanitizedGeneratedSvg = useMemo(
-    () =>
-      generatedSvg
-        ? DOMPurify.sanitize(generatedSvg, { USE_PROFILES: { svg: true } })
-        : undefined,
-    [generatedSvg]
-  )
-  const hasGeneratedSvg = Boolean(sanitizedGeneratedSvg)
+  const hasGeneratedSvg = Boolean(generatedSvg)
 
   useEffect(() => {
     if (!open) return
@@ -113,9 +105,9 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
   }, [source])
 
   const handleDownloadSvg = useCallback(() => {
-    if (!sanitizedGeneratedSvg) return
-    downloadSvg(sanitizedGeneratedSvg)
-  }, [sanitizedGeneratedSvg])
+    if (!generatedSvg) return
+    downloadSvg(generatedSvg)
+  }, [generatedSvg])
 
   const handleZoomIn = useCallback(() => {
     setZoom((current) => clampZoom(current + ZOOM_STEP))
@@ -285,7 +277,7 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
           </div>
         </div>
 
-        {sanitizedGeneratedSvg ? (
+        {generatedSvg ? (
           <div
             aria-label="Mermaid diagram viewport"
             className="h-[70vh] min-h-[320px] cursor-grab overflow-auto rounded-md border border-border bg-surface p-4 active:cursor-grabbing"
@@ -300,7 +292,7 @@ export const MermaidPreviewDialog: React.FC<MermaidPreviewDialogProps> = ({
               data-testid="mermaid-preview-canvas"
               className="mx-auto flex min-h-full origin-center items-center justify-center transition-transform"
               style={{ transform: canvasTransform }}
-              dangerouslySetInnerHTML={{ __html: sanitizedGeneratedSvg }}
+              dangerouslySetInnerHTML={{ __html: generatedSvg }}
             />
           </div>
         ) : (
