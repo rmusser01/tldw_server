@@ -33,6 +33,7 @@ Implement Task 3 from the Calendar module implementation plan: bounded recurrenc
 - Added `Calendar.view_service` for `agenda`, `week`, `expand_items_window`, and `load_scheduled_task_projections`.
 - Added minimal `CalendarDatabase` helpers for the already-existing `calendar_recurrences` table: `upsert_recurrence`, `list_recurrences_for_items`, and `list_items_for_expansion`. These were necessary so recurring master rows that start before the query window can be loaded through the DB abstraction and expanded without raw SQL in the service layer.
 - TDD red run before implementation: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/unit/test_calendar_recurrence.py tldw_Server_API/tests/Calendar/property/test_calendar_recurrence_properties.py tldw_Server_API/tests/Calendar/unit/test_calendar_service.py -v` -> 11 failed, 14 passed; failures were missing `Calendar.recurrence` and `Calendar.view_service`.
+- Follow-up review fix: raw ISO timestamp comparisons in `CalendarDatabase.list_items_for_expansion()` could drop valid offset-aware events before Python-aware overlap checks. Added failing regressions for offset-aware agenda/week inclusion, broadened candidate loading to a bounded widened date-prefix range per readable calendar, kept authoritative overlap in `CalendarViewService`, and added `idx_calendar_recurrences_item`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -46,6 +47,13 @@ Implement Task 3 from the Calendar module implementation plan: bounded recurrenc
   - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Calendar tldw_Server_API/app/core/DB_Management/Calendar_DB.py -f json -o /tmp/bandit_calendar_task519.json` -> exit 0, 0 findings.
   - `source .venv/bin/activate && python -m compileall -q tldw_Server_API/app/core/Calendar tldw_Server_API/app/core/DB_Management/Calendar_DB.py` -> exit 0.
 - Known skips/blockers: none for this Task 3 slice. API/router/frontend/reminder-handoff/CalDAV sync remain intentionally out of scope for later tasks.
+- Follow-up verification for offset-aware agenda/week review fix:
+  - Red regression run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/unit/test_calendar_service.py::test_agenda_includes_offset_aware_items_after_authoritative_datetime_overlap tldw_Server_API/tests/Calendar/unit/test_calendar_service.py::test_week_includes_offset_aware_items_crossing_raw_iso_boundary tldw_Server_API/tests/Calendar/unit/test_calendar_service.py::test_agenda_includes_all_day_date_only_items_for_overlapping_day_windows -v` -> 2 failed, 1 passed; offset-aware agenda/week items were missing.
+  - Green regression run: same command -> 3 passed, 7 warnings.
+  - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/unit/test_calendar_recurrence.py tldw_Server_API/tests/Calendar/property/test_calendar_recurrence_properties.py tldw_Server_API/tests/Calendar/unit/test_calendar_service.py -v` -> 28 passed, 7 warnings.
+  - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/unit/test_calendar_db.py tldw_Server_API/tests/Calendar/unit/test_calendar_permissions.py tldw_Server_API/tests/Calendar/unit/test_calendar_service.py tldw_Server_API/tests/Calendar/unit/test_calendar_recurrence.py tldw_Server_API/tests/Calendar/property/test_calendar_recurrence_properties.py -v` -> 56 passed, 7 warnings.
+  - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Calendar tldw_Server_API/app/core/DB_Management/Calendar_DB.py -f json -o /tmp/bandit_calendar_task519.json` -> exit 0, 0 findings.
+- Follow-up note: `include_provider_tombstones=True` remains unchanged; default tombstone hiding/privacy remains intact, and safely exposing opted-in tombstones needs a separate permission-aware service path rather than a query-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

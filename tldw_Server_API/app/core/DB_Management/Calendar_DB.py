@@ -7,7 +7,7 @@ import json
 import sqlite3
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -32,6 +32,18 @@ _UNSET = object()
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+
+def _widened_date_bounds(window_start: str, window_end: str) -> tuple[str, str]:
+    try:
+        start = datetime.fromisoformat(window_start.replace("Z", "+00:00")).date()
+        end = datetime.fromisoformat(window_end.replace("Z", "+00:00")).date()
+    except ValueError as exc:
+        raise CalendarValidationError("Calendar expansion window boundaries must be ISO timestamps") from exc
+    return (
+        (start - timedelta(days=1)).isoformat(),
+        (end + timedelta(days=1)).isoformat(),
+    )
 
 
 def _default_calendar_db_path() -> Path:
@@ -540,6 +552,8 @@ class CalendarDatabase:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS idx_calendar_recurrences_item
+                    ON calendar_recurrences(calendar_item_id);
 
                 CREATE TABLE IF NOT EXISTS calendar_annotations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -973,25 +987,35 @@ class CalendarDatabase:
         ids = list(calendar_ids)
         if not ids:
             return []
+        widened_start, widened_end = _widened_date_bounds(window_start, window_end)
         placeholders = ", ".join("?" for _ in ids)
         clauses = [
             f"calendar_id IN ({placeholders})",  # nosec B608
             """
+            COALESCE(start_at, due_at) IS NOT NULL
+            """,
+            """
             (
-                (start_at IS NOT NULL AND COALESCE(end_at, start_at) >= ? AND start_at <= ?)
-                OR (due_at IS NOT NULL AND due_at >= ? AND due_at <= ?)
-                OR (
+                (
+                    NOT EXISTS (
+                        SELECT 1 FROM calendar_recurrences r
+                        WHERE r.calendar_item_id = calendar_items.id
+                    )
+                    AND substr(COALESCE(end_at, start_at, due_at), 1, 10) >= ?
+                    AND substr(COALESCE(start_at, due_at), 1, 10) <= ?
+                )
+                OR
+                (
                     EXISTS (
                         SELECT 1 FROM calendar_recurrences r
                         WHERE r.calendar_item_id = calendar_items.id
                     )
-                    AND COALESCE(start_at, due_at) IS NOT NULL
-                    AND COALESCE(start_at, due_at) <= ?
+                    AND substr(COALESCE(start_at, due_at), 1, 10) <= ?
                 )
             )
             """,
         ]
-        params: list[Any] = [*ids, window_start, window_end, window_start, window_end, window_end]
+        params: list[Any] = [*ids, widened_start, widened_end, widened_end]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
         if not include_remote_deleted:

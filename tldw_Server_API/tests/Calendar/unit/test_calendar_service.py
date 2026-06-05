@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -544,6 +544,91 @@ async def test_agenda_expands_recurring_local_items_from_persisted_recurrence(ca
         "2026-06-06T09:00:00+00:00",
         "2026-06-07T09:00:00+00:00",
     ]
+
+
+@pytest.mark.asyncio
+async def test_agenda_includes_offset_aware_items_after_authoritative_datetime_overlap(calendar_db):
+    view_service = _view_service_module()
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="America/Los_Angeles")
+    service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="event",
+        title="Offset meeting",
+        start_at="2026-06-05T09:00:00-07:00",
+        end_at="2026-06-05T10:00:00-07:00",
+    )
+
+    result = await view_service.CalendarViewService(
+        calendar_service=service,
+        scheduled_tasks_service=_ScheduledTasksStub([]),
+    ).agenda(
+        actor_user_id=1,
+        start_at=datetime(2026, 6, 5, 15, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 5, 18, 0, tzinfo=timezone.utc),
+        filters=view_service.CalendarViewFilters(calendar_ids=[calendar.id], include_scheduled_tasks=False),
+    )
+
+    assert [item.title for item in result.items] == ["Offset meeting"]
+    assert result.items[0].start_at == "2026-06-05T09:00:00-07:00"
+
+
+@pytest.mark.asyncio
+async def test_week_includes_offset_aware_items_crossing_raw_iso_boundary(calendar_db):
+    view_service = _view_service_module()
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
+    service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="event",
+        title="Offset week boundary",
+        start_at="2026-06-08T00:30:00+02:00",
+        end_at="2026-06-08T01:00:00+02:00",
+    )
+
+    result = await view_service.CalendarViewService(
+        calendar_service=service,
+        scheduled_tasks_service=_ScheduledTasksStub([]),
+    ).week(
+        actor_user_id=1,
+        week_start=date(2026, 6, 1),
+        timezone="UTC",
+        filters=view_service.CalendarViewFilters(calendar_ids=[calendar.id], include_scheduled_tasks=False),
+    )
+
+    assert [item.title for item in result.items] == ["Offset week boundary"]
+
+
+@pytest.mark.asyncio
+async def test_agenda_includes_all_day_date_only_items_for_overlapping_day_windows(calendar_db):
+    view_service = _view_service_module()
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
+    service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="event",
+        title="All-day writing retreat",
+        start_at="2026-06-05",
+        end_at="2026-06-06",
+        all_day=True,
+    )
+
+    result = await view_service.CalendarViewService(
+        calendar_service=service,
+        scheduled_tasks_service=_ScheduledTasksStub([]),
+    ).agenda(
+        actor_user_id=1,
+        start_at=datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 5, 13, 0, tzinfo=timezone.utc),
+        filters=view_service.CalendarViewFilters(calendar_ids=[calendar.id], include_scheduled_tasks=False),
+    )
+
+    assert [item.title for item in result.items] == ["All-day writing retreat"]
+    assert result.items[0].start_at == "2026-06-05"
+    assert result.items[0].all_day is True
 
 
 @pytest.mark.asyncio
