@@ -8,6 +8,7 @@ registered once and are safe to call multiple times.
 """
 
 import os
+from typing import Any
 
 from loguru import logger
 
@@ -19,16 +20,55 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
 from tldw_Server_API.app.core.testing import is_truthy
 
 _RG_METRICS_REGISTERED = False
+_RG_BASE_METRIC_NAMES = (
+    "rg_decisions_total",
+    "rg_denials_total",
+    "rg_refunds_total",
+    "rg_concurrency_active",
+    "rg_shadow_decision_mismatch_total",
+    "rg_wait_seconds",
+)
+_RG_ENTITY_METRIC_NAMES = (
+    "rg_decisions_by_entity_total",
+    "rg_denials_by_entity_total",
+    "rg_refunds_by_entity_total",
+)
+
+
+def _required_rg_metric_names() -> tuple[str, ...]:
+    """Return the RG metrics expected in the current process configuration."""
+    if rg_metrics_entity_label_enabled():
+        return _RG_BASE_METRIC_NAMES + _RG_ENTITY_METRIC_NAMES
+    return _RG_BASE_METRIC_NAMES
+
+
+def _rg_metrics_present(reg: Any) -> bool:
+    """Return True when the current metrics registry has all RG definitions."""
+    try:
+        existing = getattr(reg, "metrics", {})
+        normalize = getattr(reg, "normalize_metric_name", lambda name: name)
+        return all(str(normalize(name)) in existing for name in _required_rg_metric_names())
+    except Exception:
+        return False
+
+
+def _register_metric_if_missing(reg: Any, definition: MetricDefinition) -> None:
+    """Register a metric definition only when the current registry lacks it."""
+    normalize = getattr(reg, "normalize_metric_name", lambda name: name)
+    normalized_name = str(normalize(definition.name))
+    if normalized_name not in getattr(reg, "metrics", {}):
+        reg.register_metric(definition)
 
 
 def ensure_rg_metrics_registered() -> None:
     global _RG_METRICS_REGISTERED
-    if _RG_METRICS_REGISTERED:
-        return
     try:
         reg = get_metrics_registry()
+        if _RG_METRICS_REGISTERED and _rg_metrics_present(reg):
+            return
         # Decisions (allow/deny) counters
-        reg.register_metric(
+        _register_metric_if_missing(
+            reg,
             MetricDefinition(
                 name="rg_decisions_total",
                 type=MetricType.COUNTER,
@@ -37,7 +77,8 @@ def ensure_rg_metrics_registered() -> None:
             )
         )
         # Denials counter (with reason)
-        reg.register_metric(
+        _register_metric_if_missing(
+            reg,
             MetricDefinition(
                 name="rg_denials_total",
                 type=MetricType.COUNTER,
@@ -46,7 +87,8 @@ def ensure_rg_metrics_registered() -> None:
             )
         )
         # Refunds counter (with reason)
-        reg.register_metric(
+        _register_metric_if_missing(
+            reg,
             MetricDefinition(
                 name="rg_refunds_total",
                 type=MetricType.COUNTER,
@@ -55,7 +97,8 @@ def ensure_rg_metrics_registered() -> None:
             )
         )
         # Concurrency active gauge
-        reg.register_metric(
+        _register_metric_if_missing(
+            reg,
             MetricDefinition(
                 name="rg_concurrency_active",
                 type=MetricType.GAUGE,
@@ -64,7 +107,8 @@ def ensure_rg_metrics_registered() -> None:
             )
         )
         # Shadow-mode comparison metric: legacy vs RG decisions
-        reg.register_metric(
+        _register_metric_if_missing(
+            reg,
             MetricDefinition(
                 name="rg_shadow_decision_mismatch_total",
                 type=MetricType.COUNTER,
@@ -73,7 +117,8 @@ def ensure_rg_metrics_registered() -> None:
             )
         )
         # Wait histogram (optional, for backoff/queueing semantics)
-        reg.register_metric(
+        _register_metric_if_missing(
+            reg,
             MetricDefinition(
                 name="rg_wait_seconds",
                 type=MetricType.HISTOGRAM,
@@ -85,7 +130,8 @@ def ensure_rg_metrics_registered() -> None:
         )
         # Optional by-entity metrics (hashed) to keep cardinality manageable
         if rg_metrics_entity_label_enabled():
-            reg.register_metric(
+            _register_metric_if_missing(
+                reg,
                 MetricDefinition(
                     name="rg_decisions_by_entity_total",
                     type=MetricType.COUNTER,
@@ -93,7 +139,8 @@ def ensure_rg_metrics_registered() -> None:
                     labels=["category", "scope", "backend", "result", "policy_id", "entity"],
                 )
             )
-            reg.register_metric(
+            _register_metric_if_missing(
+                reg,
                 MetricDefinition(
                     name="rg_denials_by_entity_total",
                     type=MetricType.COUNTER,
@@ -101,7 +148,8 @@ def ensure_rg_metrics_registered() -> None:
                     labels=["category", "scope", "reason", "policy_id", "entity"],
                 )
             )
-            reg.register_metric(
+            _register_metric_if_missing(
+                reg,
                 MetricDefinition(
                     name="rg_refunds_by_entity_total",
                     type=MetricType.COUNTER,
@@ -109,7 +157,7 @@ def ensure_rg_metrics_registered() -> None:
                     labels=["category", "scope", "reason", "policy_id", "entity"],
                 )
             )
-        _RG_METRICS_REGISTERED = True
+        _RG_METRICS_REGISTERED = _rg_metrics_present(reg)
     except Exception as e:  # pragma: no cover - metrics must never block
         logger.debug(f"RG metrics registration skipped: {e}")
 

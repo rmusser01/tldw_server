@@ -92,13 +92,14 @@ async def test_session_manager_persists_generated_key(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/auth.db")
     monkeypatch.setenv("JWT_SECRET_KEY", "old-secret-value-12345678901234567890ABCDEF")
+    api_key_path = tmp_path / "api_root" / "Config_Files" / "session_encryption.key"
+    monkeypatch.setattr(SessionManager, "_resolve_api_key_path", lambda self: api_key_path, raising=False)
     reset_settings()
 
     manager = SessionManager()
     sample = "persist-me"
     encrypted = manager.encrypt_token(sample)
     # Expect the API path to exist when SESSION_KEY_STORAGE=api
-    api_key_path = manager._resolve_api_key_path()
     assert api_key_path is not None and api_key_path.exists(), "API session_encryption.key should exist"
     assert manager.decrypt_token(encrypted) == sample
 

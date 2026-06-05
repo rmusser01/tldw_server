@@ -7,6 +7,10 @@ try:
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
     from tldw_Server_API.app.api.v1.router_registry import include_router_idempotent
+    from tldw_Server_API.app.services.app_lifecycle import (
+        get_or_create_lifecycle_state,
+        mark_lifecycle_startup,
+    )
 except Exception as e:  # pragma: no cover - guard for unrelated import failures
     import pytest
     pytest.skip(f"Skipping due to app import failure: {e}", allow_module_level=True)
@@ -40,6 +44,13 @@ async def test_websearch_cancelled_via_request_disconnect(monkeypatch):
         research_ep.get_request_user: app.dependency_overrides.get(research_ep.get_request_user, sentinel),
         research_ep.get_media_db_for_user: app.dependency_overrides.get(research_ep.get_media_db_for_user, sentinel),
     }
+    lifecycle_state = get_or_create_lifecycle_state(app)
+    previous_lifecycle = (
+        lifecycle_state.phase,
+        lifecycle_state.ready,
+        lifecycle_state.draining,
+    )
+    mark_lifecycle_startup(app)
     app.dependency_overrides[get_request_user] = fake_user
     app.dependency_overrides[research_ep.get_request_user] = fake_user
     app.dependency_overrides[research_ep.get_media_db_for_user] = fake_media_db
@@ -92,6 +103,7 @@ async def test_websearch_cancelled_via_request_disconnect(monkeypatch):
                 app.dependency_overrides.pop(dep, None)
             else:
                 app.dependency_overrides[dep] = previous
+        lifecycle_state.phase, lifecycle_state.ready, lifecycle_state.draining = previous_lifecycle
 
     assert resp.status_code == 200
     assert cancel_seen["set"] is True

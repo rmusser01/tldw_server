@@ -114,7 +114,11 @@ def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch
                 return _Cursor(row=None)
             return _Cursor(rows=[])
 
-        monkeypatch.setattr(db, "backend_type", BackendType.POSTGRESQL)
+        monkeypatch.setattr(
+            CharactersRAGDB,
+            "backend_type",
+            property(lambda self: BackendType.POSTGRESQL),
+        )
         monkeypatch.setattr(db, "execute_query", _fake_execute_query)
 
         assert db.count_flashcard_templates() == 0

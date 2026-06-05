@@ -53,20 +53,37 @@ _WEBHOOK_ENDPOINT_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+_WEBHOOK_PROXY_METHOD_NAMES = {
+    "register_webhook",
+    "get_webhook_status",
+    "unregister_webhook",
+    "test_webhook",
+}
+
+
+def _webhook_proxy_has_local_override() -> bool:
+    """Return whether tests patched the legacy lazy webhook proxy directly."""
+    try:
+        proxy_attrs = vars(webhook_manager)
+    except _WEBHOOK_TESTMODE_EXCEPTIONS:
+        return False
+    return any(name in proxy_attrs for name in _WEBHOOK_PROXY_METHOD_NAMES)
 
 
 def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
-    # In tests, always route through the lazy proxy so patched methods
-    # are honored and no real DB access is attempted.
+    service = None
     try:
+        service = get_unified_evaluation_service_for_user(user_id)
         from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
         if _is_test_mode():
-            svc = get_unified_evaluation_service_for_user(user_id)
-            svc.webhook_manager = webhook_manager
+            manager = getattr(service, "webhook_manager", None)
+            if manager is not None and not _webhook_proxy_has_local_override():
+                return manager
             return webhook_manager
     except _WEBHOOK_TESTMODE_EXCEPTIONS:
         logger.debug("Webhook test mode detection skipped")
-    service = get_unified_evaluation_service_for_user(user_id)
+    if service is None:
+        service = get_unified_evaluation_service_for_user(user_id)
     manager = getattr(service, "webhook_manager", None)
     if manager is None:
         service.webhook_manager = webhook_manager

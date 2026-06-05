@@ -33,14 +33,21 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py
 - tldw_Server_API/app/core/DB_Management/media_db/runtime/synced_document_update_ops.py
 - tldw_Server_API/app/core/AuthNZ/db_config.py
+- tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_webhooks.py
+- tldw_Server_API/app/core/Audit/unified_audit_service.py
 - tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/core/RAG/rag_service/observability.py
+- tldw_Server_API/app/core/Resource_Governance/metrics_rg.py
+- tldw_Server_API/app/services/reading_digest_scheduler.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
 - tldw_Server_API/tests/AuthNZ/integration/test_jwt_refresh_rotation_blacklist.py
+- tldw_Server_API/tests/AuthNZ/unit/test_session_manager_configured_key.py
 - tldw_Server_API/tests/AuthNZ/unit/test_email_service.py
 - tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_api_keys.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_resource_governor_permissions_claims.py
+- tldw_Server_API/tests/ChaChaNotesDB/test_flashcard_templates_db.py
 - tldw_Server_API/tests/Collections/test_collections_close.py
 - tldw_Server_API/tests/Collections/test_embedding_queue.py
 - tldw_Server_API/tests/Collections/test_reminders_notifications_db.py
@@ -51,15 +58,18 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_overrides.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_shared_workspace_registry.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_workspace_set_objects.py
+- tldw_Server_API/tests/MCP_unified/test_mcp_hub_governance_pack_distribution.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
 - tldw_Server_API/tests/Media/test_json_url_download.py
+- tldw_Server_API/tests/Media/test_process_code_and_uploads.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_workflows_daily_cap.py
+- tldw_Server_API/tests/Resource_Governance/test_rg_shadow_metrics.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
 - tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
 - tldw_Server_API/tests/conftest.py
@@ -109,6 +119,14 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-04 final completed-check recheck before pushing found the remaining completed PR #2258 failures concentrated in full-suite shards rather than frontend/build gates. Additional root causes included single-user API key test setup not matching the stricter single-user key contract, macOS `/tmp` symlink path expectations in MCP path-scope assertions, direct mutation of the read-only RAG analytics backend type property, Audit PII settings imported before test overrides, Windows path-string and locked-file assumptions in Evaluations and Infrastructure tests, raw JSON bodies missing `application/json` in Resource Governance E2E cap tests, egress metric assertions not accepting allowlist denial wording, WebSearch cancellation tests depending on globally registered routes and media DB startup, mock email filenames containing Windows-invalid timestamp separators, Evaluation webhook tests overriding only the module source instead of direct route dependency objects, and Character Chat custom prompt preset endpoints calling missing ChaChaNotesDB persistence methods. The canceled Windows ai-retrieval shard showed a HuggingFace 429 during model predownload but no pytest failure before cancellation; the other canceled shards only reported cancellation.
 
 2026-06-04 post-push recheck of run 26987098784 found `Full Suite shard (Ubuntu / Python 3.13 / platform-mcp)` failing in `test_e2e_workflows_daily_cap_denies_with_headers[rg-memory]` because the test created a default read-scoped API key, while the workflow token-scope guard requires write scope for POST access to `/api/v1/workflows/run`. The test now creates a write-scoped key, sends JSON request bodies with the correct content type, and includes response bodies in status assertions for clearer future CI diagnostics.
+
+2026-06-04 post-push recheck of run 26987953958 found `Full Suite shard (macos-latest / Python 3.12 / platform-mcp)` failing in `test_prometheus_metrics_endpoint_includes_rg_series` after the platform-mcp shard ran Metrics tests before Resource Governance tests. The Metrics tests can replace the global metrics registry, while the Resource Governance registration helper kept a module-level "registered" flag and skipped repopulating the replacement registry. The helper now verifies that the current registry contains the RG definitions before returning, and a regression covers registry replacement.
+
+2026-06-04 completed-check recheck of run 26987953958 found additional full-suite shard failures before pushing the metrics fix: Audit risk tuning read stale import-time settings after config reloads, the `.tar.gz` upload test used fake bytes that stricter MIME detection classified as text, Evaluation webhook list endpoints bypassed per-user managers in test mode when no legacy proxy patch was present, the WebSearch cancellation test inherited a draining app lifecycle from earlier tests, and two Reading Digest scheduler instances could race the same schedule/user claim in one process. The fixes now resolve live settings at `RiskScorer` construction time, build a valid gzip tar archive in the upload test, preserve legacy webhook proxy patches while returning per-user managers for normal test-mode requests, reset and restore app lifecycle state around the cancellation test, and serialize in-process reading digest schedule runs by schedule/user key.
+
+2026-06-04 pre-push recheck of the same run found more completed failures after the earlier completed-check set: macOS ai-retrieval failed because the OpenTelemetry fallback import path left `TracerProvider` undefined when tests forced `OTEL_AVAILABLE`, Ubuntu/macOS auth-db failed because the flashcard template Postgres-safety test tried to assign a now read-only `backend_type` property, Windows platform-mcp failed because governance-pack trust policy roots are normalized through the host path resolver, and Windows auth-db failed because the session-key persistence test used the real API key path and could mix generated keys with stale files from earlier tests. The fixes now define optional OpenTelemetry symbols in the fallback branch, patch the `CharactersRAGDB.backend_type` property at the class level for the Postgres query simulation, assert governance-pack roots against the service-normalized path, and isolate session-key persistence to a temp API key path.
+
+2026-06-04 final pre-push recheck found three more completed old-head failures while other old-head full-suite jobs were still queued/in progress: macOS integrations and Windows integrations failed on the same WebSearch cancellation 503, and Windows media-audio failed on the same `.tar.gz` MIME fixture. Both root causes are already covered by the local lifecycle-state and valid-archive fixes in this pass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -129,6 +147,12 @@ Sixth recheck remediation for PR #2258: isolated fake-client JSON URL download t
 Seventh recheck remediation for PR #2258: fixed the remaining completed full-suite failures by aligning single-user API-key test setup with the configured key, normalizing MCP `/tmp` scope-root expectations across macOS/Linux, using a real AnalyticsDatabase backend mock shape instead of assigning the read-only property, patching Audit PII module-level settings, normalizing Windows-sensitive path and file-lock test behavior, sending Resource Governance E2E payloads with `json=`, accepting allowlist wording in egress denial metrics, idempotently installing and overriding the WebSearch route dependencies for the cancellation test, making mock email output filenames platform-safe, overriding direct Evaluation webhook route dependencies, and adding ChaChaNotesDB custom prompt preset schema plus CRUD support required by Character Chat preset endpoints. Verification on 2026-06-04: focused CI failures passed locally across AuthNZ/MCP/RAG/Audit/Infrastructure/http-client (7), email/recipe (3), WebSearch/webhook (2), Character Chat prompt preview (1), Resource Governance chat/embeddings cap cases (2), full email service file (16), full webhook multi-user file (4), Character Chat preset editor plus request-preset preview (9), and adjusted recipe/MCP tests (2); compileall passed for touched Python files; production Bandit on `email_service.py` and `ChaChaNotes_DB.py` passed with zero findings; test-scope Bandit showed only existing assert/test-fixture literal findings after the new `/tmp` finding was removed; git diff --check passed.
 
 Eighth recheck remediation for PR #2258: fixed the post-push Ubuntu/Python 3.13 platform-mcp shard failure by giving the workflows daily-cap E2E test API key the write scope required by `TokenScopeGuard("workflows")`, posting JSON bodies with `json=`, and preserving response text in assertions. Verification on 2026-06-04: both workflows daily-cap parametrizations passed locally (2), plus exact memory and Redis runs passed individually.
+
+Ninth recheck remediation for PR #2258: fixed the macOS/Python 3.12 platform-mcp Prometheus metrics failure by making Resource Governance metric registration recover when the global metrics registry is replaced after RG registration. Verification on 2026-06-04: the Metrics registry bridge file, RG shadow metrics file, and failed Prometheus endpoint test passed together in the CI order-sensitive subset (12 passed).
+
+Tenth recheck remediation for PR #2258: fixed the remaining completed full-suite shard failures from run 26987953958 by making Audit risk scoring read current settings, replacing the fake `.tar.gz` fixture with a valid archive, restoring per-user Evaluation webhook managers without breaking legacy patched proxy tests, isolating WebSearch cancellation from leaked draining lifecycle state, and adding a process-local per-schedule Reading Digest run lock. Verification on 2026-06-04: targeted Audit, Media, Evaluation webhook, WebSearch cancellation, Reading Digest scheduler, and Resource Governance metrics regressions passed locally before commit.
+
+Eleventh recheck remediation for PR #2258: fixed additional completed failures from the same run by making the RAG observability OpenTelemetry fallback safe when optional SDK symbols are missing, updating the flashcard template Postgres-safety test to patch the class-level backend property, normalizing the MCP governance-pack trust-policy path expectation, and isolating session key persistence to a temporary API key path. Verification on 2026-06-04: exact RAG observability, flashcard template, MCP governance-pack, and AuthNZ session-manager failure tests passed together locally (4 passed); the combined targeted regression set passed (31 passed); compileall passed for touched Python files; production Bandit passed with no findings; test-scope Bandit passed with existing test-only assert/secret/subprocess rules skipped; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

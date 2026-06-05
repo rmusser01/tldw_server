@@ -237,12 +237,13 @@ async def test_governance_pack_trust_policy_persists_as_deployment_wide_config(
         actor_id=11,
     )
 
-    assert updated["allowed_local_roots"] == ["/srv/packs"]
+    expected_local_roots = [str(Path("/srv/packs").resolve())]
+    assert updated["allowed_local_roots"] == expected_local_roots
     assert updated["allowed_git_ref_kinds"] == ["commit", "tag"]
     assert updated["require_git_signature_verification"] is True
 
     stored = await repo.get_governance_pack_trust_policy()
-    assert stored["policy_document"]["allowed_local_roots"] == ["/srv/packs"]
+    assert stored["policy_document"]["allowed_local_roots"] == expected_local_roots
     assert stored["updated_by"] == 11
 
 
