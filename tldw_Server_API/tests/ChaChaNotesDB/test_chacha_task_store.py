@@ -103,6 +103,30 @@ def _projection_count(db: CharactersRAGDB, task_id: str) -> int:
     return int(row["count"])
 
 
+def _projection_row(db: CharactersRAGDB, task_id: str) -> dict:
+    with db.transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT task_id,
+                   note_id,
+                   note_version,
+                   line_number,
+                   start_offset,
+                   end_offset,
+                   normalized_text_hash,
+                   occurrence_index,
+                   block_fingerprint,
+                   raw_line,
+                   projection_status
+              FROM task_note_projections
+             WHERE task_id = ?
+            """,
+            (task_id,),
+        ).fetchone()
+    assert row is not None  # nosec B101
+    return dict(row)
+
+
 def _delete_projection(db: CharactersRAGDB, task_id: str) -> None:
     with db.transaction() as conn:
         conn.execute("DELETE FROM task_note_projections WHERE task_id = ?", (task_id,))
@@ -584,6 +608,55 @@ def test_mark_task_unlinked_rejects_projection_update_zero_rowcount(
     assert _event_count(db, "task-1", "unlinked") == 0  # nosec B101
 
 
+def test_mark_task_unlinked_rejects_projection_locator_refresh_race(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_projection = _projection_row(db, "task-1")
+    original_execute = db.task_store._execute
+    race_applied = False
+
+    def _simulate_projection_locator_refresh_race(conn, query, params=None):
+        nonlocal race_applied
+        if not race_applied and "UPDATE task_note_projections" in query:
+            race_applied = True
+            original_execute(
+                conn,
+                """
+                UPDATE task_note_projections
+                   SET note_version = ?,
+                       line_number = ?,
+                       start_offset = ?,
+                       end_offset = ?,
+                       normalized_text_hash = ?,
+                       occurrence_index = ?,
+                       block_fingerprint = ?,
+                       raw_line = ?
+                 WHERE task_id = ?
+                """,
+                (2, 2, 4, 24, "sha256:refreshed", 1, "block-2", "- [ ] Review source refreshed", "task-1"),
+            )
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_projection_locator_refresh_race)
+
+    with pytest.raises(ConflictError, match="projection.*changed"):
+        db.mark_task_unlinked(
+            task_id="task-1",
+            expected_version=1,
+            actor_type="system",
+            actor_id="reconciler",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert _projection_row(db, "task-1") == original_projection  # nosec B101
+    assert _event_count(db, "task-1", "unlinked") == 0  # nosec B101
+
+
 def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -1050,6 +1123,59 @@ def test_soft_delete_task_rejects_projection_update_zero_rowcount(
     assert task["projection_status"] == "live"  # nosec B101
     assert task["version"] == 1  # nosec B101
     assert _projection_count(db, "task-1") == 1  # nosec B101
+    assert _event_count(db, "task-1", "deleted") == 0  # nosec B101
+
+
+def test_soft_delete_task_rejects_projection_locator_refresh_race(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_projection = _projection_row(db, "task-1")
+    original_execute = db.task_store._execute
+    race_applied = False
+
+    def _simulate_projection_locator_refresh_race(conn, query, params=None):
+        nonlocal race_applied
+        if not race_applied and "UPDATE task_note_projections" in query:
+            race_applied = True
+            original_execute(
+                conn,
+                """
+                UPDATE task_note_projections
+                   SET note_version = ?,
+                       line_number = ?,
+                       start_offset = ?,
+                       end_offset = ?,
+                       normalized_text_hash = ?,
+                       occurrence_index = ?,
+                       block_fingerprint = ?,
+                       raw_line = ?
+                 WHERE task_id = ?
+                """,
+                (2, 2, 4, 24, "sha256:refreshed", 1, "block-2", "- [ ] Review source refreshed", "task-1"),
+            )
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_projection_locator_refresh_race)
+
+    with pytest.raises(ConflictError, match="projection.*changed"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=1,
+            projection_note_id=note_id,
+            projection_note_version=1,
+            projection_line_number=1,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert _projection_row(db, "task-1") == original_projection  # nosec B101
     assert _event_count(db, "task-1", "deleted") == 0  # nosec B101
 
 
