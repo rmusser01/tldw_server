@@ -1,21 +1,26 @@
 ---
 id: TASK-514.1
-title: 'Implement Notes task parser, storage, reconciliation, and REST API foundation'
+title: Implement Notes task parser, storage, reconciliation, and REST API foundation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-05 09:32'
+updated_date: 2026-06-05 09:32
 labels: []
 dependencies: []
 references:
-  - TASK-512
-  - TASK-513
-  - TASK-514
+- TASK-512
+- TASK-513
+- TASK-514
 documentation:
-  - Docs/superpowers/specs/2026-06-05-notes-task-backed-todo-lists-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-05-notes-task-backed-todo-lists-implementation-plan.md
+- Docs/superpowers/specs/2026-06-05-notes-task-backed-todo-lists-design.md
+- Docs/superpowers/plans/2026-06-05-notes-task-backed-todo-lists-implementation-plan.md
 parent_task_id: TASK-514
+modified_files:
+- tldw_Server_API/app/api/v1/schemas/notes_tasks_schemas.py
+- tldw_Server_API/app/api/v1/endpoints/notes_tasks.py
+- tldw_Server_API/app/api/v1/router_groups/content.py
+- tldw_Server_API/app/core/Notes_Tasks/service.py
+- tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_api.py
 ---
 
 ## Description
@@ -47,8 +52,7 @@ Parser/projection utilities checkpoint complete. Commits: b303ea276f24a9be9fb89f
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Task 4 REST API slice added `notes_tasks` schemas/endpoints, registered the router before generic notes routes, and extended `NotesTaskService` with note-scoped reconciliation, projected task create/update/status/delete, unlinked record-only metadata/delete handling, and unread agent task activity read/dismiss state. RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_api.py -v` initially failed 14 tests on missing 404 route behavior. GREEN: same command now passes 14 tests. Router contract verification currently has 6 unrelated failures from pre-existing dirty edits in `tldw_Server_API/tests/Services/test_router_groups_contract.py` expecting missing `router_groups.selection` and minimal route_key changes; this file was dirty before Task 4 edits and was not modified by this slice. Bandit: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/notes_tasks.py tldw_Server_API/app/api/v1/schemas/notes_tasks_schemas.py tldw_Server_API/app/core/Notes_Tasks tldw_Server_API/app/core/DB_Management/chacha/task_store.py -f json -o /tmp/bandit_notes_tasks_api_task4.json` -> 0 findings, 0 errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 <!-- SECTION:FINAL_SUMMARY:END -->
 

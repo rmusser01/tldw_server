@@ -510,12 +510,19 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         ),
     )
 
-    # Notes graph routes must be registered before generic notes routes so
-    # /graph is not shadowed by /{note_id}.
+    # Notes graph/task routes must be registered before generic notes routes so
+    # static subpaths are not shadowed by /{note_id}.
     for notes_spec in (
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph",
             log_name="notes_graph",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
+            route_key="notes",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_tasks",
+            log_name="notes_tasks",
             prefix=f"{API_V1_PREFIX}/notes",
             tags=("notes",),
             route_key="notes",
