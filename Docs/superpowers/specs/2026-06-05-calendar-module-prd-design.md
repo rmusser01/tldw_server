@@ -1,7 +1,7 @@
 # Calendar Module PRD Design
 
 Date: 2026-06-05
-Status: Draft ready for spec review
+Status: Ready for user review
 Owner: Codex brainstorming session
 Backlog: TASK-515
 
@@ -139,6 +139,7 @@ MVP includes:
 - local events;
 - lightweight dated todos/checkpoints;
 - basic one-time and common recurring items;
+- plain-text calendar annotations and local tags stored in Calendar DB;
 - agenda view;
 - week view;
 - item create/edit drawer;
@@ -170,7 +171,7 @@ V1 includes:
 - provider ID, UID, ETag/CTag, sync cursor/state, deletion/tombstone, and recurrence preservation;
 - sync now and periodic sync jobs;
 - sync status with last sync, next sync, item counts, stale state, and errors;
-- annotations, tags, and links on provider-owned records;
+- annotations, local tags, and links on provider-owned records;
 - copy-into-tldw flow for read-only provider events;
 - mocked CalDAV integration tests;
 - at least one real-provider smoke path documented for maintainers.
@@ -242,10 +243,10 @@ Key fields:
 - `priority`;
 - `location_text`;
 - `location_url`;
-- `tags`;
 - `recurrence_id`;
 - `external_binding_id`;
 - `source_uid`;
+- `provider_metadata_json`;
 - `read_only_reason`;
 - `deleted_at`;
 - `created_at`;
@@ -257,6 +258,8 @@ Rules:
 - Provider-owned items are locked for provider fields.
 - Linked projections are read-only summaries of scheduled tasks, Jobs, Watchlists, Workflows, ACP schedules, or related domain records.
 - Lightweight todos/checkpoints are calendar-native dated items, not a full task-list replacement.
+- Calendar tags are stored as local overlay metadata through `CalendarAnnotation`, not as provider-updated `CalendarItem` fields.
+- Provider categories, colors, and raw event metadata are stored in `provider_metadata_json` for imported records.
 
 ### Recurrence
 
@@ -287,7 +290,7 @@ Roadmap:
 
 ### CalendarAnnotation
 
-Stores tldw-local context that must survive provider refreshes.
+Stores tldw-local context that must survive provider refreshes. V1 should use this first-party Calendar DB table for plain-text annotations, summaries, local tags, and small structured metadata. It should not reuse the Notes data model as the storage backend for annotations in v1. Users can still link a calendar item to a full note through `CalendarLink`.
 
 Fields:
 
@@ -295,13 +298,13 @@ Fields:
 - `calendar_item_id`;
 - `author_user_id`;
 - `note`;
-- `tags`;
+- `local_tags`;
 - `summary`;
 - `metadata_json`;
 - `created_at`;
 - `updated_at`.
 
-Annotations can exist on local, provider-owned, and linked projection records, subject to permissions.
+Annotations can exist on local, provider-owned, and linked projection records, subject to permissions. `local_tags` is the v1 tag model for all calendar items, including tldw-owned items. Provider-supplied categories or colors remain provider metadata and should not be merged into `local_tags`.
 
 ### CalendarLink
 
@@ -385,14 +388,14 @@ Flow:
 5. Calendar sync scheduler periodically enqueues sync Jobs.
 6. Sync worker fetches changes and upserts provider-owned records.
 7. Provider field changes replace cached provider fields.
-8. Local annotations, tags, and links remain untouched.
+8. Local annotations, local tags, and links remain untouched.
 9. Deleted remote events are marked as remote-deleted/tombstoned locally.
 10. Agenda/week queries include local items, provider-owned items, and linked projections according to filters and permissions.
 
 Conflict rules:
 
 - Provider-owned fields are provider-authoritative.
-- Local annotations are tldw-authoritative.
+- Local annotations, local tags, and links are tldw-authoritative.
 - Local copied items are independent tldw-owned records with source provenance.
 - If a copied item source changes, the UI may show source-changed context but should not auto-merge.
 - No local changes are pushed back to providers in v1.
@@ -416,7 +419,7 @@ Calendar owns:
 - time-based visualization;
 - agenda/week placement;
 - local event/todo creation;
-- simple reminder/deferred task creation;
+- simple reminder/deferred task creation through existing reminder primitives;
 - links and annotations;
 - calendar-specific filtering.
 
@@ -431,6 +434,15 @@ Scheduled Tasks owns:
 - Watchlists/Workflows/ACP domain-specific handoff.
 
 Calendar projections of scheduled work should be read-only and deep-link to their source. Complex automation edits must happen in the owning surface.
+
+Calendar-created reminders:
+
+- Calendar can create local calendar-native dated todos/checkpoints as `CalendarItem(kind="todo")`.
+- Calendar can create basic one-time reminder/deferred tasks by calling the existing reminder task service/API path, not by creating arbitrary Jobs or a new calendar-specific task backend.
+- The resulting reminder task should appear in Calendar as a linked projection with a `CalendarLink` to the reminder source.
+- Calendar may provide narrow edit/delete affordances for reminders only where those operations map directly to existing reminder CRUD semantics.
+- Recurring reminders, automation templates, Watchlists jobs, Workflows, ACP schedules, and run/debug/result management remain owned by `/scheduled-tasks` or the relevant domain surface.
+- Calendar-native todos do not enqueue notification Jobs unless the user explicitly creates or converts them into a reminder.
 
 ## Backend Architecture
 
@@ -448,7 +460,8 @@ Suggested module layout:
   - provider profiles;
   - future Google/Microsoft/Proton adapters.
 - `tldw_Server_API/app/core/DB_Management/Calendar_DB.py`
-  - SQLite default persistence;
+  - dedicated shared Calendar DB persistence;
+  - SQLite default at `Databases/calendar.db`;
   - PostgreSQL-compatible patterns where existing repo conventions support them.
 - `tldw_Server_API/app/api/v1/endpoints/calendar.py`
   - thin FastAPI router.
@@ -464,7 +477,7 @@ API groups:
 - calendars: create, list, update, archive, permissions;
 - items: create, list, update, delete local events and todos;
 - views: agenda/week queries with recurrence expansion, overlays, projections, filters, and permission checks;
-- annotations: create, update, delete notes/tags/summaries;
+- annotations: create, update, delete plain-text annotations, local tags, and summaries;
 - links: create, delete, list typed links;
 - external accounts: create, verify, revoke, delete CalDAV accounts;
 - external bindings: discover, bind, unbind, enable/disable, inspect sync status;
@@ -476,6 +489,14 @@ Permission model:
 - Calendar-level overrides can exist as narrow ACL rows.
 - Avoid a separate policy engine in v1.
 - Prepare the model for future rich policy controls.
+
+Storage decision:
+
+- Calendar data should live in a dedicated shared Calendar DB, not in per-user Calendar DBs and not inside the existing Collections DB.
+- The dedicated DB needs tenant, org, owner, and calendar membership columns because org calendars must be queryable across users.
+- Per-user database placement would make shared org calendar queries, sync workers, and RBAC enforcement harder.
+- Collections DB should remain available for existing reminders and collections behavior, with Calendar linking to those records instead of absorbing them.
+- External account secrets should reuse existing encrypted secret-storage/AuthNZ patterns where possible; Calendar DB stores only account metadata and secret references.
 
 ## Frontend UX
 
@@ -518,8 +539,8 @@ Item drawer:
 - Recurrence summary.
 - Description.
 - Location/link fields.
-- Tags.
-- Annotations.
+- Local tags.
+- Plain-text annotations.
 - Links to related tldw objects.
 - Provider metadata when relevant.
 - Read-only reason for locked records.
@@ -596,6 +617,7 @@ Requirements:
 - Rate limit account verification and sync trigger endpoints.
 - Avoid SSRF by validating CalDAV server URLs and applying existing egress controls where appropriate.
 - Store only provider metadata needed for sync, display, and diagnostics.
+- Keep provider categories/colors separate from tldw-local tags.
 
 ## Testing Strategy
 
@@ -608,6 +630,8 @@ Backend unit tests:
 - timezone and DST edge cases;
 - provider-owned edit blocking;
 - annotation survival across provider refresh;
+- local tag survival across provider refresh;
+- calendar-created reminders call existing reminder primitives rather than creating arbitrary Jobs;
 - link normalization;
 - sync state transitions.
 
@@ -672,9 +696,7 @@ Reference links:
 ## Open Questions
 
 1. Should external CalDAV VTODO import be included in v1 when a provider supports it, or should all external todos remain roadmap until VEVENT import proves stable?
-2. Should calendar annotations be plain text only in v1, or should they reuse note/link models from an existing domain?
-3. Should the first CalDAV real-provider smoke test target Fastmail specifically?
-4. Should calendar data live in a new shared calendar DB, per-user calendar DBs, or the existing Collections DB with a new domain namespace?
+2. Should the first CalDAV real-provider smoke test target Fastmail specifically?
 
 ## Acceptance Criteria
 
@@ -686,6 +708,10 @@ Reference links:
 - The PRD requires provider-owned imported events to be read-only but locally annotatable/linkable.
 - The PRD keeps Scheduled Tasks as the automation workbench and Calendar as the time/context surface.
 - The PRD includes org RBAC integration without a new rich policy engine in v1.
+- The PRD chooses a dedicated shared Calendar DB with tenant/org/user scoping.
+- The PRD defines tldw-local tags as annotation overlay data, separate from provider metadata.
+- The PRD defines calendar annotations as first-party plain-text Calendar DB records, with Notes linked through `CalendarLink` rather than reused as storage.
+- The PRD defines calendar-created reminders as calls into existing reminder primitives, not a new task/job backend.
 - The PRD includes backend architecture, API groups, data model, sync model, UX, error handling, security, testing, and rollout risks.
 
 ## Risks And Mitigations
