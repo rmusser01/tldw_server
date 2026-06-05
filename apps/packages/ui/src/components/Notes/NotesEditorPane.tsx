@@ -17,7 +17,14 @@ import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
+import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
+import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
+import type {
+  NoteTask,
+  NoteTaskActivityEvent,
+  NoteTaskReconciliationSummary,
+} from '@/services/notes-tasks'
 import type {
   SaveIndicatorState,
   SaveRecoveryNotice,
@@ -132,6 +139,10 @@ export interface NotesEditorPaneProps {
   remoteVersionInfo: RemoteVersionInfo | null
   monitoringNotice: MonitoringNoticeState | null
   monitoringNoticeClasses: string
+  noteTasks: NoteTask[]
+  taskReconciliation: NoteTaskReconciliationSummary | null
+  taskActivityEvents: NoteTaskActivityEvent[]
+  taskConflictNotice: string | null
 
   // Title suggestion
   titleSuggestionLoading: boolean
@@ -196,6 +207,9 @@ export interface NotesEditorPaneProps {
   setIsDirty: (dirty: boolean) => void
   setSaveIndicator: (state: SaveIndicatorState) => void
   setMonitoringNotice: (notice: MonitoringNoticeState | null) => void
+  toggleTaskCheckboxLocal: (payload: TaskChecklistTogglePayload) => void
+  toggleTaskCheckboxStatus: (payload: TaskChecklistTogglePayload) => void
+  dismissTaskActivity: (eventId: string) => Promise<void>
   setEditorMode: (mode: NotesEditorMode) => void
   setEditorKeywords: (keywords: string[]) => void
   setEditorCursorIndex: (index: number | null) => void
@@ -284,6 +298,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   remoteVersionInfo,
   monitoringNotice,
   monitoringNoticeClasses,
+  noteTasks,
+  taskReconciliation,
+  taskActivityEvents,
+  taskConflictNotice,
   titleSuggestionLoading,
   canSwitchTitleStrategy,
   effectiveTitleSuggestStrategy,
@@ -326,6 +344,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   setIsDirty,
   setSaveIndicator,
   setMonitoringNotice,
+  toggleTaskCheckboxLocal,
+  toggleTaskCheckboxStatus,
+  dismissTaskActivity,
   setEditorMode,
   setEditorKeywords,
   setEditorCursorIndex,
@@ -437,6 +458,20 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         </span>
       ) : null}
     </span>
+  )
+
+  const renderTaskAwarePreviewSurface = (testId: string) => (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <TaskChecklistPreview
+        content={previewContent}
+        tasks={noteTasks}
+        isDirty={isDirty}
+        disabled={editorDisabled}
+        onToggleLocal={toggleTaskCheckboxLocal}
+        onToggleTaskStatus={toggleTaskCheckboxStatus}
+      />
+      {renderMarkdownPreviewSurface(testId)}
+    </div>
   )
 
   return (
@@ -848,6 +883,69 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               <div className="font-medium">{monitoringNotice.title}</div>
               <div className="mt-1">{monitoringNotice.guidance}</div>
             </div>
+          )}
+          {taskConflictNotice && (
+            <div
+              className="mt-2 rounded border border-warn/50 bg-warn/10 px-2 py-2 text-[12px] text-warn"
+              role="alert"
+              aria-live="polite"
+              data-testid="notes-task-conflict-notice"
+            >
+              {taskConflictNotice}
+            </div>
+          )}
+          {taskReconciliation?.status === 'incomplete' && (
+            <div
+              className="mt-2 rounded border border-warn/50 bg-warn/10 px-2 py-2 text-[12px] text-warn"
+              role="status"
+              data-testid="notes-task-reconciliation-warning"
+            >
+              {t('option:notesSearch.taskIncompleteReconciliationWarning', {
+                defaultValue: 'Some task updates are still reconciling.'
+              })}
+            </div>
+          )}
+          {taskActivityEvents.length > 0 && (
+            <div
+              className="mt-2 rounded border border-primary/40 bg-primary/10 px-2 py-2 text-[12px] text-primary"
+              role="status"
+              aria-live="polite"
+              data-testid="notes-task-activity-notice"
+            >
+              <div className="font-medium">
+                {t('option:notesSearch.taskAgentActivityNotice', {
+                  defaultValue: "Agent updated this note's tasks."
+                })}
+              </div>
+              <Button
+                size="small"
+                type="link"
+                className="!px-0 text-[12px]"
+                aria-label={t('option:notesSearch.taskActivityDismissAria', {
+                  defaultValue: 'Dismiss task activity'
+                })}
+                onClick={() => {
+                  const eventId = taskActivityEvents[0]?.id
+                  if (!eventId) return
+                  void dismissTaskActivity(eventId)
+                }}
+              >
+                {t('option:notesSearch.taskActivityDismiss', {
+                  defaultValue: 'Dismiss'
+                })}
+              </Button>
+            </div>
+          )}
+          {noteTasks.length > 0 && (
+            <Typography.Text
+              type="secondary"
+              className="block text-[11px] mt-2 text-text-muted"
+              data-testid="notes-task-continuity-notice"
+            >
+              {t('option:notesSearch.taskContinuityNotice', {
+                defaultValue: 'Portable markdown with best-effort task continuity'
+              })}
+            </Typography.Text>
           )}
           {canUndoAssist && (
             <div className="mt-2">
@@ -1424,7 +1522,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     </div>
                   </div>
                 ) : (
-                  renderMarkdownPreviewSurface('notes-preview-surface')
+                  renderTaskAwarePreviewSurface('notes-preview-surface')
                 )}
               </div>
             ) : (
@@ -1570,7 +1668,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         </div>
                       </div>
                     ) : (
-                      renderMarkdownPreviewSurface('notes-split-preview-surface')
+                      renderTaskAwarePreviewSurface('notes-split-preview-surface')
                     )}
                   </>
                 ) : (

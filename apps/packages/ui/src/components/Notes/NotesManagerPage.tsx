@@ -2344,6 +2344,10 @@ const NotesManagerPage: React.FC = () => {
         remoteVersionInfo={ed.remoteVersionInfo}
         monitoringNotice={ed.monitoringNotice}
         monitoringNoticeClasses={ed.monitoringNoticeClasses}
+        noteTasks={ed.noteTasks}
+        taskReconciliation={ed.taskReconciliation}
+        taskActivityEvents={ed.taskActivityEvents}
+        taskConflictNotice={ed.taskConflictNotice}
         titleSuggestionLoading={ed.titleSuggestionLoading}
         canSwitchTitleStrategy={ed.canSwitchTitleStrategy}
         effectiveTitleSuggestStrategy={ed.effectiveTitleSuggestStrategy}
@@ -2390,6 +2394,9 @@ const NotesManagerPage: React.FC = () => {
         setIsDirty={ed.setIsDirty}
         setSaveIndicator={ed.setSaveIndicator}
         setMonitoringNotice={ed.setMonitoringNotice}
+        toggleTaskCheckboxLocal={ed.toggleTaskCheckboxLocal}
+        toggleTaskCheckboxStatus={ed.toggleTaskCheckboxStatus}
+        dismissTaskActivity={ed.dismissTaskActivity}
         setEditorMode={ed.setEditorMode}
         setEditorKeywords={kw.setEditorKeywords}
         setEditorCursorIndex={ed.setEditorCursorIndex}

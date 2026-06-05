@@ -5,7 +5,18 @@ import type { MessageInstance } from 'antd/es/message/interface'
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
+import {
+  listNoteTasks,
+  listTaskActivity,
+  markTaskActivityRead,
+  setNoteTaskStatus,
+  type NoteTask,
+  type NoteTaskActivityEvent,
+  type NoteTaskReconciliationSummary,
+} from '@/services/notes-tasks'
 import { getSetting, setSetting, clearSetting } from '@/services/settings/registry'
+import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
+import { toggleChecklistItemMarker } from '@/components/Notes/task-markdown'
 import {
   LAST_NOTE_ID_SETTING,
   NOTES_RECENT_OPENED_SETTING,
@@ -141,6 +152,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [assistLoadingAction, setAssistLoadingAction] = React.useState<NotesAssistAction | null>(null)
   const [editProvenance, setEditProvenance] = React.useState<EditProvenanceState>({ mode: 'manual' })
   const [monitoringNotice, setMonitoringNotice] = React.useState<MonitoringNoticeState | null>(null)
+  const [noteTasks, setNoteTasks] = React.useState<NoteTask[]>([])
+  const [taskReconciliation, setTaskReconciliation] =
+    React.useState<NoteTaskReconciliationSummary | null>(null)
+  const [taskActivityEvents, setTaskActivityEvents] = React.useState<NoteTaskActivityEvent[]>([])
+  const [taskConflictNotice, setTaskConflictNotice] = React.useState<string | null>(null)
   const [recentNotes, setRecentNotes] = React.useState<NotesRecentOpenedEntry[]>([])
   const recentNotesRef = React.useRef<NotesRecentOpenedEntry[]>([])
   const [pinnedNoteIds, setPinnedNoteIds] = React.useState<string[]>([])
@@ -167,10 +183,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const savingInFlightRef = React.useRef(false)
   const titleInputRef = React.useRef<InputRef | null>(null)
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const contentRef = React.useRef('')
   const richEditorRef = React.useRef<HTMLDivElement | null>(null)
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
   const graphModalReturnFocusRef = React.useRef<HTMLElement | null>(null)
+  contentRef.current = content
 
   // ---- AI assist undo ----
   const contentBeforeAssistRef = React.useRef<string | null>(null)
@@ -348,11 +366,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         provenance?: 'manual' | NotesAssistAction
       }
     ) => {
+      contentRef.current = nextContent
       setContent(nextContent)
       setIsDirty(true)
       setSaveIndicator('dirty')
       setSaveRecoveryNotice(null)
       setMonitoringNotice(null)
+      setTaskConflictNotice(null)
       if (options?.provenance && options.provenance !== 'manual') {
         markGeneratedEdit(options.provenance)
       } else {
@@ -360,6 +380,52 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
     },
     [markGeneratedEdit, markManualEdit]
+  )
+
+  const clearTaskState = React.useCallback(() => {
+    setNoteTasks([])
+    setTaskReconciliation(null)
+    setTaskActivityEvents([])
+    setTaskConflictNotice(null)
+  }, [])
+
+  const loadTaskActivityForNote = React.useCallback(async (noteId: string | number) => {
+    try {
+      const response = await listTaskActivity({ limit: 50 })
+      const noteIdText = String(noteId)
+      const events = Array.isArray(response.events)
+        ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
+        : []
+      setTaskActivityEvents(events)
+    } catch {
+      setTaskActivityEvents([])
+    }
+  }, [])
+
+  const refreshTaskStateForNote = React.useCallback(async (noteId: string | number) => {
+    try {
+      const response = await listNoteTasks(noteId, { limit: 500 })
+      setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
+      setTaskReconciliation(response.reconciliation ?? null)
+    } catch {
+      setNoteTasks([])
+      setTaskReconciliation(null)
+    }
+    await loadTaskActivityForNote(noteId)
+  }, [loadTaskActivityForNote])
+
+  const toggleTaskCheckboxLocal = React.useCallback(
+    (payload: TaskChecklistTogglePayload) => {
+      const currentContent = contentRef.current
+      const nextContent = toggleChecklistItemMarker(
+        currentContent,
+        payload.lineNumber,
+        payload.nextStatus === 'done'
+      )
+      if (nextContent === currentContent) return
+      setContentDirty(nextContent, { provenance: 'manual' })
+    },
+    [setContentDirty]
   )
 
   // ---- load/reset ----
@@ -433,6 +499,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setSaveRecoveryNotice(null)
       setEditProvenance({ mode: 'manual' })
       setMonitoringNotice(null)
+      clearTaskState()
       setRemoteVersionInfo(null)
       setEditorCursorIndex(0)
       setWysiwygHtml(markdownToWysiwygHtml(String(d?.content || '')))
@@ -443,12 +510,26 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (queuedDraft) {
         applyOfflineDraftToEditor(queuedDraft)
       }
+      await refreshTaskStateForNote(id)
       return true
     } catch {
       message.error('Failed to load note')
       return false
     } finally { setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, clearAssistUndoState, message, rememberRecentNote, setEditorKeywords])
+  }, [applyOfflineDraftToEditor, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
+
+  const dismissTaskActivity = React.useCallback(async (eventId: string) => {
+    const normalizedEventId = String(eventId || '').trim()
+    if (!normalizedEventId) return
+    try {
+      await markTaskActivityRead(normalizedEventId, { dismissed: true })
+    } catch {
+      // Non-critical notice state. Keep the UI moving if the server already marked it.
+    }
+    setTaskActivityEvents((current) =>
+      current.filter((event) => String(event.id) !== normalizedEventId)
+    )
+  }, [])
 
   const resetEditor = React.useCallback(() => {
     clearAssistUndoState()
@@ -467,12 +548,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setSaveRecoveryNotice(null)
     setEditProvenance({ mode: 'manual' })
     setMonitoringNotice(null)
+    clearTaskState()
     setRemoteVersionInfo(null)
     setEditorCursorIndex(null)
     setWysiwygHtml('<p><br/></p>')
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = null
-  }, [clearAssistUndoState, setEditorKeywords])
+  }, [clearAssistUndoState, clearTaskState, setEditorKeywords])
 
   const confirmDiscardIfDirty = React.useCallback(async () => {
     if (!isDirty) return true
@@ -654,6 +736,59 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       duration: 6
     })
   }, [message, reloadNotes])
+
+  const toggleTaskCheckboxStatus = React.useCallback(
+    async (payload: TaskChecklistTogglePayload) => {
+      const task = payload.task
+      if (!task || selectedId == null) {
+        toggleTaskCheckboxLocal(payload)
+        return
+      }
+      const expectedNoteVersion = selectedVersion ?? task.projection?.note_version ?? null
+      if (expectedNoteVersion == null) {
+        setTaskConflictNotice(
+          t('option:notesSearch.taskConflictNotice', {
+            defaultValue: 'Task changed on the server. Reload the note and try again.'
+          })
+        )
+        return
+      }
+
+      try {
+        await setNoteTaskStatus([
+          {
+            task_id: task.id,
+            status: payload.nextStatus,
+            expected_task_version: task.version,
+            expected_note_version: expectedNoteVersion
+          }
+        ])
+        setTaskConflictNotice(null)
+        await loadDetail(selectedId)
+      } catch (error: any) {
+        setTaskConflictNotice(
+          t('option:notesSearch.taskConflictNotice', {
+            defaultValue: 'Task changed on the server. Reload the note and try again.'
+          })
+        )
+        if (isVersionConflictError(error)) {
+          handleVersionConflict(selectedId)
+        } else {
+          message.error(String(error?.message || '') || 'Task update failed')
+        }
+      }
+    },
+    [
+      handleVersionConflict,
+      isVersionConflictError,
+      loadDetail,
+      message,
+      selectedId,
+      selectedVersion,
+      t,
+      toggleTaskCheckboxLocal
+    ]
+  )
 
   // ---- monitoring ----
   const loadMonitoringNoticeForSavedNote = React.useCallback(
@@ -916,6 +1051,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             setSelectedLastSavedAt(new Date().toISOString())
           }
           if (selectedId != null) {
+            await refreshTaskStateForNote(selectedId)
             void loadMonitoringNoticeForSavedNote(selectedId, 'notes.update', saveStartedAtMs)
           }
           return true
@@ -971,6 +1107,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       currentOfflineDraftKey,
       refetch,
       removeOfflineDraftByKey,
+      refreshTaskStateForNote,
       remoteVersionInfo,
       saving,
       selectedId,
@@ -1897,6 +2034,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     canUndoAssist,
     editProvenance,
     monitoringNotice, setMonitoringNotice,
+    noteTasks,
+    taskReconciliation,
+    taskActivityEvents,
+    taskConflictNotice,
     recentNotes,
     pinnedNoteIds, pinnedNoteIdSet,
     titleSuggestStrategy, setTitleSuggestStrategy,
@@ -1937,6 +2078,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setContentDirty,
     resizeEditorTextarea,
     loadDetail,
+    refreshTaskStateForNote,
+    toggleTaskCheckboxLocal,
+    toggleTaskCheckboxStatus,
+    dismissTaskActivity,
     resetEditor,
     removeRecentNotes,
     confirmDiscardIfDirty,
