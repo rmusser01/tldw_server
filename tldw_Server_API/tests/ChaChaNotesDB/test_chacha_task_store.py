@@ -159,6 +159,39 @@ def test_reopen_clears_completed_at_and_records_event_history(db: CharactersRAGD
     assert [event["new_value_json"]["status"] for event in status_events] == ["done", "open"]  # nosec B101
 
 
+def test_mark_task_unlinked_rejects_zero_rowcount_update(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_execute = db.task_store._execute
+    projection_update_attempted = False
+
+    class _ZeroRowcount:
+        rowcount = 0
+
+    def _simulate_concurrent_update(conn, query, params=None):
+        nonlocal projection_update_attempted
+        if "UPDATE tasks" in query and "version = version + 1" in query:
+            return _ZeroRowcount()
+        if "UPDATE task_note_projections" in query:
+            projection_update_attempted = True
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_concurrent_update)
+
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db.mark_task_unlinked(
+            task_id="task-1",
+            expected_version=1,
+            actor_type="system",
+            actor_id="reconciler",
+        )
+    assert projection_update_attempted is False  # nosec B101
+
+
 def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -189,6 +222,42 @@ def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeyp
     included = db.get_task("task-1", include_deleted=True)
     assert included is not None  # nosec B101
     assert included["deleted"] in (1, True)  # nosec B101
+
+
+def test_soft_delete_task_rejects_zero_rowcount_update(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_execute = db.task_store._execute
+    projection_update_attempted = False
+
+    class _ZeroRowcount:
+        rowcount = 0
+
+    def _simulate_concurrent_update(conn, query, params=None):
+        nonlocal projection_update_attempted
+        if "UPDATE tasks" in query and "version = version + 1" in query:
+            return _ZeroRowcount()
+        if "UPDATE task_note_projections" in query:
+            projection_update_attempted = True
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_concurrent_update)
+
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=1,
+            projection_note_id=note_id,
+            projection_note_version=1,
+            projection_line_number=1,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    assert projection_update_attempted is False  # nosec B101
 
 
 def test_record_only_soft_delete_is_allowed_for_unlinked_task(db: CharactersRAGDB) -> None:
