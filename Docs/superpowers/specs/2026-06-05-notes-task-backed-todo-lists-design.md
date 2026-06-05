@@ -9,7 +9,7 @@ Backlog: TASK-512
 
 Add first-class to-do list support to Notes so users can work through tasks while using chat, the workspace, and the floating Notes Dock.
 
-The product model is task-backed, not merely markdown-enhanced. Checklist lines in notes remain readable plain markdown, but active checklist items reconcile to durable task records with identity, status, metadata, audit history, and MCP tool access. Users can mark items done from both the full `/notes` page and the Notes Dock. Agents can create, update, and complete tasks through MCP Unified when the user's MCP policy permits it.
+The product model is task-backed, not merely markdown-enhanced. Checklist lines in notes remain readable plain markdown, but active checklist items reconcile to durable task records with identity, status, metadata, audit history, and MCP tool access. Users can mark items done from both the full `/notes` page and the Notes Dock. Agents can create, update, complete, and delete tasks through MCP Unified when the user's MCP policy permits it.
 
 Markdown remains portable. The system must not insert hidden task IDs into note content. A note with tasks should still export as normal markdown containing checklist syntax such as `- [ ] Review source @due(2026-06-10) @priority(high)`.
 
@@ -71,11 +71,24 @@ That creates several gaps:
 - No Kanban board in v1.
 - No calendar sync in v1.
 - No recurring tasks in v1.
-- No notifications or reminders in v1, beyond storing metadata that can support them later.
+- No notifications or reminders in v1, beyond storing metadata that can support them later. This does not exclude required in-app audit/activity notices for agent changes.
 - No cross-user assignment or team task workflow in v1.
 - No forced conversion of all notes into task documents.
 - No hidden IDs, HTML comments, or invisible markers inserted into note markdown.
 - No broad redesign of `/notes`, Chat, Workspaces, or MCP Hub management surfaces.
+
+## Rollout Model
+
+V1 should be delivered in explicit slices so the work does not become one oversized PR.
+
+| Phase | Scope | Release gate |
+| --- | --- | --- |
+| 1. Core task foundation | Task storage, task events, parser, reconciler, lazy note reconciliation, backend/API tests. | Notes without checklist items remain unchanged; reconciliation is idempotent. |
+| 2. Notes UI interaction | `/notes` preview/split checkboxes, Notes Dock task interaction, dirty-note concurrency handling, frontend tests. | Users can mark tasks done/reopen from both surfaces without clobbering unsaved content. |
+| 3. MCP task tools | MCP tools for task discovery, create, update, status, delete, and reconciliation; policy/approval/audit/idempotency tests. | User-confirmed agent changes work end-to-end through MCP. |
+| 4. Autonomous agent surfacing | Autonomous MCP task writes, persistent activity notices, unread/dismiss behavior, browser checks. | Autonomous changes are auditable and visible even if the affected note was not open when the change happened. |
+
+Autonomous writes must not be enabled before Phase 3 tool policy is passing and Phase 4 notice delivery exists.
 
 ## Terminology
 
@@ -104,6 +117,8 @@ Any checklist line anywhere in a note can become interactive:
 
 The note remains valid markdown. The backend stores task records for those checklist lines and keeps their status synchronized with the projected markdown.
 
+For new or updated notes, checklist participation begins at successful note save/autosave. For existing notes created before task support, participation begins when the note is reconciled. Task discovery paths must not silently omit unreconciled checklist items: they must reconcile scoped candidate notes before returning complete results, or explicitly return a `reconciliation_pending`/incomplete-results signal.
+
 The task record should hold:
 
 - stable task ID;
@@ -113,7 +128,7 @@ The task record should hold:
 - source note ID;
 - source locator/projection details;
 - metadata parsed from allowlisted tokens;
-- created, updated, and completed timestamps;
+- created, updated, and completed timestamps, with `completed_at` set when status becomes `done` and cleared when the task is reopened while prior completions remain in task event history;
 - version for optimistic locking;
 - deleted/unlinked state;
 - last actor and audit references.
@@ -124,6 +139,24 @@ The note content should hold:
 - visible task text;
 - visible metadata tokens;
 - no hidden task IDs.
+
+## Task Identity Without Hidden IDs
+
+Task identity is durable in the task table, but markdown locators are not permanent identifiers.
+
+Because the product forbids hidden IDs in markdown, the system cannot guarantee perfect task identity through every free-form text edit, duplicate item, or reorder. The PRD accepts that limitation in exchange for markdown portability.
+
+Required identity rules:
+
+- A locator is valid only with the note version it was produced from.
+- Same-version checkbox toggles must include the expected note version and task version.
+- Cross-version reconciliation may preserve identity only when it can make a strong match from source note, prior locator context, normalized text hash, occurrence context, and surrounding checklist block.
+- If a unique match cannot be proven, the reconciler must not silently merge tasks. It should mark the old task `unlinked` or `ambiguous` and create a new task record for the new checklist line.
+- Duplicate checklist text is allowed, but duplicate items cannot depend on text hash alone for identity.
+- Reordered unique items may preserve identity when context still matches. Reordered duplicate items may become ambiguous.
+- Renaming an item may preserve identity only if the locator/context match is still strong enough for the current note version.
+
+This behavior must be documented for users in implementation-facing copy as "portable markdown with best-effort task continuity," not as perfect identity preservation.
 
 ## Metadata Tokens
 
@@ -140,6 +173,16 @@ Required allowlist:
 Unknown tokens remain plain text and are not stripped.
 
 Malformed allowlisted tokens remain plain text and should not block note save. The parser may return non-blocking warnings for UI or diagnostics.
+
+Parser normalization rules:
+
+- Token names are case-insensitive and normalize to lowercase metadata keys.
+- Leading/trailing whitespace inside parentheses is ignored for allowlisted tokens.
+- Duplicate allowlisted tokens use the last valid token as the structured metadata value while preserving all original text.
+- Invalid dates, unknown priorities, and unsupported estimate formats are ignored structurally and returned as warnings.
+- `@due(...)` accepts strict ISO date text only.
+- `@priority(...)` accepts `high`, `medium`, and `low`, case-insensitively.
+- `@estimate(...)` accepts simple duration text such as `30m`, `2h`, and `1d`; richer duration parsing is out of scope for v1.
 
 ## Architecture
 
@@ -166,6 +209,7 @@ The PRD expects a schema equivalent to:
 | `tasks` | Durable task records and current status. |
 | `task_note_links` or task projection fields | Source note ID and current projection locator/hash. |
 | `task_events` | Append-only task mutation/audit history, especially for agent actions. |
+| `note_task_reconciliation_state` or equivalent | Per-note last reconciled version and reconciliation status for lazy backfill and discovery correctness. |
 
 The exact table split can be decided during implementation, but the model must support:
 
@@ -191,13 +235,13 @@ The parser detects checklist lines and returns structured items:
 The reconciler maps parsed items to existing tasks. It should use conservative heuristics:
 
 1. Existing task linked to same note and same locator/hash.
-2. Existing task linked to same note and stable normalized text hash.
+2. Existing task linked to same note, unique stable normalized text hash, and compatible occurrence/block context.
 3. Existing unlinked task with a strong match in the same note.
 4. Otherwise create a new task.
 
 The reconciler must be idempotent. Running it repeatedly on unchanged content should produce the same task state and links.
 
-Ambiguous duplicate checklist lines must not be destructively merged. The reconciler should create distinct tasks or mark ambiguity for review.
+Hash-based matching is allowed only when the item is unique within the note or reinforced by occurrence context and surrounding checklist-block context. Ambiguous duplicate checklist lines must not be destructively merged. The reconciler should create distinct tasks or mark ambiguity for review.
 
 ### Frontend
 
@@ -217,9 +261,10 @@ Proposed tools:
 | --- | --- |
 | `notes.tasks.list` | Discover tasks by note, status, metadata, or search query. |
 | `notes.tasks.get` | Fetch a task with source note and projection details. |
-| `notes.tasks.create` | Append task-backed checklist items to a note. |
+| `notes.tasks.create` | Append or insert task-backed checklist items into a note under version checks. |
 | `notes.tasks.update` | Edit task text and metadata. |
 | `notes.tasks.set_status` | Mark one or more tasks open or done. |
+| `notes.tasks.delete` | Soft-delete tasks and remove their checklist projection, or return a conflict if projection removal is unsafe. |
 | `notes.tasks.reconcile_note` | Repair/reconcile note-task projection drift. |
 
 All write tools must be MCP management/write tools with input schema validation and custom `validate_tool_arguments` coverage.
@@ -235,7 +280,7 @@ All write tools must be MCP management/write tools with input schema validation 
 5. `/notes` and Notes Dock refresh note/task state.
 6. Interactive checkbox surfaces reflect reconciled task status.
 
-### User Clicks Checkbox
+### User Clicks Checkbox On Clean Note
 
 1. User clicks a task checkbox in `/notes` preview/split mode or Notes Dock.
 2. UI sends task ID, desired status, expected task version, and expected note version when note projection is being rewritten.
@@ -244,23 +289,70 @@ All write tools must be MCP management/write tools with input schema validation 
 5. Backend records a task event.
 6. UI updates status feedback and highlights the changed item briefly.
 
-The `/notes` page should follow existing autosave/save-state conventions. The Notes Dock should preserve its current unsaved-change semantics for regular note editing, while task status writes that succeed on the backend should refresh the local note/task snapshot.
+This immediate backend path is only valid when the active note content in that UI surface is clean for the expected note version. The `/notes` page should follow existing autosave/save-state conventions. The Notes Dock should preserve its current unsaved-change semantics for regular note editing, while task status writes that succeed on the backend should refresh the local note/task snapshot.
+
+### User Clicks Checkbox With Dirty Note
+
+1. User clicks a task checkbox while the active note has unsaved local edits.
+2. UI changes only the local markdown checkbox marker and keeps the note dirty.
+3. No durable task status, completion timestamp, projection rewrite, or task event is recorded yet.
+4. If the user saves/autosaves successfully, the normal note save path reconciles the saved markdown and records the resulting task changes.
+5. If the user reloads, discards, or save fails before a successful save, the local checkbox toggle is not durable and task state remains unchanged.
+6. If a remote or autonomous task change arrives while the note is dirty, the UI queues a pending-change notice and must not overwrite local content.
+
+### Dirty Note Checkbox Rules
+
+The implementation must not perform a backend projection rewrite against stale note content.
+
+Required behavior:
+
+- If the active note content is clean in the current surface, checkbox clicks may call the backend task status path immediately. The backend updates the task record and rewrites the note projection under optimistic locking.
+- If the active note content is dirty in `/notes` or the Notes Dock, checkbox clicks update the local markdown content only and keep the note dirty. The task record is reconciled on the next successful note save/autosave.
+- If a remote or autonomous task change arrives while the user has dirty local note content, the UI must not overwrite local content. It should queue a non-destructive pending-change notice and require save, reload, or explicit merge.
+- If the user saves dirty content after local checkbox toggles, reconciliation is responsible for bringing task records into alignment with the saved markdown.
+- If note save fails, local checkbox changes remain unsaved note edits and must not be represented as durable task completion.
+
+This rule applies equally to `/notes` and the Notes Dock.
 
 ### Agent Creates Or Changes Tasks
 
 1. Agent discovers tasks using MCP tools.
 2. MCP policy evaluates whether the tool is allowed, requires approval, or can run autonomously.
-3. Approved tool call creates, edits, or completes tasks.
+3. Approved tool call creates, edits, completes, or deletes tasks.
 4. Backend updates task records and note markdown projection.
 5. Backend records an audit event with actor and policy details.
 6. UI notices the changed task/note state and shows a concise activity notice such as "Assistant marked 2 items done."
 
+### User Or Agent Creates Task
+
+Task creation mutates note markdown by inserting a new checklist line, so it must be version-checked like any other projection rewrite.
+
+V1 creation behavior:
+
+- The caller must provide a note ID and expected note version.
+- The caller may append to the end of the note, append to an existing checklist block, or insert relative to a known task/locator if the current note version still matches.
+- If the target note version is stale or the UI surface has dirty local content, creation must return a conflict or require the user to save/merge first.
+- On success, the backend writes the checklist line, creates the task record, records an event, and returns the updated note/task versions.
+
 ### Metadata Token Update
 
 1. User or agent edits task metadata.
-2. Backend updates structured task metadata.
-3. Backend updates visible markdown tokens in the task projection when needed.
-4. Unknown tokens remain untouched.
+2. Caller provides expected task version and expected note version when markdown projection changes.
+3. Backend updates structured task metadata.
+4. Backend updates visible markdown tokens in the task projection when needed under optimistic locking.
+5. Unknown tokens remain untouched.
+
+### Task Delete Flow
+
+V1 includes explicit task soft-delete.
+
+Deletion rules:
+
+1. Deleting a task from task UI or MCP soft-deletes the task record.
+2. If the task still has a live source projection, soft-delete and checklist-line removal must happen in the same version-checked transaction when possible.
+3. If the projection cannot be safely removed because the note changed, the delete should fail with conflict details and no soft-delete should be committed, rather than leaving a live checklist line that immediately recreates a task.
+4. If a user manually removes a checklist line while editing markdown, reconciliation should mark the linked task `unlinked` rather than hard-deleting task history.
+5. Hard delete is out of scope for normal v1 user and agent flows.
 
 ## Permissions And Agent Behavior
 
@@ -287,13 +379,30 @@ Every agent mutation must record audit metadata:
 
 Silent autonomous mutation is not acceptable. The UI must surface a notice for task changes made by an agent while the relevant notes UI is open or when the user next opens the affected note/dock session.
 
+## Autonomous Activity Delivery
+
+Autonomous activity notices must be persistent enough that users can discover changes after the fact.
+
+Required behavior:
+
+- Every agent task event is persisted in task audit/event storage.
+- The backend exposes recent/unread task activity for the current user, with filters by note and task.
+- The UI records dismissal/read state so the same activity is not repeatedly shown after dismissal.
+- `/notes` and the Notes Dock show affected-note notices when opened.
+- If an autonomous change affects a note that is not currently open, the next visit to that note or the next time the dock opens that note should show a pending activity indicator.
+- Unread activity notices must be retained for at least 30 days in v1, unless the underlying note/task is permanently removed by an explicit retention policy.
+- Read/dismiss state is stored per user and event, so dismissal in `/notes` and the dock converges.
+
+This does not require a global notification center or reminders in v1.
+
 ## UX Requirements
 
 ### `/notes`
 
 - Raw edit mode keeps markdown visible.
 - Preview/split mode renders task-backed checkboxes for checklist lines.
-- Clicking a checkbox updates task status and markdown projection.
+- Clicking a checkbox on clean content updates task status and markdown projection immediately.
+- Clicking a checkbox on dirty content changes local markdown only until save/autosave succeeds.
 - Parsed metadata tokens can render as small chips or inline annotations.
 - Save/conflict/error states reuse existing Notes patterns.
 - If a task is unlinked or ambiguous, the UI shows a non-blocking reconciliation status rather than silently changing unrelated lines.
@@ -351,8 +460,15 @@ The exact REST endpoint design can be finalized during implementation, but the U
 - create task-backed checklist items in a note;
 - update task text and metadata;
 - set task status;
+- soft-delete tasks;
 - reconcile a note;
 - fetch recent task activity for visible audit notices.
+
+Task list/discovery behavior:
+
+- `notes.tasks.list` with a note filter must reconcile that note if its saved content version is stale before returning results.
+- Broader task listing/search must identify scoped candidate notes that may contain checklist syntax, reconcile stale candidates in the returned page/scope, and include an explicit incomplete-results indicator if additional unreconciled candidates remain.
+- MCP task discovery must use the same reconciliation-aware behavior, so agents do not miss checklist items solely because an old note has not been opened since migration.
 
 Task mutation responses should include:
 
@@ -376,7 +492,8 @@ MCP task tools must:
 - respect MCP RBAC, effective policy, runtime approval, path/scope evaluation where applicable, and governance preflight;
 - enforce persona/note scope where active scope exists;
 - return structured partial-success payloads for batch operations;
-- avoid exposing raw full-note rewrites for simple task status changes.
+- avoid exposing raw full-note rewrites for simple task status changes;
+- use reconciliation-aware list/discovery behavior so task tools do not silently miss unreconciled saved checklist lines.
 
 ## Reconciliation Requirements
 
@@ -384,6 +501,7 @@ Reconciliation should run:
 
 - after note create/update when content changed;
 - after task create/update/status changes when projection must be updated;
+- before task list/search responses that claim completeness for stale notes in scope;
 - on explicit MCP/admin repair tool invocation;
 - on migration/backfill if task tables are introduced to an existing database.
 
@@ -403,8 +521,10 @@ Migration should:
 
 1. Add task/task-event storage.
 2. Leave existing note content untouched.
-3. Optionally backfill tasks lazily when a note is opened, saved, searched for tasks, or explicitly reconciled.
-4. Provide an admin/debug repair path for rebuilding task links from notes.
+3. Track each note's last reconciled version/status.
+4. Backfill tasks lazily when a note is opened, saved, searched/listed for tasks, or explicitly reconciled.
+5. Ensure task list/discovery APIs either reconcile stale candidate notes before returning complete results or clearly report incomplete reconciliation state.
+6. Provide an admin/debug repair path for rebuilding task links from notes.
 
 The PRD does not require eager backfill of all notes during startup.
 
@@ -415,15 +535,22 @@ The PRD does not require eager backfill of all notes during startup.
 - Detect `- [ ]`, `- [x]`, and common markdown task-list variants.
 - Parse due date, priority, and estimate tokens.
 - Preserve unknown and malformed tokens.
+- Normalize token casing and whitespace.
+- Handle duplicate tokens using last-valid-token-wins semantics.
+- Treat invalid dates/priorities/estimates as warnings, not save blockers.
 - Avoid merging duplicate checklist text.
+- Avoid hash-only identity preservation for duplicate checklist text after reorder or rename.
 - Produce stable results on repeated reconciliation.
 - Mark missing source lines as unlinked.
 
 ### Backend/API
 
 - Create/update/delete task records.
+- Delete task projection lines safely when explicit task delete succeeds.
 - Reconcile tasks after note save.
+- Reconcile stale candidate notes during task list/search and report incomplete reconciliation state when applicable.
 - Rewrite note markdown when task status changes.
+- Create task-backed checklist lines only under expected note-version checks.
 - Enforce optimistic locking for note and task versions.
 - Return structured conflicts.
 - Record task events for user and agent changes.
@@ -437,6 +564,8 @@ The PRD does not require eager backfill of all notes during startup.
 - Approval-required mode returns approval-required behavior.
 - Autonomous mode succeeds only under allowed MCP policy.
 - Batch status changes return succeeded/failed/skipped IDs.
+- Delete tool removes task projections safely or returns conflicts.
+- Task discovery tools reconcile stale candidate notes or return explicit incomplete-results state.
 - Idempotency prevents duplicate task creation or duplicate repeated status changes where practical.
 
 ### Frontend
@@ -446,6 +575,7 @@ The PRD does not require eager backfill of all notes during startup.
 - Notes Dock renders and toggles task-backed items.
 - Save-state and conflict UI match existing Notes behavior.
 - Agent activity notices appear for autonomous changes.
+- Unread autonomous activity notices survive page reload and next-session note reopen until dismissed or retention expires.
 - Checkboxes have accessible labels and states.
 - Existing notes without checklist items behave unchanged.
 
@@ -456,7 +586,9 @@ The PRD does not require eager backfill of all notes during startup.
 - Mark an item done in the dock.
 - Open `/notes` and verify the same task is done.
 - Reopen the item from `/notes` and verify the dock updates after refresh/sync.
+- Toggle a checkbox while the dock has unsaved edits, fail or cancel save, and verify durable task state did not change.
 - Simulate or trigger an MCP/agent task status change and verify the activity notice.
+- Reopen the affected note in a later browser session and verify unread autonomous activity is still visible.
 
 ## Acceptance Criteria
 
@@ -464,7 +596,10 @@ The PRD does not require eager backfill of all notes during startup.
 - Task text, status, metadata, and completion state survive note reload and dock reopen.
 - No hidden IDs are added to markdown.
 - `/notes` and Notes Dock can both mark items done and reopen them.
-- MCP Unified exposes task tools for discovery, creation, update, and completion.
+- Dirty-note checkbox toggles cannot clobber unsaved note content.
+- Dirty-note checkbox toggles are not durable if the user reloads, discards, or fails to save before reconciliation.
+- Existing notes with checklist syntax are discovered by task listing/search through reconciliation-aware behavior, not silently omitted.
+- MCP Unified exposes task tools for discovery, creation, update, completion, deletion, and reconciliation.
 - MCP write behavior is governed by existing policy, approval, RBAC, validation, idempotency, and audit mechanisms.
 - Autonomous agent changes are visibly surfaced.
 - Version conflicts do not silently overwrite note or task edits.
@@ -477,7 +612,5 @@ These are intentionally left to the implementation plan:
 - Exact table split between `tasks`, task-note projection rows, and task events.
 - Whether task UI in Notes Dock is inline, a compact panel, or both.
 - Exact REST endpoint names and response schemas.
-- Whether initial backfill is lazy-only or includes an explicit one-time migration command.
+- Whether to provide an optional one-time backfill command in addition to required lazy reconciliation.
 - How much of task metadata is shown in list rows versus only detail/projection surfaces.
-- How checkbox toggles behave when a note has unsaved local edits, especially in the Notes Dock, so projection refreshes cannot clobber dirty content.
-- Whether v1 includes explicit task delete/soft-delete API and MCP tools or keeps deletion entirely reconciliation-driven.
