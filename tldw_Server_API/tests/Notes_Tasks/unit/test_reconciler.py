@@ -65,6 +65,23 @@ def _task_by_text(db: CharactersRAGDB, note_id: str) -> dict[str, dict]:
     return {task["text"]: task for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100)}
 
 
+def _live_tasks_by_line(db: CharactersRAGDB, note_id: str) -> dict[int, dict]:
+    tasks_by_line: dict[int, dict] = {}
+    for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100):
+        projection = db.task_store._fetch_projection(task["id"])
+        if task["projection_status"] == "live" and projection is not None:
+            tasks_by_line[int(projection["line_number"])] = task
+    return tasks_by_line
+
+
+def _tasks_for_text(db: CharactersRAGDB, note_id: str, text: str) -> list[dict]:
+    return [
+        task
+        for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100)
+        if task["text"] == text
+    ]
+
+
 def test_unchanged_content_is_idempotent(
     notes_db: CharactersRAGDB,
     service: NotesTaskService,
@@ -124,23 +141,78 @@ def test_duplicate_text_reorder_becomes_ambiguous_or_distinct(
     notes_db: CharactersRAGDB,
     service: NotesTaskService,
 ) -> None:
-    note = _create_note(notes_db, "- [ ] Same\n- [x] Same\n")
+    note = _create_note(notes_db, "- [ ] Solo\n- [ ] Same\n- [ ] Same\n")
     _reconcile(service, notes_db, note)
     original_live_ids = {
         task["id"]
         for task in notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100)
         if task["projection_status"] == "live"
     }
+    original_same_ids = {
+        task["id"]
+        for task in notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100)
+        if task["projection_status"] == "live" and task["text"] == "Same"
+    }
 
-    updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [x] Same\n- [ ] Same\n")
+    updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [ ] Same\n- [ ] Solo\n- [ ] Same\n")
     result = _reconcile(service, notes_db, updated_note)
     tasks = notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100)
     live_ids = {task["id"] for task in tasks if task["projection_status"] == "live"}
+    live_same_ids = {task["id"] for task in tasks if task["projection_status"] == "live" and task["text"] == "Same"}
     ambiguous_ids = {task["id"] for task in tasks if task["projection_status"] == "ambiguous"}
 
     assert len(tasks) >= 2
     assert result.ambiguous_count > 0 or live_ids != original_live_ids
-    assert ambiguous_ids or len(live_ids) == 2
+    assert result.ambiguous_count > 0 or live_same_ids != original_same_ids
+    assert ambiguous_ids or len(live_same_ids) == 2
+
+
+def test_duplicate_stable_lines_preserve_ids_when_one_status_changes(
+    notes_db: CharactersRAGDB,
+    service: NotesTaskService,
+) -> None:
+    note = _create_note(notes_db, "- [ ] Same\n- [ ] Same\n")
+    _reconcile(service, notes_db, note)
+    original_by_line = _live_tasks_by_line(notes_db, note["id"])
+
+    updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [x] Same\n- [ ] Same\n")
+    result = _reconcile(service, notes_db, updated_note)
+    updated_by_line = _live_tasks_by_line(notes_db, note["id"])
+
+    assert result.created_count == 0
+    assert result.unlinked_count == 0
+    assert updated_by_line[1]["id"] == original_by_line[1]["id"]
+    assert updated_by_line[1]["status"] == "done"
+    assert updated_by_line[2]["id"] == original_by_line[2]["id"]
+    assert updated_by_line[2]["status"] == "open"
+
+
+def test_unique_hash_fallback_requires_same_block_fingerprint(
+    notes_db: CharactersRAGDB,
+    service: NotesTaskService,
+) -> None:
+    note = _create_note(
+        notes_db,
+        "- [ ] Parent A\n  - [ ] Move me\n    detail A\n- [ ] Parent B\n  - [ ] Stay put\n",
+    )
+    _reconcile(service, notes_db, note)
+    original_move_task = _tasks_for_text(notes_db, note["id"], "Move me")[0]
+
+    updated_note = _update_note(
+        notes_db,
+        note["id"],
+        int(note["version"]),
+        "- [ ] Parent A\n  - [ ] Stay put\n- [ ] Parent B\n  - [ ] Move me\n    detail B\n",
+    )
+    _reconcile(service, notes_db, updated_note)
+    move_tasks = _tasks_for_text(notes_db, note["id"], "Move me")
+    live_move_tasks = [task for task in move_tasks if task["projection_status"] == "live"]
+    original_after = notes_db.get_task(original_move_task["id"], include_deleted=True)
+
+    assert len(live_move_tasks) == 1
+    assert live_move_tasks[0]["id"] != original_move_task["id"]
+    assert original_after is not None
+    assert original_after["projection_status"] == "unlinked"
 
 
 def test_missing_line_marks_previous_task_unlinked(
