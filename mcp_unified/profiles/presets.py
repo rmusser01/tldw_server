@@ -194,11 +194,23 @@ _DOCS_WRITE_TOOLS = [*_DOCS_READ_TOOLS, "docs.write"]
 _GIT_READ_TOOLS = [
     "git.status",
     "git.diff",
+    "git.log",
+    "git.blame",
+    "git.branches",
     "git.conflicts.list",
     "git.conflicts.read",
 ]
 _TEST_READ_TOOLS = ["tests.results.read", "tests.logs.read"]
 _TEST_REQUEST_TOOLS = [*_TEST_READ_TOOLS, "tests.request"]
+_BROWSER_READ_TOOLS = [
+    "browser.status",
+    "browser.pages.list",
+    "browser.snapshot",
+    "browser.page_state",
+    "browser.screenshot",
+    "browser.console",
+    "browser.network",
+]
 
 _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
     _preset(
@@ -261,21 +273,23 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="architect",
         name="Architect",
         description="Reviews architecture with code search, documentation, and read-only filesystem access.",
-        capabilities=["code_search", "docs.read", "filesystem.read"],
+        capabilities=["code_search", "docs.read", "filesystem.read", "git.read"],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_READ_TOOLS,
                 *_CODE_READ_TOOLS,
                 *_DOCS_READ_TOOLS,
+                *_GIT_READ_TOOLS,
             ],
             enabled_capabilities=[
                 "code_search",
                 "docs.read",
                 "filesystem.read",
+                "git.read",
                 "architecture.review",
             ],
-            direct_categories=["files", "tool_discovery", "code", "docs"],
+            direct_categories=["files", "tool_discovery", "code", "docs", "git"],
             deferred_categories=["web_search", "browser", "diagramming"],
             recommended_tools=[
                 recommended_tool(
@@ -299,7 +313,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="merge-conflict-resolver",
         name="Merge Conflict Resolver",
         description="Inspects git state and writes repo-scoped conflict resolutions with approval gates.",
-        capabilities=["git.status", "git.diff", "filesystem.read", "repo.write_scoped"],
+        capabilities=["git.status", "git.diff", "git.read", "filesystem.read", "repo.write_scoped"],
         risk_classes=["mutating"],
         approval_policy={
             "required_for": ["repo.write_scoped", "git.destructive"],
@@ -315,6 +329,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             enabled_capabilities=[
                 "git.status",
                 "git.diff",
+                "git.read",
                 "filesystem.read",
                 "repo.write_scoped",
             ],
@@ -439,7 +454,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="code-reviewer",
         name="Code Reviewer",
         description="Reviews diffs, code, and test results without write access.",
-        capabilities=["code_search", "diff.read", "tests.read", "filesystem.read"],
+        capabilities=["code_search", "diff.read", "git.read", "tests.read", "filesystem.read"],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
@@ -451,6 +466,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             enabled_capabilities=[
                 "code_search",
                 "diff.read",
+                "git.read",
                 "tests.read",
                 "filesystem.read",
             ],
@@ -478,7 +494,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="devops-engineer",
         name="DevOps Engineer",
         description="Inspects deployment, logs, and infrastructure state with approval for mutating actions.",
-        capabilities=["deploy.inspect", "logs.read", "infra.read", "infra.mutate_scoped"],
+        capabilities=["deploy.inspect", "logs.read", "infra.read", "infra.mutate_scoped", "git.read"],
         risk_classes=["mutating"],
         approval_policy={
             "required_for": ["infra.mutate_scoped", "deployment.mutate"],
@@ -488,13 +504,14 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
+                *_GIT_READ_TOOLS,
                 "deploy.status",
                 "deploy.logs.read",
                 "infra.inspect",
                 "logs.search",
             ],
-            enabled_capabilities=["deploy.inspect", "logs.read", "infra.read"],
-            direct_categories=["deployments", "logs", "infra", "tool_discovery"],
+            enabled_capabilities=["deploy.inspect", "logs.read", "infra.read", "git.read"],
+            direct_categories=["deployments", "logs", "infra", "git", "tool_discovery"],
             deferred_categories=["issue_tracker", "safe_test_runner", "browser"],
             recommended_tools=[
                 recommended_tool(
@@ -518,7 +535,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="backend-engineer",
         name="Backend Engineer",
         description="Reads and writes backend source with scoped test/build commands behind approval.",
-        capabilities=["source.write_scoped", "code_search", "tests.request", "backend.inspect"],
+        capabilities=["source.write_scoped", "code_search", "git.read", "tests.request", "backend.inspect"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
@@ -527,18 +544,21 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_GIT_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
                 "api.schema.inspect",
             ],
             enabled_capabilities=[
                 "source.write_scoped",
                 "code_search",
+                "git.read",
                 "tests.request",
                 "backend.inspect",
             ],
             direct_categories=[
                 "files",
                 "code",
+                "git",
                 "tests",
                 "backend",
                 "tool_discovery",
@@ -572,7 +592,16 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="frontend-engineer",
         name="Frontend Engineer",
         description="Works on scoped frontend source and browser/debug flows without broad process execution.",
-        capabilities=["source.write_scoped", "browser.debug", "frontend.inspect", "tests.request"],
+        capabilities=[
+            "source.write_scoped",
+            "git.read",
+            "browser.inspect",
+            "browser.debug",
+            "screenshots.capture",
+            "app_state.read",
+            "frontend.inspect",
+            "tests.request",
+        ],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
@@ -581,7 +610,9 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_GIT_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
+                *_BROWSER_READ_TOOLS,
                 "ui.components.inspect",
             ],
             enabled_capabilities=[
@@ -589,16 +620,22 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "frontend.inspect",
                 "tests.request",
                 "code_search",
+                "git.read",
+                "browser.inspect",
+                "browser.debug",
+                "screenshots.capture",
+                "app_state.read",
             ],
             direct_categories=[
                 "files",
                 "code",
                 "tests",
+                "browser",
                 "frontend",
                 "tool_discovery",
             ],
             deferred_categories=[
-                "browser",
+                "git",
                 "safe_test_runner",
                 "issue_tracker",
                 "web_search",
@@ -626,18 +663,27 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="qa-engineer",
         name="QA Engineer",
         description="Debugs running applications with browser, logs, screenshots, and read-only app state.",
-        capabilities=["browser.debug", "logs.read", "screenshots.capture", "app_state.read"],
+        capabilities=["browser.inspect", "browser.debug", "logs.read", "screenshots.capture", "app_state.read", "git.read"],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
+                *_GIT_READ_TOOLS,
+                *_BROWSER_READ_TOOLS,
                 "logs.search",
                 "screenshots.list",
                 "app_state.read",
                 "test_cases.read",
             ],
-            enabled_capabilities=["logs.read", "screenshots.capture", "app_state.read"],
-            direct_categories=["logs", "screenshots", "app_state", "tool_discovery"],
-            deferred_categories=["browser", "safe_test_runner", "issue_tracker"],
+            enabled_capabilities=[
+                "browser.inspect",
+                "browser.debug",
+                "logs.read",
+                "screenshots.capture",
+                "app_state.read",
+                "git.read",
+            ],
+            direct_categories=["browser", "logs", "screenshots", "app_state", "git", "tool_discovery"],
+            deferred_categories=["safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "test_cases.generate",
@@ -660,7 +706,17 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="sdet",
         name="Software Development Engineer in Test",
         description="Authors and runs automated tests through scoped write and approval-gated runner requests.",
-        capabilities=["tests.write_scoped", "tests.request", "code_search", "filesystem.read"],
+        capabilities=[
+            "tests.write_scoped",
+            "tests.request",
+            "code_search",
+            "filesystem.read",
+            "git.read",
+            "browser.inspect",
+            "browser.debug",
+            "screenshots.capture",
+            "app_state.read",
+        ],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
@@ -669,7 +725,9 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_GIT_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
+                *_BROWSER_READ_TOOLS,
             ],
             enabled_capabilities=[
                 "tests.write_scoped",
@@ -677,9 +735,14 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "code_search",
                 "filesystem.read",
                 "filesystem.write_scoped",
+                "git.read",
+                "browser.inspect",
+                "browser.debug",
+                "screenshots.capture",
+                "app_state.read",
             ],
-            direct_categories=["files", "code", "tests", "tool_discovery"],
-            deferred_categories=["safe_test_runner", "browser", "issue_tracker"],
+            direct_categories=["files", "code", "tests", "browser", "tool_discovery"],
+            deferred_categories=["git", "safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "tests.plan.generate",

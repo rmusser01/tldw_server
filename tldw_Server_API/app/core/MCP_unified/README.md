@@ -350,6 +350,37 @@ Tool results include the serving module:
 
 See `Docs/MCP/Unified/Modules.md` for a complete guide.
 
+## Git Read-Only Inspection Module
+
+The optional native Git inspection module is enabled only when explicitly
+configured by the operator:
+
+```bash
+export MCP_ENABLE_GIT_MODULE=true
+```
+
+When enabled, the module exposes these read-only tools:
+
+- `git.status`
+- `git.diff`
+- `git.log`
+- `git.blame`
+- `git.branches`
+- `git.conflicts.list`
+- `git.conflicts.read`
+
+The module is bound to the active workspace repository root. Callers cannot
+supply an alternate repository path. The tools do not expose checkout, add,
+commit, merge, rebase, stash, reset, clean, push, pull, arbitrary Git argv, or
+host shell execution.
+
+Git responses are intentionally privacy- and safety-bounded. Ignored files are
+excluded from status output; author emails are omitted from log and blame
+output; and external diff/textconv processing is disabled for diff reads.
+Responses are bounded by tool limits and include non-sensitive evaluation
+metadata for observability. Follow-up `TASK-2256` covers MCP-wide adoption of
+that eval metadata contract for all tools, not only Git.
+
 ## 🧭 Phase-1 Virtual CLI Runtime
 
 Phase-1 adds a governed virtual CLI foundation to MCP Unified.

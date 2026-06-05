@@ -7,6 +7,7 @@ Central data stores and database abstractions for content, prompts, notes, evalu
 - The current tree already closes the April 2026 RLS, migration-loader, UserDatabase_v2, trusted-path, media_db API, and backend-FTS findings covered by the Wave 1 rebaseline.
 - Shared content-backend cache replacement and reset must close superseded backends deterministically.
 - `verify_migrations()` reports missing migration files, checksum mismatches, and non-contiguous available-version gaps.
+- Covering ADR: [ADR-020](../../../../Docs/ADR/020-db-management-per-user-paths-and-content-backend.md) records the governing per-user path, SQLite default, PostgreSQL content backend, startup validation, and caveat boundaries.
 
 ## 1. Descriptive of Current Feature Set
 
