@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.Notes_Tasks import models
+from tldw_Server_API.app.core.Notes_Tasks import markdown_parser, models
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 
 pytestmark = pytest.mark.unit
@@ -121,6 +121,27 @@ def test_nested_child_content_is_detected_until_sibling_or_parent() -> None:
     assert [item.has_child_content for item in result.items] == [True, False, False]
 
 
+def test_child_context_analysis_is_bounded_for_deeply_nested_checklists(monkeypatch: pytest.MonkeyPatch) -> None:
+    indent_calls = 0
+    original_indent_width = markdown_parser._indent_width
+    item_count = 80
+    markdown = "\n".join(f"{'  ' * index}- [ ] Nested {index}" for index in range(item_count))
+
+    def counting_indent_width(text: str) -> int:
+        nonlocal indent_calls
+        indent_calls += 1
+        return original_indent_width(text)
+
+    monkeypatch.setattr(markdown_parser, "_indent_width", counting_indent_width)
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert len(result.items) == item_count
+    assert result.items[0].has_child_content is True
+    assert result.items[-1].has_child_content is False
+    assert indent_calls <= item_count * 4
+
+
 def test_unknown_tokens_remain_in_text_and_raw_line() -> None:
     markdown = "- [ ] Review @context(research) @due(2026-06-10)\n"
 
@@ -151,3 +172,10 @@ def test_task_enums_do_not_use_python_311_only_strenum() -> None:
 
     assert source_path.name == "models.py"
     assert "StrEnum" not in source_path.read_text(encoding="utf-8")
+
+
+def test_task_enum_string_conversion_returns_values() -> None:
+    assert str(models.TaskStatus.OPEN) == "open"
+    assert str(models.TaskStatus.DONE) == "done"
+    assert str(models.ProjectionStatus.LIVE) == "live"
+    assert str(models.ProjectionStatus.AMBIGUOUS) == "ambiguous"

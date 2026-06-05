@@ -22,6 +22,8 @@ _ESTIMATE_RE = re.compile(r"^\d+[mhd]$")
 _DUE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ALLOWED_TOKENS = {"due", "priority", "estimate"}
 _PRIORITIES = {"high", "medium", "low"}
+_ROLLING_HASH_BASE = 257
+_ROLLING_HASH_MODULUS = (1 << 127) - 1
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,14 @@ class _Line:
     raw: str
     start_offset: int
     end_offset: int
+
+
+@dataclass(frozen=True)
+class _LineContext:
+    line: _Line
+    indent_width: int
+    is_blank: bool
+    line_hash: int
 
 
 @dataclass(frozen=True)
@@ -50,7 +60,9 @@ def parse_note_checklists(*, note_id: str, note_version: int, content: str) -> P
     Locators are version-bound and suitable for same-version projections.
     """
     lines = _split_lines(content)
-    checklist_lines = _find_checklist_lines(lines)
+    line_contexts = _build_line_contexts(lines)
+    checklist_lines = _find_checklist_lines(line_contexts)
+    child_contexts = _build_child_contexts(line_contexts, checklist_lines)
     occurrence_counts: dict[str, int] = {}
     items: list[ParsedChecklistItem] = []
 
@@ -58,10 +70,7 @@ def parse_note_checklists(*, note_id: str, note_version: int, content: str) -> P
         text, metadata, warnings = _parse_metadata_tokens(checklist_line.body)
         normalized_text_hash = _hash_normalized_text(text)
         occurrence_counts[normalized_text_hash] = occurrence_counts.get(normalized_text_hash, 0) + 1
-        has_child_content, block_fingerprint = _child_context(
-            lines=lines,
-            checklist_line=checklist_line,
-        )
+        has_child_content, block_fingerprint = child_contexts[checklist_line.line_index]
         locator = TaskLocator(
             note_id=note_id,
             note_version=note_version,
@@ -103,14 +112,28 @@ def _split_lines(content: str) -> list[_Line]:
         offset += len(segment)
     if content == "":
         return []
-    if content and not content.endswith(("\n", "\r")) and not lines:
-        lines.append(_Line(raw=content, start_offset=0, end_offset=len(content)))
     return lines
 
 
-def _find_checklist_lines(lines: list[_Line]) -> list[_ChecklistLine]:
+def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
+    contexts: list[_LineContext] = []
+    for line in lines:
+        is_blank = line.raw.strip() == ""
+        contexts.append(
+            _LineContext(
+                line=line,
+                indent_width=0 if is_blank else _indent_width(line.raw),
+                is_blank=is_blank,
+                line_hash=_hash_line(line.raw),
+            )
+        )
+    return contexts
+
+
+def _find_checklist_lines(line_contexts: list[_LineContext]) -> list[_ChecklistLine]:
     checklist_lines: list[_ChecklistLine] = []
-    for line_index, line in enumerate(lines):
+    for line_index, context in enumerate(line_contexts):
+        line = context.line
         match = _CHECKLIST_RE.match(line.raw)
         if match is None:
             continue
@@ -119,7 +142,7 @@ def _find_checklist_lines(lines: list[_Line]) -> list[_ChecklistLine]:
             _ChecklistLine(
                 line_index=line_index,
                 line_number=line_index + 1,
-                indent_width=_indent_width(match.group("indent")),
+                indent_width=context.indent_width,
                 checked=match.group("marker") in {"x", "X"},
                 body=(match.group("body") or "").strip(),
                 raw_line=line.raw,
@@ -128,6 +151,97 @@ def _find_checklist_lines(lines: list[_Line]) -> list[_ChecklistLine]:
             )
         )
     return checklist_lines
+
+
+def _build_child_contexts(
+    line_contexts: list[_LineContext],
+    checklist_lines: list[_ChecklistLine],
+) -> dict[int, tuple[bool, str]]:
+    if not checklist_lines:
+        return {}
+
+    next_terminators = _next_nonblank_lte_indent_indexes(line_contexts)
+    next_nonblank_indexes = _next_nonblank_indexes(line_contexts)
+    prefix_hashes, hash_powers = _rolling_hash_prefixes(line_contexts)
+    child_contexts: dict[int, tuple[bool, str]] = {}
+
+    for checklist_line in checklist_lines:
+        block_end_index = next_terminators[checklist_line.line_index]
+        next_nonblank_index = next_nonblank_indexes[checklist_line.line_index + 1]
+        has_child_content = next_nonblank_index < block_end_index
+        block_fingerprint = _fingerprint_block_span(
+            prefix_hashes=prefix_hashes,
+            hash_powers=hash_powers,
+            start_index=checklist_line.line_index,
+            end_index=block_end_index,
+        )
+        child_contexts[checklist_line.line_index] = (
+            has_child_content,
+            block_fingerprint,
+        )
+
+    return child_contexts
+
+
+def _next_nonblank_lte_indent_indexes(line_contexts: list[_LineContext]) -> list[int]:
+    line_count = len(line_contexts)
+    next_indexes = [line_count] * line_count
+    stack: list[int] = []
+
+    for line_index in range(line_count - 1, -1, -1):
+        context = line_contexts[line_index]
+        if context.is_blank:
+            continue
+
+        while stack and line_contexts[stack[-1]].indent_width > context.indent_width:
+            stack.pop()
+
+        next_indexes[line_index] = stack[-1] if stack else line_count
+        stack.append(line_index)
+
+    return next_indexes
+
+
+def _next_nonblank_indexes(line_contexts: list[_LineContext]) -> list[int]:
+    line_count = len(line_contexts)
+    next_indexes = [line_count] * (line_count + 1)
+    next_nonblank = line_count
+
+    for line_index in range(line_count - 1, -1, -1):
+        if not line_contexts[line_index].is_blank:
+            next_nonblank = line_index
+        next_indexes[line_index] = next_nonblank
+
+    return next_indexes
+
+
+def _rolling_hash_prefixes(
+    line_contexts: list[_LineContext],
+) -> tuple[list[int], list[int]]:
+    prefix_hashes = [0] * (len(line_contexts) + 1)
+    hash_powers = [1] * (len(line_contexts) + 1)
+
+    for index, context in enumerate(line_contexts):
+        prefix_hashes[index + 1] = (
+            prefix_hashes[index] * _ROLLING_HASH_BASE + context.line_hash
+        ) % _ROLLING_HASH_MODULUS
+        hash_powers[index + 1] = (hash_powers[index] * _ROLLING_HASH_BASE) % _ROLLING_HASH_MODULUS
+
+    return prefix_hashes, hash_powers
+
+
+def _fingerprint_block_span(
+    *,
+    prefix_hashes: list[int],
+    hash_powers: list[int],
+    start_index: int,
+    end_index: int,
+) -> str:
+    span_length = end_index - start_index
+    span_hash = (
+        prefix_hashes[end_index] - prefix_hashes[start_index] * hash_powers[span_length]
+    ) % _ROLLING_HASH_MODULUS
+    return hashlib.sha256(f"{span_length}:{span_hash}".encode("ascii")).hexdigest()
 
 
 def _parse_metadata_tokens(text: str) -> tuple[str, dict[str, Any], list[str]]:
@@ -209,27 +323,9 @@ def _normalize_for_hash(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip()).casefold()
 
 
-def _child_context(*, lines: list[_Line], checklist_line: _ChecklistLine) -> tuple[bool, str]:
-    has_child_content = False
-    block_lines = [checklist_line.raw_line]
-
-    for line in lines[checklist_line.line_index + 1 :]:
-        if line.raw.strip() == "":
-            block_lines.append(line.raw)
-            continue
-
-        if _indent_width(line.raw) <= checklist_line.indent_width:
-            break
-
-        has_child_content = True
-        block_lines.append(line.raw)
-
-    return has_child_content, _fingerprint_block(block_lines)
-
-
-def _fingerprint_block(block_lines: list[str]) -> str:
-    block_text = "\n".join(block_lines)
-    return hashlib.sha256(block_text.encode("utf-8")).hexdigest()
+def _hash_line(raw_line: str) -> int:
+    digest = hashlib.sha256(raw_line.encode("utf-8")).digest()
+    return int.from_bytes(digest[:16], "big")
 
 
 def _indent_width(text: str) -> int:
