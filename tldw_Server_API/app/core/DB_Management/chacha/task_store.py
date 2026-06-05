@@ -109,6 +109,21 @@ class TaskStore:
             raise InputError("limit must be an integer.") from exc  # noqa: TRY003
         return min(max(requested_limit, self._MIN_LIMIT), self._MAX_LIMIT)
 
+    @staticmethod
+    def _normalize_offset(offset: int) -> int:
+        """Normalize caller-provided offsets before passing them into SQL."""
+        try:
+            requested_offset = int(offset)
+        except (TypeError, ValueError) as exc:
+            raise InputError("offset must be an integer.") from exc  # noqa: TRY003
+        if requested_offset < 0:
+            raise InputError("offset must be >= 0.")  # noqa: TRY003
+        return requested_offset
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     def _decode_task_row(self, row: Any) -> dict[str, Any] | None:
         return self._decode_row(row, self._TASK_JSON_FIELDS)
 
@@ -465,6 +480,10 @@ class TaskStore:
         status: str | None = None,
         projection_status: str | None = None,
         include_deleted: bool = False,
+        include_unlinked: bool = True,
+        query: str | None = None,
+        metadata_filters: dict[str, Any] | None = None,
+        offset: int = 0,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """List tasks with optional note/status filters."""
@@ -479,6 +498,25 @@ class TaskStore:
         if projection_status is not None:
             clauses.append("t.projection_status = ?")
             params.append(self._validate_projection_status(projection_status))
+        elif not include_unlinked:
+            clauses.append("t.projection_status != ?")
+            params.append("unlinked")
+        if query is not None and str(query).strip():
+            escaped_query = self._escape_like(str(query).strip().lower())
+            clauses.append("LOWER(t.text) LIKE ? ESCAPE '\\'")
+            params.append(f"%{escaped_query}%")
+        if metadata_filters is not None:
+            if not isinstance(metadata_filters, dict):
+                raise InputError("metadata_filters must be a JSON object.")  # noqa: TRY003
+            for key, value in sorted(metadata_filters.items()):
+                if key not in {"due_date", "priority", "estimate"}:
+                    raise InputError(f"Unsupported metadata filter: {key}.")  # noqa: TRY003
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    clauses.append("(t.metadata_json::jsonb ->> ?) = ?")
+                    params.extend([key, str(value)])
+                else:
+                    clauses.append("json_extract(t.metadata_json, ?) = ?")
+                    params.extend([f"$.{key}", str(value)])
         if not include_deleted:
             clauses.append("t.deleted = ?")
             params.append(self._deleted_value(False))
@@ -489,8 +527,9 @@ class TaskStore:
             query += " JOIN notes n ON n.id = t.note_id"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ?"
+        query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ? OFFSET ?"
         params.append(self._clamp_limit(limit))
+        params.append(self._normalize_offset(offset))
         cursor = self._read(query, tuple(params))
         return [self._decode_task_row(row) for row in cursor.fetchall()]
 

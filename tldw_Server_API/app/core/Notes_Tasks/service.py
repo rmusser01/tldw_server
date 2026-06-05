@@ -40,6 +40,14 @@ class NotesTaskService:
     def __init__(self, reconciler: NotesTaskReconciler | None = None) -> None:
         self._reconciler = reconciler or NotesTaskReconciler()
 
+    @staticmethod
+    def _internal_reconciliation_actor(actor: TaskActor) -> TaskActor:
+        return TaskActor(
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            tool_name="notes.tasks.reconciliation",
+        )
+
     def reconcile_note(
         self,
         *,
@@ -142,6 +150,13 @@ class NotesTaskService:
 
         with db.transaction():
             note = self._require_note_version(db, note_id=note_id, expected_note_version=expected_note_version)
+            self.reconcile_note(
+                db=db,
+                note_id=note_id,
+                note_version=expected_note_version,
+                content=str(note.get("content") or ""),
+                actor=self._internal_reconciliation_actor(actor),
+            )
             new_content = self._append_checklist_line(str(note.get("content") or ""), line)
             db.update_note(
                 note_id=note_id,
@@ -306,7 +321,7 @@ class NotesTaskService:
                 note_id=str(note["id"]),
                 note_version=updated_note_version,
                 content=new_content,
-                actor=actor,
+                actor=self._internal_reconciliation_actor(actor),
             )
             return updated_task
 
@@ -410,7 +425,7 @@ class NotesTaskService:
                 note_id=str(note["id"]),
                 note_version=expected_note_version + 1,
                 content=new_content,
-                actor=actor,
+                actor=self._internal_reconciliation_actor(actor),
             )
             return deleted
 

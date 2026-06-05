@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -106,6 +107,10 @@ class _FakeTaskDB:
         note_id: str | None = None,
         status: str | None = None,
         projection_status: str | None = None,
+        query: str | None = None,
+        metadata_filters: dict[str, Any] | None = None,
+        offset: int = 0,
+        include_unlinked: bool = True,
         include_deleted: bool = False,  # noqa: ARG002
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -116,7 +121,18 @@ class _FakeTaskDB:
             rows = [task for task in rows if task["status"] == status]
         if projection_status is not None:
             rows = [task for task in rows if task["projection_status"] == projection_status]
-        return [dict(task) for task in rows[:limit]]
+        elif not include_unlinked:
+            rows = [task for task in rows if task["projection_status"] != "unlinked"]
+        if query is not None:
+            query_normalized = query.lower()
+            rows = [task for task in rows if query_normalized in str(task["text"]).lower()]
+        if metadata_filters:
+            rows = [
+                task
+                for task in rows
+                if all((task.get("metadata_json") or {}).get(key) == value for key, value in metadata_filters.items())
+            ]
+        return [dict(task) for task in rows[offset:offset + limit]]
 
     def close_all_connections(self) -> None:
         self.closed = True
@@ -271,9 +287,9 @@ async def test_notes_task_tools_are_discoverable_with_policy_metadata_and_tight_
         "notes.tasks.reconcile_note",
     }
     assert expected.issubset(tools)  # nosec B101
-    for name in {"notes.tasks.list", "notes.tasks.get"}:
-        assert tools[name]["metadata"]["readOnlyHint"] is True  # nosec B101
-    for name in expected - {"notes.tasks.list", "notes.tasks.get"}:
+    assert tools["notes.tasks.get"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert tools["notes.tasks.list"]["metadata"]["readOnlyHint"] is False  # nosec B101
+    for name in expected - {"notes.tasks.get"}:
         metadata = tools[name]["metadata"]
         assert metadata["category"] == "management"  # nosec B101
         assert metadata["auth_required"] is True  # nosec B101
@@ -282,9 +298,16 @@ async def test_notes_task_tools_are_discoverable_with_policy_metadata_and_tight_
         assert metadata["autonomous_writes"] == "denied"  # nosec B101
         assert tools[name]["inputSchema"]["additionalProperties"] is False  # nosec B101
 
+    assert module.is_write_tool_call("notes.tasks.list", {}, tool_def=tools["notes.tasks.list"]) is True  # nosec B101
+    assert module.is_write_tool_call(
+        "notes.tasks.list",
+        {"reconcile_limit": 0},
+        tool_def=tools["notes.tasks.list"],
+    ) is False  # nosec B101
+
     assert "idempotencyKey" in tools["notes.tasks.create"]["inputSchema"]["properties"]  # nosec B101
     assert "idempotencyKey" in tools["notes.tasks.set_status"]["inputSchema"]["properties"]  # nosec B101
-    for name in expected - {"notes.tasks.list", "notes.tasks.get"}:
+    for name in expected - {"notes.tasks.get"}:
         assert "__confirm_write" not in tools[name]["inputSchema"]["properties"]  # nosec B101
 
     list_props = tools["notes.tasks.list"]["inputSchema"]["properties"]
@@ -331,6 +354,11 @@ async def test_notes_task_tools_are_discoverable_with_policy_metadata_and_tight_
             "metadata",
         ),
         ("notes.tasks.create", {"note_id": "note-1", "text": "Task", "expected_note_version": 0}, "expected"),
+        (
+            "notes.tasks.create",
+            {"note_id": "note-1", "text": "Task", "expected_note_version": 1, "idempotency_key": 123},
+            "idempotency",
+        ),
         (
             "notes.tasks.create",
             {
@@ -458,6 +486,17 @@ async def test_notes_tasks_list_and_get_execute_read_only_with_reconciliation_su
 
 
 @pytest.mark.asyncio
+async def test_notes_tasks_list_skips_reconciliation_when_reconcile_limit_is_zero() -> None:
+    module, _db, service = _module_with_fakes()
+
+    await module.execute_tool("notes.tasks.list", {"reconcile_limit": 0}, context=_ctx())
+    await module.execute_tool("notes.tasks.list", {"note_id": "note-1", "reconcile_limit": 0}, context=_ctx())
+
+    assert service.reconcile_stale_calls == 0  # nosec B101
+    assert service.ensure_note_calls == []  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_agent_write_requires_confirmation_and_autonomous_write_is_denied_without_mutation() -> None:
     module, db, service = _module_with_fakes()
 
@@ -553,6 +592,42 @@ async def test_idempotency_key_reuses_create_and_status_retry_results_without_du
 
 
 @pytest.mark.asyncio
+async def test_concurrent_idempotent_create_retries_share_one_mutation() -> None:
+    module = NotesModule(ModuleConfig(name="notes"))
+    context = _ctx()
+    args = {
+        "note_id": "note-1",
+        "text": "Concurrent idempotent",
+        "expected_note_version": 1,
+        "idempotency_key": "concurrent-create",
+    }
+    started = asyncio.Event()
+    release = asyncio.Event()
+    mutation_calls = 0
+
+    async def fake_uncached(tool_name: str, tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any]:
+        nonlocal mutation_calls
+        mutation_calls += 1
+        if mutation_calls == 1:
+            started.set()
+            await release.wait()
+        return {"tool_name": tool_name, "text": tool_args["text"], "request_id": tool_context.request_id}
+
+    module._execute_task_write_uncached = fake_uncached  # type: ignore[method-assign]
+
+    first = asyncio.create_task(module.execute_tool("notes.tasks.create", args, context=context))
+    await started.wait()
+    second = asyncio.create_task(module.execute_tool("notes.tasks.create", dict(args), context=context))
+    await asyncio.sleep(0)
+    release.set()
+
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result == second_result  # nosec B101
+    assert mutation_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_set_status_returns_succeeded_failed_and_skipped_for_partial_batch_conflicts() -> None:
     module, _db, service = _module_with_fakes()
 
@@ -574,6 +649,36 @@ async def test_set_status_returns_succeeded_failed_and_skipped_for_partial_batch
     assert [item["task_id"] for item in result["failed"]] == ["task-conflict"]  # nosec B101
     assert result["failed"][0]["error_type"] == "ConflictError"  # nosec B101
     assert [call["task_id"] for call in service.update_calls] == ["task-1", "task-conflict"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_set_status_already_matching_status_still_checks_expected_versions() -> None:
+    module, _db, service = _module_with_fakes()
+
+    stale_task_version = await module.execute_tool(
+        "notes.tasks.set_status",
+        {
+            "updates": [
+                {"task_id": "task-same", "status": "done", "expected_task_version": 3, "expected_note_version": 1},
+            ]
+        },
+        context=_ctx(),
+    )
+    stale_note_version = await module.execute_tool(
+        "notes.tasks.set_status",
+        {
+            "updates": [
+                {"task_id": "task-same", "status": "done", "expected_task_version": 4, "expected_note_version": 2},
+            ]
+        },
+        context=_ctx(),
+    )
+
+    assert stale_task_version["skipped"] == []  # nosec B101
+    assert stale_note_version["skipped"] == []  # nosec B101
+    assert [item["task_id"] for item in stale_task_version["failed"]] == ["task-same"]  # nosec B101
+    assert [item["task_id"] for item in stale_note_version["failed"]] == ["task-same"]  # nosec B101
+    assert service.update_calls == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -678,6 +783,68 @@ async def test_mcp_task_writes_record_runtime_policy_and_idempotency_metadata(tm
             assert event["task_id"] == created["id"]  # nosec B101
             assert event["note_id"] == note_id  # nosec B101
         assert deleted["projection_status"] == "deleted"  # nosec B101
+    finally:
+        for handle in opened_dbs:
+            handle.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_follow_up_reconciliation_events_do_not_inherit_direct_tool_idempotency_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "notes_task_mcp_internal_events.db"
+    db = CharactersRAGDB(str(db_path), client_id="mcp_task_internal_events_test")
+    try:
+        note_id = str(db.add_note(title="Inbox", content="- [ ] Existing sibling\n"))
+        note = db.get_note_by_id(note_id)
+        assert note is not None  # nosec B101
+    finally:
+        db.close_all_connections()
+
+    opened_dbs: list[CharactersRAGDB] = []
+
+    def _open_db(_ctx: Any) -> CharactersRAGDB:
+        handle = CharactersRAGDB(str(db_path), client_id="mcp_task_internal_events_test")
+        opened_dbs.append(handle)
+        return handle
+
+    try:
+        module = NotesModule(ModuleConfig(name="notes"))
+        module._open_db = _open_db  # type: ignore[attr-defined]
+        context = _ctx(
+            agent_context={"agent_id": "agent-1"},
+            approval={"status": "approved", "id": "approval-42", "mode": "runtime_approval"},
+        )
+
+        await module.execute_tool(
+            "notes.tasks.create",
+            {
+                "note_id": note_id,
+                "text": "Direct task",
+                "expected_note_version": int(note["version"]),
+                "idempotency_key": "direct-create-key",
+            },
+            context=context,
+        )
+
+        event_db = CharactersRAGDB(str(db_path), client_id="mcp_task_internal_events_test")
+        opened_dbs.append(event_db)
+        events = event_db.list_task_activity(note_id=note_id, limit=20)
+        sibling_events = [event for event in events if event["event_type"] == "created" and event["task_id"]]
+        assert len(sibling_events) == 2  # nosec B101
+        direct_events = [
+            event for event in sibling_events if (event.get("new_value_json") or {}).get("idempotency_key") == "direct-create-key"
+        ]
+        internal_events = [
+            event for event in sibling_events if (event.get("new_value_json") or {}).get("text") == "Existing sibling"
+        ]
+
+        assert len(direct_events) == 1  # nosec B101
+        assert len(internal_events) == 1  # nosec B101
+        internal_event = internal_events[0]
+        assert internal_event["actor_type"] == "agent"  # nosec B101
+        assert internal_event["actor_id"] == "agent-1"  # nosec B101
+        assert internal_event["tool_name"] in {None, "notes.tasks.reconciliation"}  # nosec B101
+        assert internal_event["approval_id"] is None  # nosec B101
+        assert (internal_event.get("new_value_json") or {}).get("idempotency_key") is None  # nosec B101
     finally:
         for handle in opened_dbs:
             handle.close_all_connections()
