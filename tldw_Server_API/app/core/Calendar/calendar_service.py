@@ -199,9 +199,9 @@ class CalendarService:
         item, _ = self._item_and_context(actor_user_id, item_id)
         self._raise_if_provider_owned(item)
         self._assert_calendar_access(actor_user_id, item.calendar_id, "write")
-        if "kind" in updates:
+        if {"kind", "start_at", "due_at"} & updates.keys():
             self._validate_item_time(
-                kind=str(updates["kind"]),
+                kind=str(updates.get("kind", item.kind)),
                 start_at=updates.get("start_at", item.start_at),
                 due_at=updates.get("due_at", item.due_at),
             )
@@ -322,7 +322,7 @@ class CalendarService:
         metadata_json: str | dict[str, Any] | None = None,
     ) -> CalendarLinkRow:
         item, _ = self._item_and_context(actor_user_id, item_id)
-        self._assert_calendar_access(actor_user_id, item.calendar_id, "comment")
+        self._assert_calendar_access(actor_user_id, item.calendar_id, "write")
         return self.db.create_link(
             calendar_item_id=item_id,
             target_type=target_type,
@@ -394,6 +394,8 @@ class CalendarService:
         action: CalendarAccessAction,
     ) -> CalendarAccessContext:
         calendar = self.db.get_calendar(calendar_id, include_archived=action == "manage")
+        if calendar.tenant_id != self.tenant_id:
+            raise CalendarPermissionDenied("Calendar is outside the service tenant")
         context = self._access_context(actor_user_id, calendar)
         assert_calendar_access(context, action)
         return context

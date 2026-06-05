@@ -4,16 +4,16 @@ title: Implement calendar permissions and local domain service
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-05 21:19'
+updated_date: 2026-06-05 21:19
 labels:
-  - implementation
-  - calendar
-  - backend
-  - permissions
+- implementation
+- calendar
+- backend
+- permissions
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-06-05-calendar-module-prd-design.md
-  - Docs/superpowers/plans/2026-06-05-calendar-module-implementation-plan.md
+- Docs/superpowers/specs/2026-06-05-calendar-module-prd-design.md
+- Docs/superpowers/plans/2026-06-05-calendar-module-implementation-plan.md
 ---
 
 ## Description
@@ -40,7 +40,7 @@ Follow-up review fix completed. Critical finding addressed: provider-owned perso
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Calendar Task 2 local permissions and service layer, then applied follow-up privacy hardening for the spec review critical finding. Added AuthNZ calendar permission constants; added calendar role evaluation helpers with injectable org-role resolution; added CalendarService for calendar CRUD, membership management, local item CRUD, provider-owned read-only guards, annotations, local tag overlays, links, and provider item copy-to-local. Follow-up fix adds item-level provider import visibility so shared viewers can read/list tldw-owned local items and copied provider items, but cannot get/list provider-owned personal imports; calendar/external-account owners can still read/list provider-owned imports. Added regression tests for provider import privacy, owner visibility, copied item sharing, and existing local-item edit denial for viewers. Verification: focused permission/service tests passed (18 passed); Calendar DB regression plus permission/service tests passed (40 passed); Bandit JSON report at /tmp/bandit_calendar_task518.json had 0 findings.
+Implemented Calendar Task 2 local permissions and service layer, then applied follow-up hardening from spec/code-quality review. Added AuthNZ calendar permission constants; added calendar role evaluation helpers with injectable org-role resolution; added CalendarService for calendar CRUD, membership management, local item CRUD, provider-owned read-only guards, annotations, local tag overlays, links, and provider item copy-to-local. Follow-up fixes now enforce item-level provider import privacy, reject cross-tenant calendar access immediately after calendar load, validate effective event/todo time invariants on updates, and require write access for structural links. Added regression tests for provider import privacy, copied item sharing, viewer local-item edit denial, cross-tenant calendar/item/list/annotation denial, invalid event/todo updates, and commenter/editor link permissions. Verification: focused permission/service tests passed (20 passed); Calendar DB regression plus permission/service tests passed (42 passed); Bandit JSON report at /tmp/bandit_calendar_task518.json had 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

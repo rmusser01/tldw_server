@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.errors import (
     CalendarPermissionDenied,
     CalendarReadOnlyError,
+    CalendarValidationError,
 )
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 
@@ -190,6 +191,46 @@ def test_editor_can_create_and_edit_local_items(calendar_db):
     assert updated.title == "Final title"
 
 
+def test_update_item_validates_effective_event_and_todo_times(calendar_db):
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Personal", timezone="UTC")
+    event = service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="event",
+        title="Planning",
+        start_at="2026-06-05T10:00:00Z",
+    )
+    due_only_todo = service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="todo",
+        title="Submit notes",
+        due_at="2026-06-05T17:00:00Z",
+    )
+    scheduled_todo = service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="todo",
+        title="Read paper",
+        start_at="2026-06-05T14:00:00Z",
+        due_at="2026-06-05T17:00:00Z",
+    )
+
+    with pytest.raises(CalendarValidationError):
+        service.update_item(actor_user_id=1, item_id=event.id, start_at=None)
+
+    with pytest.raises(CalendarValidationError):
+        service.update_item(actor_user_id=1, item_id=due_only_todo.id, due_at=None)
+
+    updated_todo = service.update_item(actor_user_id=1, item_id=scheduled_todo.id, due_at=None)
+
+    assert calendar_db.get_item(event.id).start_at == "2026-06-05T10:00:00Z"
+    assert calendar_db.get_item(due_only_todo.id).due_at == "2026-06-05T17:00:00Z"
+    assert updated_todo.due_at is None
+    assert updated_todo.start_at == "2026-06-05T14:00:00Z"
+
+
 def test_commenter_can_annotate_local_item_but_cannot_edit_it(calendar_db):
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
@@ -222,6 +263,24 @@ def test_commenter_can_annotate_local_item_but_cannot_edit_it(calendar_db):
 
     with pytest.raises(CalendarPermissionDenied):
         service.update_item(actor_user_id=2, item_id=local_item.id, title="Nope")
+
+    owner_link = service.create_link(
+        actor_user_id=1,
+        item_id=local_item.id,
+        target_type="note",
+        target_id="note-123",
+    )
+
+    with pytest.raises(CalendarPermissionDenied):
+        service.create_link(
+            actor_user_id=2,
+            item_id=local_item.id,
+            target_type="note",
+            target_id="note-456",
+        )
+
+    with pytest.raises(CalendarPermissionDenied):
+        service.delete_link(actor_user_id=2, link_id=owner_link.id)
 
     assert annotation.author_user_id == 2
     assert json.loads(annotation.tags_json or "[]") == ["follow-up"]
@@ -340,6 +399,58 @@ def test_copied_provider_item_is_shared_by_normal_membership(calendar_db):
     assert fetched.provider_owned is False
     assert copied.id in {item.id for item in visible_items}
     assert provider_item.id not in {item.id for item in visible_items}
+
+
+def test_service_rejects_cross_tenant_calendar_item_list_and_annotation_paths(calendar_db):
+    tenant_a_service = CalendarService(db=calendar_db, tenant_id="tenant-a")
+    tenant_b_service = CalendarService(db=calendar_db, tenant_id="tenant-b")
+    tenant_b_calendar = tenant_b_service.create_calendar(
+        actor_user_id=1,
+        name="Tenant B",
+        timezone="UTC",
+    )
+    tenant_b_item = tenant_b_service.create_item(
+        actor_user_id=1,
+        calendar_id=tenant_b_calendar.id,
+        kind="event",
+        title="Tenant B item",
+        start_at="2026-06-05T10:00:00Z",
+    )
+
+    with pytest.raises(CalendarPermissionDenied):
+        tenant_a_service.update_calendar(
+            actor_user_id=1,
+            calendar_id=tenant_b_calendar.id,
+            name="Leaked calendar",
+        )
+
+    with pytest.raises(CalendarPermissionDenied):
+        tenant_a_service.get_item(actor_user_id=1, item_id=tenant_b_item.id)
+
+    with pytest.raises(CalendarPermissionDenied):
+        tenant_a_service.update_item(
+            actor_user_id=1,
+            item_id=tenant_b_item.id,
+            title="Leaked B item",
+        )
+
+    visible_items = tenant_a_service.list_items_window(
+        actor_user_id=1,
+        calendar_ids=[tenant_b_calendar.id],
+        window_start="2026-06-05T00:00:00Z",
+        window_end="2026-06-06T00:00:00Z",
+    )
+
+    with pytest.raises(CalendarPermissionDenied):
+        tenant_a_service.create_annotation(
+            actor_user_id=1,
+            item_id=tenant_b_item.id,
+            body="Cross-tenant note",
+        )
+
+    assert visible_items == []
+    assert calendar_db.get_calendar(tenant_b_calendar.id).name == "Tenant B"
+    assert tenant_b_service.get_item(actor_user_id=1, item_id=tenant_b_item.id).title == "Tenant B item"
 
 
 def test_calendar_links_follow_calendar_permissions(calendar_db):
