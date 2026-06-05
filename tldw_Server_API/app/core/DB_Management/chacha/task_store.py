@@ -304,10 +304,11 @@ class TaskStore:
         """Update mutable task fields using optimistic locking."""
         if text is not None and not text.strip():
             raise InputError("Task text cannot be empty.")  # noqa: TRY003
+        if projection_status is not None:
+            raise InputError(
+                "projection_status cannot be updated with update_task_record; use projection helpers."
+            )  # noqa: TRY003
         normalized_status = self._validate_status(status) if status is not None else None
-        normalized_projection_status = (
-            self._validate_projection_status(projection_status) if projection_status is not None else None
-        )
         metadata_json = self._json_dumps(metadata, "metadata") if metadata is not None else None
 
         def _execute_update(transaction_conn: TaskConnection) -> dict[str, Any]:
@@ -325,7 +326,6 @@ class TaskStore:
             new_metadata_json = (
                 metadata_json if metadata_json is not None else json.dumps(old["metadata_json"], sort_keys=True)
             )
-            new_projection_status = normalized_projection_status or old["projection_status"]
             completed_at = old.get("completed_at")
             if new_status == "done" and old["status"] != "done":
                 completed_at = now
@@ -339,7 +339,6 @@ class TaskStore:
                    SET text = ?,
                        status = ?,
                        metadata_json = ?,
-                       projection_status = ?,
                        updated_at = ?,
                        completed_at = ?,
                        version = version + 1
@@ -349,7 +348,6 @@ class TaskStore:
                     new_text,
                     new_status,
                     new_metadata_json,
-                    new_projection_status,
                     now,
                     completed_at,
                     task_id,
@@ -567,9 +565,12 @@ class TaskStore:
         """Soft-delete a task, requiring projection context for live projected rows."""
 
         def _execute_delete(transaction_conn: TaskConnection) -> dict[str, Any]:
-            old = self._require_expected_version(
-                self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
-                expected_version,
+            old = self._require_active_task(
+                self._require_expected_version(
+                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    expected_version,
+                    task_id,
+                ),
                 task_id,
             )
             projection = self._fetch_projection(task_id, conn=transaction_conn)
@@ -592,9 +593,16 @@ class TaskStore:
                        projection_status = ?,
                        updated_at = ?,
                        version = version + 1
-                 WHERE id = ? AND version = ?
+                 WHERE id = ? AND version = ? AND deleted = ?
                 """,
-                (self._deleted_value(True), "deleted", now, task_id, expected_version),
+                (
+                    self._deleted_value(True),
+                    "deleted",
+                    now,
+                    task_id,
+                    expected_version,
+                    self._deleted_value(False),
+                ),
             )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(

@@ -205,6 +205,24 @@ def test_update_task_record_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
     assert task["deleted"] in (1, True)  # nosec B101
 
 
+def test_update_task_record_rejects_projection_status_updates(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+
+    with pytest.raises(InputError, match="projection_status"):
+        db.update_task_record(
+            task_id="task-1",
+            expected_version=1,
+            projection_status="unlinked",
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+
+
 def test_mark_task_unlinked_rejects_zero_rowcount_update(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
@@ -294,6 +312,34 @@ def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeyp
     included = db.get_task("task-1", include_deleted=True)
     assert included is not None  # nosec B101
     assert included["deleted"] in (1, True)  # nosec B101
+
+
+def test_soft_delete_task_rejects_repeat_delete_without_new_version_or_event(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    deleted = db.soft_delete_task(
+        task_id="task-1",
+        expected_version=1,
+        projection_note_id=note_id,
+        projection_note_version=1,
+        projection_line_number=1,
+        actor_type="user",
+        actor_id="user-1",
+    )
+
+    with pytest.raises(ConflictError, match="deleted"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=deleted["version"],
+            allow_record_only=True,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    delete_events = [event for event in db.list_task_activity(task_id="task-1") if event["event_type"] == "deleted"]
+    assert task["version"] == deleted["version"]  # nosec B101
+    assert len(delete_events) == 1  # nosec B101
 
 
 def test_set_task_projection_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
