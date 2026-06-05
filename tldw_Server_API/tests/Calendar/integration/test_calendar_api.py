@@ -52,6 +52,7 @@ def calendar_api_client(
     db.ensure_schema()
     reminder_service = _ReminderServiceStub()
     current_user_id = {"value": 1}
+    current_tenant_id: dict[str, str | None] = {"value": None}
 
     async def override_user() -> User:
         user_id = current_user_id["value"]
@@ -63,6 +64,7 @@ def calendar_api_client(
             is_admin=True,
             roles=["admin"],
             permissions=["*"],
+            tenant_id=current_tenant_id["value"],
         )
 
     calendar_endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.calendar")
@@ -74,8 +76,9 @@ def calendar_api_client(
     app.dependency_overrides[calendar_endpoint.get_scheduled_tasks_service] = lambda: reminder_service
 
     try:
-        with TestClient(app) as client:
+        with TestClient(app, raise_server_exceptions=False) as client:
             client.current_user_id = current_user_id  # type: ignore[attr-defined]
+            client.current_tenant_id = current_tenant_id  # type: ignore[attr-defined]
             yield client, db, reminder_service
     finally:
         app.dependency_overrides.clear()
@@ -83,6 +86,10 @@ def calendar_api_client(
 
 def _set_user(client: TestClient, user_id: int) -> None:
     client.current_user_id["value"] = user_id  # type: ignore[attr-defined]
+
+
+def _set_tenant(client: TestClient, tenant_id: str | None) -> None:
+    client.current_tenant_id["value"] = tenant_id  # type: ignore[attr-defined]
 
 
 def _create_calendar(client: TestClient, **overrides: Any) -> dict[str, Any]:
@@ -297,6 +304,23 @@ def test_agenda_requires_explicit_bounded_range(
     assert too_large.json()["detail"]["code"] == "calendar_validation_error"
 
 
+def test_agenda_rejects_invalid_date_params_with_stable_client_error(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    client, _db, _reminder_service = calendar_api_client
+
+    response = client.get(
+        "/api/v1/calendar/views/agenda",
+        params={
+            "start_at": "not-a-date",
+            "end_at": "2026-06-06T00:00:00Z",
+        },
+    )
+
+    assert response.status_code in {400, 422}
+    assert response.json()["detail"]["code"] == "calendar_validation_error"
+
+
 def test_agenda_returns_items_in_bounded_range(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
 ) -> None:
@@ -481,6 +505,33 @@ def test_external_binding_placeholders_enforce_account_owner_scope(
 
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "calendar_permission_denied"
+
+
+def test_external_binding_uses_request_user_tenant_for_created_calendar(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    client, _db, _reminder_service = calendar_api_client
+    _set_tenant(client, "tenant-a")
+
+    calendar = _create_calendar(client, name="Tenant import target")
+    account = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={"provider": "caldav", "display_name": "Tenant Fastmail"},
+    )
+    assert account.status_code == 201, account.text
+    binding = client.post(
+        "/api/v1/calendar/external/bindings",
+        json={
+            "account_id": account.json()["id"],
+            "calendar_id": calendar["id"],
+            "remote_calendar_id": "remote-calendar",
+        },
+    )
+
+    assert calendar["tenant_id"] == "tenant-a"
+    assert account.json()["tenant_id"] == "tenant-a"
+    assert binding.status_code == 201, binding.text
+    assert binding.json()["calendar_id"] == calendar["id"]
 
 
 def test_external_binding_list_and_sync_placeholders_enforce_owner_scope(

@@ -78,9 +78,10 @@ def get_scheduled_tasks_service() -> ScheduledTasksControlPlaneService:
 
 
 def get_calendar_service(
+    current_user: User = Depends(get_request_user),
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarService:
-    return CalendarService(db=db)
+    return CalendarService(db=db, tenant_id=_tenant_id(current_user))
 
 
 def get_calendar_view_service(
@@ -420,6 +421,8 @@ async def get_calendar_agenda(
         )
     except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
         raise _map_calendar_error(exc) from exc
+    except (TypeError, ValueError) as exc:
+        raise _map_calendar_error(CalendarValidationError(str(exc))) from exc
     return _view_response(result)
 
 
