@@ -479,6 +479,10 @@ def test_service_validation_rejects_invalid_metadata_values() -> None:
     with pytest.raises(InputError):
         NotesTaskService._validate_metadata({"due_date": "2026-02-31"})
     with pytest.raises(InputError):
+        NotesTaskService._validate_metadata({"due_date": "20260605"})
+    with pytest.raises(InputError):
+        NotesTaskService._validate_metadata({"due_date": "2026-W23-5"})
+    with pytest.raises(InputError):
         NotesTaskService._validate_metadata({"priority": "urgent"})
     with pytest.raises(InputError):
         NotesTaskService._validate_metadata({"estimate": "soon"})

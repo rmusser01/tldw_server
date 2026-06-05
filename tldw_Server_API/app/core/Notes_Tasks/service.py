@@ -479,6 +479,8 @@ class NotesTaskService:
         if due_date is not None:
             if not isinstance(due_date, str):
                 raise InputError("Task due_date metadata must be a string.")
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_date) is None:
+                raise InputError("Task due_date metadata must use YYYY-MM-DD format.")
             try:
                 date.fromisoformat(due_date)
             except ValueError as exc:
