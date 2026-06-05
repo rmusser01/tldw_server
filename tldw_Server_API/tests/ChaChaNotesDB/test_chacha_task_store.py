@@ -44,7 +44,14 @@ def _create_task(db: CharactersRAGDB, note_id: str, *, task_id: str = "task-1") 
     return created
 
 
-def _set_projection(db: CharactersRAGDB, task_id: str, note_id: str, *, note_version: int = 1) -> dict:
+def _set_projection(
+    db: CharactersRAGDB,
+    task_id: str,
+    note_id: str,
+    *,
+    note_version: int = 1,
+    projection_status: str = "live",
+) -> dict:
     return db.set_task_projection(
         task_id=task_id,
         note_id=note_id,
@@ -57,6 +64,7 @@ def _set_projection(db: CharactersRAGDB, task_id: str, note_id: str, *, note_ver
         block_fingerprint="block-1",
         raw_line="- [ ] Review source",
         has_child_content=False,
+        projection_status=projection_status,
     )
 
 
@@ -223,6 +231,48 @@ def test_update_task_record_rejects_projection_status_updates(db: CharactersRAGD
     assert task["version"] == 1  # nosec B101
 
 
+def test_update_task_record_rejects_ambiguous_projected_tasks(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id, projection_status="ambiguous")
+
+    with pytest.raises(ConflictError, match="ambiguous"):
+        db.update_task_record(
+            task_id="task-1",
+            expected_version=1,
+            status="done",
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["status"] == "open"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+
+
+def test_update_task_record_rejects_unlinked_projected_tasks_by_default(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    unlinked = db.mark_task_unlinked(
+        task_id="task-1",
+        expected_version=1,
+        actor_type="system",
+        actor_id="reconciler",
+    )
+
+    with pytest.raises(ConflictError, match="unlinked"):
+        db.update_task_record(
+            task_id="task-1",
+            expected_version=unlinked["version"],
+            text="Review source again",
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["text"] == "Review source"  # nosec B101
+    assert task["version"] == unlinked["version"]  # nosec B101
+
+
 def test_mark_task_unlinked_rejects_zero_rowcount_update(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
@@ -376,6 +426,54 @@ def test_set_task_projection_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
     assert task["version"] == deleted["version"]  # nosec B101
 
 
+def test_soft_delete_task_rejects_ambiguous_projection_without_mutation(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id, projection_status="ambiguous")
+
+    with pytest.raises(ConflictError, match="ambiguous"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=1,
+            projection_note_id=note_id,
+            projection_note_version=1,
+            projection_line_number=1,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    delete_events = [event for event in db.list_task_activity(task_id="task-1") if event["event_type"] == "deleted"]
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["projection_status"] == "ambiguous"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert delete_events == []  # nosec B101
+
+
+def test_set_task_projection_rejects_deleted_projection_status_for_active_task(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+
+    with pytest.raises(InputError, match="deleted"):
+        db.set_task_projection(
+            task_id="task-1",
+            note_id=note_id,
+            note_version=2,
+            line_number=1,
+            start_offset=0,
+            end_offset=20,
+            normalized_text_hash="sha256:review-deleted",
+            occurrence_index=0,
+            block_fingerprint="block-deleted",
+            raw_line="- [ ] Review source",
+            has_child_content=False,
+            projection_status="deleted",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["projection_status"] == "live"  # nosec B101
+
+
 def test_set_task_projection_requires_task_note_ownership(db: CharactersRAGDB) -> None:
     owning_note_id = _create_note(db, content="- [ ] Owning note\n")
     other_note_id = _create_note(db, content="- [ ] Other note\n")
@@ -465,6 +563,31 @@ def test_record_only_soft_delete_is_allowed_for_unlinked_task(db: CharactersRAGD
     assert deleted["deleted"] in (1, True)  # nosec B101
     assert deleted["projection_status"] == "deleted"  # nosec B101
     assert deleted["version"] == 3  # nosec B101
+
+
+def test_soft_delete_task_rejects_unlinked_without_record_only(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    unlinked = db.mark_task_unlinked(
+        task_id="task-1",
+        expected_version=1,
+        actor_type="system",
+        actor_id="reconciler",
+    )
+
+    with pytest.raises(ConflictError, match="unlinked"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=unlinked["version"],
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    delete_events = [event for event in db.list_task_activity(task_id="task-1") if event["event_type"] == "deleted"]
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["version"] == unlinked["version"]  # nosec B101
+    assert delete_events == []  # nosec B101
 
 
 def test_rejects_ambiguous_projection_deletion(db: CharactersRAGDB) -> None:
