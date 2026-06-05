@@ -91,6 +91,27 @@ def test_parse_ignores_checklist_markers_inside_nested_backtick_fences() -> None
     assert result.items[1].locator.line_number == 5
 
 
+def test_parse_keeps_over_indented_marker_inside_nested_fence_as_code() -> None:
+    markdown = (
+        "\n".join(
+            [
+                "- [ ] Parent",
+                "    ```",
+                "      ```",
+                "    - [ ] should be code",
+                "    ```",
+                "  - [ ] Real nested task",
+            ]
+        )
+        + "\n"
+    )
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["Parent", "Real nested task"]
+    assert result.items[1].locator.line_number == 6
+
+
 def test_parse_ignores_checklist_markers_inside_nested_tilde_fences() -> None:
     markdown = (
         "\n".join(

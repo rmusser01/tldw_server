@@ -17,8 +17,8 @@ from tldw_Server_API.app.core.Notes_Tasks.models import (
 _CHECKLIST_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])[ \t]+\[(?P<marker>[ xX])\](?:[ \t]+(?P<body>.*)|[ \t]*)$"
 )
-_FENCE_RE = re.compile(r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})")
-_INDENTED_FENCE_RE = re.compile(r"^[ \t]+(?P<fence>`{3,}|~{3,})")
+_FENCE_RE = re.compile(r"^(?P<indent>[ \t]{0,3})(?P<fence>`{3,}|~{3,})")
+_INDENTED_FENCE_RE = re.compile(r"^(?P<indent>[ \t]+)(?P<fence>`{3,}|~{3,})")
 _LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?:[ \t]+.*)?$")
 _TOKEN_RE = re.compile(r"@(?P<name>[A-Za-z][A-Za-z0-9_-]*)\((?P<value>[^)]*)\)")
 _ESTIMATE_RE = re.compile(r"^\d+[mhd]$")
@@ -49,7 +49,15 @@ class _LineContext:
 class _Fence:
     char: str
     length: int
+    indent_width: int
     allow_indented_close: bool
+
+
+@dataclass(frozen=True)
+class _FenceMarker:
+    char: str
+    length: int
+    indent_width: int
 
 
 @dataclass(frozen=True)
@@ -145,10 +153,10 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
             allow_indented=list_context_active,
         )
         if active_fence is None and fence_marker is not None:
-            fence_char, fence_length = fence_marker
             active_fence = _Fence(
-                char=fence_char,
-                length=fence_length,
+                char=fence_marker.char,
+                length=fence_marker.length,
+                indent_width=fence_marker.indent_width,
                 allow_indented_close=list_context_active,
             )
             is_fenced_code = True
@@ -173,7 +181,7 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
     return contexts
 
 
-def _find_fence_marker(*, raw_line: str, allow_indented: bool) -> tuple[str, int] | None:
+def _find_fence_marker(*, raw_line: str, allow_indented: bool) -> _FenceMarker | None:
     match = _FENCE_RE.match(raw_line)
     if match is None and allow_indented:
         match = _INDENTED_FENCE_RE.match(raw_line)
@@ -181,7 +189,11 @@ def _find_fence_marker(*, raw_line: str, allow_indented: bool) -> tuple[str, int
         return None
 
     fence = match.group("fence")
-    return fence[0], len(fence)
+    return _FenceMarker(
+        char=fence[0],
+        length=len(fence),
+        indent_width=_indent_width(match.group("indent")),
+    )
 
 
 def _is_closing_fence(raw_line: str, active_fence: _Fence) -> bool:
@@ -192,8 +204,10 @@ def _is_closing_fence(raw_line: str, active_fence: _Fence) -> bool:
     if fence_marker is None:
         return False
 
-    fence_char, fence_length = fence_marker
-    if fence_char != active_fence.char or fence_length < active_fence.length:
+    if fence_marker.char != active_fence.char or fence_marker.length < active_fence.length:
+        return False
+
+    if active_fence.allow_indented_close and fence_marker.indent_width > active_fence.indent_width:
         return False
 
     stripped = raw_line.strip()
