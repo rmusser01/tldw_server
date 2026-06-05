@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 
-class TaskStatus(StrEnum):
+class TaskStatus(str, Enum):
     """Durable task status values."""
 
     OPEN = "open"
     DONE = "done"
 
 
-class ProjectionStatus(StrEnum):
+class ProjectionStatus(str, Enum):
     """Markdown projection status values."""
 
     LIVE = "live"

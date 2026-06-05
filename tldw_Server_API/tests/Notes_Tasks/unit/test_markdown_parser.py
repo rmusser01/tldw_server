@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
+from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Notes_Tasks import models
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 
 pytestmark = pytest.mark.unit
@@ -94,6 +97,17 @@ def test_duplicate_checklist_text_gets_distinct_occurrence_indexes() -> None:
     assert [item.locator.occurrence_index for item in result.items] == [1, 2, 1]
 
 
+def test_normalized_text_hash_ignores_case_and_extra_whitespace() -> None:
+    markdown = "- [ ] Review   Source\n- [ ] review source\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["Review Source", "review source"]
+    assert result.items[0].locator.normalized_text_hash == result.items[1].locator.normalized_text_hash
+    assert result.items[0].locator.normalized_text_hash == _expected_hash("review source")
+    assert [item.locator.occurrence_index for item in result.items] == [1, 2]
+
+
 def test_nested_child_content_is_detected_until_sibling_or_parent() -> None:
     markdown = "- [ ] Parent\n" "  supporting detail\n" "  - [ ] Child\n" "- [ ] Sibling without child content\n"
 
@@ -130,3 +144,10 @@ def test_parser_is_idempotent_on_repeated_calls() -> None:
     second = parse_note_checklists(note_id="note-1", note_version=12, content=markdown)
 
     assert second == first
+
+
+def test_task_enums_do_not_use_python_311_only_strenum() -> None:
+    source_path = Path(inspect.getsourcefile(models) or "")
+
+    assert source_path.name == "models.py"
+    assert "StrEnum" not in source_path.read_text(encoding="utf-8")
