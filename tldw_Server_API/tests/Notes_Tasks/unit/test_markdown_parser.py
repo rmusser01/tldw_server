@@ -121,6 +121,15 @@ def test_parse_keeps_over_indented_marker_inside_nested_fence_as_code() -> None:
     assert result.items[1].locator.line_number == 6
 
 
+def test_parse_allows_slightly_deeper_nested_fence_close() -> None:
+    markdown = "- [ ] Parent\n  ```\n  code\n   ```\n  - [ ] child\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["Parent", "child"]
+    assert result.items[1].locator.line_number == 5
+
+
 def test_fenced_code_content_changes_parent_block_fingerprint_at_lower_indent() -> None:
     markdown_a = "- [ ] Parent\n  ```\ncode A\n  ```\n- [ ] Sibling\n"
     markdown_b = "- [ ] Parent\n  ```\ncode B\n  ```\n- [ ] Sibling\n"
@@ -201,6 +210,15 @@ def test_parse_nested_unordered_checklist_under_multi_digit_ordered_parent() -> 
     assert result.items[0].locator.line_number == 2
 
 
+def test_parse_nested_unordered_checklist_under_paren_ordered_parent() -> None:
+    markdown = "1) Parent\n    - [ ] child\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["child"]
+    assert result.items[0].locator.line_number == 2
+
+
 def test_parse_ordered_parent_nested_fence_then_real_unordered_task() -> None:
     markdown = "1. Parent\n" "    ```\n" "    - [ ] should be code\n" "    ```\n" "    - [ ] real nested task\n"
 
@@ -212,6 +230,14 @@ def test_parse_ordered_parent_nested_fence_then_real_unordered_task() -> None:
 
 def test_parse_direct_ordered_list_checkbox_remains_unparsed() -> None:
     markdown = "1. [ ] Task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert result.items == []
+
+
+def test_parse_direct_paren_ordered_list_checkbox_remains_unparsed() -> None:
+    markdown = "1) [ ] Task\n"
 
     result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
 
