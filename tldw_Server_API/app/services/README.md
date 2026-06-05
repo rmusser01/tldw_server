@@ -39,6 +39,12 @@ This keeps ordering visible in `lifespan_startup_sequence.py` and
 `lifespan_shutdown_sequence.py`, while individual modules own narrowly scoped
 behavior.
 
+Architecture rationale: see
+`Docs/ADR/021-services-lifecycle-startup-and-shutdown.md` for the accepted
+record covering Services lifespan orchestration, worker lifecycle session
+ownership, cooperative stop-event workers, staged shutdown, bounded
+timeout/cancel fallback, and compatibility caveats.
+
 ## Module Families
 
 - `lifespan_startup_sequence.py` and `lifespan_shutdown_sequence.py`:
