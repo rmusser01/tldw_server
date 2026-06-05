@@ -1067,6 +1067,36 @@ class TaskStore:
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
 
+    def list_recent_unread_task_activity(
+        self,
+        *,
+        user_id: str,
+        task_id: str | None = None,
+        note_id: str | None = None,
+        actor_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List newest unread task events for a user, applying visibility before limit."""
+        query = """
+            SELECT events.*
+            FROM task_events AS events
+            LEFT JOIN task_event_read_state AS state
+              ON state.event_id = events.id
+             AND state.user_id = ?
+            WHERE (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
+              AND (? IS NULL OR events.task_id = ?)
+              AND (? IS NULL OR events.note_id = ?)
+              AND (? IS NULL OR events.actor_type = ?)
+        """
+        if self._db.backend_type == BackendType.SQLITE:
+            query += " ORDER BY events.created_at DESC, events.rowid DESC LIMIT ?"
+        else:
+            query += " ORDER BY events.created_at DESC, events.id DESC LIMIT ?"
+        params: list[Any] = [user_id, task_id, task_id, note_id, note_id, actor_type, actor_type]
+        params.append(self._clamp_limit(limit))
+        cursor = self._read(query, tuple(params))
+        return [self._decode_event_row(row) for row in cursor.fetchall()]
+
     def mark_task_activity_read(
         self,
         event_id: str,

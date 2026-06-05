@@ -221,6 +221,30 @@ def test_list_recent_task_activity_returns_newest_without_changing_default_order
     assert [event["id"] for event in recent_events] == [third["id"], second["id"]]  # nosec B101
 
 
+def test_list_recent_unread_task_activity_filters_read_state_before_limit(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    task = _create_task(db, note_id)
+    older_unread_event = db.record_task_event(
+        task_id=task["id"],
+        note_id=note_id,
+        event_type="updated",
+        actor_type="agent",
+    )
+    newer_dismissed_event = db.record_task_event(
+        task_id=task["id"],
+        note_id=note_id,
+        event_type="updated",
+        actor_type="agent",
+    )
+    db.mark_task_activity_dismissed(newer_dismissed_event["id"], user_id="user-1")
+
+    user_one_events = db.list_recent_unread_task_activity(user_id="user-1", actor_type="agent", limit=1)
+    user_two_events = db.list_recent_unread_task_activity(user_id="user-2", actor_type="agent", limit=1)
+
+    assert [event["id"] for event in user_one_events] == [older_unread_event["id"]]  # nosec B101
+    assert [event["id"] for event in user_two_events] == [newer_dismissed_event["id"]]  # nosec B101
+
+
 def test_list_helpers_reject_nonnumeric_limits(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
