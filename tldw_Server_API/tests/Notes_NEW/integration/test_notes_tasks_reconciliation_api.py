@@ -129,6 +129,72 @@ def test_note_create_ignores_empty_checklist_placeholder_with_warning_state(
     assert state["warning_count"] == 1
 
 
+def test_title_only_put_advances_reconciliation_state_without_changing_tasks(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_client
+
+    create_response = client.post(
+        "/api/v1/notes/",
+        json={"title": "Tasks", "content": "- [ ] Alpha\n- [x] Beta\n"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    note_id = created["id"]
+    original_tasks = _tasks_by_text(db, note_id)
+
+    update_response = client.put(
+        f"/api/v1/notes/{note_id}",
+        json={"title": "Renamed Tasks"},
+        headers={"expected-version": str(created["version"])},
+    )
+
+    assert update_response.status_code == 200, update_response.text
+    updated = update_response.json()
+    updated_state = db.get_reconciliation_state(note_id)
+    updated_tasks = _tasks_by_text(db, note_id)
+    assert updated["version"] == created["version"] + 1
+    assert updated_state is not None
+    assert updated_state["note_version"] == updated["version"]
+    assert updated_tasks["Alpha"]["id"] == original_tasks["Alpha"]["id"]
+    assert updated_tasks["Alpha"]["status"] == original_tasks["Alpha"]["status"]
+    assert updated_tasks["Beta"]["id"] == original_tasks["Beta"]["id"]
+    assert updated_tasks["Beta"]["status"] == original_tasks["Beta"]["status"]
+
+
+def test_title_only_patch_advances_reconciliation_state_without_changing_tasks(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_client
+
+    create_response = client.post(
+        "/api/v1/notes/",
+        json={"title": "Tasks", "content": "- [ ] Alpha\n- [x] Beta\n"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    note_id = created["id"]
+    original_tasks = _tasks_by_text(db, note_id)
+
+    patch_response = client.patch(
+        f"/api/v1/notes/{note_id}",
+        json={"title": "Patched Tasks"},
+        headers={"expected-version": str(created["version"])},
+    )
+
+    assert patch_response.status_code == 200, patch_response.text
+    patched = patch_response.json()
+    patched_state = db.get_reconciliation_state(note_id)
+    patched_tasks = _tasks_by_text(db, note_id)
+    assert patched["version"] == created["version"] + 1
+    assert patched_state is not None
+    assert patched_state["note_version"] == patched["version"]
+    assert patched_tasks["Alpha"]["id"] == original_tasks["Alpha"]["id"]
+    assert patched_tasks["Alpha"]["status"] == original_tasks["Alpha"]["status"]
+    assert patched_tasks["Beta"]["id"] == original_tasks["Beta"]["id"]
+    assert patched_tasks["Beta"]["status"] == original_tasks["Beta"]["status"]
+
+
 def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(
     notes_tasks_client: tuple[TestClient, CharactersRAGDB],
 ) -> None:
