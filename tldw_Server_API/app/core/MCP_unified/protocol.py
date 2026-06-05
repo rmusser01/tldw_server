@@ -43,6 +43,7 @@ from .tool_observability import (
     attach_execution_eval_metadata,
     ensure_tool_definition_eval_metadata,
     execution_eval_metadata_from_tool_definition,
+    sanitize_eval_profile_id,
 )
 
 try:  # pragma: no cover - optional dependency
@@ -1828,8 +1829,15 @@ class MCPProtocol:
                     tool_copy = tool.copy()
                     name = tool_copy.get("name")
                     if isinstance(name, str) and name.strip():
-                        with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
+                        try:
                             tool_copy = ensure_tool_definition_eval_metadata(tool_copy)
+                        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+                            context.logger.opt(exception=exc).debug(
+                                "Failed to attach eval metadata to listed tool",
+                                module_id=module_id,
+                                tool_name=name,
+                                error_type=exc.__class__.__name__,
+                            )
                     tool_copy["module"] = module_id
                     # Scoped tool permissions: when scopes are present, list only matching tools
                     if self._mcp_scopes(context) and isinstance(name, str):
@@ -1887,8 +1895,9 @@ class MCPProtocol:
             return None
         for key in ("profile_id", "mcp_profile_id", "gateway_profile_id"):
             value = metadata.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+            clean_value = sanitize_eval_profile_id(value)
+            if clean_value is not None:
+                return clean_value
         return None
 
     def _extract_tool_command(self, tool_args: Any) -> str | None:
@@ -2333,8 +2342,15 @@ class MCPProtocol:
         # Look up tool definition early for scope gating and validation
         tool_def = await self._resolve_tool_definition(module, tool_name)
         if isinstance(tool_def, dict):
-            with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
+            try:
                 tool_def = ensure_tool_definition_eval_metadata(tool_def)
+            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+                context.logger.opt(exception=exc).debug(
+                    "Failed to attach eval metadata to resolved tool definition",
+                    module_id=module_id,
+                    tool_name=tool_name,
+                    error_type=exc.__class__.__name__,
+                )
         tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
 
         # Determine write-capable status from sanitized arguments.
@@ -2618,15 +2634,11 @@ class MCPProtocol:
                     profile_id=profile_id,
                     duration_ms=duration_ms,
                 )
-                execution_eval = (
-                    result.get("eval")
-                    if isinstance(result, dict) and isinstance(result.get("eval"), dict)
-                    else execution_eval_metadata_from_tool_definition(
-                        tool_name=tool_name,
-                        tool_def=tool_def,
-                        profile_id=profile_id,
-                        duration_ms=duration_ms,
-                    )
+                execution_eval = execution_eval_metadata_from_tool_definition(
+                    tool_name=tool_name,
+                    tool_def=tool_def,
+                    profile_id=profile_id,
+                    duration_ms=duration_ms,
                 )
                 if isinstance(result, str):
                     content = [{"type": "text", "text": result}]

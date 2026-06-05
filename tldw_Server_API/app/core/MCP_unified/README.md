@@ -371,10 +371,12 @@ embedded copy. These fields are intentionally limited to scalar values such as
 tool name, prompt id/version, action family, result kind, optional profile id,
 truncation/path-filter flags, reason code, and duration. They must not contain
 raw arguments, raw file contents, diffs, secrets, absolute local paths, or user
-email addresses.
+email addresses. Profile IDs are accepted only as short safe labels using
+letters, numbers, `_`, `.`, or `-`; unsafe values are omitted.
 
-Module authors should use `create_tool_definition()` for new tools. It preserves
-explicit `metadata.eval` and fills safe defaults when metadata is omitted.
+Module authors should use `create_tool_definition()` for new tools. It merges
+safe explicit `metadata.eval` fields over inferred defaults and drops unknown or
+non-string scalar fields.
 Manual descriptors and federated external tools are normalized at catalog and
 protocol boundaries so standalone gateway and hosted MCP callers see the same
 contract.

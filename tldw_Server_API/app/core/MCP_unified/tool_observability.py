@@ -14,15 +14,19 @@ ExecutionEvalMetadata: TypeAlias = dict[str, ExecutionEvalValue]
 
 DEFAULT_TOOL_PROMPT_VERSION = "2026.06.04"
 _TOOL_PROMPT_ID_INVALID_CHARS = re.compile(r"[^a-z0-9_.-]+")
+_SAFE_PROFILE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _WRITE_CATEGORIES = frozenset({"ingestion", "management", "write", "mutation"})
 
 
-def _clean_list(values: Iterable[str]) -> list[str]:
-    """Return stripped, non-blank values while preserving input order."""
+def _clean_list(values: Iterable[Any] | None) -> list[str]:
+    """Return stripped string list values while rejecting scalar strings and nulls."""
+    if values is None or isinstance(values, str | bytes):
+        return []
     return [cleaned for value in values if isinstance(value, str) and (cleaned := value.strip())]
 
 
 def _required_string(value: str, field_name: str) -> str:
+    """Return a stripped required string or raise for blank values."""
     cleaned = str(value).strip()
     if not cleaned:
         raise ValueError(f"{field_name} must not be blank")
@@ -30,35 +34,49 @@ def _required_string(value: str, field_name: str) -> str:
 
 
 def _optional_string(value: str | None) -> str | None:
+    """Return a stripped optional string for trusted internal scalar values."""
     if value is None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
 
 
+def _optional_raw_string(value: Any) -> str | None:
+    """Return a stripped string only when the raw value is already a string."""
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _metadata_dict(tool_def: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a shallow metadata copy from a tool definition-like mapping."""
     metadata = (tool_def or {}).get("metadata") if isinstance(tool_def, dict) else None
     return dict(metadata) if isinstance(metadata, dict) else {}
 
 
 def _clean_tool_prompt_name(tool_name: str) -> str:
+    """Normalize a tool name into a stable prompt-id-safe name segment."""
     cleaned = _TOOL_PROMPT_ID_INVALID_CHARS.sub("_", tool_name.strip().lower())
     cleaned = cleaned.strip("._-")
     return cleaned or "unknown"
 
 
 def _first_tool_family(tool_name: str) -> str:
+    """Infer the broad tool family from the first prompt-id-safe name segment."""
     cleaned = _clean_tool_prompt_name(tool_name)
     family = cleaned.split(".", 1)[0].strip()
     return family or "general"
 
 
 def _infer_category(tool_name: str, metadata: dict[str, Any]) -> str:
+    """Infer a non-empty task family from metadata.category or the tool name."""
     category = _optional_string(str(metadata.get("category"))) if metadata.get("category") is not None else None
     return category or _first_tool_family(tool_name)
 
 
 def _infer_prompt_variant(metadata: dict[str, Any], prompt_variant: str | None) -> str:
+    """Infer which prompt/catalog variant should be attributed to a tool."""
     explicit = _optional_string(prompt_variant)
     if explicit is not None:
         return explicit
@@ -72,6 +90,7 @@ def _infer_prompt_variant(metadata: dict[str, Any], prompt_variant: str | None) 
 
 
 def _infer_success_signals(metadata: dict[str, Any], category: str) -> list[str]:
+    """Infer coarse success signals from tool metadata without inspecting arguments."""
     signals = ["completed_without_error"]
     if bool(metadata.get("readOnlyHint")):
         signals.insert(0, "avoided_mutation")
@@ -81,28 +100,28 @@ def _infer_success_signals(metadata: dict[str, Any], category: str) -> list[str]
 
 
 def _clean_existing_tool_eval(value: Any) -> dict[str, ToolEvalValue] | None:
+    """Clean an explicit metadata.eval block into a safe partial override."""
     if not isinstance(value, dict):
         return None
 
-    tool_prompt_id = _optional_string(value.get("tool_prompt_id"))
-    tool_prompt_version = _optional_string(value.get("tool_prompt_version"))
-    expected_result_kind = _optional_string(value.get("expected_result_kind"))
-    if tool_prompt_id is None or tool_prompt_version is None or expected_result_kind is None:
-        return None
+    cleaned: dict[str, ToolEvalValue] = {}
+
+    for key in ("tool_prompt_id", "tool_prompt_version", "expected_result_kind"):
+        clean_value = _optional_raw_string(value.get(key))
+        if clean_value is not None:
+            cleaned[key] = clean_value
 
     raw_task_families = value.get("task_families")
-    task_families = _clean_list(raw_task_families) if isinstance(raw_task_families, list) else []
+    if isinstance(raw_task_families, list):
+        cleaned["task_families"] = _clean_list(raw_task_families)
     raw_success_signals = value.get("success_signals")
-    success_signals = _clean_list(raw_success_signals) if isinstance(raw_success_signals, list) else []
+    if isinstance(raw_success_signals, list):
+        cleaned["success_signals"] = _clean_list(raw_success_signals)
+    prompt_variant = _optional_raw_string(value.get("prompt_variant"))
+    if prompt_variant is not None:
+        cleaned["prompt_variant"] = prompt_variant
 
-    return {
-        "tool_prompt_id": tool_prompt_id,
-        "tool_prompt_version": tool_prompt_version,
-        "task_families": task_families,
-        "expected_result_kind": expected_result_kind,
-        "success_signals": success_signals,
-        "prompt_variant": _optional_string(value.get("prompt_variant")) or "builtin",
-    }
+    return cleaned
 
 
 def build_tool_eval_metadata(
@@ -159,19 +178,27 @@ def ensure_tool_definition_eval_metadata(
     normalized = dict(tool_def)
     tool_name = _required_string(str(normalized.get("name") or ""), "tool_name")
     metadata = _metadata_dict(normalized)
+    inferred_eval = dict(
+        infer_tool_eval_metadata(
+            tool_name=tool_name,
+            metadata=metadata,
+            prompt_variant=prompt_variant,
+        )["eval"]
+    )
     existing_eval = _clean_existing_tool_eval(metadata.get("eval"))
-    if existing_eval is None:
-        metadata.update(
-            infer_tool_eval_metadata(
-                tool_name=tool_name,
-                metadata=metadata,
-                prompt_variant=prompt_variant,
-            )
-        )
-    else:
-        metadata["eval"] = existing_eval
+    if existing_eval is not None:
+        inferred_eval.update(existing_eval)
+    metadata["eval"] = inferred_eval
     normalized["metadata"] = metadata
     return normalized
+
+
+def sanitize_eval_profile_id(value: Any) -> str | None:
+    """Return a non-sensitive profile id, or None when it fails the allowlist."""
+    cleaned = _optional_raw_string(value)
+    if cleaned is None or _SAFE_PROFILE_ID.fullmatch(cleaned) is None:
+        return None
+    return cleaned
 
 
 def execution_eval_metadata_from_tool_definition(
@@ -258,7 +285,7 @@ def build_execution_eval_metadata(
         "result_kind": _required_string(result_kind, "result_kind"),
     }
 
-    clean_profile_id = _optional_string(profile_id)
+    clean_profile_id = sanitize_eval_profile_id(profile_id)
     if clean_profile_id is not None:
         metadata["profile_id"] = clean_profile_id
     if path_filter_used is not None:

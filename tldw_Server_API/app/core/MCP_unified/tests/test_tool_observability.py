@@ -62,6 +62,19 @@ def test_build_tool_eval_metadata_strips_values_and_removes_blank_list_items() -
     }
 
 
+def test_build_tool_eval_metadata_ignores_non_list_iterable_values() -> None:
+    metadata = build_tool_eval_metadata(
+        tool_prompt_id="mcp.git.diff.v1",
+        tool_prompt_version="2026.06.04",
+        task_families="search",
+        expected_result_kind="bounded_diff",
+        success_signals=None,  # type: ignore[arg-type]
+    )
+
+    assert metadata["eval"]["task_families"] == []
+    assert metadata["eval"]["success_signals"] == []
+
+
 @pytest.mark.parametrize(
     ("field", "kwargs"),
     [
@@ -232,8 +245,64 @@ def test_create_tool_definition_sanitizes_explicit_eval_metadata() -> None:
     }
 
 
+def test_create_tool_definition_merges_partial_explicit_eval_metadata() -> None:
+    tool = create_tool_definition(
+        name="docs.search",
+        description="Search indexed docs.",
+        parameters={"properties": {"query": {"type": "string"}}, "required": ["query"]},
+        metadata={
+            "category": "search",
+            "eval": {
+                "tool_prompt_id": "mcp.docs.search.operator.v1",
+                "task_families": ["operator_docs"],
+                "success_signals": ["matched_operator_prompt"],
+            },
+        },
+    )
+
+    assert tool["metadata"]["eval"] == {
+        "tool_prompt_id": "mcp.docs.search.operator.v1",
+        "tool_prompt_version": "2026.06.04",
+        "task_families": ["operator_docs"],
+        "expected_result_kind": "search_result",
+        "success_signals": ["matched_operator_prompt"],
+        "prompt_variant": "builtin",
+    }
+
+
+def test_create_tool_definition_rejects_non_string_required_eval_fields() -> None:
+    tool = create_tool_definition(
+        name="docs.search",
+        description="Search indexed docs.",
+        parameters={"properties": {"query": {"type": "string"}}, "required": ["query"]},
+        metadata={
+            "category": "search",
+            "eval": {
+                "tool_prompt_id": {"raw": "do-not-leak"},
+                "tool_prompt_version": "2026.06.04-custom",
+                "expected_result_kind": "custom_search_result",
+            },
+        },
+    )
+
+    eval_metadata = tool["metadata"]["eval"]
+    assert eval_metadata["tool_prompt_id"] == "mcp.docs.search.v1"
+    assert "do-not-leak" not in str(eval_metadata)
+    assert eval_metadata["tool_prompt_version"] == "2026.06.04-custom"
+    assert eval_metadata["expected_result_kind"] == "custom_search_result"
+
+
 class _ManualObservableModule(BaseModule):
     """Test module that intentionally bypasses the shared definition helper."""
+
+    def __init__(
+        self,
+        config: ModuleConfig,
+        *,
+        result_override: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(config)
+        self._result_override = result_override
 
     async def on_initialize(self) -> None:
         return None
@@ -264,6 +333,8 @@ class _ManualObservableModule(BaseModule):
         arguments: dict[str, Any],
         context: Any | None = None,
     ) -> Any:
+        if self._result_override is not None:
+            return dict(self._result_override)
         return {"target": arguments["target"], "ok": True}
 
 
@@ -281,9 +352,12 @@ class _ManualRegistryStub:
         return {"manual": self.module}
 
 
-def _manual_observable_protocol() -> MCPProtocol:
+def _manual_observable_protocol(
+    *,
+    result_override: dict[str, Any] | None = None,
+) -> MCPProtocol:
     protocol = MCPProtocol()
-    module = _ManualObservableModule(ModuleConfig(name="manual"))
+    module = _ManualObservableModule(ModuleConfig(name="manual"), result_override=result_override)
     protocol.module_registry = _ManualRegistryStub(module)  # type: ignore[assignment]
 
     async def _allow_module(_context: RequestContext, _module_id: str | None) -> bool:
@@ -342,3 +416,55 @@ async def test_tools_call_adds_execution_eval_metadata_to_structured_results() -
     assert eval_metadata["result_kind"] == "inspection_result"
     assert eval_metadata["profile_id"] == "researcher"
     assert isinstance(eval_metadata["duration_ms"], float)
+    assert payload["eval"]["tool_name"] == "manual.inspect"
+    assert payload["eval"]["profile_id"] == "researcher"
+
+
+@pytest.mark.asyncio
+async def test_tools_call_omits_unsafe_profile_id_from_eval_metadata() -> None:
+    protocol = _manual_observable_protocol()
+    context = RequestContext(
+        request_id="manual-call",
+        user_id="user-1",
+        client_id="client-1",
+        metadata={"profile_id": "researcher@example.com"},
+    )
+
+    payload = await protocol._handle_tools_call(
+        {"name": "manual.inspect", "arguments": {"target": "readme"}},
+        context,
+    )
+
+    result_eval = payload["content"][0]["json"]["eval"]
+    assert "profile_id" not in result_eval
+    assert "profile_id" not in payload["eval"]
+
+
+@pytest.mark.asyncio
+async def test_tools_call_does_not_promote_tool_returned_eval_to_top_level() -> None:
+    protocol = _manual_observable_protocol(
+        result_override={
+            "target": "readme",
+            "eval": {
+                "tool_name": "malicious.override",
+                "raw_payload": "diff --git a/secret.txt b/secret.txt",
+                "profile_id": "operator@example.com",
+            },
+        }
+    )
+    context = RequestContext(
+        request_id="manual-call",
+        user_id="user-1",
+        client_id="client-1",
+        metadata={"profile_id": "researcher"},
+    )
+
+    payload = await protocol._handle_tools_call(
+        {"name": "manual.inspect", "arguments": {"target": "readme"}},
+        context,
+    )
+
+    assert payload["content"][0]["json"]["eval"]["tool_name"] == "malicious.override"
+    assert payload["eval"]["tool_name"] == "manual.inspect"
+    assert payload["eval"]["profile_id"] == "researcher"
+    assert "raw_payload" not in payload["eval"]

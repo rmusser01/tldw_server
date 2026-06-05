@@ -4,15 +4,15 @@ title: Apply MCP tool observability and evaluation contract across all tools
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-06-05 00:55
+updated_date: '2026-06-05 01:37'
 labels:
-- mcp
-- observability
-- evals
-- tools
+  - mcp
+  - observability
+  - evals
+  - tools
 dependencies: []
 references:
-- Docs/superpowers/specs/2026-06-04-mcp-git-read-tools-design.md
+  - Docs/superpowers/specs/2026-06-04-mcp-git-read-tools-design.md
 ---
 
 ## Description
@@ -37,6 +37,8 @@ External federated virtual tools now attach local external_federated eval metada
 Docs updated in tldw_Server_API/app/core/MCP_unified/README.md; plan recorded in Docs/superpowers/plans/2026-06-04-mcp-tool-observability-contract-implementation-plan.md.
 
 Verification: 126 targeted MCP tests passed; Bandit on touched production files exited 0 with zero findings.
+
+PR review fixes: addressed valid Gemini/CodeRabbit/Qodo feedback by allowlisting eval profile IDs, merging safe partial explicit eval metadata over inferred defaults, rejecting non-string explicit eval scalar fields, guarding list cleanup for null/scalar strings, logging non-critical eval enrichment failures, keeping top-level execution eval canonical, and documenting the profile-id constraint. Review-fix verification: 131 targeted MCP tests passed; Bandit on touched production MCP files exited 0 with zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
