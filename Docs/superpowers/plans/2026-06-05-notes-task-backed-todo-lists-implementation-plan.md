@@ -738,7 +738,7 @@ git commit -m "feat: add notes task API"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/notes_module.py`
 - Test: `tldw_Server_API/tests/MCP_unified/test_notes_task_tools.py`
 
-- [ ] **Step 1: Write failing MCP tool tests**
+- [x] **Step 1: Write failing MCP tool tests**
 
 Cover:
 
@@ -756,7 +756,7 @@ Cover:
 - governance preflight, persona scope, user scope, and note ownership checks run before every write
 - denied autonomous writes do not mutate notes/tasks and still return an auditable policy decision
 
-- [ ] **Step 2: Run MCP tests to verify they fail**
+- [x] **Step 2: Run MCP tests to verify they fail**
 
 Run:
 
@@ -767,7 +767,7 @@ python -m pytest tldw_Server_API/tests/MCP_unified/test_notes_task_tools.py -v
 
 Expected: FAIL with missing tools.
 
-- [ ] **Step 3: Add tool definitions**
+- [x] **Step 3: Add tool definitions**
 
 Use the existing `create_tool_definition` style. Proposed schemas:
 
@@ -779,11 +779,11 @@ Use the existing `create_tool_definition` style. Proposed schemas:
 - `notes.tasks.delete`: task_id, expected_task_version, expected_note_version, record_only_if_unlinked, idempotency_key
 - `notes.tasks.reconcile_note`: note_id, expected_note_version optional, work_limit optional
 
-- [ ] **Step 4: Implement validators**
+- [x] **Step 4: Implement validators**
 
 Use `validate_tool_arguments` with strict checks. Do not rely only on JSON schema.
 
-- [ ] **Step 5: Implement execution methods**
+- [x] **Step 5: Implement execution methods**
 
 Each method should open the user ChaCha DB with `_open_db`, call `NotesTaskService`, close connections, and sanitize debug logs on close failures like existing MCP modules.
 
@@ -797,7 +797,7 @@ Before each write, use the existing MCP Unified permission/governance hooks inst
 
 Write event metadata must include actor type, actor ID where available, tool name, policy mode, approval ID if present, idempotency key, and note/task IDs.
 
-- [ ] **Step 6: Run MCP tests**
+- [x] **Step 6: Run MCP tests**
 
 Run:
 
@@ -808,7 +808,7 @@ python -m pytest tldw_Server_API/tests/MCP_unified/test_notes_task_tools.py -v
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit MCP slice**
+- [x] **Step 7: Commit MCP slice**
 
 ```bash
 git add \
