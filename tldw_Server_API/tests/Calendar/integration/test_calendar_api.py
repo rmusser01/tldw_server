@@ -174,30 +174,54 @@ def test_membership_add_list_remove_and_owner_only_management(
 ) -> None:
     client, _db, _reminder_service = calendar_api_client
     calendar = _create_calendar(client)
+    role_by_principal = {
+        "2": "viewer",
+        "3": "editor",
+        "4": "commenter",
+    }
 
-    added = client.post(
-        f"/api/v1/calendar/calendars/{calendar['id']}/memberships",
-        json={"principal_type": "user", "principal_id": "2", "role": "editor"},
-    )
-    assert added.status_code == 201, added.text
-    assert added.json()["role"] == "editor"
+    for principal_id, role in role_by_principal.items():
+        added = client.post(
+            f"/api/v1/calendar/calendars/{calendar['id']}/memberships",
+            json={"principal_type": "user", "principal_id": principal_id, "role": role},
+        )
+        assert added.status_code == 201, added.text
+        assert added.json()["principal_id"] == principal_id
+        assert added.json()["role"] == role
 
     listed = client.get(f"/api/v1/calendar/calendars/{calendar['id']}/memberships")
     assert listed.status_code == 200, listed.text
-    assert any(row["principal_id"] == "2" and row["role"] == "editor" for row in listed.json()["items"])
+    listed_roles = {
+        row["principal_id"]: row["role"]
+        for row in listed.json()["items"]
+        if row["principal_id"] in role_by_principal
+    }
+    assert listed_roles == role_by_principal
 
     _set_user(client, 2)
     denied = client.post(
         f"/api/v1/calendar/calendars/{calendar['id']}/memberships",
-        json={"principal_type": "user", "principal_id": "3", "role": "viewer"},
+        json={"principal_type": "user", "principal_id": "5", "role": "viewer"},
     )
     assert denied.status_code == 403
     assert denied.json()["detail"]["code"] == "calendar_permission_denied"
+    denied_list = client.get(f"/api/v1/calendar/calendars/{calendar['id']}/memberships")
+    assert denied_list.status_code == 403
+    assert denied_list.json()["detail"]["code"] == "calendar_permission_denied"
+    denied_remove = client.delete(f"/api/v1/calendar/calendars/{calendar['id']}/memberships/user/3")
+    assert denied_remove.status_code == 403
+    assert denied_remove.json()["detail"]["code"] == "calendar_permission_denied"
 
     _set_user(client, 1)
-    removed = client.delete(f"/api/v1/calendar/calendars/{calendar['id']}/memberships/user/2")
-    assert removed.status_code == 200, removed.text
-    assert removed.json()["removed"] == 1
+    for principal_id in role_by_principal:
+        removed = client.delete(f"/api/v1/calendar/calendars/{calendar['id']}/memberships/user/{principal_id}")
+        assert removed.status_code == 200, removed.text
+        assert removed.json()["removed"] == 1
+
+    final_list = client.get(f"/api/v1/calendar/calendars/{calendar['id']}/memberships")
+    assert final_list.status_code == 200, final_list.text
+    final_principals = {row["principal_id"] for row in final_list.json()["items"]}
+    assert final_principals.isdisjoint(role_by_principal)
 
 
 def test_create_event_and_todo_items(

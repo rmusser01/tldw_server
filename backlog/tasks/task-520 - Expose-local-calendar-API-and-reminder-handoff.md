@@ -32,7 +32,7 @@ Implement Task 4 from the Calendar module implementation plan: Pydantic calendar
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Task 4 execution notes: Red run verified missing endpoint module. Implemented calendar schemas/router, registered content/minimal route specs, and hardened raw RRULE parsing for unsupported keys and bad numeric/UNTIL values. Integration API test command now passes: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/integration/test_calendar_api.py -v (14 passed).
+Task 4 execution notes: implemented Calendar schemas/router, registered content/minimal route specs, hardened raw RRULE parsing, and added API integration coverage. Spec-compliance follow-up expanded membership API coverage to successful owner add/list/remove for viewer, editor, commenter and non-owner denial for add/list/remove. No app code changes were made for the follow-up.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -44,7 +44,7 @@ Task 4 execution notes: Red run verified missing endpoint module. Implemented ca
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Task 4: added Calendar API schemas and thin FastAPI router for local calendars, memberships, items, agenda views, annotations, links, provider-item copy, reminder handoff, and external account/binding/sync placeholders. Registered the calendar route in content and minimal router groups. Hardened raw RRULE parsing so unsupported keys and invalid numeric/UNTIL values are surfaced as CalendarValidationError/client errors instead of raw ValueError/500. Added permission-aware owner checks for external account/binding/sync placeholder routes. Verification: red API test failed on missing endpoint first; additional external placeholder ownership tests failed before the guard and passed after it. Final runs passed: calendar API integration 16 passed, OpenAPI config/jobs 4 passed, Calendar unit/property suite 56 passed, Bandit exited 0 with results [].
+Implemented Task 4: added Calendar API schemas and thin FastAPI router for local calendars, memberships, items, agenda views, annotations, links, provider-item copy, reminder handoff, and external account/binding/sync placeholders. Registered the calendar route in content and minimal router groups. Hardened raw RRULE parsing so unsupported keys and invalid numeric/UNTIL values are surfaced as CalendarValidationError/client errors instead of raw ValueError/500. Added permission-aware owner checks for external account/binding/sync placeholder routes. Spec-compliance follow-up: expanded the membership API integration test to cover owner-managed add/list/remove for viewer, editor, and commenter roles, and added non-owner denial checks for add, list, and remove management paths. Verification: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/integration/test_calendar_api.py -v passed with 16 tests for this follow-up. No app code changed in this follow-up, so Bandit was not rerun.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
