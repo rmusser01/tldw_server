@@ -276,7 +276,8 @@ class CalendarSecretStore:
         conn.execute(
             """
             UPDATE calendar_external_account_secrets
-            SET deleted_at = ?
+            SET encrypted_payload = '',
+                deleted_at = ?
             WHERE secret_ref = ? AND deleted_at IS NULL
             """,
             (_utcnow_iso(), secret_ref),
@@ -412,7 +413,7 @@ class CalendarDatabase:
                     source_ctag TEXT,
                     source_payload_json TEXT,
                     source_updated_at TEXT,
-                    copied_from_item_id INTEGER REFERENCES calendar_items(id),
+                    copied_from_item_id INTEGER REFERENCES calendar_items(id) ON DELETE SET NULL,
                     linked_projection_type TEXT,
                     linked_projection_id TEXT,
                     deleted_at TEXT,
@@ -983,6 +984,7 @@ class CalendarDatabase:
             ids = [int(row["id"]) for row in rows]
             if not ids:
                 return 0
+            self._detach_copied_items_from_provider_items(conn, ids)
             placeholders = ", ".join("?" for _ in ids)
             conn.execute(
                 f"DELETE FROM calendar_items WHERE id IN ({placeholders})",  # nosec B608
@@ -1567,6 +1569,7 @@ class CalendarDatabase:
         destructive: bool,
     ) -> None:
         if destructive:
+            self._detach_copied_items_for_binding(conn, binding_id)
             conn.execute(
                 """
                 DELETE FROM calendar_items
@@ -1583,6 +1586,39 @@ class CalendarDatabase:
             WHERE external_binding_id = ? AND provider_owned = 1
             """,
             (remote_deleted_at, remote_deleted_at, binding_id),
+        )
+
+    def _detach_copied_items_for_binding(self, conn: sqlite3.Connection, binding_id: int) -> None:
+        conn.execute(
+            """
+            UPDATE calendar_items
+            SET copied_from_item_id = NULL,
+                updated_at = ?
+            WHERE copied_from_item_id IN (
+                SELECT id FROM calendar_items
+                WHERE external_binding_id = ? AND provider_owned = 1
+            )
+            """,
+            (_utcnow_iso(), binding_id),
+        )
+
+    def _detach_copied_items_from_provider_items(
+        self,
+        conn: sqlite3.Connection,
+        item_ids: Iterable[int],
+    ) -> None:
+        ids = list(item_ids)
+        if not ids:
+            return
+        placeholders = ", ".join("?" for _ in ids)
+        conn.execute(
+            f"""
+            UPDATE calendar_items
+            SET copied_from_item_id = NULL,
+                updated_at = ?
+            WHERE copied_from_item_id IN ({placeholders})
+            """,  # nosec B608
+            (_utcnow_iso(), *ids),
         )
 
     def _get_calendar_row(
