@@ -2397,6 +2397,7 @@ const NotesManagerPage: React.FC = () => {
         toggleTaskCheckboxLocal={ed.toggleTaskCheckboxLocal}
         toggleTaskCheckboxStatus={ed.toggleTaskCheckboxStatus}
         dismissTaskActivity={ed.dismissTaskActivity}
+        inspectTaskActivity={ed.inspectTaskActivity}
         setEditorMode={ed.setEditorMode}
         setEditorKeywords={kw.setEditorKeywords}
         setEditorCursorIndex={ed.setEditorCursorIndex}

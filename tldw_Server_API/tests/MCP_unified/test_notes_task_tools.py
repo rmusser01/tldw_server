@@ -296,7 +296,7 @@ async def test_notes_task_tools_are_discoverable_with_policy_metadata_and_tight_
         assert metadata["auth_required"] is True  # nosec B101
         assert metadata["requires_confirmation"] is True  # nosec B101
         assert metadata["agent_write_policy"] == "approval_required"  # nosec B101
-        assert metadata["autonomous_writes"] == "denied"  # nosec B101
+        assert metadata["autonomous_writes"] == "policy_allowed"  # nosec B101
         assert tools[name]["inputSchema"]["additionalProperties"] is False  # nosec B101
 
     assert module.is_write_tool_call("notes.tasks.list", {}, tool_def=tools["notes.tasks.list"]) is True  # nosec B101
@@ -550,7 +550,7 @@ async def test_notes_tasks_list_explicit_scope_fetches_high_allowed_offset() -> 
 
 
 @pytest.mark.asyncio
-async def test_agent_write_requires_confirmation_and_autonomous_write_is_denied_without_mutation() -> None:
+async def test_agent_write_requires_confirmation_and_autonomous_write_requires_scoped_permission() -> None:
     module, db, service = _module_with_fakes()
 
     needs_approval = await module.execute_tool(
@@ -568,7 +568,7 @@ async def test_agent_write_requires_confirmation_and_autonomous_write_is_denied_
     assert needs_approval["policy_decision"]["action"] == "require_approval"  # nosec B101
     assert denied["status"] == "denied"  # nosec B101
     assert denied["policy_decision"]["action"] == "deny"  # nosec B101
-    assert "activity_notice_required" in denied["policy_decision"]["reason_code"]  # nosec B101
+    assert "permission_required" in denied["policy_decision"]["reason_code"]  # nosec B101
     assert service.create_calls == 0  # nosec B101
     assert all(not task_id.startswith("task-created") for task_id in db.tasks)  # nosec B101
 
@@ -589,6 +589,22 @@ async def test_agent_write_requires_confirmation_and_autonomous_write_is_denied_
 
     assert allowed["id"] == "task-created-1"  # nosec B101
     assert service.create_calls == 1  # nosec B101
+
+    autonomous_allowed = await module.execute_tool(
+        "notes.tasks.create",
+        {"note_id": "note-1", "text": "Autonomous permitted task", "expected_note_version": 1},
+        context=_ctx(
+            agent_context={"agent_id": "agent-1", "autonomous": True},
+            _mcp_effective_tool_policy={
+                "enabled": True,
+                "approval_mode": "autonomous",
+                "capabilities": ["notes.tasks.write.autonomous"],
+            },
+        ),
+    )
+
+    assert autonomous_allowed["id"] == "task-created-2"  # nosec B101
+    assert service.create_calls == 2  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -857,6 +873,73 @@ async def test_mcp_task_writes_record_runtime_policy_and_idempotency_metadata(tm
             assert event["task_id"] == created["id"]  # nosec B101
             assert event["note_id"] == note_id  # nosec B101
         assert deleted["projection_status"] == "deleted"  # nosec B101
+    finally:
+        for handle in opened_dbs:
+            handle.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_autonomous_mcp_task_write_records_policy_metadata_and_unread_activity(tmp_path: Path) -> None:
+    db_path = tmp_path / "notes_task_mcp_autonomous_events.db"
+    db = CharactersRAGDB(str(db_path), client_id="mcp_task_autonomous_events_test")
+    try:
+        note_id = str(db.add_note(title="Inbox", content=""))
+        note = db.get_note_by_id(note_id)
+        assert note is not None  # nosec B101
+    finally:
+        db.close_all_connections()
+
+    opened_dbs: list[CharactersRAGDB] = []
+
+    def _open_db(_ctx: Any) -> CharactersRAGDB:
+        handle = CharactersRAGDB(str(db_path), client_id="mcp_task_autonomous_events_test")
+        opened_dbs.append(handle)
+        return handle
+
+    try:
+        module = NotesModule(ModuleConfig(name="notes"))
+        module._open_db = _open_db  # type: ignore[attr-defined]
+        context = _ctx(
+            agent_context={"agent_id": "agent-1", "autonomous": True},
+            _mcp_effective_tool_policy={
+                "enabled": True,
+                "approval_mode": "autonomous",
+                "capabilities": ["notes.tasks.write.autonomous"],
+                "sources": [{"assignment_id": 7}],
+                "selected_assignment_id": 7,
+            },
+        )
+
+        created = await module.execute_tool(
+            "notes.tasks.create",
+            {
+                "note_id": note_id,
+                "text": "Autonomous event metadata",
+                "expected_note_version": int(note["version"]),
+                "idempotency_key": "autonomous-create-key",
+            },
+            context=context,
+        )
+
+        event_db = CharactersRAGDB(str(db_path), client_id="mcp_task_autonomous_events_test")
+        opened_dbs.append(event_db)
+        events = event_db.list_task_activity(task_id=created["id"], limit=20)
+        created_events = [
+            event
+            for event in events
+            if event["event_type"] == "created"
+            and (event.get("new_value_json") or {}).get("idempotency_key") == "autonomous-create-key"
+        ]
+        assert len(created_events) == 1  # nosec B101
+        event = created_events[0]
+        assert event["actor_type"] == "agent"  # nosec B101
+        assert event["actor_id"] == "agent-1"  # nosec B101
+        assert event["tool_name"] == "notes.tasks.create"  # nosec B101
+        assert event["policy_mode"] == "autonomous"  # nosec B101
+        assert event["approval_id"] is None  # nosec B101
+
+        unread = event_db.list_recent_unread_task_activity(user_id="7", actor_type="agent", limit=20)
+        assert [row["id"] for row in unread] == [event["id"]]  # nosec B101
     finally:
         for handle in opened_dbs:
             handle.close_all_connections()

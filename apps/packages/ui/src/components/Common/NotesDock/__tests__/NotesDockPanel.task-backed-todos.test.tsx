@@ -166,6 +166,7 @@ const setupTaskBackedDockMock = (options: {
                   event_type: "status_changed",
                   actor_type: "agent",
                   actor_id: "agent-1",
+                  tool_name: "notes.tasks.set_status",
                   created_at: "2026-06-05T07:05:00Z"
                 }
               ]
@@ -320,7 +321,7 @@ describe("NotesDockPanel task-backed todos", () => {
     render(<NotesDockPanel />)
 
     expect(await screen.findByTestId("notes-dock-task-activity-notice")).toHaveTextContent(
-      "Agent updated this note's tasks."
+      "agent-1 via notes.tasks.set_status changed 1 task in Dock task note."
     )
     expect(dockContentEditor()).toHaveValue("- [ ] Draft PRD\nlocal note")
 

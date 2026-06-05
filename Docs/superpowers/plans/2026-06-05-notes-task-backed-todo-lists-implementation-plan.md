@@ -1082,7 +1082,7 @@ git commit -m "feat: add task-backed checklists to notes dock"
 - Test: `apps/packages/ui/src/components/Common/NotesDock/__tests__/NotesDockPanel.task-activity.test.tsx`
 - Optional E2E: `tests/e2e/notes-task-backed-todos.spec.ts` if this repo already has a running WebUI E2E harness in the active branch.
 
-- [ ] **Step 1: Write activity notice tests**
+- [x] **Step 1: Write activity notice tests**
 
 Cover:
 
@@ -1094,7 +1094,7 @@ Cover:
 - read/dismiss state is per user and backed by `task_event_read_state`
 - autonomous task write remains blocked until the activity delivery path is verified
 
-- [ ] **Step 2: Run activity tests to verify they fail**
+- [x] **Step 2: Run activity tests to verify they fail**
 
 Run:
 
@@ -1106,7 +1106,7 @@ bunx vitest run \
 
 Expected: FAIL until activity UI is complete.
 
-- [ ] **Step 3: Implement activity notice behavior**
+- [x] **Step 3: Implement activity notice behavior**
 
 Use the task activity endpoint. Keep UI concise:
 
@@ -1120,7 +1120,7 @@ No global notification center in v1.
 
 Use `task_event_read_state` for per-user read/dismiss state. Do not store read/dismiss flags directly on `task_events`, because the same event can be unread for one user and dismissed for another.
 
-- [ ] **Step 4: Run focused frontend tests**
+- [x] **Step 4: Run focused frontend tests**
 
 Run:
 
@@ -1134,7 +1134,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 5: Enable autonomous MCP writes after activity delivery passes**
+- [x] **Step 5: Enable autonomous MCP writes after activity delivery passes**
 
 Only after Step 4 activity UI tests pass:
 
@@ -1143,7 +1143,7 @@ Only after Step 4 activity UI tests pass:
 - add/extend MCP tests proving autonomous allowed policy succeeds and records actor/tool/policy metadata
 - keep denied autonomous policy tests from Task 5 passing
 
-- [ ] **Step 6: Run focused backend tests**
+- [x] **Step 6: Run focused backend tests**
 
 Run:
 
@@ -1160,7 +1160,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Run Bandit on touched backend scope**
+- [x] **Step 7: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1177,7 +1177,7 @@ python -m bandit -r \
 
 Expected: PASS or only documented pre-existing/non-applicable findings.
 
-- [ ] **Step 8: Run OpenAPI guard if frontend paths changed**
+- [x] **Step 8: Run OpenAPI guard if frontend paths changed**
 
 Run from `apps/packages/ui`:
 
@@ -1187,7 +1187,9 @@ bun run verify:openapi
 
 Expected: PASS. If it fails because the generated spec has not been refreshed, update the checked-in path guard or snapshot according to the verifier output.
 
-- [ ] **Step 9: Run browser smoke when dev server is available**
+- [x] **Step 9: Run browser smoke when dev server is available**
+
+Skipped for this slice: root `tests/e2e` is absent in this checkout and no running WebUI dev server was available. The equivalent note/task activity flows were covered by focused Vitest UI tests and backend MCP/API tests.
 
 Scenario:
 
@@ -1207,7 +1209,7 @@ Scenario:
 7. Simulate MCP/agent activity response and verify activity notice appears.
 8. Simulate an allowed autonomous MCP task status update and verify it writes an event before the UI marks it read.
 
-- [ ] **Step 10: Commit final UI/activity slice**
+- [x] **Step 10: Commit final UI/activity slice**
 
 ```bash
 git add \
@@ -1222,7 +1224,7 @@ git commit -m "feat: surface notes task activity"
 
 ## Final Verification
 
-- [ ] **Step 1: Run all focused tests**
+- [x] **Step 1: Run all focused tests**
 
 ```bash
 source .venv/bin/activate
@@ -1245,6 +1247,12 @@ bunx vitest run \
   apps/packages/ui/src/components/Common/NotesDock/__tests__/NotesDockPanel.task-activity.test.tsx
 ```
 
+Results for Task 9:
+
+- `python -m pytest tldw_Server_API/tests/Notes_Tasks/unit/test_markdown_parser.py tldw_Server_API/tests/Notes_Tasks/unit/test_reconciler.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_task_store.py tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_api.py tldw_Server_API/tests/MCP_unified/test_notes_task_tools.py -v`: 167 passed, 7 warnings.
+- `bunx vitest run src/services/__tests__/notes-tasks.test.ts src/components/Notes/__tests__/task-markdown.test.ts src/components/Notes/__tests__/TaskChecklistPreview.test.tsx src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx src/components/Notes/__tests__/NotesManagerPage.task-activity.test.tsx src/components/Common/NotesDock/__tests__/NotesDockPanel.task-backed-todos.test.tsx src/components/Common/NotesDock/__tests__/NotesDockPanel.task-activity.test.tsx`: 7 files passed, 20 tests passed.
+- Broader backend command including `tldw_Server_API/tests/Services/test_router_groups_contract.py`: failed in unrelated dirty router contract tests expecting missing `tldw_Server_API.app.api.v1.router_groups.selection` and route-key behavior; task-focused backend tests passed.
+
 - [ ] **Step 2: Run broader regression tests if time allows**
 
 ```bash
@@ -1253,7 +1261,7 @@ python -m pytest tldw_Server_API/tests/Notes_NEW tldw_Server_API/tests/MCP_unifi
 bunx vitest run apps/packages/ui/src/components/Notes apps/packages/ui/src/components/Common/NotesDock
 ```
 
-- [ ] **Step 3: Run Bandit**
+- [x] **Step 3: Run Bandit**
 
 ```bash
 source .venv/bin/activate
@@ -1266,13 +1274,15 @@ python -m bandit -r \
   -f json -o /tmp/bandit_notes_tasks.json
 ```
 
-- [ ] **Step 4: Final commit if any verification-only fixes were made**
+- [x] **Step 4: Final commit if any verification-only fixes were made**
 
 ```bash
 git status --short
 git add <only task-related changed files>
 git commit -m "test: verify notes task-backed todos"
 ```
+
+Task 9 commit message: `feat: surface notes task activity`.
 
 ## Known Risks To Watch During Implementation
 

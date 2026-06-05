@@ -99,6 +99,9 @@ export type NoteTaskActivityEvent = {
   event_type: string
   actor_type: string
   actor_id?: string | null
+  tool_name?: string | null
+  policy_mode?: string | null
+  approval_id?: string | null
   old_value?: Record<string, unknown> | null
   new_value?: Record<string, unknown> | null
   created_at: string

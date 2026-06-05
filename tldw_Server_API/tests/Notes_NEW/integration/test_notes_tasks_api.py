@@ -648,6 +648,9 @@ def test_recent_activity_returns_unread_agent_events_and_supports_dismissal(
         event_type="updated",
         actor_type="agent",
         actor_id="assistant",
+        tool_name="notes.tasks.update",
+        policy_mode="autonomous",
+        approval_id="approval-1",
         new_value={"text": "Agent proposal"},
     )
     db.record_task_event(
@@ -666,6 +669,9 @@ def test_recent_activity_returns_unread_agent_events_and_supports_dismissal(
     assert len(payload["events"]) == 1
     event = payload["events"][0]
     assert event["actor_type"] == "agent"
+    assert event["tool_name"] == "notes.tasks.update"
+    assert event["policy_mode"] == "autonomous"
+    assert event["approval_id"] == "approval-1"
     assert event["read_at"] is None
     assert event["dismissed_at"] is None
 
