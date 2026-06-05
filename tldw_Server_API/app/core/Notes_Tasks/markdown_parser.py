@@ -20,7 +20,7 @@ _CHECKLIST_RE = re.compile(
 _FENCE_RE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})")
 _INDENTED_FENCE_RE = re.compile(r"^(?P<indent>[ \t]+)(?P<fence>`{3,}|~{3,})")
 _UNORDERED_LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?:[ \t]+.*)?$")
-_ORDERED_LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)\d+\.[ \t]+.*$")
+_ORDERED_LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)\d+[\.)][ \t]+.*$")
 _TOKEN_RE = re.compile(r"@(?P<name>[A-Za-z][A-Za-z0-9_-]*)\((?P<value>[^)]*)\)")
 _ESTIMATE_RE = re.compile(r"^\d+[mhd]$")
 _DUE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -28,6 +28,7 @@ _ALLOWED_TOKENS = {"due", "priority", "estimate"}
 _PRIORITIES = {"high", "medium", "low"}
 _ROLLING_HASH_BASE = 257
 _ROLLING_HASH_MODULUS = (1 << 127) - 1
+_LIST_FENCE_CLOSE_EXTRA_INDENT = 1
 
 
 @dataclass(frozen=True)
@@ -215,7 +216,10 @@ def _is_closing_fence(raw_line: str, active_fence: _Fence) -> bool:
     if fence_marker.char != active_fence.char or fence_marker.length < active_fence.length:
         return False
 
-    if active_fence.allow_indented_close and fence_marker.indent_width > active_fence.indent_width:
+    if (
+        active_fence.allow_indented_close
+        and fence_marker.indent_width > active_fence.indent_width + _LIST_FENCE_CLOSE_EXTRA_INDENT
+    ):
         return False
 
     stripped = raw_line.strip()
