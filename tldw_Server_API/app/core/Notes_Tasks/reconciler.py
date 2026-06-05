@@ -197,12 +197,10 @@ class NotesTaskReconciler:
         note_version: int,
         content: str,
     ) -> None:
-        cursor = db.task_store._read(
-            "SELECT id, version, content, deleted FROM notes WHERE id = ?",
-            (note_id,),
+        note = db.task_store.get_note_reconciliation_snapshot(
+            note_id=note_id,
             conn=conn,
         )
-        note = cursor.fetchone()
         if note is None or bool(note["deleted"]):
             raise ConflictError("Note not found for task reconciliation.", entity="notes", entity_id=note_id)
         if int(note["version"]) != int(note_version):

@@ -57,6 +57,12 @@ def _tasks_by_text(db: CharactersRAGDB, note_id: str) -> dict[str, dict]:
     return {task["text"]: task for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100)}
 
 
+def _single_note_by_title(db: CharactersRAGDB, title: str) -> dict:
+    matches = [note for note in db.list_notes(limit=20) if note["title"] == title]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def test_note_create_returns_saved_note_when_reconciliation_raises(
     notes_tasks_client: tuple[TestClient, CharactersRAGDB],
     monkeypatch: pytest.MonkeyPatch,
@@ -193,6 +199,78 @@ def test_title_only_patch_advances_reconciliation_state_without_changing_tasks(
     assert patched_tasks["Alpha"]["status"] == original_tasks["Alpha"]["status"]
     assert patched_tasks["Beta"]["id"] == original_tasks["Beta"]["id"]
     assert patched_tasks["Beta"]["status"] == original_tasks["Beta"]["status"]
+
+
+def test_bulk_create_reconciles_checklist_tasks_for_created_note(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_client
+
+    response = client.post(
+        "/api/v1/notes/bulk",
+        json={
+            "notes": [
+                {
+                    "title": "Bulk Tasks",
+                    "content": "- [ ] Bulk Alpha\n- [x] Bulk Beta\n",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["created_count"] == 1
+    assert payload["failed_count"] == 0
+    created_note = payload["results"][0]["note"]
+    note_id = created_note["id"]
+    state = db.get_reconciliation_state(note_id)
+    tasks = _tasks_by_text(db, note_id)
+
+    assert state is not None
+    assert state["note_version"] == created_note["version"]
+    assert state["status"] == "clean"
+    assert {text: task["status"] for text, task in tasks.items()} == {
+        "Bulk Alpha": "open",
+        "Bulk Beta": "done",
+    }
+
+
+def test_markdown_import_reconciles_checklist_tasks_for_created_note(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_client
+
+    response = client.post(
+        "/api/v1/notes/import",
+        json={
+            "items": [
+                {
+                    "file_name": "import-tasks.md",
+                    "format": "markdown",
+                    "content": "# Import Tasks\n- [ ] Imported Alpha\n- [x] Imported Beta\n",
+                }
+            ],
+            "duplicate_strategy": "create_copy",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["detected_notes"] == 1
+    assert payload["created_count"] == 1
+    assert payload["failed_count"] == 0
+    imported_note = _single_note_by_title(db, "Import Tasks")
+    state = db.get_reconciliation_state(imported_note["id"])
+    tasks = _tasks_by_text(db, imported_note["id"])
+
+    assert state is not None
+    assert state["note_version"] == imported_note["version"]
+    assert state["status"] == "clean"
+    assert {text: task["status"] for text, task in tasks.items()} == {
+        "Imported Alpha": "open",
+        "Imported Beta": "done",
+    }
 
 
 def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(

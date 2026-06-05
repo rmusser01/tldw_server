@@ -209,6 +209,21 @@ class TaskStore:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def get_note_reconciliation_snapshot(
+        self,
+        *,
+        note_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
+        """Return note fields needed to validate task reconciliation input."""
+        cursor = self._read(
+            "SELECT id, version, content, deleted FROM notes WHERE id = ?",
+            (note_id,),
+            conn=conn,
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
     def list_live_projected_tasks(
         self,
         *,
