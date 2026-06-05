@@ -183,6 +183,41 @@ def test_parse_does_not_include_ordered_list_checkboxes() -> None:
     assert result.items[0].locator.line_number == 2
 
 
+def test_parse_nested_unordered_checklist_under_ordered_parent() -> None:
+    markdown = "1. Parent\n    - [ ] child\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["child"]
+    assert result.items[0].locator.line_number == 2
+
+
+def test_parse_nested_unordered_checklist_under_multi_digit_ordered_parent() -> None:
+    markdown = "10. Parent\n    - [ ] child\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["child"]
+    assert result.items[0].locator.line_number == 2
+
+
+def test_parse_ordered_parent_nested_fence_then_real_unordered_task() -> None:
+    markdown = "1. Parent\n" "    ```\n" "    - [ ] should be code\n" "    ```\n" "    - [ ] real nested task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["real nested task"]
+    assert result.items[0].locator.line_number == 5
+
+
+def test_parse_direct_ordered_list_checkbox_remains_unparsed() -> None:
+    markdown = "1. [ ] Task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert result.items == []
+
+
 def test_parse_supports_checked_markers_and_bullet_variants() -> None:
     markdown = "* [X] Done with star\n  + [ ] Open with plus\n- [x] Done with dash\n"
 
