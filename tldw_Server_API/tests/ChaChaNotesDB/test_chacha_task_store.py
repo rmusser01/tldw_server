@@ -79,6 +79,28 @@ def test_create_task_record_and_list_by_note(db: CharactersRAGDB) -> None:
     assert [row["id"] for row in listed] == ["task-1"]  # nosec B101
 
 
+def test_list_helpers_clamp_negative_limits(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    for index in range(3):
+        _create_task(db, note_id, task_id=f"task-{index}")
+
+    assert len(db.list_tasks(limit=-10)) == 1  # nosec B101
+    assert len(db.list_task_activity(limit=-10)) == 1  # nosec B101
+
+
+def test_candidate_notes_for_task_discovery_clamps_oversized_limits(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(3):
+        _create_note(db, content=f"- [ ] Review source {index}\n")
+    monkeypatch.setattr(db.task_store, "_MAX_LIMIT", 2, raising=False)
+
+    candidates = db.candidate_notes_for_task_discovery(limit=10_000)
+
+    assert len(candidates) == 2  # nosec B101
+
+
 def test_update_status_uses_optimistic_locking(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -159,6 +181,30 @@ def test_reopen_clears_completed_at_and_records_event_history(db: CharactersRAGD
     assert [event["new_value_json"]["status"] for event in status_events] == ["done", "open"]  # nosec B101
 
 
+def test_update_task_record_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    deleted = db.soft_delete_task(
+        task_id="task-1",
+        expected_version=1,
+        allow_record_only=True,
+        actor_type="user",
+        actor_id="user-1",
+    )
+
+    with pytest.raises(ConflictError, match="deleted"):
+        db.update_task_record(
+            task_id="task-1",
+            expected_version=deleted["version"],
+            status="open",
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["version"] == deleted["version"]  # nosec B101
+    assert task["deleted"] in (1, True)  # nosec B101
+
+
 def test_mark_task_unlinked_rejects_zero_rowcount_update(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
@@ -192,6 +238,32 @@ def test_mark_task_unlinked_rejects_zero_rowcount_update(
     assert projection_update_attempted is False  # nosec B101
 
 
+def test_mark_task_unlinked_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    deleted = db.soft_delete_task(
+        task_id="task-1",
+        expected_version=1,
+        projection_note_id=note_id,
+        projection_note_version=1,
+        projection_line_number=1,
+        actor_type="user",
+        actor_id="user-1",
+    )
+
+    with pytest.raises(ConflictError, match="deleted"):
+        db.mark_task_unlinked(
+            task_id="task-1",
+            expected_version=deleted["version"],
+            actor_type="system",
+            actor_id="reconciler",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "deleted"  # nosec B101
+    assert task["version"] == deleted["version"]  # nosec B101
+
+
 def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -222,6 +294,69 @@ def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeyp
     included = db.get_task("task-1", include_deleted=True)
     assert included is not None  # nosec B101
     assert included["deleted"] in (1, True)  # nosec B101
+
+
+def test_set_task_projection_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    deleted = db.soft_delete_task(
+        task_id="task-1",
+        expected_version=1,
+        projection_note_id=note_id,
+        projection_note_version=1,
+        projection_line_number=1,
+        actor_type="user",
+        actor_id="user-1",
+    )
+
+    with pytest.raises(ConflictError, match="deleted"):
+        db.set_task_projection(
+            task_id="task-1",
+            note_id=note_id,
+            note_version=2,
+            line_number=1,
+            start_offset=0,
+            end_offset=20,
+            normalized_text_hash="sha256:review-again",
+            occurrence_index=0,
+            block_fingerprint="block-2",
+            raw_line="- [ ] Review source",
+            has_child_content=False,
+            projection_status="live",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "deleted"  # nosec B101
+    assert task["version"] == deleted["version"]  # nosec B101
+
+
+def test_set_task_projection_requires_task_note_ownership(db: CharactersRAGDB) -> None:
+    owning_note_id = _create_note(db, content="- [ ] Owning note\n")
+    other_note_id = _create_note(db, content="- [ ] Other note\n")
+    _create_task(db, owning_note_id)
+
+    with pytest.raises(ConflictError, match="owning note"):
+        db.set_task_projection(
+            task_id="task-1",
+            note_id=other_note_id,
+            note_version=1,
+            line_number=1,
+            start_offset=0,
+            end_offset=16,
+            normalized_text_hash="sha256:other",
+            occurrence_index=0,
+            block_fingerprint="block-other",
+            raw_line="- [ ] Other note",
+            has_child_content=False,
+        )
+    deleted = db.soft_delete_task(
+        task_id="task-1",
+        expected_version=1,
+        allow_record_only=True,
+        actor_type="user",
+        actor_id="user-1",
+    )
+    assert deleted["deleted"] in (1, True)  # nosec B101
 
 
 def test_soft_delete_task_rejects_zero_rowcount_update(

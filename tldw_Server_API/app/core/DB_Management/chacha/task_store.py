@@ -30,6 +30,8 @@ class TaskStore:
     _EVENT_JSON_FIELDS = ("old_value_json", "new_value_json")
     _TASK_STATUSES = {"open", "done"}
     _PROJECTION_STATUSES = {"live", "unlinked", "deleted", "ambiguous"}
+    _MIN_LIMIT = 1
+    _MAX_LIMIT = 500
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -93,6 +95,11 @@ class TaskStore:
                 item[field] = None
         return item
 
+    def _clamp_limit(self, limit: int) -> int:
+        """Normalize caller-provided row limits before passing them into SQL."""
+        requested_limit = int(limit)
+        return min(max(requested_limit, self._MIN_LIMIT), self._MAX_LIMIT)
+
     def _decode_task_row(self, row: Any) -> dict[str, Any] | None:
         return self._decode_row(row, self._TASK_JSON_FIELDS)
 
@@ -154,6 +161,18 @@ class TaskStore:
                 f"Task version mismatch for ID '{task_id}'. Expected {expected_version}, found {task['version']}.",
                 entity="tasks",
                 entity_id=task_id,
+            )  # noqa: TRY003
+        return task
+
+    @staticmethod
+    def _require_active_task(task: dict[str, Any] | None, task_id: str) -> dict[str, Any]:
+        if task is None:
+            raise ConflictError(
+                f"Task with ID '{task_id}' not found.", entity="tasks", entity_id=task_id
+            )  # noqa: TRY003
+        if bool(task["deleted"]):
+            raise ConflictError(
+                f"Task with ID '{task_id}' is deleted.", entity="tasks", entity_id=task_id
             )  # noqa: TRY003
         return task
 
@@ -265,7 +284,7 @@ class TaskStore:
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY created_at ASC, id ASC LIMIT ?"
-        params.append(int(limit))
+        params.append(self._clamp_limit(limit))
         cursor = self._read(query, tuple(params))
         return [self._decode_task_row(row) for row in cursor.fetchall()]
 
@@ -292,9 +311,12 @@ class TaskStore:
         metadata_json = self._json_dumps(metadata, "metadata") if metadata is not None else None
 
         def _execute_update(transaction_conn: TaskConnection) -> dict[str, Any]:
-            old = self._require_expected_version(
-                self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
-                expected_version,
+            old = self._require_active_task(
+                self._require_expected_version(
+                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    expected_version,
+                    task_id,
+                ),
                 task_id,
             )
             now = self._db._get_current_utc_timestamp_iso()
@@ -393,6 +415,30 @@ class TaskStore:
         now = self._db._get_current_utc_timestamp_iso()
 
         def _execute_projection(transaction_conn: TaskConnection) -> dict[str, Any]:
+            task = self._require_active_task(
+                self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                task_id,
+            )
+            if task["note_id"] != note_id:
+                raise ConflictError(
+                    f"Task projection note does not match owning note for task '{task_id}'.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
+            update_cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE tasks
+                   SET projection_status = ?,
+                       updated_at = ?
+                 WHERE id = ? AND note_id = ? AND deleted = ?
+                """,
+                (normalized_projection_status, now, task_id, note_id, self._deleted_value(False)),
+            )
+            if getattr(update_cursor, "rowcount", None) == 0:
+                raise ConflictError(
+                    f"Task with ID '{task_id}' is deleted.", entity="tasks", entity_id=task_id
+                )  # noqa: TRY003
             self._execute(
                 transaction_conn,
                 """
@@ -432,11 +478,6 @@ class TaskStore:
                     now,
                 ),
             )
-            self._execute(
-                transaction_conn,
-                "UPDATE tasks SET projection_status = ?, updated_at = ? WHERE id = ?",
-                (normalized_projection_status, now, task_id),
-            )
             projection = self._fetch_projection(task_id, conn=transaction_conn)
             if projection is None:
                 raise CharactersRAGDBError(f"Failed to read projection for task '{task_id}'.")  # noqa: TRY003
@@ -456,9 +497,12 @@ class TaskStore:
         """Mark a task's projection as unlinked after reconciliation."""
 
         def _execute_unlink(transaction_conn: TaskConnection) -> dict[str, Any]:
-            old = self._require_expected_version(
-                self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
-                expected_version,
+            old = self._require_active_task(
+                self._require_expected_version(
+                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    expected_version,
+                    task_id,
+                ),
                 task_id,
             )
             now = self._db._get_current_utc_timestamp_iso()
@@ -665,7 +709,7 @@ class TaskStore:
             query += " ORDER BY created_at ASC, rowid ASC LIMIT ?"
         else:
             query += " ORDER BY created_at ASC, id ASC LIMIT ?"
-        params.append(int(limit))
+        params.append(self._clamp_limit(limit))
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
 
@@ -841,7 +885,7 @@ class TaskStore:
                 "%- [x]%",
                 "%- [X]%",
                 "clean",
-                int(limit),
+                self._clamp_limit(limit),
             ),
         )
         return [dict(row) for row in cursor.fetchall()]
