@@ -573,7 +573,21 @@ class MCPServer:
                     })
                     logger.info("MCP filesystem module enabled by default; queuing FilesystemModule for registration")
 
-            # 6) Optional: Sandbox module (code interpreter) - disabled by default
+            # 6) Optional: Git module - disabled by default
+            if self._env_flag_enabled("MCP_ENABLE_GIT_MODULE"):
+                if not any(m.get("id") == "git" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "git",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module:GitModule",
+                        "enabled": True,
+                        "name": "Git",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
+
+            # 7) Optional: Sandbox module (code interpreter) - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
                 modules_to_load.append({
                     "id": "sandbox",
@@ -586,7 +600,7 @@ class MCPServer:
                 })
                 logger.info("MCP_ENABLE_SANDBOX_MODULE=true; queuing SandboxModule for registration")
 
-            # 7) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
+            # 8) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
             browser_cdp_url = os.getenv("MCP_BROWSER_CDP_URL", "").strip()
             browser_cdp_disabled = self._env_flag_explicitly_disabled("MCP_ENABLE_BROWSER_CDP_MODULE")
             browser_cdp_enabled = self._env_flag_enabled("MCP_ENABLE_BROWSER_CDP_MODULE")
