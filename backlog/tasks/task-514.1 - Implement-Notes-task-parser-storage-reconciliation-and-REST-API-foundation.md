@@ -63,3 +63,9 @@ Parser/projection utilities checkpoint complete. Commits: b303ea276f24a9be9fb89f
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Storage/migration checkpoint complete. Commits: 7d5ac09b7855c2bf69fe2cb579369c92f269f4bb, 4281e84cad4a31da4e7da448957f7330dc77bb85, 324635e5ebec6dd937f564883776f85c5ffa9729, 5142d203717b753fcef4f96a36f1f6cba86ae299, 174241232693670f31e0478c6199fd865b2d94df, d9d71e971038b69ee0a2a0918277290e81e11eb2, 455370c458177960f280b87e43fb54be0fd93646, 57391be4469855c1f7e87faef0d9ada4c2242578, 36f653a59fd8176160ea3db30c2f01fa027cacc3, 1000fef8aa6f78c5e73dac2aa4b2e3f8d173cf45, a22dca9337c936f892e6137440349b42c784ac9f. Spec compliance review approved. Final code-quality review approved with no Critical, Important, or Minor issues. Local verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_chacha_task_store.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v48_tasks.py -v` -> 56 passed, 7 warnings. Bandit: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/chacha/task_store.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py -f json -o /tmp/bandit_notes_tasks_storage_final.json` -> 0 findings, 0 errors. Internal task table is `note_tasks` to avoid collision with Scheduler `tasks`; storage tests cover active-note write guards, projection drift/race handling, event/read-state/reconciliation error mapping, and migration table/check constraints.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
