@@ -961,6 +961,127 @@ class CalendarDatabase:
             rows = conn.execute(sql, tuple(params)).fetchall()
         return [self._item_from_row(row) for row in rows]
 
+    def list_items_for_expansion(
+        self,
+        *,
+        calendar_ids: Iterable[int],
+        window_start: str,
+        window_end: str,
+        include_deleted: bool = False,
+        include_remote_deleted: bool = False,
+    ) -> list[CalendarItemRow]:
+        ids = list(calendar_ids)
+        if not ids:
+            return []
+        placeholders = ", ".join("?" for _ in ids)
+        clauses = [
+            f"calendar_id IN ({placeholders})",  # nosec B608
+            """
+            (
+                (start_at IS NOT NULL AND COALESCE(end_at, start_at) >= ? AND start_at <= ?)
+                OR (due_at IS NOT NULL AND due_at >= ? AND due_at <= ?)
+                OR (
+                    EXISTS (
+                        SELECT 1 FROM calendar_recurrences r
+                        WHERE r.calendar_item_id = calendar_items.id
+                    )
+                    AND COALESCE(start_at, due_at) IS NOT NULL
+                    AND COALESCE(start_at, due_at) <= ?
+                )
+            )
+            """,
+        ]
+        params: list[Any] = [*ids, window_start, window_end, window_start, window_end, window_end]
+        if not include_deleted:
+            clauses.append("deleted_at IS NULL")
+        if not include_remote_deleted:
+            clauses.append("remote_deleted_at IS NULL")
+        sql = f"""
+            SELECT * FROM calendar_items
+            WHERE {' AND '.join(clauses)}
+            ORDER BY COALESCE(start_at, due_at) ASC, id ASC
+            """  # nosec B608
+        with self.connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [self._item_from_row(row) for row in rows]
+
+    def upsert_recurrence(
+        self,
+        *,
+        calendar_item_id: int,
+        rrule: str | None,
+        rdate_json: str | list[str] | None = None,
+        exdate_json: str | list[str] | None = None,
+        timezone: str | None = None,
+    ) -> CalendarRecurrenceRow:
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            self._get_item_row(conn, calendar_item_id, include_deleted=True)
+            existing = conn.execute(
+                """
+                SELECT * FROM calendar_recurrences
+                WHERE calendar_item_id = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (calendar_item_id,),
+            ).fetchone()
+            if existing is None:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO calendar_recurrences (
+                        calendar_item_id, rrule, rdate_json, exdate_json,
+                        timezone, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        calendar_item_id,
+                        rrule,
+                        _json_or_none(rdate_json),
+                        _json_or_none(exdate_json),
+                        timezone,
+                        now,
+                        now,
+                    ),
+                )
+                return self._get_recurrence_row(conn, int(cursor.lastrowid))
+            self._apply_update(
+                conn,
+                "calendar_recurrences",
+                "id",
+                int(existing["id"]),
+                {
+                    "rrule": rrule,
+                    "rdate_json": rdate_json,
+                    "exdate_json": exdate_json,
+                    "timezone": timezone,
+                },
+                {"rrule", "rdate_json", "exdate_json", "timezone"},
+            )
+            return self._get_recurrence_row(conn, int(existing["id"]))
+
+    def list_recurrences_for_items(
+        self,
+        calendar_item_ids: Iterable[int],
+    ) -> dict[int, CalendarRecurrenceRow]:
+        ids = list(calendar_item_ids)
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        sql = f"""
+            SELECT * FROM calendar_recurrences
+            WHERE calendar_item_id IN ({placeholders})
+            ORDER BY id ASC
+            """  # nosec B608
+        with self.connection() as conn:
+            rows = conn.execute(sql, tuple(ids)).fetchall()
+        recurrences: dict[int, CalendarRecurrenceRow] = {}
+        for row in rows:
+            recurrence = self._recurrence_from_row(row)
+            recurrences.setdefault(recurrence.calendar_item_id, recurrence)
+        return recurrences
+
     def upsert_provider_item(
         self,
         *,
@@ -1928,6 +2049,19 @@ class CalendarDatabase:
             raise CalendarItemNotFound(f"Calendar item not found: {item_id}")
         return self._item_from_row(row)
 
+    def _get_recurrence_row(
+        self,
+        conn: sqlite3.Connection,
+        recurrence_id: int,
+    ) -> CalendarRecurrenceRow:
+        row = conn.execute(
+            "SELECT * FROM calendar_recurrences WHERE id = ?",
+            (recurrence_id,),
+        ).fetchone()
+        if row is None:
+            raise CalendarItemNotFound(f"Calendar recurrence not found: {recurrence_id}")
+        return self._recurrence_from_row(row)
+
     def _get_annotation_row(
         self,
         conn: sqlite3.Connection,
@@ -2024,6 +2158,10 @@ class CalendarDatabase:
         data["provider_owned"] = bool(data["provider_owned"])
         data["all_day"] = bool(data["all_day"])
         return CalendarItemRow(**data)
+
+    @staticmethod
+    def _recurrence_from_row(row: sqlite3.Row) -> CalendarRecurrenceRow:
+        return CalendarRecurrenceRow(**dict(row))
 
     @staticmethod
     def _annotation_from_row(row: sqlite3.Row) -> CalendarAnnotationRow:

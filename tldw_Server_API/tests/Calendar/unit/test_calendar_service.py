@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import importlib
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import (
+    ScheduledTask,
+    ScheduledTaskListResponse,
+)
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.errors import (
     CalendarPermissionDenied,
@@ -53,6 +59,23 @@ def _create_provider_item(calendar_db: CalendarDatabase, *, owner_user_id: int =
         source_ctag="ctag-1",
     )
     return calendar, item
+
+
+def _view_service_module():
+    try:
+        return importlib.import_module("tldw_Server_API.app.core.Calendar.view_service")
+    except ModuleNotFoundError as exc:
+        pytest.fail(f"calendar view service module is missing: {exc}")
+
+
+class _ScheduledTasksStub:
+    def __init__(self, tasks: list[ScheduledTask]) -> None:
+        self.tasks = tasks
+        self.calls: list[int] = []
+
+    async def list_tasks(self, *, user_id: int) -> ScheduledTaskListResponse:
+        self.calls.append(user_id)
+        return ScheduledTaskListResponse(items=self.tasks, total=len(self.tasks))
 
 
 def test_viewer_cannot_edit_local_item(calendar_db):
@@ -483,3 +506,85 @@ def test_calendar_links_follow_calendar_permissions(calendar_db):
 
     assert links == [link]
     assert deleted_count == 1
+
+
+@pytest.mark.asyncio
+async def test_agenda_expands_recurring_local_items_from_persisted_recurrence(calendar_db):
+    view_service = _view_service_module()
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
+    item = service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="event",
+        title="Standup",
+        start_at=start.isoformat(),
+        end_at=(start + timedelta(minutes=30)).isoformat(),
+    )
+    calendar_db.upsert_recurrence(
+        calendar_item_id=item.id,
+        rrule=view_service.LocalRecurrenceRule(frequency="daily", count=3).to_rrule(),
+        timezone="UTC",
+    )
+
+    result = await view_service.CalendarViewService(
+        calendar_service=service,
+        scheduled_tasks_service=_ScheduledTasksStub([]),
+    ).agenda(
+        actor_user_id=1,
+        start_at=start - timedelta(days=1),
+        end_at=start + timedelta(days=5),
+        filters=view_service.CalendarViewFilters(calendar_ids=[calendar.id], include_scheduled_tasks=False),
+    )
+
+    standup_items = [item for item in result.items if item.title == "Standup"]
+    assert [item.start_at for item in standup_items] == [
+        "2026-06-05T09:00:00+00:00",
+        "2026-06-06T09:00:00+00:00",
+        "2026-06-07T09:00:00+00:00",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agenda_returns_read_only_scheduled_task_linked_projections(calendar_db):
+    view_service = _view_service_module()
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
+    in_window = ScheduledTask(
+        id="reminder:task-1",
+        primitive="reminder_task",
+        title="Review notes",
+        status="scheduled",
+        enabled=True,
+        next_run_at="2026-06-05T12:30:00+00:00",
+        edit_mode="native",
+    )
+    outside_window = ScheduledTask(
+        id="watchlist_job:99",
+        primitive="watchlist_job",
+        title="Outside scan",
+        status="scheduled",
+        enabled=True,
+        next_run_at="2026-07-05T12:30:00+00:00",
+        edit_mode="external",
+    )
+    scheduled_tasks = _ScheduledTasksStub([in_window, outside_window])
+
+    result = await view_service.CalendarViewService(
+        calendar_service=service,
+        scheduled_tasks_service=scheduled_tasks,
+    ).agenda(
+        actor_user_id=1,
+        start_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+        filters=view_service.CalendarViewFilters(calendar_ids=[calendar.id], include_scheduled_tasks=True),
+    )
+
+    projection = next(item for item in result.items if item.title == "Review notes")
+    assert scheduled_tasks.calls == [1]
+    assert projection.source_owner == "linked_projection"
+    assert projection.read_only_reason == "linked_projection"
+    assert projection.link.target_type == "scheduled_task"
+    assert projection.link.target_id == "reminder:task-1"
+    assert "Outside scan" not in {item.title for item in result.items}
