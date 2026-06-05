@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -19,7 +20,6 @@ if TYPE_CHECKING:
 _CHECKLIST_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?P<space>[ \t]+)\[(?P<marker>[ xX])\](?P<body_part>(?:[ \t]+(?P<body>.*)|[ \t]*))$"
 )
-_ALLOWLISTED_TOKEN_RE = re.compile(r"@(?P<name>due|priority|estimate)\((?P<value>[^)]*)\)", re.IGNORECASE)
 _METADATA_TOKEN_ORDER = ("due_date", "priority", "estimate")
 _METADATA_TOKEN_NAMES = {"due_date": "due", "priority": "priority", "estimate": "estimate"}
 
@@ -297,19 +297,12 @@ class NotesTaskService:
                 has_child_content=updated_parsed_item.has_child_content,
                 conn=conn,
             )
-            parsed = parse_note_checklists(
+            self.reconcile_note(
+                db=db,
                 note_id=str(note["id"]),
                 note_version=updated_note_version,
                 content=new_content,
-            )
-            warning_count = sum(len(item.warnings) for item in parsed.items)
-            db.set_reconciliation_state(
-                note_id=str(note["id"]),
-                note_version=updated_note_version,
-                status="clean" if warning_count == 0 else "warnings",
-                item_count=len(parsed.items),
-                warning_count=warning_count,
-                conn=conn,
+                actor=actor,
             )
             return updated_task
 
@@ -400,19 +393,12 @@ class NotesTaskService:
                 actor_id=actor.actor_id,
                 conn=conn,
             )
-            parsed = parse_note_checklists(
+            self.reconcile_note(
+                db=db,
                 note_id=str(note["id"]),
                 note_version=expected_note_version + 1,
                 content=new_content,
-            )
-            warning_count = sum(len(item.warnings) for item in parsed.items)
-            db.set_reconciliation_state(
-                note_id=str(note["id"]),
-                note_version=expected_note_version + 1,
-                status="clean" if warning_count == 0 else "warnings",
-                item_count=len(parsed.items),
-                warning_count=warning_count,
-                conn=conn,
+                actor=actor,
             )
             return deleted
 
@@ -480,6 +466,8 @@ class NotesTaskService:
             raise InputError("Task text cannot be empty.")
         if len(text) > 2000:
             raise InputError("Task text must be 2000 characters or fewer.")
+        if "\n" in text or "\r" in text:
+            raise InputError("Task text cannot contain newline characters.")
 
     @staticmethod
     def _validate_metadata(metadata: dict[str, Any]) -> None:
@@ -487,6 +475,21 @@ class NotesTaskService:
         unknown = sorted(set(metadata) - allowed)
         if unknown:
             raise InputError(f"Unsupported task metadata keys: {', '.join(unknown)}.")
+        due_date = metadata.get("due_date")
+        if due_date is not None:
+            if not isinstance(due_date, str):
+                raise InputError("Task due_date metadata must be a string.")
+            try:
+                date.fromisoformat(due_date)
+            except ValueError as exc:
+                raise InputError("Task due_date metadata must be a real ISO date.") from exc
+        priority = metadata.get("priority")
+        if priority is not None and priority not in {"high", "medium", "low"}:
+            raise InputError("Task priority metadata must be high, medium, or low.")
+        estimate = metadata.get("estimate")
+        if estimate is not None:
+            if not isinstance(estimate, str) or re.fullmatch(r"\d+[mhd]", estimate) is None:
+                raise InputError("Task estimate metadata must match '<number><m|h|d>'.")
 
     @staticmethod
     def _append_checklist_line(content: str, line: str) -> str:
@@ -521,8 +524,7 @@ class NotesTaskService:
             raise ConflictError("Task projection line is no longer a checklist item.", entity="tasks")
         marker = "x" if checked else " "
         if preserve_existing_body:
-            raw_body = match.group("body") or ""
-            base_text = self._strip_allowlisted_tokens(raw_body)
+            base_text = text.strip()
             body = self._render_body(text=base_text, metadata=metadata)
         else:
             body = self._render_body(text=text, metadata=metadata)
@@ -538,11 +540,6 @@ class NotesTaskService:
             f"{match.group('indent')}{match.group('bullet')}{match.group('space')}"
             f"[{marker}]{match.group('body_part')}"
         )
-
-    @staticmethod
-    def _strip_allowlisted_tokens(raw_body: str) -> str:
-        stripped = _ALLOWLISTED_TOKEN_RE.sub("", raw_body)
-        return re.sub(r"[ \t]{2,}", " ", stripped).strip()
 
     @staticmethod
     def _replace_projection_line(*, content: str, projection: dict[str, Any], new_line: str) -> str:

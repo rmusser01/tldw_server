@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService
 
 pytestmark = pytest.mark.integration
 
@@ -219,6 +220,43 @@ def test_status_update_preserves_unknown_checklist_tokens(
     assert response.json()["tasks"][0]["status"] == "done"
 
 
+def test_batch_status_update_rolls_back_when_later_item_conflicts(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha\n- [ ] Beta\n")
+    alpha = _task_by_text(db, note["id"], "Alpha")
+    beta = _task_by_text(db, note["id"], "Beta")
+
+    response = client.post(
+        "/api/v1/notes/tasks/status",
+        json={
+            "updates": [
+                {
+                    "task_id": alpha["id"],
+                    "status": "done",
+                    "expected_task_version": alpha["version"],
+                    "expected_note_version": note["version"],
+                },
+                {
+                    "task_id": beta["id"],
+                    "status": "done",
+                    "expected_task_version": beta["version"],
+                    "expected_note_version": note["version"],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    saved = db.get_note_by_id(note["id"])
+    assert saved is not None
+    assert saved["version"] == note["version"]
+    assert saved["content"] == "- [ ] Alpha\n- [ ] Beta\n"
+    assert _task_by_text(db, note["id"], "Alpha")["status"] == "open"
+    assert _task_by_text(db, note["id"], "Beta")["status"] == "open"
+
+
 def test_update_text_requires_expected_task_and_note_versions(
     notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
 ) -> None:
@@ -250,6 +288,118 @@ def test_update_text_requires_expected_task_and_note_versions(
     assert response.json()["text"] == "Beta"
 
 
+def test_update_projected_task_refreshes_sibling_projection(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha\n- [ ] Beta\n")
+    alpha = _task_by_text(db, note["id"], "Alpha")
+    beta = _task_by_text(db, note["id"], "Beta")
+
+    alpha_response = client.patch(
+        f"/api/v1/notes/tasks/{alpha['id']}",
+        json={
+            "text": "Alpha updated",
+            "expected_task_version": alpha["version"],
+            "expected_note_version": note["version"],
+        },
+    )
+    assert alpha_response.status_code == 200, alpha_response.text
+    saved = db.get_note_by_id(note["id"])
+    assert saved is not None
+    beta_after_alpha = db.get_task(beta["id"])
+    assert beta_after_alpha is not None
+    beta_projection = db.task_store._fetch_projection(beta["id"])
+    assert beta_projection is not None
+    assert beta_projection["note_version"] == saved["version"]
+
+    beta_response = client.patch(
+        f"/api/v1/notes/tasks/{beta['id']}",
+        json={
+            "text": "Beta updated",
+            "expected_task_version": beta_after_alpha["version"],
+            "expected_note_version": saved["version"],
+        },
+    )
+
+    assert beta_response.status_code == 200, beta_response.text
+    saved_after_beta = db.get_note_by_id(note["id"])
+    assert saved_after_beta is not None
+    assert saved_after_beta["content"] == "- [ ] Alpha updated\n- [ ] Beta updated\n"
+    assert len(db.list_tasks(note_id=note["id"], include_deleted=True, limit=20)) == 2
+
+
+def test_delete_projected_task_refreshes_sibling_projection(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha\n- [ ] Beta\n")
+    alpha = _task_by_text(db, note["id"], "Alpha")
+    beta = _task_by_text(db, note["id"], "Beta")
+
+    delete_response = client.request(
+        "DELETE",
+        f"/api/v1/notes/tasks/{alpha['id']}",
+        json={"expected_task_version": alpha["version"], "expected_note_version": note["version"]},
+    )
+    assert delete_response.status_code == 200, delete_response.text
+    saved = db.get_note_by_id(note["id"])
+    assert saved is not None
+    beta_after_delete = db.get_task(beta["id"])
+    assert beta_after_delete is not None
+    beta_projection = db.task_store._fetch_projection(beta["id"])
+    assert beta_projection is not None
+    assert beta_projection["note_version"] == saved["version"]
+
+    beta_response = client.patch(
+        f"/api/v1/notes/tasks/{beta['id']}",
+        json={
+            "text": "Beta updated",
+            "expected_task_version": beta_after_delete["version"],
+            "expected_note_version": saved["version"],
+        },
+    )
+
+    assert beta_response.status_code == 200, beta_response.text
+    saved_after_beta = db.get_note_by_id(note["id"])
+    assert saved_after_beta is not None
+    assert saved_after_beta["content"] == "- [ ] Beta updated\n"
+
+
+def test_create_task_rejects_newline_text(notes_tasks_api_client: tuple[TestClient, CharactersRAGDB]) -> None:
+    client, _db = notes_tasks_api_client
+    note = _create_note(client, content="Intro\n")
+
+    response = client.post(
+        f"/api/v1/notes/{note['id']}/tasks",
+        json={"text": "Alpha\n- [ ] Injected", "expected_note_version": note["version"]},
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_update_task_rejects_newline_text(notes_tasks_api_client: tuple[TestClient, CharactersRAGDB]) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha\n")
+    task = _task_by_text(db, note["id"], "Alpha")
+
+    response = client.patch(
+        f"/api/v1/notes/tasks/{task['id']}",
+        json={
+            "text": "Beta\r\n- [ ] Injected",
+            "expected_task_version": task["version"],
+            "expected_note_version": note["version"],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_service_validation_rejects_newline_text() -> None:
+    with pytest.raises(InputError):
+        NotesTaskService._validate_task_text("Alpha\n- [ ] Injected")
+
+
 def test_metadata_update_preserves_unknown_tokens(notes_tasks_api_client: tuple[TestClient, CharactersRAGDB]) -> None:
     client, db = notes_tasks_api_client
     note = _create_note(client, content="- [ ] Alpha @foo(bar) @priority(low)\n")
@@ -269,6 +419,69 @@ def test_metadata_update_preserves_unknown_tokens(notes_tasks_api_client: tuple[
     assert saved is not None
     assert saved["content"] == "- [ ] Alpha @foo(bar) @priority(high) @estimate(2h)\n"
     assert response.json()["metadata"] == {"estimate": "2h", "priority": "high"}
+
+
+def test_metadata_update_preserves_malformed_allowlisted_tokens(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha @due(not-a-date) @foo(bar) @priority(low)\n")
+    task = _task_by_text(db, note["id"], "Alpha @due(not-a-date) @foo(bar)")
+
+    response = client.patch(
+        f"/api/v1/notes/tasks/{task['id']}",
+        json={
+            "metadata": {"priority": "high", "estimate": "2h"},
+            "expected_task_version": task["version"],
+            "expected_note_version": note["version"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    saved = db.get_note_by_id(note["id"])
+    assert saved is not None
+    assert saved["content"] == "- [ ] Alpha @due(not-a-date) @foo(bar) @priority(high) @estimate(2h)\n"
+
+
+def test_metadata_rejects_unknown_keys(notes_tasks_api_client: tuple[TestClient, CharactersRAGDB]) -> None:
+    client, _db = notes_tasks_api_client
+    note = _create_note(client, content="Intro\n")
+
+    response = client.post(
+        f"/api/v1/notes/{note['id']}/tasks",
+        json={
+            "text": "Alpha",
+            "metadata": {"owner": "tester"},
+            "expected_note_version": note["version"],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_metadata_rejects_impossible_due_date(notes_tasks_api_client: tuple[TestClient, CharactersRAGDB]) -> None:
+    client, _db = notes_tasks_api_client
+    note = _create_note(client, content="Intro\n")
+
+    response = client.post(
+        f"/api/v1/notes/{note['id']}/tasks",
+        json={
+            "text": "Alpha",
+            "metadata": {"due_date": "2026-02-31"},
+            "expected_note_version": note["version"],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_service_validation_rejects_invalid_metadata_values() -> None:
+    with pytest.raises(InputError):
+        NotesTaskService._validate_metadata({"due_date": "2026-02-31"})
+    with pytest.raises(InputError):
+        NotesTaskService._validate_metadata({"priority": "urgent"})
+    with pytest.raises(InputError):
+        NotesTaskService._validate_metadata({"estimate": "soon"})
 
 
 def test_delete_projected_task_removes_line_transactionally(

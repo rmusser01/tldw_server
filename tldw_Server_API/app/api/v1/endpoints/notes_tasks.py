@@ -200,18 +200,20 @@ async def set_task_status(
 ) -> TaskStatusBatchResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.update")
     try:
-        tasks = [
-            _TASK_SERVICE.update_task(
-                db=db,
-                task_id=item.task_id,
-                expected_task_version=item.expected_task_version,
-                expected_note_version=item.expected_note_version,
-                status=item.status,
-                actor=_actor(current_user),
-                record_only=item.record_only,
-            )
-            for item in request.updates
-        ]
+        tasks = []
+        with db.transaction():
+            for item in request.updates:
+                tasks.append(
+                    _TASK_SERVICE.update_task(
+                        db=db,
+                        task_id=item.task_id,
+                        expected_task_version=item.expected_task_version,
+                        expected_note_version=item.expected_note_version,
+                        status=item.status,
+                        actor=_actor(current_user),
+                        record_only=item.record_only,
+                    )
+                )
         return TaskStatusBatchResponse(tasks=[_task_response(db, task) for task in tasks])
     except Exception as exc:
         _handle_task_error(exc)
