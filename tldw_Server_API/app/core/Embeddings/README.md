@@ -3,6 +3,7 @@
 ## 1. Descriptive of Current Feature Set
 
 - Purpose: OpenAI-compatible embeddings API with production safeguards and a Redis Streams worker for media embeddings stages (Jobs remains the root status/billing record). Focus on reliability (circuit breaker, retries), performance (TTL cache, connection pooling, batching), and observability (metrics, health, DLQ tools).
+- Covering ADR: `Docs/ADR/022-embeddings-api-and-media-pipeline.md`
 - Capabilities:
   - OpenAI-compatible embeddings endpoint with provider auto-detect (OpenAI, HuggingFace/Transformers, ONNX, Local API)
   - TTL cache, request batching, connection pooling, per-provider circuit breakers
