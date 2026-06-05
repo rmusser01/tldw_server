@@ -44,6 +44,45 @@ def test_parse_nested_checklist_lines_as_tasks() -> None:
     assert result.items[1].has_child_content is True
 
 
+def test_parse_ignores_checklist_markers_inside_backtick_fences() -> None:
+    markdown = "Before\n```\n- [ ] code task\n```\n- [ ] real task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["real task"]
+    assert result.items[0].locator.line_number == 5
+
+
+def test_parse_ignores_checklist_markers_inside_tilde_fences() -> None:
+    markdown = "Before\n~~~python\n- [x] code task\n~~~\n- [x] real task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [(item.checked, item.text) for item in result.items] == [(True, "real task")]
+    assert result.items[0].locator.line_number == 5
+
+
+def test_parse_ignores_top_level_indented_code_checklist_markers() -> None:
+    markdown = "Before\n    - [ ] code task\n- [ ] real task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["real task"]
+    assert result.items[0].locator.line_number == 3
+
+
+def test_parse_keeps_actual_nested_checklist_items_at_code_indent() -> None:
+    markdown = "- [ ] Parent\n    - [ ] Nested task at four spaces\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == [
+        "Parent",
+        "Nested task at four spaces",
+    ]
+    assert result.items[1].locator.line_number == 2
+
+
 def test_parse_supports_checked_markers_and_bullet_variants() -> None:
     markdown = "* [X] Done with star\n  + [ ] Open with plus\n- [x] Done with dash\n"
 
