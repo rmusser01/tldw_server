@@ -9,6 +9,7 @@ import {
   BookText,
   Bot,
   BrainCircuitIcon,
+  CalendarDays,
   CombineIcon,
   CpuIcon,
   Gauge,
@@ -184,6 +185,7 @@ const OptionWatchlists = lazy(() => import("./option-watchlists"))
 const OptionIntegrations = lazy(() => import("./option-integrations"))
 const OptionAdminIntegrations = lazy(() => import("./option-admin-integrations"))
 const OptionScheduledTasks = lazy(() => import("./option-scheduled-tasks"))
+const OptionCalendar = lazy(() => import("./option-calendar"))
 const OptionKanbanPlayground = lazy(() => import("./option-kanban-playground"))
 const OptionDataTables = lazy(() => import("./option-data-tables"))
 const OptionCollections = lazy(() => import("./option-collections"))
@@ -611,6 +613,17 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       labelToken: "option:header.scheduledTasks",
       icon: ListTodo,
       order: 3.4
+    }
+  },
+  {
+    kind: "options",
+    path: "/calendar",
+    element: <OptionCalendar />,
+    nav: {
+      group: "workspace",
+      labelToken: "option:calendar.nav",
+      icon: CalendarDays,
+      order: 3.5
     }
   },
   { kind: "options", path: "/kanban", element: <OptionKanbanPlayground /> },

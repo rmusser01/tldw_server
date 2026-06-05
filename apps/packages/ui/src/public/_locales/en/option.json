@@ -3014,6 +3014,9 @@
   "header_scheduledTasks": {
     "message": "Scheduled Tasks"
   },
+  "calendar.nav": {
+    "message": "Calendar"
+  },
   "header_adminIntegrations": {
     "message": "Workspace Integrations"
   },
