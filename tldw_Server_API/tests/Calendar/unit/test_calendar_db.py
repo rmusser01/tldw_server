@@ -70,7 +70,7 @@ def test_remote_deleted_provider_tombstones_are_hidden_from_window_queries(calen
         user_id=1,
         provider="caldav",
         display_name="Fastmail",
-        secret_ref="calendar-secret-1",
+        secret_ref=None,
         account_metadata_json='{"principal": "user@example.com"}',
     )
     binding = calendar_db.create_external_binding(
@@ -174,7 +174,7 @@ def test_external_binding_stores_window_and_provider_capabilities(calendar_db):
         user_id=1,
         provider="caldav",
         display_name="Fastmail",
-        secret_ref="calendar-secret-1",
+        secret_ref=None,
     )
 
     binding = calendar_db.create_external_binding(
@@ -192,6 +192,227 @@ def test_external_binding_stores_window_and_provider_capabilities(calendar_db):
     assert binding.provider_capabilities_json == '{"read_only": true, "supports_vevent": true}'
 
 
+@pytest.mark.parametrize(
+    ("calendar_owner_user_id", "org_id"),
+    [
+        (1, 42),
+        (2, None),
+    ],
+)
+def test_external_binding_rejects_org_or_other_user_calendar(
+    calendar_db,
+    calendar_owner_user_id,
+    org_id,
+):
+    calendar = calendar_db.create_calendar(
+        tenant_id="default",
+        owner_user_id=calendar_owner_user_id,
+        org_id=org_id,
+        name="Shared Calendar",
+        timezone="UTC",
+        color="#2563eb",
+    )
+    account = calendar_db.create_external_account(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        display_name="Fastmail",
+        secret_ref=None,
+    )
+
+    with pytest.raises(CalendarValidationError):
+        calendar_db.create_external_binding(
+            account_id=account.id,
+            calendar_id=calendar.id,
+            remote_calendar_id="remote-calendar",
+        )
+
+
+def test_provider_upsert_rejects_calendar_id_that_does_not_match_binding(calendar_db):
+    calendar = _create_calendar(calendar_db)
+    other_calendar = calendar_db.create_calendar(
+        tenant_id="default",
+        owner_user_id=1,
+        org_id=None,
+        name="Other Personal Calendar",
+        timezone="UTC",
+        color="#16a34a",
+    )
+    account = calendar_db.create_external_account(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        display_name="Fastmail",
+        secret_ref=None,
+    )
+    binding = calendar_db.create_external_binding(
+        account_id=account.id,
+        calendar_id=calendar.id,
+        remote_calendar_id="remote-calendar",
+    )
+
+    with pytest.raises(CalendarValidationError):
+        calendar_db.upsert_provider_item(
+            calendar_id=other_calendar.id,
+            external_binding_id=binding.id,
+            source_uid="remote-event-1",
+            title="Imported meeting",
+            start_at=datetime(2026, 6, 5, 17, 0, tzinfo=timezone.utc).isoformat(),
+        )
+
+
+@pytest.mark.parametrize(
+    "account_kwargs",
+    [
+        {"tenant_id": "other", "user_id": 1, "provider": "caldav"},
+        {"tenant_id": "default", "user_id": 2, "provider": "caldav"},
+        {"tenant_id": "default", "user_id": 1, "provider": "google"},
+    ],
+)
+def test_create_external_account_rejects_secret_ref_scope_mismatch(calendar_db, account_kwargs):
+    secret_ref = calendar_db.create_secret_ref(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        encrypted_payload="encrypted-token-payload",
+    )
+
+    with pytest.raises(CalendarValidationError):
+        calendar_db.create_external_account(
+            display_name="Fastmail",
+            secret_ref=secret_ref,
+            **account_kwargs,
+        )
+
+
+def test_scoped_secret_ref_access_rejects_mismatched_owner(calendar_db):
+    secret_ref = calendar_db.create_secret_ref(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        encrypted_payload="encrypted-token-payload",
+    )
+
+    with pytest.raises(CalendarValidationError):
+        calendar_db.resolve_secret_ref_scoped(
+            secret_ref,
+            tenant_id="default",
+            user_id=2,
+            provider="caldav",
+        )
+    with pytest.raises(CalendarValidationError):
+        calendar_db.delete_secret_ref_scoped(
+            secret_ref,
+            tenant_id="default",
+            user_id=2,
+            provider="caldav",
+        )
+
+    assert calendar_db.resolve_secret_ref(secret_ref) == "encrypted-token-payload"
+    calendar_db.delete_secret_ref_scoped(
+        secret_ref,
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+    )
+    with pytest.raises(CalendarValidationError):
+        calendar_db.resolve_secret_ref(secret_ref)
+
+
+def test_external_binding_can_rebind_remote_calendar_after_soft_delete(calendar_db):
+    calendar = _create_calendar(calendar_db)
+    account = calendar_db.create_external_account(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        display_name="Fastmail",
+        secret_ref=None,
+    )
+    binding = calendar_db.create_external_binding(
+        account_id=account.id,
+        calendar_id=calendar.id,
+        remote_calendar_id="remote-calendar",
+        remote_display_name="Remote Calendar",
+    )
+
+    calendar_db.delete_external_binding(binding.id)
+    rebound = calendar_db.create_external_binding(
+        account_id=account.id,
+        calendar_id=calendar.id,
+        remote_calendar_id="remote-calendar",
+        remote_display_name="Remote Calendar Rebound",
+    )
+
+    assert rebound.id == binding.id
+    assert rebound.sync_enabled is True
+    assert rebound.disabled_at is None
+    assert rebound.deleted_at is None
+    assert rebound.remote_display_name == "Remote Calendar Rebound"
+
+
+def test_external_binding_rejects_non_active_account(calendar_db):
+    calendar = _create_calendar(calendar_db)
+    account = calendar_db.create_external_account(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        display_name="Fastmail",
+        secret_ref=None,
+        status="revoked",
+    )
+
+    with pytest.raises(CalendarValidationError):
+        calendar_db.create_external_binding(
+            account_id=account.id,
+            calendar_id=calendar.id,
+            remote_calendar_id="remote-calendar",
+        )
+
+
+@pytest.mark.parametrize("account_state", ["inactive", "revoked", "deleted"])
+def test_due_scan_excludes_non_active_accounts(calendar_db, account_state):
+    calendar = _create_calendar(calendar_db)
+    account = calendar_db.create_external_account(
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        display_name="Fastmail",
+        secret_ref=None,
+    )
+    binding = calendar_db.create_external_binding(
+        account_id=account.id,
+        calendar_id=calendar.id,
+        remote_calendar_id="remote-calendar",
+        next_scan_at="2026-06-05T17:00:00+00:00",
+    )
+    with calendar_db.transaction() as conn:
+        if account_state == "deleted":
+            conn.execute(
+                "UPDATE external_calendar_accounts SET deleted_at = ? WHERE id = ?",
+                ("2026-06-05T17:00:00+00:00", account.id),
+            )
+        elif account_state == "revoked":
+            conn.execute(
+                """
+                UPDATE external_calendar_accounts
+                SET status = 'revoked', revoked_at = ?
+                WHERE id = ?
+                """,
+                ("2026-06-05T17:00:00+00:00", account.id),
+            )
+        else:
+            conn.execute(
+                "UPDATE external_calendar_accounts SET status = 'inactive' WHERE id = ?",
+                (account.id,),
+            )
+
+    due_bindings = calendar_db.list_sync_enabled_bindings_due_for_scan(
+        now_iso="2026-06-05T18:00:00+00:00"
+    )
+
+    assert binding.id not in {due_binding.id for due_binding in due_bindings}
+
+
 def test_destructive_account_cleanup_preserves_copied_tldw_item(calendar_db):
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
@@ -199,7 +420,7 @@ def test_destructive_account_cleanup_preserves_copied_tldw_item(calendar_db):
         user_id=1,
         provider="caldav",
         display_name="Fastmail",
-        secret_ref="calendar-secret-1",
+        secret_ref=None,
     )
     binding = calendar_db.create_external_binding(
         account_id=account.id,
@@ -241,7 +462,7 @@ def test_remote_tombstone_cleanup_preserves_copied_tldw_item(calendar_db):
         user_id=1,
         provider="caldav",
         display_name="Fastmail",
-        secret_ref="calendar-secret-1",
+        secret_ref=None,
     )
     binding = calendar_db.create_external_binding(
         account_id=account.id,

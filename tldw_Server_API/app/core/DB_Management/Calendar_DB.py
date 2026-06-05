@@ -254,34 +254,136 @@ class CalendarSecretStore:
 
     def resolve_secret_ref(self, secret_ref: str) -> str:
         with self._database.connection() as conn:
-            row = conn.execute(
-                """
-                SELECT encrypted_payload
-                FROM calendar_external_account_secrets
-                WHERE secret_ref = ? AND deleted_at IS NULL
-                """,
-                (secret_ref,),
-            ).fetchone()
-        if row is None:
-            raise CalendarValidationError(f"Calendar secret ref not found: {secret_ref}")
+            row = self._get_secret_row(conn, secret_ref)
+        return str(row["encrypted_payload"])
+
+    def resolve_secret_ref_scoped(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+        provider: str,
+    ) -> str:
+        with self._database.connection() as conn:
+            row = self._get_secret_row(
+                conn,
+                secret_ref,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                provider=provider,
+            )
         return str(row["encrypted_payload"])
 
     def delete_secret_ref(self, secret_ref: str) -> None:
         with self._database.transaction() as conn:
             self.delete_secret_ref_in_connection(conn, secret_ref)
 
-    def delete_secret_ref_in_connection(self, conn: sqlite3.Connection, secret_ref: str | None) -> None:
+    def delete_secret_ref_scoped(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+        provider: str,
+    ) -> None:
+        with self._database.transaction() as conn:
+            self.delete_secret_ref_in_connection(
+                conn,
+                secret_ref,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                provider=provider,
+            )
+
+    def delete_secret_ref_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        secret_ref: str | None,
+        *,
+        tenant_id: str | None = None,
+        user_id: int | None = None,
+        provider: str | None = None,
+    ) -> None:
         if not secret_ref:
             return
+        self._get_secret_row(
+            conn,
+            secret_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            provider=provider,
+        )
+        clauses = ["secret_ref = ?", "deleted_at IS NULL"]
+        params: list[Any] = [secret_ref]
+        if tenant_id is not None:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if provider is not None:
+            clauses.append("provider = ?")
+            params.append(provider)
+        params.insert(0, _utcnow_iso())
         conn.execute(
-            """
+            f"""
             UPDATE calendar_external_account_secrets
             SET encrypted_payload = '',
                 deleted_at = ?
-            WHERE secret_ref = ? AND deleted_at IS NULL
-            """,
-            (_utcnow_iso(), secret_ref),
+            WHERE {' AND '.join(clauses)}
+            """,  # nosec B608
+            tuple(params),
         )
+
+    def validate_secret_ref_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        secret_ref: str,
+        tenant_id: str,
+        user_id: int,
+        provider: str,
+    ) -> None:
+        self._get_secret_row(
+            conn,
+            secret_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            provider=provider,
+        )
+
+    def _get_secret_row(
+        self,
+        conn: sqlite3.Connection,
+        secret_ref: str,
+        *,
+        tenant_id: str | None = None,
+        user_id: int | None = None,
+        provider: str | None = None,
+    ) -> sqlite3.Row:
+        clauses = ["secret_ref = ?", "deleted_at IS NULL"]
+        params: list[Any] = [secret_ref]
+        if tenant_id is not None:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if provider is not None:
+            clauses.append("provider = ?")
+            params.append(provider)
+        row = conn.execute(
+            f"""
+            SELECT encrypted_payload
+            FROM calendar_external_account_secrets
+            WHERE {' AND '.join(clauses)}
+            """,  # nosec B608
+            tuple(params),
+        ).fetchone()
+        if row is None:
+            raise CalendarValidationError(f"Calendar secret ref not found: {secret_ref}")
+        return row
 
 
 class CalendarDatabase:
@@ -862,6 +964,13 @@ class CalendarDatabase:
         payload_json = _json_or_none(provider_payload_json)
         metadata = _json_or_none(metadata_json)
         with self.transaction() as conn:
+            binding = self._get_external_binding_row(conn, external_binding_id)
+            account = self._get_external_account_row(conn, binding.account_id)
+            calendar = self._get_calendar_row(conn, binding.calendar_id)
+            self._validate_external_account_active(account)
+            self._validate_external_binding_calendar(account, calendar)
+            if binding.calendar_id != calendar_id:
+                raise CalendarValidationError("Provider item calendar_id must match external binding")
             conn.execute(
                 """
                 INSERT INTO calendar_items (
@@ -893,7 +1002,7 @@ class CalendarDatabase:
                     updated_at = excluded.updated_at
                 """,
                 (
-                    calendar_id,
+                    binding.calendar_id,
                     kind,
                     CALENDAR_SOURCE_OWNER_PROVIDER,
                     title,
@@ -1129,8 +1238,38 @@ class CalendarDatabase:
     def resolve_secret_ref(self, secret_ref: str) -> str:
         return self.secret_store.resolve_secret_ref(secret_ref)
 
+    def resolve_secret_ref_scoped(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+        provider: str,
+    ) -> str:
+        return self.secret_store.resolve_secret_ref_scoped(
+            secret_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            provider=provider,
+        )
+
     def delete_secret_ref(self, secret_ref: str) -> None:
         self.secret_store.delete_secret_ref(secret_ref)
+
+    def delete_secret_ref_scoped(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+        provider: str,
+    ) -> None:
+        self.secret_store.delete_secret_ref_scoped(
+            secret_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            provider=provider,
+        )
 
     def create_external_account(
         self,
@@ -1145,6 +1284,14 @@ class CalendarDatabase:
     ) -> ExternalCalendarAccountRow:
         now = _utcnow_iso()
         with self.transaction() as conn:
+            if secret_ref is not None:
+                self.secret_store.validate_secret_ref_in_connection(
+                    conn,
+                    secret_ref=secret_ref,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    provider=provider,
+                )
             cursor = conn.execute(
                 """
                 INSERT INTO external_calendar_accounts (
@@ -1209,7 +1356,13 @@ class CalendarDatabase:
         now = deleted_at or _utcnow_iso()
         with self.transaction() as conn:
             account = self._get_external_account_row(conn, account_id, include_deleted=True)
-            self.secret_store.delete_secret_ref_in_connection(conn, account.secret_ref)
+            self.secret_store.delete_secret_ref_in_connection(
+                conn,
+                account.secret_ref,
+                tenant_id=account.tenant_id,
+                user_id=account.user_id,
+                provider=account.provider,
+            )
             bindings = self._list_external_bindings_for_account_rows(
                 conn,
                 account_id,
@@ -1245,7 +1398,13 @@ class CalendarDatabase:
         now = revoked_at or _utcnow_iso()
         with self.transaction() as conn:
             account = self._get_external_account_row(conn, account_id, include_deleted=True)
-            self.secret_store.delete_secret_ref_in_connection(conn, account.secret_ref)
+            self.secret_store.delete_secret_ref_in_connection(
+                conn,
+                account.secret_ref,
+                tenant_id=account.tenant_id,
+                user_id=account.user_id,
+                provider=account.provider,
+            )
             bindings = self._list_external_bindings_for_account_rows(
                 conn,
                 account_id,
@@ -1286,6 +1445,61 @@ class CalendarDatabase:
     ) -> ExternalCalendarBindingRow:
         now = _utcnow_iso()
         with self.transaction() as conn:
+            account = self._get_external_account_row(conn, account_id)
+            calendar = self._get_calendar_row(conn, calendar_id)
+            self._validate_external_account_active(account)
+            self._validate_external_binding_calendar(account, calendar)
+            existing = conn.execute(
+                """
+                SELECT * FROM external_calendar_bindings
+                WHERE account_id = ? AND remote_calendar_id = ?
+                """,
+                (account_id, remote_calendar_id),
+            ).fetchone()
+            if existing is not None:
+                existing_binding = self._external_binding_from_row(existing)
+                if existing_binding.deleted_at is None:
+                    raise CalendarValidationError(
+                        "External calendar binding already exists for this account and remote calendar"
+                    )
+                conn.execute(
+                    """
+                    UPDATE external_calendar_bindings
+                    SET calendar_id = ?,
+                        remote_display_name = ?,
+                        sync_enabled = ?,
+                        sync_interval_minutes = ?,
+                        lookback_days = ?,
+                        lookahead_days = ?,
+                        provider_capabilities_json = ?,
+                        sync_cursor = ?,
+                        last_sync_at = NULL,
+                        next_scan_at = ?,
+                        last_error = NULL,
+                        disabled_at = NULL,
+                        deleted_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        calendar_id,
+                        remote_display_name,
+                        int(sync_enabled),
+                        sync_interval_minutes,
+                        lookback_days,
+                        lookahead_days,
+                        _json_or_none(provider_capabilities_json),
+                        sync_cursor,
+                        next_scan_at,
+                        now,
+                        existing_binding.id,
+                    ),
+                )
+                return self._get_external_binding_row(
+                    conn,
+                    existing_binding.id,
+                    include_deleted=True,
+                )
             cursor = conn.execute(
                 """
                 INSERT INTO external_calendar_bindings (
@@ -1345,12 +1559,16 @@ class CalendarDatabase:
         with self.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM external_calendar_bindings
-                WHERE sync_enabled = 1
-                  AND disabled_at IS NULL
-                  AND deleted_at IS NULL
-                  AND (next_scan_at IS NULL OR next_scan_at <= ?)
-                ORDER BY COALESCE(next_scan_at, created_at) ASC, id ASC
+                SELECT b.* FROM external_calendar_bindings b
+                JOIN external_calendar_accounts a ON a.id = b.account_id
+                WHERE b.sync_enabled = 1
+                  AND b.disabled_at IS NULL
+                  AND b.deleted_at IS NULL
+                  AND a.status = 'active'
+                  AND a.revoked_at IS NULL
+                  AND a.deleted_at IS NULL
+                  AND (b.next_scan_at IS NULL OR b.next_scan_at <= ?)
+                ORDER BY COALESCE(b.next_scan_at, b.created_at) ASC, b.id ASC
                 LIMIT ?
                 """,
                 (now, limit),
@@ -1559,6 +1777,23 @@ class CalendarDatabase:
             """,
             (disabled_at, disabled_at, binding_id),
         )
+
+    @staticmethod
+    def _validate_external_account_active(account: ExternalCalendarAccountRow) -> None:
+        if account.status != "active" or account.revoked_at is not None or account.deleted_at is not None:
+            raise CalendarValidationError("External calendar account is not active")
+
+    @staticmethod
+    def _validate_external_binding_calendar(
+        account: ExternalCalendarAccountRow,
+        calendar: CalendarRow,
+    ) -> None:
+        if calendar.org_id is not None:
+            raise CalendarValidationError("Personal external calendar accounts cannot bind to org calendars")
+        if calendar.owner_user_id != account.user_id:
+            raise CalendarValidationError("External calendar account can only bind to the owner's calendar")
+        if calendar.tenant_id != account.tenant_id:
+            raise CalendarValidationError("External calendar account and calendar tenant must match")
 
     def _cleanup_provider_items_for_binding(
         self,
