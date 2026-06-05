@@ -309,7 +309,8 @@ Required behavior:
 - If the active note content is clean in the current surface, checkbox clicks may call the backend task status path immediately. The backend updates the task record and rewrites the note projection under optimistic locking.
 - If the active note content is dirty in `/notes` or the Notes Dock, checkbox clicks update the local markdown content only and keep the note dirty. The task record is reconciled on the next successful note save/autosave.
 - If a remote or autonomous task change arrives while the user has dirty local note content, the UI must not overwrite local content. It should queue a non-destructive pending-change notice and require save, reload, or explicit merge.
-- If the user saves dirty content after local checkbox toggles, reconciliation is responsible for bringing task records into alignment with the saved markdown.
+- If the user saves dirty content after local checkbox toggles, that save must use the note version the local draft was based on. If the backend note version changed because of a remote or autonomous task/note update, the save must fail with a conflict or enter an explicit merge path rather than overwriting the newer projection.
+- Reconciliation after dirty checkbox toggles may run only after a successful version-checked note save/autosave. Failed, canceled, or conflicted saves must leave durable task state unchanged.
 - If note save fails, local checkbox changes remain unsaved note edits and must not be represented as durable task completion.
 
 This rule applies equally to `/notes` and the Notes Dock.
@@ -342,6 +343,17 @@ V1 creation behavior:
 4. Backend updates visible markdown tokens in the task projection when needed under optimistic locking.
 5. Unknown tokens remain untouched.
 
+### Task Text Update
+
+Task text updates are projection rewrites and follow the same version and conflict model as status and metadata changes.
+
+Required behavior:
+
+- Caller provides expected task version and expected note version.
+- Backend rewrites only the visible checklist text and intended allowlisted metadata tokens, preserving the checkbox marker and unrelated/unknown tokens where possible.
+- If the projection is stale, missing, unlinked, ambiguous, or the active UI surface has dirty local content, the update must return a conflict or require explicit repair/merge.
+- If the new text contains allowlisted metadata tokens, the parser reconciles structured metadata from the saved projection after the rewrite.
+
 ### Task Delete Flow
 
 V1 includes explicit task soft-delete.
@@ -351,8 +363,9 @@ Deletion rules:
 1. Deleting a task from task UI or MCP soft-deletes the task record.
 2. If the task still has a live source projection, soft-delete and checklist-line removal must happen in the same version-checked transaction when possible.
 3. If the projection cannot be safely removed because the note changed, the delete should fail with conflict details and no soft-delete should be committed, rather than leaving a live checklist line that immediately recreates a task.
-4. If a user manually removes a checklist line while editing markdown, reconciliation should mark the linked task `unlinked` rather than hard-deleting task history.
-5. Hard delete is out of scope for normal v1 user and agent flows.
+4. If the checklist line has indented child bullets or nested checklist items, default delete must fail with conflict details instead of silently deleting, outdenting, or reparenting child content. Future explicit modes such as `delete_subtree` or `promote_children` can be considered after v1.
+5. If a user manually removes a checklist line while editing markdown, reconciliation should mark the linked task `unlinked` rather than hard-deleting task history.
+6. Hard delete is out of scope for normal v1 user and agent flows.
 
 ## Permissions And Agent Behavior
 
@@ -439,6 +452,16 @@ If a task's original checklist line disappears, keep the task record and mark it
 
 The reconciler must avoid destructive merges. It can create distinct task records or mark ambiguity for review.
 
+### Unlinked Or Ambiguous Task Mutations
+
+Read operations may return unlinked or ambiguous tasks, but write operations must handle them conservatively:
+
+- `notes.tasks.get` and `notes.tasks.list` may return unlinked/ambiguous tasks with projection status and repair hints.
+- Status, text, and metadata mutations require a live, unambiguous projection when they would rewrite markdown.
+- Projection-changing mutations against unlinked or ambiguous tasks must return a conflict that names the required repair action, such as reconcile, relink, choose a specific projection, or edit the note directly.
+- A record-only soft-delete is allowed for an unlinked task because no live markdown projection needs to be removed.
+- Deleting an ambiguous task with a possible live projection must conflict unless the caller resolves the exact projection first.
+
 ### Malformed Metadata Token
 
 Preserve the token as plain text. Ignore it for structured metadata and optionally return a non-blocking warning.
@@ -469,6 +492,9 @@ Task list/discovery behavior:
 - `notes.tasks.list` with a note filter must reconcile that note if its saved content version is stale before returning results.
 - Broader task listing/search must identify scoped candidate notes that may contain checklist syntax, reconcile stale candidates in the returned page/scope, and include an explicit incomplete-results indicator if additional unreconciled candidates remain.
 - MCP task discovery must use the same reconciliation-aware behavior, so agents do not miss checklist items solely because an old note has not been opened since migration.
+- Broad discovery must be bounded by requested page size, scope, and a server-side reconciliation work limit. It must not synchronously scan and reconcile the entire notes corpus for an ordinary list request.
+- Candidate detection should use cheap saved-note signals such as content search for checklist syntax and per-note reconciliation state before running the full parser.
+- If the work limit is reached, responses must include structured reconciliation status such as reconciled note count, skipped/pending candidate count, incomplete flag, and a cursor or repair/reconcile action for continuing.
 
 Task mutation responses should include:
 
@@ -542,6 +568,7 @@ The PRD does not require eager backfill of all notes during startup.
 - Avoid hash-only identity preservation for duplicate checklist text after reorder or rename.
 - Produce stable results on repeated reconciliation.
 - Mark missing source lines as unlinked.
+- Mark ambiguous projection matches without allowing destructive status/text/metadata rewrites.
 
 ### Backend/API
 
@@ -551,6 +578,11 @@ The PRD does not require eager backfill of all notes during startup.
 - Reconcile stale candidate notes during task list/search and report incomplete reconciliation state when applicable.
 - Rewrite note markdown when task status changes.
 - Create task-backed checklist lines only under expected note-version checks.
+- Update task text only under expected task/note version checks.
+- Reject dirty-note saves that would overwrite a newer remote/autonomous projection without explicit merge.
+- Reject projection-changing mutations for unlinked or ambiguous tasks unless repair/relink resolves the projection.
+- Reject default task delete when the checklist line has nested child content.
+- Enforce reconciliation work limits and return incomplete-results metadata for broad discovery.
 - Enforce optimistic locking for note and task versions.
 - Return structured conflicts.
 - Record task events for user and agent changes.
@@ -566,6 +598,8 @@ The PRD does not require eager backfill of all notes during startup.
 - Batch status changes return succeeded/failed/skipped IDs.
 - Delete tool removes task projections safely or returns conflicts.
 - Task discovery tools reconcile stale candidate notes or return explicit incomplete-results state.
+- Task discovery tools expose reconciliation progress/continuation metadata when bounded discovery stops early.
+- Write tools return conflicts for unlinked/ambiguous projections instead of silently appending or rewriting note content.
 - Idempotency prevents duplicate task creation or duplicate repeated status changes where practical.
 
 ### Frontend
@@ -587,6 +621,9 @@ The PRD does not require eager backfill of all notes during startup.
 - Open `/notes` and verify the same task is done.
 - Reopen the item from `/notes` and verify the dock updates after refresh/sync.
 - Toggle a checkbox while the dock has unsaved edits, fail or cancel save, and verify durable task state did not change.
+- Toggle a checkbox while dirty, apply a remote/autonomous task change, then verify normal save conflicts instead of overwriting the remote projection.
+- Attempt to delete a task line with nested child content and verify child content is preserved and the operation conflicts.
+- Attempt to update an unlinked or ambiguous task and verify the UI shows repair/conflict state rather than silently rewriting markdown.
 - Simulate or trigger an MCP/agent task status change and verify the activity notice.
 - Reopen the affected note in a later browser session and verify unread autonomous activity is still visible.
 
@@ -598,7 +635,11 @@ The PRD does not require eager backfill of all notes during startup.
 - `/notes` and Notes Dock can both mark items done and reopen them.
 - Dirty-note checkbox toggles cannot clobber unsaved note content.
 - Dirty-note checkbox toggles are not durable if the user reloads, discards, or fails to save before reconciliation.
+- Dirty-note saves conflict or require explicit merge when the backend note version changed after the local draft was created.
 - Existing notes with checklist syntax are discovered by task listing/search through reconciliation-aware behavior, not silently omitted.
+- Broad task discovery is bounded and reports incomplete reconciliation state when it cannot safely finish within request limits.
+- Projection-changing writes against unlinked or ambiguous tasks conflict unless explicit repair/relink resolves the target projection.
+- Deleting a task line with nested child content cannot silently delete, outdent, or reparent that content in v1.
 - MCP Unified exposes task tools for discovery, creation, update, completion, deletion, and reconciliation.
 - MCP write behavior is governed by existing policy, approval, RBAC, validation, idempotency, and audit mechanisms.
 - Autonomous agent changes are visibly surfaced.
