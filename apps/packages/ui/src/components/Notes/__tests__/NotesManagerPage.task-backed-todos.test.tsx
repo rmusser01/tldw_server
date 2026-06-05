@@ -229,6 +229,7 @@ const setupTaskBackedNoteMock = (options: { conflictOnSave?: boolean } = {}) => 
                 event_type: "status_changed",
                 actor_type: "agent",
                 actor_id: "agent-1",
+                tool_name: "notes.tasks.set_status",
                 created_at: "2026-06-05T07:05:00Z"
               }
             ]
@@ -355,7 +356,9 @@ describe("NotesManagerPage task-backed todos", () => {
     setupTaskBackedNoteMock()
     renderPage()
 
-    expect(await screen.findByText("Agent updated this note's tasks.")).toBeInTheDocument()
+    expect(
+      await screen.findByText("agent-1 via notes.tasks.set_status changed 1 task in Task note.")
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss task activity" }))
 
@@ -369,7 +372,9 @@ describe("NotesManagerPage task-backed todos", () => {
       )
     })
     await waitFor(() => {
-      expect(screen.queryByText("Agent updated this note's tasks.")).not.toBeInTheDocument()
+      expect(
+        screen.queryByText("agent-1 via notes.tasks.set_status changed 1 task in Task note.")
+      ).not.toBeInTheDocument()
     })
   }, 10000)
 })

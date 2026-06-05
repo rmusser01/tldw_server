@@ -63,6 +63,7 @@ _TASK_MAX_BATCH_UPDATES = 50
 _TASK_IDEMPOTENCY_CACHE_SIZE = 128
 _TASK_LIST_MAX_OFFSET = 500
 _TASK_LIST_MAX_QUERY_CHARS = 1000
+_TASK_AUTONOMOUS_WRITE_CAPABILITIES = {"notes.tasks.write.autonomous"}
 
 
 def _normalize_scores(results: list[dict[str, Any]], score_key: Optional[str] = None) -> list[float]:
@@ -304,7 +305,8 @@ class NotesModule(BaseModule):
             "auth_required": True,
             "requires_confirmation": True,
             "agent_write_policy": "approval_required",
-            "autonomous_writes": "denied",
+            "autonomous_writes": "policy_allowed",
+            "autonomous_write_capability": "notes.tasks.write.autonomous",
             "governance_preflight_required": True,
             "sensitive": True,
         }
@@ -1455,13 +1457,15 @@ class NotesModule(BaseModule):
             return None
 
         if self._is_autonomous_agent_context(metadata):
+            if self._has_autonomous_task_write_permission(metadata):
+                return None
             return self._task_policy_decision(
                 tool_name,
                 context,
                 status="denied",
                 action="deny",
-                reason_code="autonomous_notes_task_write_activity_notice_required",
-                message="Autonomous Notes task writes are disabled until persistent activity notices are enabled.",
+                reason_code="autonomous_notes_task_write_permission_required",
+                message="Autonomous Notes task writes require the notes.tasks.write.autonomous MCP capability.",
             )
 
         if self._has_write_confirmation(metadata):
@@ -1496,6 +1500,37 @@ class NotesModule(BaseModule):
             return True
         mode = str(metadata.get("execution_mode") or metadata.get("agent_mode") or "").strip().lower()
         return bool(metadata.get("autonomous") or metadata.get("autonomous_agent")) or mode == "autonomous"
+
+    @classmethod
+    def _has_autonomous_task_write_permission(cls, metadata: dict[str, Any]) -> bool:
+        effective_policy = metadata.get("_mcp_effective_tool_policy")
+        if isinstance(effective_policy, dict) and effective_policy.get("enabled") is False:
+            return False
+
+        granted: set[str] = set()
+        for source in (metadata, effective_policy if isinstance(effective_policy, dict) else None):
+            if not isinstance(source, dict):
+                continue
+            for key in ("capabilities", "resolved_capabilities", "permissions"):
+                cls._add_policy_values(granted, source.get(key))
+            for nested_key in ("policy_document", "inline_policy_document"):
+                nested = source.get(nested_key)
+                if isinstance(nested, dict):
+                    cls._add_policy_values(granted, nested.get("capabilities"))
+                    cls._add_policy_values(granted, nested.get("resolved_capabilities"))
+        return bool(granted.intersection(_TASK_AUTONOMOUS_WRITE_CAPABILITIES))
+
+    @staticmethod
+    def _add_policy_values(target: set[str], value: Any) -> None:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                target.add(stripped)
+            return
+        if isinstance(value, Iterable) and not isinstance(value, dict):
+            for item in value:
+                if item is not None and str(item).strip():
+                    target.add(str(item).strip())
 
     def _agent_id_from_metadata(self, metadata: dict[str, Any]) -> str | None:
         agent_context = metadata.get("agent_context")

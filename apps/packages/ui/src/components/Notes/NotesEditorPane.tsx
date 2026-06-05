@@ -18,6 +18,7 @@ import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
+import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
 import type {
   NoteTask,
@@ -185,6 +186,7 @@ export interface NotesEditorPaneProps {
   toggleTaskCheckboxLocal: (payload: TaskChecklistTogglePayload) => void
   toggleTaskCheckboxStatus: (payload: TaskChecklistTogglePayload) => void
   dismissTaskActivity: (eventId: string) => Promise<void>
+  inspectTaskActivity: () => void
   setEditorMode: (mode: NotesEditorMode) => void
   setEditorKeywords: (keywords: string[]) => void
   setEditorCursorIndex: (index: number | null) => void
@@ -319,6 +321,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   toggleTaskCheckboxLocal,
   toggleTaskCheckboxStatus,
   dismissTaskActivity,
+  inspectTaskActivity,
   setEditorMode,
   setEditorKeywords,
   setEditorCursorIndex,
@@ -772,37 +775,13 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               })}
             </div>
           )}
-          {taskActivityEvents.length > 0 && (
-            <div
-              className="mt-2 rounded border border-primary/40 bg-primary/10 px-2 py-2 text-[12px] text-primary"
-              role="status"
-              aria-live="polite"
-              data-testid="notes-task-activity-notice"
-            >
-              <div className="font-medium">
-                {t('option:notesSearch.taskAgentActivityNotice', {
-                  defaultValue: "Agent updated this note's tasks."
-                })}
-              </div>
-              <Button
-                size="small"
-                type="link"
-                className="!px-0 text-[12px]"
-                aria-label={t('option:notesSearch.taskActivityDismissAria', {
-                  defaultValue: 'Dismiss task activity'
-                })}
-                onClick={() => {
-                  const eventId = taskActivityEvents[0]?.id
-                  if (!eventId) return
-                  void dismissTaskActivity(eventId)
-                }}
-              >
-                {t('option:notesSearch.taskActivityDismiss', {
-                  defaultValue: 'Dismiss'
-                })}
-              </Button>
-            </div>
-          )}
+          <TaskActivityNotice
+            events={taskActivityEvents}
+            noteTitle={title || null}
+            testId="notes-task-activity-notice"
+            onInspect={inspectTaskActivity}
+            onDismiss={(eventId) => void dismissTaskActivity(eventId)}
+          />
           {noteTasks.length > 0 && (
             <Typography.Text
               type="secondary"

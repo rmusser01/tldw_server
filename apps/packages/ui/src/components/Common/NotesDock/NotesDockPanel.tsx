@@ -24,6 +24,7 @@ import { getQueryClient } from "@/services/query-client"
 import TaskChecklistPreview, {
   type TaskChecklistTogglePayload
 } from "@/components/Notes/TaskChecklistPreview"
+import TaskActivityNotice from "@/components/Notes/TaskActivityNotice"
 import { toggleChecklistItemMarker } from "@/components/Notes/task-markdown"
 import {
   listNoteTasks,
@@ -737,7 +738,6 @@ export const NotesDockPanel: React.FC = () => {
 
   const portalRoot = ensurePortalRoot()
   if (!portalRoot) return null
-  const firstTaskActivityEvent = taskActivityEvents[0] ?? null
   const hasIncompleteTaskReconciliation = taskReconciliation?.status === "incomplete"
 
   const panel = (
@@ -1011,32 +1011,15 @@ export const NotesDockPanel: React.FC = () => {
                 {t("option:notesDock.unsaved", "Unsaved changes")}
               </div>
             )}
-            {firstTaskActivityEvent && (
-              <div
-                className="mt-2 flex items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] text-warning"
-                data-testid="notes-dock-task-activity-notice"
-              >
-                <span>
-                  {t(
-                    "option:notesDock.taskAgentActivityNotice",
-                    "Agent updated this note's tasks."
-                  )}
-                </span>
-                <Button
-                  type="link"
-                  size="small"
-                  className="h-auto p-0 text-[11px]"
-                  loading={dismissingTaskActivityId === firstTaskActivityEvent.id}
-                  onClick={() => void dismissTaskActivity(firstTaskActivityEvent.id)}
-                  aria-label={t(
-                    "option:notesDock.taskActivityDismissAria",
-                    "Dismiss task activity"
-                  )}
-                >
-                  {t("option:notesDock.taskActivityDismiss", "Dismiss")}
-                </Button>
-              </div>
-            )}
+            <TaskActivityNotice
+              events={taskActivityEvents}
+              noteTitle={activeNote?.title || null}
+              testId="notes-dock-task-activity-notice"
+              compact
+              dismissingEventId={dismissingTaskActivityId}
+              onInspect={() => navigate("/notes")}
+              onDismiss={(eventId) => void dismissTaskActivity(eventId)}
+            />
             {hasIncompleteTaskReconciliation && (
               <div className="mt-2 text-[11px] text-warning" data-testid="notes-dock-task-reconciliation-warning">
                 {t(

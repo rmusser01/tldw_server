@@ -493,6 +493,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     )
   }, [])
 
+  const inspectTaskActivity = React.useCallback(() => {
+    if (selectedId == null) return
+    void refreshTaskStateForNote(selectedId)
+  }, [refreshTaskStateForNote, selectedId])
+
   const resetEditor = React.useCallback(() => {
     clearAssistUndoState()
     setSelectedId(null)
@@ -1960,6 +1965,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     toggleTaskCheckboxLocal,
     toggleTaskCheckboxStatus,
     dismissTaskActivity,
+    inspectTaskActivity,
     resetEditor,
     confirmDiscardIfDirty,
     switchListMode,
