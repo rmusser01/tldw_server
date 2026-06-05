@@ -6264,6 +6264,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
 
+    def upsert_voice_command(
+        self,
+        *,
+        command_id: str,
+        user_id: int,
+        persona_id: str | None,
+        connection_id: str | None,
+        name: str,
+        phrases: list[str] | str,
+        action_type: str,
+        action_config: dict[str, Any] | str,
+        priority: int,
+        enabled: bool,
+        requires_confirmation: bool,
+        description: str | None,
+        created_at: str,
+        updated_at: str,
+    ) -> None:
+        """Persist a user-defined voice command for VoiceAssistant helpers."""
+        phrases_json = phrases if isinstance(phrases, str) else json.dumps(phrases)
+        action_config_json = (
+            action_config if isinstance(action_config, str) else json.dumps(action_config)
+        )
+        self.execute_query(
+            """
+            INSERT INTO voice_commands (
+                id, user_id, persona_id, connection_id, name, phrases,
+                action_type, action_config, priority, enabled,
+                requires_confirmation, description, created_at, updated_at, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id = excluded.user_id,
+                persona_id = excluded.persona_id,
+                connection_id = excluded.connection_id,
+                name = excluded.name,
+                phrases = excluded.phrases,
+                action_type = excluded.action_type,
+                action_config = excluded.action_config,
+                priority = excluded.priority,
+                enabled = excluded.enabled,
+                requires_confirmation = excluded.requires_confirmation,
+                description = excluded.description,
+                updated_at = excluded.updated_at,
+                deleted = 0
+            """,
+            (
+                command_id,
+                user_id,
+                persona_id,
+                connection_id,
+                name,
+                phrases_json,
+                action_type,
+                action_config_json,
+                priority,
+                1 if enabled else 0,
+                1 if requires_confirmation else 0,
+                description,
+                created_at,
+                updated_at,
+            ),
+            commit=True,
+        )
+
     def execute_many(
         self,
         query: str,

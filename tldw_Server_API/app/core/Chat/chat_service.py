@@ -2713,14 +2713,17 @@ async def moderate_input_messages(
 
         with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
             metrics.track_moderation_input(str(req_user_id or client_id), resolved_action, category=(category or "default"))
-            await write_mandatory_moderation_audit(
-                audit_service=audit_service,
-                audit_context=audit_context,
-                audit_event_type=audit_event_type,
-                action="moderation.input",
-                result=("failure" if resolved_action == "block" else "success"),
-                metadata={"phase": "input", "action": resolved_action, "pattern": sample},
-            )
+
+        await write_mandatory_moderation_audit(
+            audit_service=audit_service,
+            audit_context=audit_context,
+            audit_event_type=audit_event_type,
+            action="moderation.input",
+            result=("failure" if resolved_action == "block" else "success"),
+            metadata={"phase": "input", "action": resolved_action, "pattern": sample},
+        )
+
+        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
             await _capture_moderation_review_item_safely_async(
                 phase="input",
                 action=resolved_action,

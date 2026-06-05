@@ -15,10 +15,10 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
 pytestmark = pytest.mark.unit
 
 
-def _context() -> WorkerLifecycleContext:
+def _context(settings: Any | None = None) -> WorkerLifecycleContext:
     return WorkerLifecycleContext(
         app="app",
-        settings={},
+        settings={} if settings is None else settings,
         test_mode=True,
         route_enabled=lambda *_args, **_kwargs: True,
         logger=None,
@@ -125,25 +125,18 @@ def test_usage_aggregator_worker_spec_enabled_uses_settings(monkeypatch: pytest.
 
 
 def test_llm_usage_aggregator_worker_spec_enabled_uses_settings(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.services import llm_usage_aggregator
 
-    monkeypatch.setattr(
-        llm_usage_aggregator,
-        "get_settings",
-        lambda: SimpleNamespace(LLM_USAGE_AGGREGATOR_ENABLED=True),
-    )
     [enabled_spec] = llm_usage_aggregator.provide_llm_usage_aggregator_worker_specs()
-    assert enabled_spec.enabled(_context()) is True
+    assert enabled_spec.enabled(
+        _context(SimpleNamespace(LLM_USAGE_AGGREGATOR_ENABLED=True)),
+    ) is True
 
-    monkeypatch.setattr(
-        llm_usage_aggregator,
-        "get_settings",
-        lambda: SimpleNamespace(LLM_USAGE_AGGREGATOR_ENABLED=False),
-    )
     [disabled_spec] = llm_usage_aggregator.provide_llm_usage_aggregator_worker_specs()
-    assert disabled_spec.enabled(_context()) is False
+    assert disabled_spec.enabled(
+        _context(SimpleNamespace(LLM_USAGE_AGGREGATOR_ENABLED=False)),
+    ) is False
 
 
 def test_shutdown_usage_aggregators_direct_stop_module_is_removed() -> None:

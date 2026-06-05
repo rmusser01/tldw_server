@@ -1,6 +1,6 @@
 """
 Integration test for /api/v1/research/websearch endpoint.
-Allows 200 or 500 due to environment/network variability.
+Allows sanitized provider/network failures due to environment variability.
 """
 
 import os
@@ -41,7 +41,7 @@ def test_websearch_minimal(client_with_user: TestClient):
         "aggregate": False,
     }
     resp = client.post("/api/v1/research/websearch", json=payload)
-    assert resp.status_code in (200, 500)
+    assert resp.status_code in (200, 500, 502)
     if resp.status_code == 200:
         data = resp.json()
         assert "web_search_results_dict" in data

@@ -37,7 +37,9 @@ def test_update_config_blocked_for_remote_via_forwarded_header(mocker, monkeypat
 
     assert response.status_code == 403
     body = response.json()
-    assert 'restricted to local requests' in (body.get('detail') or '').lower()
+    detail = (body.get('detail') or '').lower()
+    assert 'local' in detail
+    assert 'remote setup access' in detail
 
 
 def test_complete_blocked_for_remote_via_forwarded_header(mocker, monkeypatch):
@@ -67,7 +69,9 @@ def test_complete_blocked_for_remote_via_forwarded_header(mocker, monkeypatch):
 
     assert response.status_code == 403
     body = response.json()
-    assert 'restricted to local requests' in (body.get('detail') or '').lower()
+    detail = (body.get('detail') or '').lower()
+    assert 'local' in detail
+    assert 'remote setup access' in detail
 def test_get_config_blocked_for_remote_when_trust_proxy_enabled(mocker, monkeypatch):
      # Setup enabled
     mocker.patch.object(

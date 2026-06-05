@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -63,39 +62,38 @@ def _setup_sqlite_media_db(db_path: str):
 
 
 @pytest.mark.integration
-def test_bm25_title_vs_content_weights_flip_order(monkeypatch):
+def test_bm25_title_vs_content_weights_flip_order(monkeypatch, tmp_path: Path):
     # Ensure raw SQL fallback is allowed (not production)
     os.environ["tldw_production"] = "false"
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "media.db")
-        _setup_sqlite_media_db(db_path)
+    db_path = str(tmp_path / "media.db")
+    _setup_sqlite_media_db(db_path)
 
-        # Helper to run retrieval with specific weights via settings monkeypatch
-        def run_with_weights(title_w: float, content_w: float):
-            # Patch settings consumed inside retriever
-            from tldw_Server_API.app.core import config as cfg
-            cfg.settings.setdefault("RAG", {})
-            cfg.settings["RAG"]["fts_title_weight"] = float(title_w)
-            cfg.settings["RAG"]["fts_content_weight"] = float(content_w)
+    # Helper to run retrieval with specific weights via settings monkeypatch
+    def run_with_weights(title_w: float, content_w: float):
+        # Patch settings consumed inside retriever
+        from tldw_Server_API.app.core import config as cfg
+        cfg.settings.setdefault("RAG", {})
+        cfg.settings["RAG"]["fts_title_weight"] = float(title_w)
+        cfg.settings["RAG"]["fts_content_weight"] = float(content_w)
 
-            retr = MediaDBRetriever(db_path=db_path, config=RetrievalConfig(max_results=5))
-            try:
-                import asyncio
-                docs = asyncio.run(retr.retrieve(query="alpha"))
-                assert docs, "Expected at least one result"
-                return [str(d.id) for d in docs]
-            finally:
-                retr.close()
-                reset_managed_sqlite_backends(sqlite_targets=[db_path, str(Path(db_path).resolve())])
-
+        retr = MediaDBRetriever(db_path=db_path, config=RetrievalConfig(max_results=5))
         try:
-            # Title weight high
-            order_title = run_with_weights(5.0, 0.1)
-            # Content weight high
-            order_content = run_with_weights(0.1, 5.0)
-
-            # Expect that the ordering flips with strong weight changes
-            assert order_title[0] != order_content[0], f"Expected different top result; got {order_title[0]} vs {order_content[0]}"
+            import asyncio
+            docs = asyncio.run(retr.retrieve(query="alpha"))
+            assert docs, "Expected at least one result"
+            return [str(d.id) for d in docs]
         finally:
+            retr.close()
             reset_managed_sqlite_backends(sqlite_targets=[db_path, str(Path(db_path).resolve())])
+
+    try:
+        # Title weight high
+        order_title = run_with_weights(5.0, 0.1)
+        # Content weight high
+        order_content = run_with_weights(0.1, 5.0)
+
+        # Expect that the ordering flips with strong weight changes
+        assert order_title[0] != order_content[0], f"Expected different top result; got {order_title[0]} vs {order_content[0]}"
+    finally:
+        reset_managed_sqlite_backends(sqlite_targets=[db_path, str(Path(db_path).resolve())])

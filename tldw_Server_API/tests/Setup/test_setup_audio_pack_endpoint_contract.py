@@ -97,7 +97,8 @@ async def test_import_audio_pack_uses_managed_directory(mocker, tmp_path):
         None,
     )
 
-    assert result["audio_readiness"]["imported_packs"][0]["pack_path"] == "audio_packs/import-pack.json"
+    pack_path = result["audio_readiness"]["imported_packs"][0]["pack_path"]
+    assert PurePosixPath(pack_path.replace("\\", "/")) == PurePosixPath("audio_packs/import-pack.json")
     assert result["selection_key"] == "v2:cpu_local:balanced"
     assert result["audio_readiness"]["machine_profile"]["ffmpeg_available"] is True
     assert result["audio_readiness"]["machine_profile"]["free_disk_gb"] == 64.0

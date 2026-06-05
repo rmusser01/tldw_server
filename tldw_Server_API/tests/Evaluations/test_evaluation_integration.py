@@ -12,7 +12,6 @@ Tests the complete evaluation pipeline including:
 import pytest
 pytestmark = pytest.mark.unit
 import asyncio
-import tempfile
 import os
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -27,14 +26,9 @@ class TestEvaluationIntegration:
     """Integration tests for the complete evaluation pipeline."""
 
     @pytest.fixture
-    def temp_db_path(self):
+    def temp_db_path(self, tmp_path: Path):
         """Create a temporary database for testing."""
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            db_path = Path(f.name)
-        yield db_path
-        # Cleanup
-        if db_path.exists():
-            db_path.unlink()
+        return tmp_path / "evaluations.db"
 
 
     @pytest.fixture
@@ -334,12 +328,12 @@ class TestAuthentication:
             mock_get_settings.return_value = mock_settings
 
             async def _fake_verify_jwt(_request, token: str) -> User:
-                assert token == "valid-jwt-token"
+                assert token == "valid-jwt-token"  # nosec B105
                 return User(id=123, username="testuser", is_active=True)
 
             class _JwtService:
                 def decode_access_token(self, token: str):
-                    assert token == "valid-jwt-token"
+                    assert token == "valid-jwt-token"  # nosec B105
                     return {"sub": "123"}
 
             with patch('tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth.get_jwt_service', lambda: _JwtService()):

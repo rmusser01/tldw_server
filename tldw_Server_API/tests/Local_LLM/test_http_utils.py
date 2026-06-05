@@ -29,7 +29,7 @@ def _build_client(status_codes: list[int], payload: dict | None = None) -> tuple
 async def test_request_json_retries_on_5xx():
     client, call_count = _build_client([500, 200], payload={"ok": True})
     async with client:
-        data = await request_json(client, "GET", "http://x/y", retries=1, backoff=0)
+        data = await request_json(client, "GET", "http://127.0.0.1/y", retries=1, backoff=0)
     assert data["ok"] is True
     assert call_count["n"] == 2
 
@@ -39,7 +39,7 @@ async def test_request_json_retries_zero_makes_single_attempt():
     client, call_count = _build_client([500])
     async with client:
         with pytest.raises(JSONDecodeError):
-            await request_json(client, "GET", "http://x/y", retries=0, backoff=0)
+            await request_json(client, "GET", "http://127.0.0.1/y", retries=0, backoff=0)
     assert call_count["n"] == 1
 
 
