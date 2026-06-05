@@ -462,7 +462,7 @@ class TaskStore:
                 task_id,
             )
             now = self._db._get_current_utc_timestamp_iso()
-            self._execute(
+            update_cursor = self._execute(
                 transaction_conn,
                 """
                 UPDATE tasks
@@ -473,6 +473,12 @@ class TaskStore:
                 """,
                 ("unlinked", now, task_id, expected_version),
             )
+            if getattr(update_cursor, "rowcount", None) == 0:
+                raise ConflictError(
+                    f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
             self._execute(
                 transaction_conn,
                 """
@@ -534,7 +540,7 @@ class TaskStore:
                         "Task projection deletion is ambiguous without a matching projection locator."
                     )  # noqa: TRY003
             now = self._db._get_current_utc_timestamp_iso()
-            self._execute(
+            update_cursor = self._execute(
                 transaction_conn,
                 """
                 UPDATE tasks
@@ -546,6 +552,12 @@ class TaskStore:
                 """,
                 (self._deleted_value(True), "deleted", now, task_id, expected_version),
             )
+            if getattr(update_cursor, "rowcount", None) == 0:
+                raise ConflictError(
+                    f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
             self._execute(
                 transaction_conn,
                 """
