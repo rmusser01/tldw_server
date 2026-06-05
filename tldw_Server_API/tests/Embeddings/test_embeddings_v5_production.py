@@ -214,6 +214,26 @@ class TestTTLCache:
         assert await cache.get("key2") is None
 
     @pytest.mark.asyncio
+    async def test_cache_lru_eviction_uses_access_order_when_timestamps_tie(self, monkeypatch):
+        """Test LRU eviction remains deterministic when timer resolution ties."""
+        from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as embeddings_module
+
+        cache = embeddings_module.TTLCache(max_size=3, ttl_seconds=3600)
+        monkeypatch.setattr(embeddings_module.time, "time", lambda: 1000.0)
+
+        await cache.set("key1", [1.0])
+        await cache.set("key2", [2.0])
+        await cache.set("key3", [3.0])
+        await cache.get("key1")
+
+        await cache.set("key4", [4.0])
+
+        assert await cache.get("key1") == [1.0]
+        assert await cache.get("key2") is None
+        assert await cache.get("key3") == [3.0]
+        assert await cache.get("key4") == [4.0]
+
+    @pytest.mark.asyncio
     async def test_cache_cleanup_task(self):
         """Test background cleanup task removes expired entries"""
         from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import TTLCache

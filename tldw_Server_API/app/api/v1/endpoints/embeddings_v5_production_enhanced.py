@@ -844,8 +844,15 @@ class TTLCache:
             self._use_thread = is_truthy(os.getenv("EMBEDDINGS_TTLCACHE_DAEMON", "true"))
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             self._use_thread = True
+        self._access_sequence = 0
         self.hits = 0
         self.misses = 0
+
+    def _mark_access_locked(self, entry: dict[str, Any], current_time: float) -> None:
+        """Record a deterministic recency order for LRU eviction."""
+        self._access_sequence += 1
+        entry['last_access'] = current_time
+        entry['last_access_order'] = self._access_sequence
 
     async def start_cleanup_task(self):
         """Start background cleanup task"""
@@ -936,8 +943,9 @@ class TTLCache:
                 self.misses += 1
                 return None
 
-            if time.time() - entry['timestamp'] <= self.ttl_seconds:
-                entry['last_access'] = time.time()
+            current_time = time.time()
+            if current_time - entry['timestamp'] <= self.ttl_seconds:
+                self._mark_access_locked(entry, current_time)
                 self.hits += 1
                 return entry['value']
 
@@ -950,20 +958,21 @@ class TTLCache:
     async def set(self, key: str, value: Any):
         """Set value in cache with TTL"""
         with self._lock:
-            if len(self.cache) >= self.max_size:
+            if key not in self.cache and len(self.cache) >= self.max_size:
                 lru_key = min(
                     self.cache.keys(),
-                    key=lambda k: self.cache[k].get('last_access', 0)
+                    key=lambda k: self.cache[k].get('last_access_order', 0)
                 )
                 with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                     logger.debug(f"Embeddings TTLCache evict LRU key={lru_key[:8]}..., size={len(self.cache)}")
                 del self.cache[lru_key]
 
+            current_time = time.time()
             self.cache[key] = {
                 'value': value,
-                'timestamp': time.time(),
-                'last_access': time.time()
+                'timestamp': current_time,
             }
+            self._mark_access_locked(self.cache[key], current_time)
             embedding_cache_size.set(len(self.cache))
 
     async def clear(self):

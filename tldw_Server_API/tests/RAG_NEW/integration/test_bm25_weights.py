@@ -78,15 +78,23 @@ def test_bm25_title_vs_content_weights_flip_order(monkeypatch):
             cfg.settings["RAG"]["fts_content_weight"] = float(content_w)
 
             retr = MediaDBRetriever(db_path=db_path, config=RetrievalConfig(max_results=5))
-            import asyncio
-            docs = asyncio.run(retr.retrieve(query="alpha"))
-            assert docs, "Expected at least one result"
-            return [str(d.id) for d in docs]
+            try:
+                import asyncio
+                docs = asyncio.run(retr.retrieve(query="alpha"))
+                assert docs, "Expected at least one result"
+                return [str(d.id) for d in docs]
+            finally:
+                retr.close()
 
-        # Title weight high
-        order_title = run_with_weights(5.0, 0.1)
-        # Content weight high
-        order_content = run_with_weights(0.1, 5.0)
+        try:
+            # Title weight high
+            order_title = run_with_weights(5.0, 0.1)
+            # Content weight high
+            order_content = run_with_weights(0.1, 5.0)
 
-        # Expect that the ordering flips with strong weight changes
-        assert order_title[0] != order_content[0], f"Expected different top result; got {order_title[0]} vs {order_content[0]}"
+            # Expect that the ordering flips with strong weight changes
+            assert order_title[0] != order_content[0], f"Expected different top result; got {order_title[0]} vs {order_content[0]}"
+        finally:
+            from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
+
+            reset_managed_sqlite_backends(sqlite_targets=[db_path])

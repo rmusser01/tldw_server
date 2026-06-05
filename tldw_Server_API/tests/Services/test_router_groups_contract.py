@@ -1998,6 +1998,7 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     module_paths = {
         "tldw_Server_API.app.api.v1.endpoints.media": {"router": "/media/list"},
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs": {"router": "/ingest/jobs"},
         "tldw_Server_API.app.api.v1.endpoints.audio.audio": {
             "router": "/transcriptions",
             "ws_router": "/stream/transcribe",
@@ -2046,12 +2047,15 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     selected_specs = [
         spec
         for spec in specs
-        if spec.route_key in {"media", "audio", "audio-websocket", "audio-jobs"}
+        if spec.route_key in {"media", "media-ingest-jobs", "audio", "audio-websocket", "audio-jobs"}
     ]
     by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
 
     assert by_first_path["/media/list"].prefix == "/api/v1/media"
     assert by_first_path["/media/list"].tags == ("media",)
+    assert by_first_path["/ingest/jobs"].prefix == "/api/v1/media"
+    assert by_first_path["/ingest/jobs"].tags == ("media",)
+    assert by_first_path["/ingest/jobs"].route_key == "media-ingest-jobs"
     assert by_first_path["/transcriptions"].prefix == "/api/v1/audio"
     assert by_first_path["/transcriptions"].tags == ("audio",)
     assert by_first_path["/stream/transcribe"].prefix == "/api/v1/audio"
@@ -4192,7 +4196,7 @@ def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: py
     assert by_first_path["/search"].route_key == "research"
     assert by_first_path["/runs"].prefix == "/api/v1"
     assert by_first_path["/runs"].tags == ("research-runs",)
-    assert by_first_path["/runs"].route_key == "research"
+    assert by_first_path["/runs"].route_key == "research-runs"
     assert by_first_path["/papers"].prefix == "/api/v1/paper-search"
     assert by_first_path["/papers"].tags == ("paper-search",)
     assert by_first_path["/papers"].route_key == "paper-search"
@@ -10539,6 +10543,11 @@ def test_iter_minimal_optional_router_specs_includes_media_audio_when_opted_in(
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+        path="/ingest/jobs",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.audio.audio",
         path="/transcriptions",
     )
@@ -11290,6 +11299,10 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["media-embeddings"].tags == ("media-embeddings",)
     assert by_key["media"].prefix == "/api/v1/media"
     assert by_key["media"].tags == ("media",)
+    assert by_key["media-ingest-jobs"].prefix == "/api/v1/media"
+    assert by_key["media-ingest-jobs"].tags == ("media",)
+    assert by_first_path["/ingest/jobs"].prefix == "/api/v1/media"
+    assert by_first_path["/ingest/jobs"].route_key == "media-ingest-jobs"
     assert by_key["audio"].prefix == "/api/v1/audio"
     assert by_key["audio"].tags == ("audio",)
     assert by_key["audio-websocket"].prefix == "/api/v1/audio"
@@ -11471,8 +11484,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["vn-play"].tags == ("vn-play",)
     assert by_tags[("research",)].prefix == "/api/v1/research"
     assert by_tags[("research",)].tags == ("research",)
+    assert by_key["research-runs"].prefix == "/api/v1"
+    assert by_key["research-runs"].tags == ("research-runs",)
     assert by_tags[("research-runs",)].prefix == "/api/v1"
     assert by_tags[("research-runs",)].tags == ("research-runs",)
+    assert by_tags[("research-runs",)].route_key == "research-runs"
     assert by_tags[("paper-search",)].prefix == "/api/v1/paper-search"
     assert by_tags[("paper-search",)].tags == ("paper-search",)
 

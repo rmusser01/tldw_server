@@ -1277,6 +1277,18 @@ def test_create_chat_completion_character_not_found_uses_defaults(
 ):
     # Mock DB to return None for character
     mock_chat_db.get_character_card_by_id.return_value = None
+    default_character_card = {
+        "id": "mock_default_char_id_123",
+        "name": DEFAULT_CHARACTER_NAME,
+        "system_prompt": "Mock default system prompt",
+    }
+
+    def get_character_card_by_name(name):
+        if name == DEFAULT_CHARACTER_NAME:
+            return default_character_card
+        return None
+
+    mock_chat_db.get_character_card_by_name.side_effect = get_character_card_by_name
     mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE  # Or a specific test template
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
@@ -1308,8 +1320,10 @@ def test_create_chat_completion_character_not_found_uses_defaults(
         called_args_to_shim.get("system_message") is not None
     )  # It will be at least "" if DEFAULT_RAW_PASSTHROUGH_TEMPLATE is used
 
-    # Verify DB was called
-    mock_chat_db.get_character_card_by_name.assert_called_once_with("non_existent_char_id")
+    # Verify the requested character was attempted and the default character was used as fallback.
+    name_lookups = [lookup_call.args[0] for lookup_call in mock_chat_db.get_character_card_by_name.call_args_list]
+    assert name_lookups.count("non_existent_char_id") == 1
+    assert DEFAULT_CHARACTER_NAME in name_lookups
     mock_chat_db.get_character_card_by_id.assert_not_called()
 
     # Clean up only the overrides we added (not the auth override from fixture)

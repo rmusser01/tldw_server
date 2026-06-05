@@ -6369,6 +6369,79 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 conn.execute(cls._SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS[table_name])
             conn.commit()
 
+    def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
+        """Return SQLite schema migrations keyed by their source schema version."""
+        return {
+            4: self._migrate_from_v4_to_v5,
+            5: self._migrate_from_v5_to_v6,
+            6: self._migrate_from_v6_to_v7,
+            7: self._migrate_from_v7_to_v8,
+            8: self._migrate_from_v8_to_v9,
+            9: self._migrate_from_v9_to_v10,
+            10: self._migrate_from_v10_to_v11,
+            11: self._migrate_from_v11_to_v12,
+            12: self._migrate_from_v12_to_v13,
+            13: self._migrate_from_v13_to_v14,
+            14: self._migrate_from_v14_to_v15,
+            15: self._migrate_from_v15_to_v16,
+            16: self._migrate_from_v16_to_v17,
+            17: self._migrate_from_v17_to_v18,
+            18: self._migrate_from_v18_to_v19,
+            19: self._migrate_from_v19_to_v20,
+            20: self._migrate_from_v20_to_v21,
+            21: self._migrate_from_v21_to_v22,
+            22: self._migrate_from_v22_to_v23,
+            23: self._migrate_from_v23_to_v24,
+            24: self._migrate_from_v24_to_v25,
+            25: self._migrate_from_v25_to_v26,
+            26: self._migrate_from_v26_to_v27,
+            27: self._migrate_from_v27_to_v28,
+            28: self._migrate_from_v28_to_v29,
+            29: self._migrate_from_v29_to_v30,
+            30: self._migrate_from_v30_to_v31,
+            31: self._migrate_from_v31_to_v32,
+            32: self._migrate_from_v32_to_v33,
+            33: self._migrate_from_v33_to_v34,
+            34: self._migrate_from_v34_to_v35,
+            35: self._migrate_from_v35_to_v36,
+            36: self._migrate_from_v36_to_v37,
+            37: self._migrate_from_v37_to_v38,
+            38: self._migrate_from_v38_to_v39,
+            39: self._migrate_from_v39_to_v40,
+            40: self._migrate_from_v40_to_v41,
+            41: self._migrate_from_v41_to_v42,
+            42: self._migrate_from_v42_to_v43,
+            43: self._migrate_from_v43_to_v44,
+            44: self._migrate_from_v44_to_v45,
+            45: self._migrate_from_v45_to_v46,
+            46: self._migrate_from_v46_to_v47,
+        }
+
+    def _run_sqlite_linear_migration_step(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        from_version: int,
+        target_version: int,
+        initial_version: int,
+    ) -> int:
+        steps = self._sqlite_linear_migration_steps()
+        step = steps.get(from_version)
+        if step is None:
+            raise SchemaError(  # noqa: TRY003
+                f"Migration path undefined for '{self._SCHEMA_NAME}' from version {from_version} to {target_version} "
+                f"while migrating from {initial_version} to {target_version}. Manual migration or a new database may be required."
+            )
+        step(conn)
+        next_version = self._get_db_version(conn)
+        expected_version = from_version + 1
+        if next_version != expected_version:
+            raise SchemaError(  # noqa: TRY003
+                f"SQLite migration for '{self._SCHEMA_NAME}' advanced from version {from_version} to {next_version}; "
+                f"expected {expected_version} while migrating from {initial_version} to {target_version}."
+            )
+        return next_version
+
     @staticmethod
     def _sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
         """Return the SQLite table names visible to a migration connection."""
@@ -9526,8 +9599,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._migrate_from_v43_to_v44(conn)
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 45 and current_db_version == 44:
-                        self._migrate_from_v44_to_v45(conn)
-                        current_db_version = self._get_db_version(conn)
+                        current_db_version = self._run_sqlite_linear_migration_step(
+                            conn,
+                            from_version=44,
+                            target_version=target_version,
+                            initial_version=current_initial_version,
+                        )
                     if target_version >= 46 and current_db_version == 45:
                         self._migrate_from_v45_to_v46(conn)
                         current_db_version = self._get_db_version(conn)
@@ -9590,8 +9667,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         pass
                     # Handle known migration paths for pre-existing databases
                     elif current_initial_version == 4 and target_version >= 5:
-                        self._migrate_from_v4_to_v5(conn)
-                        current_db_version = self._get_db_version(conn)
+                        current_db_version = self._run_sqlite_linear_migration_step(
+                            conn,
+                            from_version=4,
+                            target_version=target_version,
+                            initial_version=current_initial_version,
+                        )
                         if target_version >= 6 and current_db_version == 5:
                             self._migrate_from_v5_to_v6(conn)
                             current_db_version = self._get_db_version(conn)
@@ -9878,7 +9959,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             elif fallback_version == 43:
                                 self._migrate_from_v43_to_v44(conn)
                             elif fallback_version == 44:
-                                self._migrate_from_v44_to_v45(conn)
+                                self._run_sqlite_linear_migration_step(
+                                    conn,
+                                    from_version=44,
+                                    target_version=target_version,
+                                    initial_version=current_initial_version,
+                                )
                             elif fallback_version == 45:
                                 self._migrate_from_v45_to_v46(conn)
                             elif fallback_version == 46:
@@ -9992,8 +10078,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._migrate_from_v43_to_v44(conn)
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 45 and current_db_version == 44:
-                    self._migrate_from_v44_to_v45(conn)
-                    current_db_version = self._get_db_version(conn)
+                    current_db_version = self._run_sqlite_linear_migration_step(
+                        conn,
+                        from_version=44,
+                        target_version=target_version,
+                        initial_version=current_initial_version,
+                    )
                 if target_version >= 46 and current_db_version == 45:
                     self._migrate_from_v45_to_v46(conn)
                     current_db_version = self._get_db_version(conn)

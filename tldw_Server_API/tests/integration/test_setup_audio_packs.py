@@ -45,6 +45,10 @@ def _make_client():
     return TestClient(app)
 
 
+def _normalized_pack_path(value: object) -> str:
+    return str(value).replace("\\", "/")
+
+
 def test_setup_audio_pack_export_returns_manifest(mocker):
     mocker.patch.object(
         setup_endpoint.setup_manager,
@@ -185,7 +189,7 @@ def test_setup_audio_pack_import_updates_readiness(mocker, tmp_path):
     assert readiness.status_code == 200
     assert readiness.json()["selected_bundle_id"] == "cpu_local"
     assert readiness.json()["selected_resource_profile"] == "balanced"
-    assert readiness.json()["imported_packs"][0]["pack_path"] == "audio_packs/audio_pack.json"
+    assert _normalized_pack_path(readiness.json()["imported_packs"][0]["pack_path"]) == "audio_packs/audio_pack.json"
 
 
 def test_setup_audio_pack_import_rejects_parent_directory_traversal(mocker):
@@ -304,5 +308,5 @@ def test_setup_audio_pack_export_writes_to_managed_audio_pack_directory(mocker, 
         )
 
     assert response.status_code == 200
-    assert response.json()["pack_path"] == "audio_packs/managed-pack.json"
+    assert _normalized_pack_path(response.json()["pack_path"]) == "audio_packs/managed-pack.json"
     assert (config_root / "audio_packs" / "managed-pack.json").is_file()

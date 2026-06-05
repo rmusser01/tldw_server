@@ -1003,9 +1003,21 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
     # --- CORRECTED TestClient Call ---
     # Pass form data via `data` and files via `files` in the same call
     if media_type == "audio":
-        # Avoid heavy dependencies by mocking conversion + transcription
+        # Avoid heavy dependencies by mocking conversion + transcription.
         with patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.convert_to_wav", side_effect=lambda p, **kw: p), \
         patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text", return_value=[{"Text": "test", "start_seconds": 0, "end_seconds": 1}]):
+            response = test_api_client.post(
+                ADD_MEDIA_ENDPOINT,
+                data=form_data,
+                files={"files": file_tuple}, # Key must match the File(..., alias="files") parameter name
+                headers=dummy_headers
+            )
+    elif media_type == "video":
+        # The sample MP4 is a dummy file; keep this test focused on endpoint plumbing.
+        with patch(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.perform_transcription",
+            return_value=("Mocked video transcript.", []),
+        ):
             response = test_api_client.post(
                 ADD_MEDIA_ENDPOINT,
                 data=form_data,

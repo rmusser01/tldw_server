@@ -101,7 +101,6 @@ _MEDIA_ENDPOINT_MODULES: tuple[str, ...] = (
     "add",
     "debug",
     "ingest_web_content",
-    "ingest_jobs",
     "playlist_preflight",
     "collections",
     "process_code",

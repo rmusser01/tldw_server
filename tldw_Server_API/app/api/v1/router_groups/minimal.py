@@ -212,6 +212,17 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             skip_context=minimal_skip_context,
         ),
     )
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+            log_name="media-ingest-jobs",
+            prefix=f"{API_V1_PREFIX}/media",
+            tags=("media",),
+            route_key="media-ingest-jobs",
+            skip_context=minimal_skip_context,
+        ),
+    )
 
     if _audio_jobs_imports_enabled_for_runtime():
         append_imported_router_spec(

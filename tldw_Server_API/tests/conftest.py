@@ -71,6 +71,7 @@ import weakref
 import threading
 import atexit
 import asyncio
+from unittest import mock as unittest_mock
 try:
     import faulthandler
     import signal
@@ -81,6 +82,45 @@ except Exception:
     # Best-effort; tracing is optional
     _ = None
 import pytest
+
+
+class _LocalPatchProxy:
+    def __init__(self, request):
+        self._request = request
+
+    def __call__(self, target, *args, **kwargs):
+        patcher = unittest_mock.patch(target, *args, **kwargs)
+        replacement = patcher.start()
+        self._request.addfinalizer(patcher.stop)
+        return replacement
+
+    def object(self, target, attribute, *args, **kwargs):
+        patcher = unittest_mock.patch.object(target, attribute, *args, **kwargs)
+        replacement = patcher.start()
+        self._request.addfinalizer(patcher.stop)
+        return replacement
+
+    def dict(self, in_dict, values=(), clear=False, **kwargs):
+        patcher = unittest_mock.patch.dict(in_dict, values, clear=clear, **kwargs)
+        replacement = patcher.start()
+        self._request.addfinalizer(patcher.stop)
+        return replacement
+
+
+class _LocalMocker:
+    Mock = unittest_mock.Mock
+    MagicMock = unittest_mock.MagicMock
+    AsyncMock = unittest_mock.AsyncMock
+    call = unittest_mock.call
+
+    def __init__(self, request):
+        self.patch = _LocalPatchProxy(request)
+
+
+@pytest.fixture
+def mocker(request):
+    """Small pytest-mock compatible shim for CI runs with plugin autoload disabled."""
+    return _LocalMocker(request)
 
 
 _AIOSQLITE_CONNECTIONS: "weakref.WeakSet[object]" = weakref.WeakSet()

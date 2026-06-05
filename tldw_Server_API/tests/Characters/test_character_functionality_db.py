@@ -1039,9 +1039,18 @@ class TestConversationCRUD:
         assert is_recent_iso_timestamp(retrieved["created_at"])
         check_sync_log_entry(db, "conversations", conv_id, "create", expected_version=1)
 
-    def test_add_conversation_missing_char_id_fails(self, db: CharactersRAGDB):
-        with pytest.raises(InputError, match="Required field 'character_id' is missing"):
-            db.add_conversation({"title": "No Char Convo", "root_id": str(uuid.uuid4())})
+    def test_add_conversation_without_assistant_identity_creates_generic_chat(self, db: CharactersRAGDB):
+        root_id = str(uuid.uuid4())
+        conv_id = db.add_conversation({"title": "No Assistant Convo", "root_id": root_id})
+
+        retrieved = db.get_conversation_by_id(conv_id)
+        assert retrieved is not None
+        assert retrieved["character_id"] is None
+        assert retrieved["assistant_kind"] is None
+        assert retrieved["assistant_id"] is None
+        assert retrieved["persona_memory_mode"] is None
+        assert retrieved["title"] == "No Assistant Convo"
+        assert retrieved["root_id"] == root_id
 
     def test_add_conversation_invalid_char_id_fails(self, db: CharactersRAGDB):
         with pytest.raises(CharactersRAGDBError):  # Wraps sqlite3.IntegrityError

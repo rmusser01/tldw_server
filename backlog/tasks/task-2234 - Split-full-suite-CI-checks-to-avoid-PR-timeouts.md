@@ -21,6 +21,10 @@ modified_files:
 - apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
 - apps/packages/ui/src/routes/option-setup.tsx
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
+- tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
+- tldw_Server_API/app/api/v1/endpoints/media/__init__.py
+- tldw_Server_API/app/api/v1/router_groups/content.py
+- tldw_Server_API/app/api/v1/router_groups/minimal.py
 - tldw_Server_API/app/core/AuthNZ/email_service.py
 - tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
 - tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
@@ -47,6 +51,12 @@ modified_files:
 - tldw_Server_API/app/core/Resource_Governance/metrics_rg.py
 - tldw_Server_API/app/services/reading_digest_scheduler.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
+- tldw_Server_API/tests/ChaChaNotesDB/test_flashcard_deck_sharing.py
+- tldw_Server_API/tests/Characters/test_character_functionality_db.py
+- tldw_Server_API/tests/Chat/integration/test_chat_endpoint.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
+- tldw_Server_API/tests/Evaluations/test_connection_pool.py
+- tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
 - tldw_Server_API/tests/Audit/test_unified_audit_service.py
@@ -90,6 +100,10 @@ modified_files:
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
+- tldw_Server_API/tests/LLM_Adapters/benchmarks/test_streaming_unified_benchmark.py
+- tldw_Server_API/tests/Media_Ingestion_Modification/test_add_media_endpoint.py
+- tldw_Server_API/tests/RAG_NEW/integration/test_bm25_weights.py
+- tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
 - tldw_Server_API/tests/RAG/test_query_rewriting_loop.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
@@ -100,12 +114,17 @@ modified_files:
 - tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
 - tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py
 - tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
+- tldw_Server_API/tests/Services/test_document_processing_service.py
+- tldw_Server_API/tests/Services/test_router_groups_contract.py
+- tldw_Server_API/tests/VectorStores/integration/test_vector_stores_real_db.py
 - tldw_Server_API/tests/Web_Scraping/test_enhanced_web_scraping_guards.py
 - tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
 - tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
 - tldw_Server_API/tests/integration/test_setup_audio_packs.py
+- tldw_Server_API/tests/integration/test_setup_audio_readiness.py
+- tldw_Server_API/tests/test_utils.py
 references:
 - https://github.com/rmusser01/tldw_server/pull/2258
 ---
@@ -177,6 +196,12 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-05 local shard reproduction while run 27019363370 was still finishing found additional failures before GitHub logs for the later shards were available: the product-modules shard failed because the eval inline-webhook disabled test only set `TEST_MODE=0` and did not clear the alternate `TLDW_TEST_MODE` flag, and the platform-mcp shard found two more lifecycle startup contract tests that did not force module-level `_TEST_MODE` before asserting helper arguments. Those tests now isolate the relevant test-mode state explicitly, the exact regressions pass locally under the CI shard environment, and the full lifecycle contract file passes locally.
 
 2026-06-05 completed-check follow-up for run 27019363370 found all current CI rows finished with 30 failed checks on the old head. Downloaded logs covered the functional failures already targeted, and local shard reproduction exposed one additional product-modules regression: `test_init_abtest_store_falls_back_when_sqlalchemy_driver_missing` constructed `EvaluationsDatabase` through `__new__` and assigned read-only backend properties. The test now initializes the private backing fields used by the current backend properties. After the checks stopped running, the remaining direct job logs showed four more completed failures: audit workflow assertions depended on event-row ordering, setup audio-pack import used a manifest profile that could mismatch the runner platform, the AuthNZ under-budget chat test used an in-memory ChaChaNotes override across request-thread boundaries, and the evaluation state machine could hit delayed Windows SQLite file-release during temp cleanup. Those tests now assert order-independent audit trail contents, build import manifests from the local compatibility shape, use a temp file-backed ChaChaNotes DB, and retry/ignore Windows temp cleanup timing. The same local chat shard reproduction advanced slowly through `Character_Chat_NEW` while the CI chat/ai rows failed at the 35-minute shard timeout, so the workflow now splits the oversized `ai-retrieval` and `chat-llm` matrix entries into smaller retrieval, character-chat, chat-core, and LLM-provider shards across PR and release full-suite matrices, with a workflow contract preventing the old monolithic shard names from returning. Local verification: focused CI regression matrix passed (24), workflow contract tests passed (19), compileall passed for touched Python files, production Bandit passed for touched app files, and git diff --check passed.
+
+2026-06-05 recheck of run 27025965099 found completed failures across RAG stream parity, OpenAPI streaming route exemptions, chat default-character fallback, ChaChaNotes migration registry tests, setup audio readiness/pack fixtures, document-processing metadata serialization, VectorStore admin auth overrides, media dummy-video transcription, TTLCache deterministic LRU behavior, plugin-disabled benchmark fixture availability, BM25 temp DB cleanup, Windows Media DB temp cleanup, Windows ChaChaNotes flashcard deck-sharing cleanup, and SQLite connection-pool cleanup. Local fixes already covered the first groups and this pass added shared `temp_db()` managed-SQLite backend eviction plus a `test_flashcard_deck_sharing.py` temp `CharactersRAGDB` cleanup helper using `close_all_connections()`. Verification on 2026-06-05: the unique completed-failure node matrix passed locally (15 passed), plugin-disabled benchmark shard exited cleanly (1 skipped, exit 0), flashcard/BM25/connection-pool cleanup checks passed (9 passed), media Windows-lock exact cases passed (2 passed), compileall passed on touched files, `git diff --check` passed, and Bandit on touched production files reported zero issues. GitHub still reported two old-head product-module shards in progress at that point, so no push was made from that pass.
+
+2026-06-05 final recheck of run 27025965099 found all PR checks terminal, with 30 failed rows on the old pushed SHA and no running rows. The Ubuntu/Python 3.13 product shard was canceled with no pytest failure summary, and the macOS/Python 3.12 product shard exposed one additional distinct failure: `test_persona_chat_judge_artifact_command_outputs_trace_safe_artifact` parsed `CliRunner.result.output`, which can include stderr/log diagnostics under the CI Click version. The JSON assertions now parse `result.stdout` while keeping `result.output` for failure messages. Verification on 2026-06-05: persona CLI review-command file passed (9 passed), neighboring eval route binding plus persona CLI sequence passed (14 passed), media upload/email exact failures passed in isolation (2 passed), OpenAPI streaming exemption exact failure passed in isolation (1 passed), the remaining distinct old-head failure set passed (14 passed, 1 skipped for plugin-disabled benchmark fixture), compileall passed on touched Python files, `git diff --check` passed, production Bandit on touched app files reported zero findings, and all-touched Bandit findings were test-scope baseline assertions/literals rather than new production findings.
+
+2026-06-05 pre-commit verification found one stale router contract assertion still expecting the old minimal `/runs` route key `research` after the content/minimal router groups moved that spec to `research-runs`. The assertion now matches the implementation and tag. Final local verification on 2026-06-05: the targeted distinct failure matrix passed (58 passed, 1 skipped for plugin-disabled benchmark fixture), OpenAPI streaming exemption passed in isolation (1 passed), media upload exact cases passed in isolation (9 passed, 1 skipped, 1 xpassed), compileall passed on touched Python files, `git diff --check` passed, production Bandit on touched app files reported zero findings, and `gh pr checks` showed all old-head rows terminal with no running checks before the push.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

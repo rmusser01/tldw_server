@@ -14,11 +14,7 @@ non-unified path and compare benchmark results across runs.
 from typing import Iterator
 
 import pytest
-
-# Ensure the pytest-benchmark plugin is available before defining tests that
-# require its 'benchmark' fixture. This skips the entire module cleanly when
-# the plugin isn't installed, avoiding a collection-time missing-fixture error.
-pytest.importorskip("pytest_benchmark", reason="pytest-benchmark plugin not installed")
+from _pytest.fixtures import FixtureLookupError
 
 # Register chat fixtures (authenticated_client)
 from tldw_Server_API.tests._plugins import chat_fixtures as _chat_pl  # noqa: F401
@@ -52,7 +48,13 @@ def _payload() -> dict:
 
 
 @pytest.mark.benchmark
-def test_streaming_unified_throughput_benchmark(monkeypatch, authenticated_client, benchmark):
+def test_streaming_unified_throughput_benchmark(monkeypatch, request):
+    try:
+        benchmark = request.getfixturevalue("benchmark")
+    except FixtureLookupError:
+        pytest.skip("pytest-benchmark fixture is not available")
+    authenticated_client = request.getfixturevalue("authenticated_client")
+
     import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
     chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "openai": "sk-openai-test"}
 
