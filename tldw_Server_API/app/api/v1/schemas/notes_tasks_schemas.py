@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TaskStatusValue = Literal["open", "done"]
 ProjectionStatusValue = Literal["live", "unlinked", "ambiguous", "deleted"]
 
 
 class TaskMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     due_date: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     priority: Literal["high", "medium", "low"] | None = None
     estimate: str | None = Field(None, pattern=r"^\d+[mhd]$")
+
+    @field_validator("due_date")
+    @classmethod
+    def validate_due_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("due_date must be a real ISO date.") from exc
+        return value
 
     def as_compact_dict(self) -> dict[str, Any]:
         return self.model_dump(exclude_none=True)
@@ -82,6 +96,8 @@ class TaskCreateRequest(BaseModel):
         stripped = value.strip()
         if not stripped:
             raise ValueError("Task text cannot be empty.")
+        if "\n" in value or "\r" in value:
+            raise ValueError("Task text cannot contain newline characters.")
         return stripped
 
 
@@ -116,6 +132,8 @@ class TaskUpdateRequest(BaseModel):
         stripped = value.strip()
         if not stripped:
             raise ValueError("Task text cannot be empty.")
+        if "\n" in value or "\r" in value:
+            raise ValueError("Task text cannot contain newline characters.")
         return stripped
 
     @model_validator(mode="after")
