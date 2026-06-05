@@ -18,6 +18,7 @@ _CHECKLIST_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])[ \t]+\[(?P<marker>[ xX])\](?:[ \t]+(?P<body>.*)|[ \t]*)$"
 )
 _FENCE_RE = re.compile(r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})")
+_INDENTED_FENCE_RE = re.compile(r"^[ \t]+(?P<fence>`{3,}|~{3,})")
 _LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?:[ \t]+.*)?$")
 _TOKEN_RE = re.compile(r"@(?P<name>[A-Za-z][A-Za-z0-9_-]*)\((?P<value>[^)]*)\)")
 _ESTIMATE_RE = re.compile(r"^\d+[mhd]$")
@@ -131,7 +132,10 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
                 list_indent_stack.pop()
 
         is_fenced_code = active_fence is not None
-        fence_marker = _find_fence_marker(line.raw)
+        fence_marker = _find_fence_marker(
+            raw_line=line.raw,
+            allow_indented=bool(list_indent_stack),
+        )
         if active_fence is None and fence_marker is not None:
             active_fence = fence_marker
             is_fenced_code = True
@@ -156,8 +160,10 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
     return contexts
 
 
-def _find_fence_marker(raw_line: str) -> tuple[str, int] | None:
+def _find_fence_marker(*, raw_line: str, allow_indented: bool) -> tuple[str, int] | None:
     match = _FENCE_RE.match(raw_line)
+    if match is None and allow_indented:
+        match = _INDENTED_FENCE_RE.match(raw_line)
     if match is None:
         return None
 
