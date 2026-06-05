@@ -76,6 +76,27 @@ class TestQueryRewriterImproveForRetrieval:
         # All should be improve_for_retrieval type
         assert all(r.rewrite_type == "improve_for_retrieval" for r in rewrites)
 
+    def test_improve_for_retrieval_without_wordnet_still_rewrites(self, monkeypatch, rewriter):
+        """WordNet-free test environments still get a deterministic retrieval rewrite."""
+        def _missing_wordnet(_term):
+            raise LookupError("wordnet unavailable")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.RAG.rag_service.query_features.wordnet.synsets",
+            _missing_wordnet,
+        )
+
+        rewrites = rewriter.rewrite_query(
+            "what is machine learning",
+            strategies=["improve_for_retrieval"],
+        )
+
+        assert any(
+            rewrite.rewritten_query == "machine learning"
+            and rewrite.explanation == "Generated keyword-focused fallback rewrite"
+            for rewrite in rewrites
+        )
+
     def test_improve_for_retrieval_with_failed_docs(self, rewriter, sample_failed_docs):
         """Test that improve_for_retrieval uses entities from failed docs."""
         query = "how does it work"

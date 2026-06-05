@@ -83,14 +83,17 @@ def temp_db_path() -> Generator[Path, None, None]:
         yield db_path
 
 @pytest.fixture
-def media_database(temp_db_path) -> MediaDatabase:
+def media_database(temp_db_path) -> Generator[MediaDatabase, None, None]:
     """Create a real MediaDatabase instance for testing."""
     db = MediaDatabase(
         db_path=str(temp_db_path),
         client_id="test_client"
     )
     db.initialize_db()
-    return db
+    try:
+        yield db
+    finally:
+        db.close_connection()
 
 @pytest.fixture
 def populated_media_db(media_database) -> MediaDatabase:

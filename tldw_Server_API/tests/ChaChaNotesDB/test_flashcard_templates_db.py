@@ -295,8 +295,17 @@ def test_flashcard_template_schema_postgres_registers_sync_log_trigger(monkeypat
                 executed.append(str(query))
                 return None
 
-        monkeypatch.setattr(db, "backend_type", BackendType.POSTGRESQL)
-        monkeypatch.setattr(db, "backend", _Backend())
+        backend = _Backend()
+        monkeypatch.setattr(
+            CharactersRAGDB,
+            "backend_type",
+            property(lambda self: BackendType.POSTGRESQL),
+        )
+        monkeypatch.setattr(
+            CharactersRAGDB,
+            "backend",
+            property(lambda self: backend),
+        )
 
         db._ensure_flashcard_template_schema_postgres(conn=object())
 

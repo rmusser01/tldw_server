@@ -685,6 +685,16 @@ class QueryRewriter:
                 explanation="Expanded with related concepts"
             ))
 
+        if not rewrites:
+            fallback = self._keyword_fallback_for_retrieval(query, analysis)
+            if fallback and fallback.lower() != query.lower():
+                rewrites.append(QueryRewrite(
+                    rewritten_query=fallback,
+                    rewrite_type="improve_for_retrieval",
+                    confidence=0.5,
+                    explanation="Generated keyword-focused fallback rewrite"
+                ))
+
         return rewrites
 
     def _remove_modifiers(
@@ -846,6 +856,45 @@ class QueryRewriter:
 
         # Add the first expanded term
         return f"{query} ({expanded_terms[0]})"
+
+    def _keyword_fallback_for_retrieval(
+        self,
+        query: str,
+        analysis: QueryAnalysis,
+    ) -> Optional[str]:
+        """Create a deterministic retrieval rewrite when optional NLP data is unavailable."""
+        question_terms = {
+            "what",
+            "who",
+            "where",
+            "which",
+            "how",
+            "why",
+            "when",
+            "do",
+            "does",
+            "did",
+            "can",
+            "could",
+            "should",
+            "would",
+        }
+        terms = [term for term in analysis.key_terms if term not in question_terms]
+        if len(terms) >= 2:
+            fallback = " ".join(terms)
+            if len(fallback) >= 5:
+                return fallback
+
+        cleaned = re.sub(
+            r"^\s*(what|who|where|which|how|why|when)\s+"
+            r"(is|are|was|were|do|does|did|can|could|should|would)\s+",
+            "",
+            query,
+            flags=re.I,
+        ).strip(" ?")
+        if len(cleaned) >= 5:
+            return cleaned
+        return None
 
 
 class QueryRouter:

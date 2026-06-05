@@ -807,7 +807,7 @@ class SessionManager:
                     logger.warning(f"Session key file {path} is not owned by the current user; ignoring.")
                     return False
                 mode = stat.S_IMODE(st.st_mode)
-                if mode & (stat.S_IRWXG | stat.S_IRWXO):
+                if os.name != "nt" and mode & (stat.S_IRWXG | stat.S_IRWXO):
                     logger.warning(
                         f"Session key file {path} has insecure permissions {oct(mode)}; ignoring."
                     )

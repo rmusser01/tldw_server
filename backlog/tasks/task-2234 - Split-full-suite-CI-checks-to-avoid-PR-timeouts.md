@@ -1,7 +1,7 @@
 ---
 id: TASK-2234
 title: Split full-suite CI checks to avoid PR timeouts
-status: Done
+status: In Progress
 labels:
 - ci
 - github-actions
@@ -36,12 +36,20 @@ modified_files:
 - tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_webhooks.py
 - tldw_Server_API/app/core/Audit/unified_audit_service.py
 - tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/api/v1/endpoints/chat.py
+- tldw_Server_API/app/core/AuthNZ/create_admin.py
+- tldw_Server_API/app/core/AuthNZ/session_manager.py
+- tldw_Server_API/app/core/DB_Management/migration_tools.py
+- tldw_Server_API/app/core/Evaluations/unified_evaluation_service.py
+- tldw_Server_API/app/core/RAG/rag_service/query_features.py
+- tldw_Server_API/app/services/enhanced_web_scraping_service.py
 - tldw_Server_API/app/core/RAG/rag_service/observability.py
 - tldw_Server_API/app/core/Resource_Governance/metrics_rg.py
 - tldw_Server_API/app/services/reading_digest_scheduler.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
+- tldw_Server_API/tests/Audit/test_unified_audit_service.py
 - tldw_Server_API/tests/AuthNZ/integration/test_jwt_refresh_rotation_blacklist.py
 - tldw_Server_API/tests/AuthNZ/unit/test_session_manager_configured_key.py
 - tldw_Server_API/tests/AuthNZ/unit/test_email_service.py
@@ -54,6 +62,7 @@ modified_files:
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 - tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py
 - tldw_Server_API/tests/Evaluations/integration/test_webhook_multi_user_api.py
+- tldw_Server_API/tests/Evaluations/test_embeddings_abtest_idempotency.py
 - tldw_Server_API/tests/Infrastructure/test_distributed_lock.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_overrides.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_shared_workspace_registry.py
@@ -64,13 +73,19 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
 - tldw_Server_API/tests/Media/test_json_url_download.py
 - tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+- tldw_Server_API/tests/MediaIngestion_NEW/conftest.py
+- tldw_Server_API/tests/MediaIngestion_NEW/integration/test_video_download_integration.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
+- tldw_Server_API/tests/RAG/test_query_rewriting_loop.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_workflows_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_rg_shadow_metrics.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
+- tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
+- tldw_Server_API/tests/Web_Scraping/test_enhanced_web_scraping_guards.py
+- tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
 - tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
@@ -129,6 +144,10 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-04 final pre-push recheck found three more completed old-head failures while other old-head full-suite jobs were still queued/in progress: macOS integrations and Windows integrations failed on the same WebSearch cancellation 503, and Windows media-audio failed on the same `.tar.gz` MIME fixture. Both root causes are already covered by the local lifecycle-state and valid-archive fixes in this pass.
 
 2026-06-04 post-push PR metadata showed `mergeStateStatus=DIRTY` against current `origin/dev`, preventing new GitHub Actions rows from populating for commit `d75bff4e7f`. Merged current `origin/dev` into the PR branch and resolved the only conflict markers in `Docs/Published/User_Guides/index.md` and `Docs/User_Guides/index.md` using the current dev wording for benchmark/chatbook guide text.
+
+2026-06-05 continued current-head recheck of run 26989907418 found additional completed shard failures before pushing: RAG query rewriting returned no fallback when WordNet was unavailable, Web Scraping guard tests mocked stale policy APIs, Audit auto-category assertions depended on nondeterministic ordering, Loguru placeholder guard found percent-style placeholders in touched production paths, Character Chat property tests expected unnormalized whitespace tags, claims rebuild health tests could still fall back to live service health, web-scraping persistence tests called a changed helper signature and exposed a missing `api_name` data-flow parameter, MCP governance-pack symlink tests parsed Windows file URIs incorrectly, MediaIngestion temp DB fixtures leaked open SQLite handles on Windows, and A/B test idempotency used shared evaluation service state. Local fixes now add a deterministic RAG keyword fallback, align tests with current policy/storage/service APIs, close temp MediaDatabase fixtures, normalize Windows file URLs, isolate evaluation storage and cache rebinding, and pass `api_name` into web storage chunking resolution. Local verification passed the combined targeted failure matrix (15 passed, 1 skipped due local ffmpeg absence), compileall on touched files, `git diff --check`, production Bandit on touched app files, and test-scope Bandit with test-only assert/random/subprocess skips. Several old-head CI jobs were still in progress, so the branch was not pushed yet.
+
+2026-06-05 continued current-head recheck of run 26989907418 found a newly completed Windows auth-db failure in `test_session_manager_persists_generated_key`. Windows reported the freshly persisted Fernet key as mode `0o666`, so `_is_valid_key_file` rejected the key on reload and the second SessionManager fell back to derived secrets that could not decrypt the generated-key token. The fix keeps Unix group/other permission-bit rejection on non-Windows platforms while allowing Windows mode bits, where ACLs are not represented by those POSIX bits, and adds regression coverage for the Windows mode-bit case.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -157,6 +176,12 @@ Tenth recheck remediation for PR #2258: fixed the remaining completed full-suite
 Eleventh recheck remediation for PR #2258: fixed additional completed failures from the same run by making the RAG observability OpenTelemetry fallback safe when optional SDK symbols are missing, updating the flashcard template Postgres-safety test to patch the class-level backend property, normalizing the MCP governance-pack trust-policy path expectation, and isolating session key persistence to a temporary API key path. Verification on 2026-06-04: exact RAG observability, flashcard template, MCP governance-pack, and AuthNZ session-manager failure tests passed together locally (4 passed); the combined targeted regression set passed (31 passed); compileall passed for touched Python files; production Bandit passed with no findings; test-scope Bandit passed with existing test-only assert/secret/subprocess rules skipped; git diff --check passed.
 
 Merge-state remediation for PR #2258: merged `origin/dev`, resolved the user-guide index conflicts in favor of current dev wording, and re-ran verification. Verification on 2026-06-04: compileall passed for the touched production/test scope plus merged MCP server modules; production Bandit passed; git diff --check passed; the combined targeted regression set passed again (31 passed).
+
+2026-06-05 current-head full CI run 26989907418 exposed two additional failures after queued jobs started: macOS media-audio blocked the local HTTP video download integration test through the strict egress allowlist, and macOS auth-db still had one flashcard template Postgres trigger test patching the read-only `CharactersRAGDB.backend_type` property on an instance. The video integration test now patches the video module egress evaluator to allow only its temporary local HTTP server, and the remaining flashcard trigger test now patches the class-level `backend_type` property.
+
+Current-head recheck follow-up on 2026-06-05 fixed the remaining completed failure signatures observed so far in run 26989907418 across RAG, Web Scraping, Audit, Logging, Character Chat, Claims, Evaluations A/B tests, MCP governance-pack distribution, and Windows MediaIngestion cleanup. Verification on 2026-06-05: targeted CI failure matrix passed locally (15 passed, 1 skipped because local ffmpeg is unavailable), compileall passed for touched files, `git diff --check` passed, production Bandit passed, and test-scope Bandit passed with test-only skips.
+
+Final current-head recheck follow-up on 2026-06-05 waited for all old-head CI checks in run 26989907418 to finish before pushing. The last completed failure was Windows auth-db `test_session_manager_persists_generated_key`, where Windows mode bits caused a freshly persisted Fernet key to be rejected on reload; the fix now keeps Unix permission-bit rejection on non-Windows platforms and adds Windows mode-bit regression coverage. The final Ubuntu 3.12/3.13 and macOS/Windows full-suite rows were aggregate failures caused by shard failures already inspected; the remaining long-running Ubuntu ai/chat shards canceled after earlier failures without new pytest failure summaries. Verification on 2026-06-05: expanded targeted matrix passed locally (17 passed, 1 skipped because local ffmpeg is unavailable), compileall passed for touched files, `git diff --check` passed, test-scope Bandit passed with test-only skips, and production Bandit had no findings after skipping existing `B106` token-label false positives in untouched `session_manager.py` lines.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

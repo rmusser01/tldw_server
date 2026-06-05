@@ -1252,9 +1252,10 @@ class TestUnifiedAuditService:
         await audit_service.flush()
 
         events = await audit_service.query_events()
+        categories_by_type = {event["event_type"]: event["category"] for event in events}
 
-        for event, (event_type, expected_category) in zip(reversed(events), test_cases):
-            assert event["category"] == expected_category.value
+        for event_type, expected_category in test_cases:
+            assert categories_by_type[event_type.value] == expected_category.value
 
     @pytest.mark.asyncio
     async def test_auto_severity_determination(self, audit_service):

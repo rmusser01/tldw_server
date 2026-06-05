@@ -4,6 +4,7 @@ import stat
 import pytest
 from cryptography.fernet import Fernet
 
+from tldw_Server_API.app.core.AuthNZ import session_manager as session_manager_module
 from tldw_Server_API.app.core.AuthNZ.session_manager import (
     SessionManager,
     reset_session_manager,
@@ -113,6 +114,17 @@ async def test_session_manager_persists_generated_key(monkeypatch, tmp_path):
     for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
         monkeypatch.delenv(env_key, raising=False)
     reset_settings()
+
+
+def test_session_key_validation_allows_windows_mode_bits(monkeypatch, tmp_path):
+    key_path = tmp_path / "session_encryption.key"
+    key_path.write_text(Fernet.generate_key().decode("utf-8"), encoding="utf-8")
+    key_path.chmod(0o666)
+
+    monkeypatch.setattr(session_manager_module.os, "name", "nt", raising=False)
+
+    manager = object.__new__(SessionManager)
+    assert manager._is_valid_key_file(key_path) is True
 
 
 @pytest.mark.asyncio

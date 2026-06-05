@@ -61,6 +61,26 @@ def test_claims_rebuild_health_reads_persisted(monkeypatch, tmp_path):
     )
     db.close_connection()
 
+    def _load_persisted_health_for_test():
+        with _managed_media_database(client_id="test", db_path=db_path, initialize=False) as health_db:
+            return health_db.get_claims_monitoring_health("1")
+
+    def _unexpected_live_service_fallback():
+        raise AssertionError("claims_rebuild_health should use persisted health in this test")
+
+    monkeypatch.setattr(
+        claims_service,
+        "_load_persisted_rebuild_health",
+        _load_persisted_health_for_test,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "get_claims_rebuild_service",
+        _unexpected_live_service_fallback,
+        raising=False,
+    )
+
     principal = AuthPrincipal(
         kind="user",
         user_id=1,

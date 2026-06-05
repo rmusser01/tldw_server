@@ -1,16 +1,32 @@
-import os
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+from tldw_Server_API.app.core.Evaluations import unified_evaluation_service as eval_service_module
+
+
+@pytest.fixture()
+def isolated_evaluations_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
+    monkeypatch.setenv("EVALUATIONS_TEST_DB_PATH", str(tmp_path / "evals.db"))
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_db"))
+    reset_settings()
+    eval_service_module._service_instance = None
+    eval_service_module._service_instances_by_user.clear()
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    yield headers
+    eval_service_module._service_instance = None
+    eval_service_module._service_instances_by_user.clear()
+    reset_settings()
 
 
 @pytest.mark.integration
-def test_abtest_export_idempotency(monkeypatch, auth_headers):
-     # Disable admin-only for heavy evaluations and enable testing shortcut auth
-    monkeypatch.setenv('EVALS_HEAVY_ADMIN_ONLY', 'false')
-    monkeypatch.setenv('TESTING', 'true')
-
+def test_abtest_export_idempotency(isolated_evaluations_storage):
+    auth_headers = isolated_evaluations_storage
     client = TestClient(app)
 
     # Create minimal A/B test
@@ -51,9 +67,8 @@ def test_abtest_export_idempotency(monkeypatch, auth_headers):
 
 
 @pytest.mark.integration
-def test_abtest_delete_idempotency(monkeypatch, auth_headers):
-    monkeypatch.setenv('EVALS_HEAVY_ADMIN_ONLY', 'false')
-    monkeypatch.setenv('TESTING', 'true')
+def test_abtest_delete_idempotency(isolated_evaluations_storage):
+    auth_headers = isolated_evaluations_storage
     client = TestClient(app)
 
     # Create minimal A/B test

@@ -100,7 +100,7 @@ def migrate_sqlite_to_postgres(
 
         insertion_order = _topological_sort(tables)
         logger.debug(
-            "Computed insertion order for SQLite to PostgreSQL migration (%s tables)",
+            "Computed insertion order for SQLite to PostgreSQL migration ({} tables)",
             len(insertion_order),
         )
 
@@ -237,7 +237,7 @@ def migrate_workflows_sqlite_to_postgres(
         run_count = int(result_runs.scalar or 0)
         def_count = int(result_defs.scalar or 0)
         logger.info(
-            'Completed migration of workflows database (%s definitions, %s runs)',
+            'Completed migration of workflows database ({} definitions, {} runs)',
             def_count,
             run_count,
         )
@@ -343,7 +343,7 @@ def _truncate_tables(
             params = (user_id,)
         elif user_id and not has_user_id:
             logger.info(
-                'Skipping truncate for %s (no user_id column) in per-user mode',
+                'Skipping truncate for {} (no user_id column) in per-user mode',
                 table_name,
             )
             continue
@@ -353,7 +353,7 @@ def _truncate_tables(
         try:
             backend.execute(sql, params, connection=pg_conn)
         except _MIGRATION_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive logging
-            logger.warning('Unable to clear table %s: %s', table_name, exc)
+            logger.warning('Unable to clear table {}: {}', table_name, exc)
 
 
 def _copy_table(
@@ -422,7 +422,7 @@ def _copy_table(
         params = converted_params
         backend.execute_many(insert_sql, params, connection=pg_conn)
         total += len(params)
-    logger.info('Copied %s rows into %s', total, meta.name)
+    logger.info('Copied {} rows into {}', total, meta.name)
 
 
 def _sync_sequences(
@@ -444,7 +444,7 @@ def _sync_sequences(
             try:
                 backend.execute(sql, connection=pg_conn)
             except _MIGRATION_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive logging
-                logger.warning('Sequence sync failed for %s.%s: %s', meta.name, column, exc)
+                logger.warning('Sequence sync failed for {}.{}: {}', meta.name, column, exc)
 
 
 def _build_postgres_config_from_args(args: argparse.Namespace) -> DatabaseConfig:
@@ -521,7 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with contextlib.suppress(_MIGRATION_NONCRITICAL_EXCEPTIONS):
                 _backend.get_pool().close_all()
     except _MIGRATION_NONCRITICAL_EXCEPTIONS as _init_exc:  # pragma: no cover - defensive
-        logger.warning('Could not pre-initialize PostgreSQL schema: %s', _init_exc)
+        logger.warning('Could not pre-initialize PostgreSQL schema: {}', _init_exc)
     for label, path in targets:
         migrate_sqlite_to_postgres(
             path,

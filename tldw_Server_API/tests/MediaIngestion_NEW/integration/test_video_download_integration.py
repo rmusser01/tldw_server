@@ -5,6 +5,8 @@ import subprocess
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 
@@ -41,7 +43,7 @@ def _serve_directory(directory: Path):
 
 
 @pytest.mark.integration
-def test_download_video_real_http(tmp_path):
+def test_download_video_real_http(monkeypatch, tmp_path):
     """Exercise download_video end-to-end against a local HTTP server."""
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
@@ -81,6 +83,16 @@ def test_download_video_real_http(tmp_path):
         media_url = f"{base_url}/sample.mp4"
         download_dir = tmp_path / "downloads"
         download_dir.mkdir()
+        allowed_netloc = urlparse(base_url).netloc
+
+        def _allow_test_server(url, **_kwargs):
+            parsed = urlparse(url)
+            return SimpleNamespace(
+                allowed=parsed.scheme == "http" and parsed.netloc == allowed_netloc,
+                reason=None if parsed.netloc == allowed_netloc else "unexpected test host",
+            )
+
+        monkeypatch.setattr(video_lib, "evaluate_url_policy", _allow_test_server)
 
         downloaded_path = video_lib.download_video(
             media_url,

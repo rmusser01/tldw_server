@@ -101,7 +101,8 @@ class TestCharacterCardProperties:
         assert character['description'] == description
         assert character['personality'] == personality
         assert character['first_message'] == first_message
-        assert set(character.get('tags', [])) == set(tags)
+        expected_tags = {tag.strip() for tag in tags if tag and tag.strip()}
+        assert set(character.get('tags', [])) == expected_tags
 
     @pytest.mark.property
     @given(name=character_name_strategy)

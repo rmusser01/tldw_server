@@ -51,7 +51,15 @@ async def test_enhanced_webscraping_persist_with_mocked_db_path(tmp_path: Path, 
     svc = WebScrapingService()
 
     # Act: directly exercise the persistence path
-    res = await svc._store_persistent(result=result, keywords="foo,bar", user_id=7)
+    res = await svc._store_persistent(
+        result=result,
+        keywords="foo,bar",
+        user_id=7,
+        perform_chunking=False,
+        chunking_mode=None,
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=False,
+    )
 
     # Assert: verify status and number of stored articles
     assert res["status"] == "persist-ok"
@@ -110,6 +118,10 @@ async def test_enhanced_webscraping_persist_sanitizes_storage_failure(
         result=result,
         keywords="foo,bar",
         user_id=7,
+        perform_chunking=False,
+        chunking_mode=None,
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=False,
     )
 
     assert res["status"] == "persist-ok"
