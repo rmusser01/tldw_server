@@ -113,12 +113,19 @@ class TaskStore:
         include_deleted: bool,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
-        query = "SELECT * FROM tasks WHERE id = ?"
-        params: list[Any] = [task_id]
-        if not include_deleted:
-            query += " AND deleted = ?"
-            params.append(self._deleted_value(False))
-        cursor = self._read(query, tuple(params), conn=conn)
+        if include_deleted:
+            cursor = self._read("SELECT * FROM tasks WHERE id = ?", (task_id,), conn=conn)
+            return self._decode_task_row(cursor.fetchone())
+        cursor = self._read(
+            """
+            SELECT t.*
+              FROM tasks t
+              JOIN notes n ON n.id = t.note_id
+             WHERE t.id = ? AND t.deleted = ? AND n.deleted = ?
+            """,
+            (task_id, self._deleted_value(False), self._deleted_value(False)),
+            conn=conn,
+        )
         return self._decode_task_row(cursor.fetchone())
 
     def _fetch_projection(
@@ -211,6 +218,15 @@ class TaskStore:
                 (
                     f"Task projection status mismatch for task '{task_id}': "
                     f"task row is '{task_status}', projection row is '{projection_status}'."
+                ),
+                entity="tasks",
+                entity_id=task_id,
+            )  # noqa: TRY003
+        if task["note_id"] != projection["note_id"]:
+            raise ConflictError(
+                (
+                    f"Task projection ownership mismatch for task '{task_id}': "
+                    f"task row note is '{task['note_id']}', projection row note is '{projection['note_id']}'."
                 ),
                 entity="tasks",
                 entity_id=task_id,
@@ -312,21 +328,25 @@ class TaskStore:
         clauses: list[str] = []
         params: list[Any] = []
         if note_id is not None:
-            clauses.append("note_id = ?")
+            clauses.append("t.note_id = ?")
             params.append(note_id)
         if status is not None:
-            clauses.append("status = ?")
+            clauses.append("t.status = ?")
             params.append(self._validate_status(status))
         if projection_status is not None:
-            clauses.append("projection_status = ?")
+            clauses.append("t.projection_status = ?")
             params.append(self._validate_projection_status(projection_status))
         if not include_deleted:
-            clauses.append("deleted = ?")
+            clauses.append("t.deleted = ?")
             params.append(self._deleted_value(False))
-        query = "SELECT * FROM tasks"
+            clauses.append("n.deleted = ?")
+            params.append(self._deleted_value(False))
+        query = "SELECT t.* FROM tasks t"
+        if not include_deleted:
+            query += " JOIN notes n ON n.id = t.note_id"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY created_at ASC, id ASC LIMIT ?"
+        query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ?"
         params.append(self._clamp_limit(limit))
         cursor = self._read(query, tuple(params))
         return [self._decode_task_row(row) for row in cursor.fetchall()]
