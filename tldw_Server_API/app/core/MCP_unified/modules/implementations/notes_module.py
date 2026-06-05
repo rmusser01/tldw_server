@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from ....Notes_Tasks import NotesTaskService, TaskActor
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids, merge_requested_ids_with_scope
 from ..base import BaseModule, create_tool_definition
@@ -113,6 +113,7 @@ class NotesModule(BaseModule):
         super().__init__(*args, **kwargs)
         self._task_service = NotesTaskService()
         self._task_idempotency_cache: OrderedDict[str, tuple[str, Any]] = OrderedDict()
+        self._task_idempotency_lock = asyncio.Lock()
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Notes module: {self.name}")
@@ -287,6 +288,16 @@ class NotesModule(BaseModule):
         tools.extend(self._task_tool_definitions())
         return tools
 
+    def is_write_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        tool_def: dict[str, Any] | None = None,
+    ) -> bool:
+        if tool_name == "notes.tasks.list":
+            return self._is_task_list_write_call(arguments)
+        return super().is_write_tool_call(tool_name, arguments, tool_def=tool_def)
+
     def _task_tool_definitions(self) -> list[dict[str, Any]]:
         write_metadata = {
             "category": "management",
@@ -347,7 +358,10 @@ class NotesModule(BaseModule):
         return [
             strict_tool(
                 name="notes.tasks.list",
-                description="List note-backed tasks with reconciliation-aware discovery.",
+                description=(
+                    "List note-backed tasks with reconciliation-aware discovery. "
+                    "Set reconcile_limit=0 for an explicitly read-only list."
+                ),
                 parameters={
                     "properties": {
                         "note_id": {"type": "string", "minLength": 1},
@@ -362,7 +376,7 @@ class NotesModule(BaseModule):
                     },
                     "required": [],
                 },
-                metadata={"category": "retrieval", "readOnlyHint": True, "auth_required": True},
+                metadata={**write_metadata, "readOnlyHint": False},
             ),
             strict_tool(
                 name="notes.tasks.get",
@@ -492,6 +506,10 @@ class NotesModule(BaseModule):
         if tool_name == "notes.tags.list":
             return await self._tags_list(args, context)
         if tool_name == "notes.tasks.list":
+            if self._is_task_list_write_call(args):
+                policy_decision = self._preflight_task_agent_write_policy(tool_name, args, context)
+                if policy_decision is not None:
+                    return policy_decision
             return await self._tasks_list(args, context)
         if tool_name == "notes.tasks.get":
             return await self._tasks_get(args, context)
@@ -869,6 +887,17 @@ class NotesModule(BaseModule):
             self._validate_optional_bool(item, "record_only")
 
     @staticmethod
+    def _is_task_list_write_call(arguments: dict[str, Any] | None) -> bool:
+        args = arguments if isinstance(arguments, dict) else {}
+        raw_limit = args.get("reconcile_limit", 25)
+        if isinstance(raw_limit, bool):
+            return True
+        try:
+            return int(raw_limit) > 0
+        except (TypeError, ValueError):
+            return True
+
+    @staticmethod
     def _task_status_updates(arguments: dict[str, Any]) -> Any:
         has_updates = "updates" in arguments and arguments.get("updates") is not None
         has_items = "items" in arguments and arguments.get("items") is not None
@@ -891,22 +920,23 @@ class NotesModule(BaseModule):
 
     async def _execute_task_write(self, tool_name: str, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
         idempotency_key = self._get_idempotency_key(args)
-        if tool_name in _TASK_IDEMPOTENT_WRITE_TOOLS and idempotency_key:
-            cache_key = self._task_idempotency_cache_key(context, tool_name, idempotency_key)
-            fingerprint = self._task_arguments_fingerprint(args)
-            cached = self._task_idempotency_cache.get(cache_key)
-            if cached is not None:
-                cached_fingerprint, cached_result = cached
-                if cached_fingerprint != fingerprint:
-                    raise ValueError("idempotencyKey was reused with different arguments")
+        if tool_name in _TASK_IDEMPOTENT_WRITE_TOOLS and isinstance(idempotency_key, str) and idempotency_key:
+            async with self._task_idempotency_lock:
+                cache_key = self._task_idempotency_cache_key(context, tool_name, idempotency_key)
+                fingerprint = self._task_arguments_fingerprint(args)
+                cached = self._task_idempotency_cache.get(cache_key)
+                if cached is not None:
+                    cached_fingerprint, cached_result = cached
+                    if cached_fingerprint != fingerprint:
+                        raise ValueError("idempotencyKey was reused with different arguments")
+                    self._task_idempotency_cache.move_to_end(cache_key)
+                    return copy.deepcopy(cached_result)
+                result = await self._execute_task_write_uncached(tool_name, args, context)
+                self._task_idempotency_cache[cache_key] = (fingerprint, copy.deepcopy(result))
                 self._task_idempotency_cache.move_to_end(cache_key)
-                return copy.deepcopy(cached_result)
-            result = await self._execute_task_write_uncached(tool_name, args, context)
-            self._task_idempotency_cache[cache_key] = (fingerprint, copy.deepcopy(result))
-            self._task_idempotency_cache.move_to_end(cache_key)
-            while len(self._task_idempotency_cache) > _TASK_IDEMPOTENCY_CACHE_SIZE:
-                self._task_idempotency_cache.popitem(last=False)
-            return result
+                while len(self._task_idempotency_cache) > _TASK_IDEMPOTENCY_CACHE_SIZE:
+                    self._task_idempotency_cache.popitem(last=False)
+                return result
         return await self._execute_task_write_uncached(tool_name, args, context)
 
     async def _execute_task_write_uncached(
@@ -934,74 +964,94 @@ class NotesModule(BaseModule):
         limit = int(args.get("limit", 100))
         offset = int(args.get("offset", 0))
         reconcile_limit = int(args.get("reconcile_limit", 25))
-        fetch_limit = min(limit + offset, 500)
+        query = args.get("query")
+        metadata_filters = dict(args.get("metadata_filters") or {})
+        include_unlinked = bool(args.get("include_unlinked", False))
         actor = self._task_actor(context)
 
         db = self._open_db(context)
         try:
             if note_id is not None:
                 assert_identifier_in_scope(context, "note_id", note_id, label="Note")
-                reconciliation = self._task_service.ensure_note_reconciled(
-                    db=db,
-                    note_id=str(note_id),
-                    actor=actor,
-                )
+                if reconcile_limit > 0:
+                    reconciliation = self._task_service.ensure_note_reconciled(
+                        db=db,
+                        note_id=str(note_id),
+                        actor=actor,
+                    )
+                else:
+                    reconciliation = {"status": "clean", "processed_notes": 0, "remaining_stale_notes": 0}
                 tasks = db.list_tasks(
                     note_id=str(note_id),
                     status=status,
                     projection_status=projection_status,
-                    limit=fetch_limit,
+                    query=query,
+                    metadata_filters=metadata_filters,
+                    offset=offset,
+                    include_unlinked=include_unlinked,
+                    limit=limit,
                 )
             else:
                 scoped_note_ids = get_explicit_scope_ids(context, "note_id")
                 if scoped_note_ids is None:
-                    reconciliation = self._task_service.reconcile_stale_notes(
-                        db=db,
-                        limit=reconcile_limit,
-                        actor=actor,
-                    )
+                    if reconcile_limit > 0:
+                        reconciliation = self._task_service.reconcile_stale_notes(
+                            db=db,
+                            limit=reconcile_limit,
+                            actor=actor,
+                        )
+                    else:
+                        reconciliation = {"status": "clean", "processed_notes": 0, "remaining_stale_notes": 0}
                     tasks = db.list_tasks(
                         status=status,
                         projection_status=projection_status,
-                        limit=fetch_limit,
+                        query=query,
+                        metadata_filters=metadata_filters,
+                        offset=offset,
+                        include_unlinked=include_unlinked,
+                        limit=limit,
                     )
                 else:
-                    tasks = []
+                    fetched_tasks = []
                     processed = 0
                     for scoped_note_id in sorted(scoped_note_ids):
-                        if len(tasks) >= fetch_limit:
+                        if len(fetched_tasks) >= min(limit + offset, 500):
                             break
-                        self._task_service.ensure_note_reconciled(
-                            db=db,
-                            note_id=str(scoped_note_id),
-                            actor=actor,
-                        )
-                        processed += 1
-                        tasks.extend(
+                        if reconcile_limit > 0:
+                            if processed >= reconcile_limit:
+                                break
+                            self._task_service.ensure_note_reconciled(
+                                db=db,
+                                note_id=str(scoped_note_id),
+                                actor=actor,
+                            )
+                            processed += 1
+                        fetched_tasks.extend(
                             db.list_tasks(
                                 note_id=str(scoped_note_id),
                                 status=status,
                                 projection_status=projection_status,
-                                limit=fetch_limit - len(tasks),
+                                query=query,
+                                metadata_filters=metadata_filters,
+                                offset=0,
+                                include_unlinked=include_unlinked,
+                                limit=min(limit + offset, 500) - len(fetched_tasks),
                             )
                         )
+                    tasks = fetched_tasks[offset:offset + limit]
                     reconciliation = {
                         "status": "clean",
                         "processed_notes": processed,
                         "remaining_stale_notes": 0,
                     }
 
-            filtered_tasks = self._filter_task_list(tasks, args)
-            paged_tasks = filtered_tasks[offset:offset + limit]
             return {
-                "tasks": [self._task_response(db, task) for task in paged_tasks],
+                "tasks": [self._task_response(db, task) for task in tasks],
                 "reconciliation": self._task_reconciliation_response(reconciliation),
                 "pagination": {
                     "limit": limit,
                     "offset": offset,
-                    "returned": len(paged_tasks),
-                    "matched_within_fetch": len(filtered_tasks),
-                    "fetch_limit": fetch_limit,
+                    "returned": len(tasks),
                 },
             }
         finally:
@@ -1109,6 +1159,12 @@ class NotesModule(BaseModule):
                 try:
                     current = self._require_scoped_task(db, context, task_id)
                     requested_status = str(item.get("status"))
+                    self._require_task_expected_versions(
+                        db,
+                        current,
+                        expected_task_version=int(item.get("expected_task_version")),
+                        expected_note_version=int(item["expected_note_version"]),
+                    )
                     if current.get("status") == requested_status and current.get("projection_status") == "live":
                         skipped.append({
                             "task_id": task_id,
@@ -1139,6 +1195,41 @@ class NotesModule(BaseModule):
             }
         finally:
             self._close_task_db(db, "task status update")
+
+    def _require_task_expected_versions(
+        self,
+        db: CharactersRAGDB,
+        task: dict[str, Any],
+        *,
+        expected_task_version: int,
+        expected_note_version: int,
+    ) -> None:
+        task_id = str(task.get("id") or "")
+        actual_task_version = int(task.get("version") or 0)
+        if actual_task_version != int(expected_task_version):
+            raise ConflictError(
+                f"Task version mismatch for ID '{task_id}'. "
+                f"Expected {expected_task_version}, found {actual_task_version}.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if task.get("projection_status") != "live":
+            return
+        task_store = getattr(db, "task_store", None)
+        projection = task_store._fetch_projection(task_id) if task_store is not None else None
+        if projection is None:
+            raise ConflictError(
+                f"Task projection is missing for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        actual_note_version = int(projection.get("note_version") or 0)
+        if actual_note_version != int(expected_note_version):
+            raise ConflictError(
+                f"Task projection is stale for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
 
     def _tasks_delete_sync(self, context: Any | None, args: dict[str, Any], tool_name: str) -> dict[str, Any]:
         self._require_task_user_context(context)
@@ -1458,13 +1549,15 @@ class NotesModule(BaseModule):
         }
 
     @staticmethod
-    def _get_idempotency_key(args: dict[str, Any]) -> str | None:
+    def _get_idempotency_key(args: dict[str, Any]) -> Any | None:
         raw = args.get("idempotencyKey")
         if raw is None:
             raw = args.get("idempotency_key")
         if raw is None:
             return None
-        value = str(raw).strip()
+        if not isinstance(raw, str):
+            return raw
+        value = raw.strip()
         return value or None
 
     @staticmethod

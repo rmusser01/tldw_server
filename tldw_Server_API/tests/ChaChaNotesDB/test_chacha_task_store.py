@@ -44,6 +44,27 @@ def _create_task(db: CharactersRAGDB, note_id: str, *, task_id: str = "task-1") 
     return created
 
 
+def _create_named_task(
+    db: CharactersRAGDB,
+    note_id: str,
+    *,
+    task_id: str,
+    text: str,
+    metadata: dict | None = None,
+) -> dict:
+    created = db.create_task(
+        task_id=task_id,
+        note_id=note_id,
+        text=text,
+        status="open",
+        metadata=metadata or {},
+        actor_type="user",
+        actor_id="user-1",
+    )
+    assert created["id"] == task_id  # nosec B101
+    return created
+
+
 def _set_projection(
     db: CharactersRAGDB,
     task_id: str,
@@ -205,6 +226,27 @@ def test_list_helpers_clamp_negative_limits(db: CharactersRAGDB) -> None:
 
     assert len(db.list_tasks(limit=-10)) == 1  # nosec B101
     assert len(db.list_task_activity(limit=-10)) == 1  # nosec B101
+
+
+def test_list_tasks_filters_query_and_metadata_before_limit_and_offset(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_named_task(db, note_id, task_id="task-a", text="Alpha filler", metadata={"priority": "low"})
+    _create_named_task(db, note_id, task_id="task-b", text="Beta filler", metadata={"priority": "low"})
+    _create_named_task(db, note_id, task_id="task-c", text="Needle first", metadata={"priority": "high"})
+    _create_named_task(db, note_id, task_id="task-d", text="Needle second", metadata={"priority": "high"})
+
+    queried = db.list_tasks(note_id=note_id, query="needle", limit=1)
+    second_high = db.list_tasks(note_id=note_id, metadata_filters={"priority": "high"}, offset=1, limit=1)
+    combined = db.list_tasks(
+        note_id=note_id,
+        query="needle",
+        metadata_filters={"priority": "high"},
+        limit=10,
+    )
+
+    assert [task["id"] for task in queried] == ["task-c"]  # nosec B101
+    assert [task["id"] for task in second_high] == ["task-d"]  # nosec B101
+    assert [task["id"] for task in combined] == ["task-c", "task-d"]  # nosec B101
 
 
 def test_list_recent_task_activity_returns_newest_without_changing_default_order(db: CharactersRAGDB) -> None:
