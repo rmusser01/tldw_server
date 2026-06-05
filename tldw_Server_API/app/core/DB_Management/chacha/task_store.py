@@ -194,6 +194,29 @@ class TaskStore:
                 f"Task projection is deleted for active task '{task_id}'.", entity="tasks", entity_id=task_id
             )  # noqa: TRY003
 
+    def _resolve_projection_state(
+        self,
+        task: dict[str, Any],
+        task_id: str,
+        *,
+        conn: TaskConnection,
+    ) -> tuple[str, dict[str, Any] | None]:
+        projection = self._fetch_projection(task_id, conn=conn)
+        task_status = task["projection_status"]
+        if projection is None:
+            return task_status, None
+        projection_status = projection["projection_status"]
+        if task_status != projection_status:
+            raise ConflictError(
+                (
+                    f"Task projection status mismatch for task '{task_id}': "
+                    f"task row is '{task_status}', projection row is '{projection_status}'."
+                ),
+                entity="tasks",
+                entity_id=task_id,
+            )  # noqa: TRY003
+        return task_status, projection
+
     def create_task(
         self,
         *,
@@ -214,6 +237,8 @@ class TaskStore:
         final_task_id = task_id or self._db._generate_uuid()
         normalized_status = self._validate_status(status)
         normalized_projection_status = self._validate_projection_status(projection_status)
+        if normalized_projection_status == "deleted":
+            raise InputError("projection_status 'deleted' is reserved for soft_delete_task.")  # noqa: TRY003
         metadata_json = self._json_dumps(metadata, "metadata")
         now = self._db._get_current_utc_timestamp_iso()
         completed_at = now if normalized_status == "done" else None
@@ -338,6 +363,8 @@ class TaskStore:
                 ),
                 task_id,
             )
+            projection_state, _ = self._resolve_projection_state(old, task_id, conn=transaction_conn)
+            old["projection_status"] = projection_state
             self._require_record_update_allowed(old, task_id)
             now = self._db._get_current_utc_timestamp_iso()
             new_text = text.strip() if text is not None else old["text"]
@@ -438,6 +465,7 @@ class TaskStore:
                 self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
                 task_id,
             )
+            self._resolve_projection_state(task, task_id, conn=transaction_conn)
             if task["note_id"] != note_id:
                 raise ConflictError(
                     f"Task projection note does not match owning note for task '{task_id}'.",
@@ -524,6 +552,13 @@ class TaskStore:
                 ),
                 task_id,
             )
+            projection_state, _ = self._resolve_projection_state(old, task_id, conn=transaction_conn)
+            if projection_state != "live":
+                raise ConflictError(
+                    f"Task projection is {projection_state} for task '{task_id}'.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
             now = self._db._get_current_utc_timestamp_iso()
             update_cursor = self._execute(
                 transaction_conn,
@@ -594,8 +629,7 @@ class TaskStore:
                 ),
                 task_id,
             )
-            projection = self._fetch_projection(task_id, conn=transaction_conn)
-            projection_status = projection["projection_status"] if projection else old["projection_status"]
+            projection_status, projection = self._resolve_projection_state(old, task_id, conn=transaction_conn)
             if projection_status == "ambiguous":
                 raise ConflictError(
                     f"Task projection is ambiguous for task '{task_id}'.", entity="tasks", entity_id=task_id
