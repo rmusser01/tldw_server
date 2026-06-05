@@ -24,19 +24,19 @@ Create a PRD/design spec for first-class task-backed to-do list support in Notes
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Refined the approved PRD/spec based on human design review findings before implementation planning. Addressed dirty-note checkbox semantics, markdown identity limits without hidden IDs, rollout phasing, task deletion, reconciliation-aware discovery, autonomous activity notices, parser normalization, MCP delete/create behavior, and metadata version checks.
+Addressed follow-up design review findings before implementation planning. Patched the PRD for dirty-save conflict semantics, unlinked/ambiguous task mutations, bounded reconciliation-aware discovery, task text update projection/version rules, and nested markdown delete semantics.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Spec re-review completed after revisions. Reviewer reported no remaining must-fix contradictions and approved the revised spec. Advisory clarifications were applied for transactional delete behavior, metadata projection version checks, and activity-notice/non-notification wording.
+Follow-up design fixes applied after human review. Added hard rules for stale dirty saves, unlinked/ambiguous projection-changing mutations, bounded discovery work limits and incomplete-result metadata, text-update version checks, and nested checklist delete conflicts.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-512 spec refined after design review. The updated PRD now resolves dirty-note checkbox behavior, identity without hidden IDs, reconciliation-aware task discovery for existing notes, canonical task soft-delete/projection removal semantics, autonomous activity retention/read state, task creation conflicts, completed_at reopen behavior, and parser normalization. Spec re-review approved with no remaining must-fix issues. Bandit skipped because this is documentation/task-tracking only; no Python code was changed.
+TASK-512 spec refined again after follow-up design review. The PRD now explicitly requires stale dirty saves to conflict or merge rather than overwrite remote/autonomous projections, projection-changing writes against unlinked/ambiguous tasks to conflict unless repaired/relinked, broad discovery to be bounded with incomplete reconciliation metadata, task text updates to use expected task/note versions, and nested child content to be preserved by default delete conflicts. Verification: reviewed spec diff and ran git diff --check. Bandit skipped because this is documentation/task-tracking only; no Python code was changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
