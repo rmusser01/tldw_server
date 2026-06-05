@@ -65,3 +65,28 @@ class ParsedChecklistResult:
     note_id: str
     note_version: int
     items: list[ParsedChecklistItem] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TaskActor:
+    """Actor metadata recorded on task reconciliation events."""
+
+    actor_type: str
+    actor_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ReconciliationResult:
+    """Summary of one note checklist reconciliation run."""
+
+    note_id: str
+    note_version: int
+    parsed_count: int
+    created_count: int = 0
+    updated_count: int = 0
+    unlinked_count: int = 0
+    ambiguous_count: int = 0
+    matched_task_ids: list[str] = field(default_factory=list)
+    created_task_ids: list[str] = field(default_factory=list)
+    unlinked_task_ids: list[str] = field(default_factory=list)
+    warning_count: int = 0
