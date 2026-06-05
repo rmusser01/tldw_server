@@ -1,6 +1,4 @@
 import contextlib
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -116,7 +114,7 @@ async def test_e2e_workflows_daily_cap_denies_with_headers(monkeypatch, tmp_path
     user_id = int(created_user["id"])
     mgr = APIKeyManager(pool)
     await mgr.initialize()
-    key_rec = await mgr.create_api_key(user_id=user_id, name="wf-cap-key")
+    key_rec = await mgr.create_api_key(user_id=user_id, name="wf-cap-key", scope="write")
     api_key = key_rec["key"]
 
     # Isolate workflows content DB under a temporary user DB base dir so legacy
@@ -180,16 +178,16 @@ async def test_e2e_workflows_daily_cap_denies_with_headers(monkeypatch, tmp_path
             r1 = c.post(
                 "/api/v1/workflows/run",
                 headers={"X-API-KEY": api_key},
-                data=json.dumps(body),
+                json=body,
             )
-            assert r1.status_code == 200
+            assert r1.status_code == 200, r1.text
 
             r2 = c.post(
                 "/api/v1/workflows/run",
                 headers={"X-API-KEY": api_key},
-                data=json.dumps(body),
+                json=body,
             )
-            assert r2.status_code == 429
+            assert r2.status_code == 429, r2.text
             limit_hdr = r2.headers.get("X-RateLimit-Limit")
             assert limit_hdr is not None
             limit_vals = [v.strip() for v in limit_hdr.split(",")]
