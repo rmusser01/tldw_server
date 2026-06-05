@@ -132,7 +132,8 @@ class _FakeTaskDB:
                 for task in rows
                 if all((task.get("metadata_json") or {}).get(key) == value for key, value in metadata_filters.items())
             ]
-        return [dict(task) for task in rows[offset:offset + limit]]
+        effective_limit = min(max(int(limit), 1), 500)
+        return [dict(task) for task in rows[offset:offset + effective_limit]]
 
     def close_all_connections(self) -> None:
         self.closed = True
@@ -528,6 +529,27 @@ async def test_notes_tasks_list_queries_all_scoped_notes_after_reconcile_budget_
 
 
 @pytest.mark.asyncio
+async def test_notes_tasks_list_explicit_scope_fetches_high_allowed_offset() -> None:
+    module, db, _service = _module_with_fakes()
+    for index in range(501):
+        task_id = f"task-high-offset-{index:03d}"
+        db.tasks[task_id] = db._task(
+            task_id,
+            note_id="note-2",
+            text=f"High offset scoped match {index:03d}",
+            version=1,
+        )
+
+    listed = await module.execute_tool(
+        "notes.tasks.list",
+        {"query": "High offset scoped match", "offset": 500, "limit": 1, "reconcile_limit": 0},
+        context=_ctx(persona_scope={"explicit_ids": {"note_id": ["note-1", "note-2"]}}),
+    )
+
+    assert [task["id"] for task in listed["tasks"]] == ["task-high-offset-500"]  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_agent_write_requires_confirmation_and_autonomous_write_is_denied_without_mutation() -> None:
     module, db, service = _module_with_fakes()
 
@@ -709,6 +731,27 @@ async def test_set_status_already_matching_status_still_checks_expected_versions
     assert stale_note_version["skipped"] == []  # nosec B101
     assert [item["task_id"] for item in stale_task_version["failed"]] == ["task-same"]  # nosec B101
     assert [item["task_id"] for item in stale_note_version["failed"]] == ["task-same"]  # nosec B101
+    assert service.update_calls == []  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_set_status_already_matching_status_checks_current_note_version() -> None:
+    module, db, service = _module_with_fakes()
+    db.notes["note-1"]["version"] = 2
+
+    result = await module.execute_tool(
+        "notes.tasks.set_status",
+        {
+            "updates": [
+                {"task_id": "task-same", "status": "done", "expected_task_version": 4, "expected_note_version": 1},
+            ]
+        },
+        context=_ctx(),
+    )
+
+    assert result["skipped"] == []  # nosec B101
+    assert [item["task_id"] for item in result["failed"]] == ["task-same"]  # nosec B101
+    assert result["failed"][0]["error_type"] == "ConflictError"  # nosec B101
     assert service.update_calls == []  # nosec B101
 
 
