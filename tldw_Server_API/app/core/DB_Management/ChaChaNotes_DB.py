@@ -26993,6 +26993,7 @@ for _task_store_method in (
     "soft_delete_task",
     "record_task_event",
     "list_task_activity",
+    "list_recent_task_activity",
     "mark_task_activity_read",
     "mark_task_activity_dismissed",
     "get_task_activity_read_state",

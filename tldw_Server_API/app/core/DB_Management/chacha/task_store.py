@@ -1036,6 +1036,37 @@ class TaskStore:
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
 
+    def list_recent_task_activity(
+        self,
+        *,
+        task_id: str | None = None,
+        note_id: str | None = None,
+        actor_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List task events newest-first without changing the ascending default helper."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            params.append(task_id)
+        if note_id is not None:
+            clauses.append("note_id = ?")
+            params.append(note_id)
+        if actor_type is not None:
+            clauses.append("actor_type = ?")
+            params.append(actor_type)
+        query = "SELECT * FROM task_events"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        if self._db.backend_type == BackendType.SQLITE:
+            query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        else:
+            query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(self._clamp_limit(limit))
+        cursor = self._read(query, tuple(params))
+        return [self._decode_event_row(row) for row in cursor.fetchall()]
+
     def mark_task_activity_read(
         self,
         event_id: str,

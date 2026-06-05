@@ -240,13 +240,19 @@ class NotesTaskService:
             new_text = text.strip() if text is not None else str(task["text"])
             new_status = status or str(task["status"])
             new_metadata = metadata if metadata is not None else dict(task.get("metadata_json") or {})
-            new_line = self._rewrite_line(
-                raw_line=parsed_item.raw_line,
-                checked=new_status == "done",
-                text=new_text,
-                metadata=new_metadata,
-                preserve_existing_body=metadata is not None and text is None,
-            )
+            if status is not None and text is None and metadata is None:
+                new_line = self._rewrite_marker_only(
+                    raw_line=parsed_item.raw_line,
+                    checked=new_status == "done",
+                )
+            else:
+                new_line = self._rewrite_line(
+                    raw_line=parsed_item.raw_line,
+                    checked=new_status == "done",
+                    text=new_text,
+                    metadata=new_metadata,
+                    preserve_existing_body=metadata is not None and text is None,
+                )
             new_content = self._replace_projection_line(
                 content=str(note.get("content") or ""),
                 projection=projection,
@@ -521,6 +527,17 @@ class NotesTaskService:
         else:
             body = self._render_body(text=text, metadata=metadata)
         return f"{match.group('indent')}{match.group('bullet')}{match.group('space')}[{marker}] {body}"
+
+    @staticmethod
+    def _rewrite_marker_only(*, raw_line: str, checked: bool) -> str:
+        match = _CHECKLIST_RE.match(raw_line)
+        if match is None:
+            raise ConflictError("Task projection line is no longer a checklist item.", entity="tasks")
+        marker = "x" if checked else " "
+        return (
+            f"{match.group('indent')}{match.group('bullet')}{match.group('space')}"
+            f"[{marker}]{match.group('body_part')}"
+        )
 
     @staticmethod
     def _strip_allowlisted_tokens(raw_body: str) -> str:

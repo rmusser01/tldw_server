@@ -203,6 +203,22 @@ def test_set_status_on_clean_note_rewrites_marker_and_records_event(
     assert any(event["event_type"] == "status_changed" for event in events)
 
 
+def test_status_update_preserves_unknown_checklist_tokens(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Pay rent @estimate(2h) @external(abc) @priority(high)\n")
+    task = _task_by_text(db, note["id"], "Pay rent @external(abc)")
+
+    response = _status_update(client, task=task, status="done", expected_note_version=note["version"])
+
+    assert response.status_code == 200, response.text
+    saved = db.get_note_by_id(note["id"])
+    assert saved is not None
+    assert saved["content"] == "- [x] Pay rent @estimate(2h) @external(abc) @priority(high)\n"
+    assert response.json()["tasks"][0]["status"] == "done"
+
+
 def test_update_text_requires_expected_task_and_note_versions(
     notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
 ) -> None:
@@ -447,6 +463,37 @@ def test_recent_activity_returns_unread_agent_events_and_supports_dismissal(
     after = client.get("/api/v1/notes/tasks/activity")
     assert after.status_code == 200, after.text
     assert after.json()["events"] == []
+
+
+def test_recent_activity_includes_latest_agent_event_after_many_older_user_events(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha\n")
+    task = _task_by_text(db, note["id"], "Alpha")
+    for index in range(201):
+        db.record_task_event(
+            task_id=task["id"],
+            note_id=note["id"],
+            event_type="updated",
+            actor_type="user",
+            actor_id=f"user-{index}",
+            new_value={"index": index},
+        )
+    latest_agent_event = db.record_task_event(
+        task_id=task["id"],
+        note_id=note["id"],
+        event_type="updated",
+        actor_type="agent",
+        actor_id="assistant",
+        new_value={"text": "latest agent event"},
+    )
+
+    response = client.get("/api/v1/notes/tasks/activity")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == [latest_agent_event["id"]]
 
 
 def test_reconcile_note_endpoint_refreshes_state(
