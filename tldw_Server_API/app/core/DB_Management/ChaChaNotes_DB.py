@@ -581,7 +581,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 47  # Schema v47 adds Research Workspace migration protocol state
+    _CURRENT_SCHEMA_VERSION = 48  # Schema v48 adds Notes task-backed checklist storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -5429,6 +5429,221 @@ UPDATE db_schema_version
    AND version < 47;
 """
 
+    _MIGRATION_SQL_V47_TO_V48 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 48 — Notes task-backed checklist storage (2026-06-05)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id                TEXT PRIMARY KEY,
+  note_id           TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  text              TEXT NOT NULL,
+  status            TEXT NOT NULL CHECK(status IN ('open','done')),
+  metadata_json     TEXT NOT NULL DEFAULT '{}',
+  projection_status TEXT NOT NULL DEFAULT 'live',
+  deleted           BOOLEAN NOT NULL DEFAULT 0,
+  created_at        DATETIME NOT NULL,
+  updated_at        DATETIME NOT NULL,
+  completed_at      DATETIME,
+  client_id         TEXT NOT NULL,
+  version           INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_client_scope
+  ON tasks(client_id, deleted, updated_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_note
+  ON tasks(note_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_tasks_status
+  ON tasks(status, deleted);
+CREATE INDEX IF NOT EXISTS idx_tasks_projection_status
+  ON tasks(projection_status, deleted);
+
+CREATE TABLE IF NOT EXISTS task_note_projections (
+  task_id              TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  note_id              TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  note_version         INTEGER NOT NULL,
+  line_number          INTEGER NOT NULL,
+  start_offset         INTEGER NOT NULL,
+  end_offset           INTEGER NOT NULL,
+  normalized_text_hash TEXT NOT NULL,
+  occurrence_index     INTEGER NOT NULL,
+  block_fingerprint    TEXT NOT NULL,
+  raw_line             TEXT NOT NULL,
+  has_child_content    BOOLEAN NOT NULL DEFAULT 0,
+  projection_status    TEXT NOT NULL DEFAULT 'live',
+  updated_at           DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_note_projections_note
+  ON task_note_projections(note_id, note_version);
+CREATE INDEX IF NOT EXISTS idx_task_note_projections_status
+  ON task_note_projections(projection_status, updated_at);
+
+CREATE TABLE IF NOT EXISTS task_events (
+  id             TEXT PRIMARY KEY,
+  task_id        TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  note_id        TEXT REFERENCES notes(id) ON DELETE SET NULL,
+  event_type     TEXT NOT NULL,
+  actor_type     TEXT NOT NULL,
+  actor_id       TEXT,
+  tool_name      TEXT,
+  policy_mode    TEXT,
+  approval_id    TEXT,
+  old_value_json TEXT,
+  new_value_json TEXT,
+  created_at     DATETIME NOT NULL,
+  client_id      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_events_task_created
+  ON task_events(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_events_note_created
+  ON task_events(note_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_events_client_created
+  ON task_events(client_id, created_at);
+
+CREATE TABLE IF NOT EXISTS task_event_read_state (
+  event_id     TEXT NOT NULL REFERENCES task_events(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL,
+  read_at      DATETIME,
+  dismissed_at DATETIME,
+  PRIMARY KEY(event_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_event_read_state_user
+  ON task_event_read_state(user_id, read_at, dismissed_at);
+CREATE INDEX IF NOT EXISTS idx_task_event_read_state_dismissed
+  ON task_event_read_state(user_id, dismissed_at);
+
+CREATE TABLE IF NOT EXISTS note_task_reconciliation_state (
+  note_id       TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
+  note_version  INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  reconciled_at DATETIME NOT NULL,
+  item_count    INTEGER NOT NULL DEFAULT 0,
+  warning_count INTEGER NOT NULL DEFAULT 0,
+  cursor        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_task_reconciliation_status
+  ON note_task_reconciliation_state(status, reconciled_at);
+CREATE INDEX IF NOT EXISTS idx_note_task_reconciliation_version
+  ON note_task_reconciliation_state(note_id, note_version);
+
+UPDATE db_schema_version
+   SET version = 48
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 48;
+"""
+
+    _MIGRATION_SQL_V47_TO_V48_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id                TEXT PRIMARY KEY,
+  note_id           TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  text              TEXT NOT NULL,
+  status            TEXT NOT NULL CHECK(status IN ('open','done')),
+  metadata_json     TEXT NOT NULL DEFAULT '{}',
+  projection_status TEXT NOT NULL DEFAULT 'live',
+  deleted           BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at        TIMESTAMP NOT NULL,
+  updated_at        TIMESTAMP NOT NULL,
+  completed_at      TIMESTAMP,
+  client_id         TEXT NOT NULL,
+  version           INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_client_scope
+  ON tasks(client_id, deleted, updated_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_note
+  ON tasks(note_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_tasks_status
+  ON tasks(status, deleted);
+CREATE INDEX IF NOT EXISTS idx_tasks_projection_status
+  ON tasks(projection_status, deleted);
+
+CREATE TABLE IF NOT EXISTS task_note_projections (
+  task_id              TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  note_id              TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  note_version         INTEGER NOT NULL,
+  line_number          INTEGER NOT NULL,
+  start_offset         INTEGER NOT NULL,
+  end_offset           INTEGER NOT NULL,
+  normalized_text_hash TEXT NOT NULL,
+  occurrence_index     INTEGER NOT NULL,
+  block_fingerprint    TEXT NOT NULL,
+  raw_line             TEXT NOT NULL,
+  has_child_content    BOOLEAN NOT NULL DEFAULT FALSE,
+  projection_status    TEXT NOT NULL DEFAULT 'live',
+  updated_at           TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_note_projections_note
+  ON task_note_projections(note_id, note_version);
+CREATE INDEX IF NOT EXISTS idx_task_note_projections_status
+  ON task_note_projections(projection_status, updated_at);
+
+CREATE TABLE IF NOT EXISTS task_events (
+  id             TEXT PRIMARY KEY,
+  task_id        TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  note_id        TEXT REFERENCES notes(id) ON DELETE SET NULL,
+  event_type     TEXT NOT NULL,
+  actor_type     TEXT NOT NULL,
+  actor_id       TEXT,
+  tool_name      TEXT,
+  policy_mode    TEXT,
+  approval_id    TEXT,
+  old_value_json TEXT,
+  new_value_json TEXT,
+  created_at     TIMESTAMP NOT NULL,
+  client_id      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_events_task_created
+  ON task_events(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_events_note_created
+  ON task_events(note_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_events_client_created
+  ON task_events(client_id, created_at);
+
+CREATE TABLE IF NOT EXISTS task_event_read_state (
+  event_id     TEXT NOT NULL REFERENCES task_events(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL,
+  read_at      TIMESTAMP,
+  dismissed_at TIMESTAMP,
+  PRIMARY KEY(event_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_event_read_state_user
+  ON task_event_read_state(user_id, read_at, dismissed_at);
+CREATE INDEX IF NOT EXISTS idx_task_event_read_state_dismissed
+  ON task_event_read_state(user_id, dismissed_at);
+
+CREATE TABLE IF NOT EXISTS note_task_reconciliation_state (
+  note_id       TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
+  note_version  INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  reconciled_at TIMESTAMP NOT NULL,
+  item_count    INTEGER NOT NULL DEFAULT 0,
+  warning_count INTEGER NOT NULL DEFAULT 0,
+  cursor        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_task_reconciliation_status
+  ON note_task_reconciliation_state(status, reconciled_at);
+CREATE INDEX IF NOT EXISTS idx_note_task_reconciliation_version
+  ON note_task_reconciliation_state(note_id, note_version);
+
+UPDATE db_schema_version
+   SET version = 48
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 48;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -5554,11 +5769,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 
         self.character_store = CharacterStore(self)
         self.conversation_store = ConversationStore(self)
         self.message_store = MessageStore(self)
         self.note_store = NoteStore(self)
+        self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
 
@@ -7552,6 +7769,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v47_to_v48(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V47 to V48 (Notes task-backed checklist storage)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V47 to V48 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V47_TO_V48)
+            final_version = self._get_db_version(conn)
+            if final_version != 48:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V47->V48 failed version check. Expected 48, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V48 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V47->V48 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V47->V48 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V47->V48: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V48 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
@@ -9007,6 +9244,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 47 and current_db_version == 46:
                         self._migrate_from_v46_to_v47(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 48 and current_db_version == 47:
+                        self._migrate_from_v47_to_v48(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -9356,6 +9596,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 self._migrate_from_v45_to_v46(conn)
                             elif fallback_version == 46:
                                 self._migrate_from_v46_to_v47(conn)
+                            elif fallback_version == 47:
+                                self._migrate_from_v47_to_v48(conn)
                             else:
                                 raise SchemaError(  # noqa: TRY003, TRY301
                                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
@@ -9472,6 +9714,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 47 and current_db_version == 46:
                     self._migrate_from_v46_to_v47(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 48 and current_db_version == 47:
+                    self._migrate_from_v47_to_v48(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -13296,6 +13541,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 47:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V46_TO_V47_POSTGRES, conn, expected_version=47)
                 current_version = 47
+            if current_version < 48:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V47_TO_V48_POSTGRES, conn, expected_version=48)
+                current_version = 48
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -24446,6 +24694,30 @@ for _note_store_method in (
         CharactersRAGDB,
         _note_store_method,
         _delegate_store_method("note_store", _note_store_method),
+    )
+
+
+for _task_store_method in (
+    "create_task",
+    "get_task",
+    "list_tasks",
+    "update_task_record",
+    "set_task_projection",
+    "mark_task_unlinked",
+    "soft_delete_task",
+    "record_task_event",
+    "list_task_activity",
+    "mark_task_activity_read",
+    "mark_task_activity_dismissed",
+    "get_task_activity_read_state",
+    "get_reconciliation_state",
+    "set_reconciliation_state",
+    "candidate_notes_for_task_discovery",
+):
+    setattr(
+        CharactersRAGDB,
+        _task_store_method,
+        _delegate_store_method("task_store", _task_store_method),
     )
 
 
