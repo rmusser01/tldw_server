@@ -344,3 +344,32 @@ def test_stale_note_version_does_not_update_reconciliation_state(
         )
 
     assert notes_db.get_reconciliation_state(note["id"]) == original_state
+
+
+def test_current_note_validation_uses_public_task_store_snapshot(
+    notes_db: CharactersRAGDB,
+    service: NotesTaskService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note = _create_note(notes_db, "- [ ] Alpha\n")
+
+    def stale_snapshot(self, *, note_id: str, conn=None):
+        return {
+            "id": note_id,
+            "version": int(note["version"]) + 1,
+            "content": note["content"],
+            "deleted": False,
+        }
+
+    monkeypatch.setattr(
+        type(notes_db.task_store),
+        "get_note_reconciliation_snapshot",
+        stale_snapshot,
+        raising=False,
+    )
+
+    with pytest.raises(ConflictError):
+        _reconcile(service, notes_db, note)
+
+    assert notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100) == []
+    assert notes_db.get_reconciliation_state(note["id"]) is None
