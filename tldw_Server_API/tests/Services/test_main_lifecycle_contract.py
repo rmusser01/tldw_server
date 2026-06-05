@@ -773,6 +773,7 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
+    monkeypatch.setattr(main_module, "_TEST_MODE", True)
     recorded_calls: list[dict[str, object]] = []
 
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
@@ -813,6 +814,7 @@ def test_lifespan_startup_delegates_pre_core_helper(
     from tldw_Server_API.app.services import startup_core_initialization, startup_pre_core
 
     app = main_module.app
+    monkeypatch.setattr(main_module, "_TEST_MODE", True)
     pre_core_calls: list[dict[str, object]] = []
     core_calls: list[dict[str, object]] = []
 
@@ -899,6 +901,7 @@ def test_lifespan_startup_collects_declarative_worker_specs(
     from tldw_Server_API.app.services import startup_worker_bootstrap, startup_worker_groups
 
     app = main_module.app
+    monkeypatch.setattr(main_module, "_TEST_MODE", True)
     recorded_contexts: list[object] = []
     lifecycle_session = _empty_lifecycle_session()
 

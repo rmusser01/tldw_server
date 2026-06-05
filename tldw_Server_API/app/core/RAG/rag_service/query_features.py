@@ -598,9 +598,21 @@ class QueryRewriter:
 
     def _get_synonyms(self, word: str) -> list[str]:
         """Get synonyms for a word using WordNet."""
+        if not _HAS_WORDNET:
+            return []
         synonyms = set()
 
-        for synset in wordnet.synsets(word):
+        try:
+            synsets = wordnet.synsets(word)
+        except LookupError as exc:
+            logger.debug(
+                "NLTK WordNet unavailable; skipping synonym expansion for '{}': {}",
+                word,
+                exc,
+            )
+            return []
+
+        for synset in synsets:
             for lemma in synset.lemmas():
                 synonym = lemma.name().replace('_', ' ')
                 if synonym.lower() != word.lower():

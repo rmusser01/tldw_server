@@ -1,4 +1,5 @@
 import json
+import platform
 import sys
 from unittest.mock import Mock
 
@@ -117,6 +118,18 @@ def test_setup_audio_pack_import_updates_readiness(mocker, tmp_path):
     store = setup_endpoint.audio_readiness_store.AudioReadinessStore(
         tmp_path / "audio_readiness.json"
     )
+    machine_profile = MachineProfile(
+        platform=platform.system().lower(),
+        arch=platform.machine().lower(),
+        apple_silicon=False,
+        cuda_available=False,
+        ffmpeg_available=True,
+        espeak_available=True,
+        free_disk_gb=64.0,
+        network_available_for_downloads=False,
+    )
+    compatibility = setup_endpoint._audio_pack_compatibility(machine_profile)
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     pack_root = tmp_path / "Config_Files" / "audio_packs"
     pack_root.mkdir(parents=True, exist_ok=True)
     pack_path = pack_root / "audio_pack.json"
@@ -128,11 +141,7 @@ def test_setup_audio_pack_import_updates_readiness(mocker, tmp_path):
                 "resource_profile": "balanced",
                 "catalog_version": "v2",
                 "selection_key": "v2:cpu_local:balanced",
-                "compatibility": {
-                    "platform": "linux",
-                    "arch": "x86_64",
-                    "python_version": "3.11",
-                },
+                "compatibility": compatibility,
                 "checksums": {"manifest_sha256": ""},
             }
         ),
@@ -143,7 +152,7 @@ def test_setup_audio_pack_import_updates_readiness(mocker, tmp_path):
         bundle_id="cpu_local",
         resource_profile="balanced",
         catalog_version="v2",
-        compatibility={"platform": "linux", "arch": "x86_64", "python_version": "3.11"},
+        compatibility=compatibility,
     )
     pack_path.write_text(json.dumps(manifest), encoding="utf-8")
 
@@ -155,16 +164,7 @@ def test_setup_audio_pack_import_updates_readiness(mocker, tmp_path):
     mocker.patch.object(
         setup_endpoint.audio_profile_service,
         "detect_machine_profile",
-        return_value=MachineProfile(
-            platform="linux",
-            arch="x86_64",
-            apple_silicon=False,
-            cuda_available=False,
-            ffmpeg_available=True,
-            espeak_available=True,
-            free_disk_gb=64.0,
-            network_available_for_downloads=False,
-        ),
+        return_value=machine_profile,
     )
     mocker.patch.object(
         setup_endpoint.audio_readiness_store,
@@ -181,7 +181,7 @@ def test_setup_audio_pack_import_updates_readiness(mocker, tmp_path):
         readiness = client.get("/api/v1/setup/audio/readiness")
 
     assert response.status_code == 200
-    assert response.json()["compatible"] is True
+    assert response.json()["compatible"] is True, response.json().get("issues")
     assert readiness.status_code == 200
     assert readiness.json()["selected_bundle_id"] == "cpu_local"
     assert readiness.json()["selected_resource_profile"] == "balanced"

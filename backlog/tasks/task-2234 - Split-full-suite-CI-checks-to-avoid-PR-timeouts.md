@@ -51,6 +51,7 @@ modified_files:
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
 - tldw_Server_API/tests/Audit/test_unified_audit_service.py
 - tldw_Server_API/tests/AuthNZ/integration/test_jwt_refresh_rotation_blacklist.py
+- tldw_Server_API/tests/AuthNZ_SQLite/test_llm_budget_402_sqlite.py
 - tldw_Server_API/tests/AuthNZ_SQLite/test_quota_enforcement_http_sqlite.py
 - tldw_Server_API/tests/AuthNZ/unit/test_session_manager_configured_key.py
 - tldw_Server_API/tests/AuthNZ/unit/test_email_service.py
@@ -64,10 +65,14 @@ modified_files:
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 - tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py
 - tldw_Server_API/tests/Evaluations/integration/test_webhook_multi_user_api.py
+- tldw_Server_API/tests/Evaluations/property/test_evaluation_invariants.py
 - tldw_Server_API/tests/Evaluations/test_embeddings_abtest_idempotency.py
+- tldw_Server_API/tests/Evaluations/test_eval_test_mode_truthiness.py
+- tldw_Server_API/tests/Evaluations/unit/test_evaluations_abtest_store_init.py
 - tldw_Server_API/tests/Infrastructure/test_distributed_lock.py
 - tldw_Server_API/tests/Logging/test_trace_context.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_governance_pack_import.py
+- tldw_Server_API/tests/MCP_unified/test_mcp_hub_multi_root_assignment_validation.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_overrides.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_shared_workspace_registry.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_workspace_set_objects.py
@@ -78,9 +83,11 @@ modified_files:
 - tldw_Server_API/tests/Monitoring/test_metrics_surface_contracts.py
 - tldw_Server_API/tests/Media/test_json_url_download.py
 - tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+- tldw_Server_API/tests/MediaDB2/test_sync_endpoint_errors.py
 - tldw_Server_API/tests/MediaIngestion_NEW/conftest.py
 - tldw_Server_API/tests/MediaIngestion_NEW/integration/test_video_download_integration.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
@@ -88,7 +95,9 @@ modified_files:
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_workflows_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_rg_shadow_metrics.py
+- tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
+- tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
 - tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py
 - tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
 - tldw_Server_API/tests/Web_Scraping/test_enhanced_web_scraping_guards.py
@@ -162,6 +171,12 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-05 continued pushed-head recheck of run 26996945045 found additional completed failures before pushing: integrations lacked the `mocker` fixture used by setup audio-pack tests, setup audio-pack assertions used stale bundle-error wording, MediaIngestion form tests expected string collection IDs after schema normalization moved them to integers, RAG query-rewrite tests monkeypatched an NLTK LazyCorpusLoader path that could raise before patching, lifecycle worker catalog tests missed the new workspace-file inventory job poller, MCP governance-pack tests parsed Windows `file:///C:/...` repo URLs as invalid POSIX paths, Evaluations A/B idempotency and trace-context request-propagation tests inherited leaked shared-app drain state, Reading Digest scheduler tests asserted against jobs from other schedules, Windows MediaIngestion cleanup could fail on a locked temp DB file, and Audit severity tests depended on query ordering even though high-risk events can auto-flush early. Local fixes add a minimal setup-audio mocker shim, align assertions with current schemas/messages, patch RAG/MCP/worker tests at stable module boundaries, reset shared app lifecycle around affected API tests, filter Reading Digest assertions by schedule, tolerate Windows temp cleanup timing, and assert audit severity by event type instead of row order. Verification on 2026-06-05: expanded focused matrix passed locally (22 passed), compileall passed for touched tests, `git diff --check` passed, and test-scope Bandit passed with test-only skips.
 
 2026-06-05 continued pushed-head recheck of run 26996945045 found a later completed Windows auth-db failure in `test_jwt_quota_enforced_for_chat_and_rag_sqlite`. The test used `CharactersRAGDB(db_path=":memory:")` as its ChaChaNotes dependency override, but the chat endpoint persists through executor threads and SQLite in-memory databases are per connection/thread. Windows CI created schema on one connection and later queried an empty per-thread database, returning `no such table: messages` through the chat module DB error wrapper. The quota tests now use temp file-backed ChaChaNotes DB overrides and explicitly close opened connections. Verification on 2026-06-05: the full quota enforcement SQLite file passed locally (2 passed), the expanded focused matrix passed locally (91 passed), compileall passed for touched tests, and `git diff --check` passed.
+
+2026-06-05 pushed-head recheck of run 27019363370 found the next batch of completed full-suite shard failures while several shards were still queued or running: setup audio-pack import fixtures used a Python 3.11-only manifest under 3.12/3.13 shards, normalized STT artifact expectations omitted current `diarization` and `usage` fields, ChatGrammarService tests reached missing ChaChaNotesDB grammar-table helpers, RAG synonym rewriting still raised when WordNet data was unavailable, MCP multi-root overlap assertions hard-coded POSIX roots on Windows, a PostgreSQL migration fake transaction returned an object without `execute`, lifecycle worker-bootstrap tests assumed ambient test-mode flags, and stale legacy sync tests still called the removed `/sync/send` payload signature instead of the 410 replacement or retained processor.
+
+2026-06-05 local shard reproduction while run 27019363370 was still finishing found additional failures before GitHub logs for the later shards were available: the product-modules shard failed because the eval inline-webhook disabled test only set `TEST_MODE=0` and did not clear the alternate `TLDW_TEST_MODE` flag, and the platform-mcp shard found two more lifecycle startup contract tests that did not force module-level `_TEST_MODE` before asserting helper arguments. Those tests now isolate the relevant test-mode state explicitly, the exact regressions pass locally under the CI shard environment, and the full lifecycle contract file passes locally.
+
+2026-06-05 completed-check follow-up for run 27019363370 found all current CI rows finished with 30 failed checks on the old head. Downloaded logs covered the functional failures already targeted, and local shard reproduction exposed one additional product-modules regression: `test_init_abtest_store_falls_back_when_sqlalchemy_driver_missing` constructed `EvaluationsDatabase` through `__new__` and assigned read-only backend properties. The test now initializes the private backing fields used by the current backend properties. After the checks stopped running, the remaining direct job logs showed four more completed failures: audit workflow assertions depended on event-row ordering, setup audio-pack import used a manifest profile that could mismatch the runner platform, the AuthNZ under-budget chat test used an in-memory ChaChaNotes override across request-thread boundaries, and the evaluation state machine could hit delayed Windows SQLite file-release during temp cleanup. Those tests now assert order-independent audit trail contents, build import manifests from the local compatibility shape, use a temp file-backed ChaChaNotes DB, and retry/ignore Windows temp cleanup timing. The same local chat shard reproduction advanced slowly through `Character_Chat_NEW` while the CI chat/ai rows failed at the 35-minute shard timeout, so the workflow now splits the oversized `ai-retrieval` and `chat-llm` matrix entries into smaller retrieval, character-chat, chat-core, and LLM-provider shards across PR and release full-suite matrices, with a workflow contract preventing the old monolithic shard names from returning. Local verification: focused CI regression matrix passed (24), workflow contract tests passed (19), compileall passed for touched Python files, production Bandit passed for touched app files, and git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -78,8 +78,11 @@ def test_migration_v32_to_latest_creates_persona_exemplar_table(db_path: Path):
 
 
 class _FakeTransaction:
+    def __init__(self, connection):
+        self.connection = connection
+
     def __enter__(self):
-        return object()
+        return self.connection
 
     def __exit__(self, exc_type, exc, tb):
         return False
@@ -88,13 +91,17 @@ class _FakeTransaction:
 class _FakeBackend:
     backend_type = BackendType.POSTGRESQL
 
+    def __init__(self):
+        self.executed_statements: list[str] = []
+
     def transaction(self):
-        return _FakeTransaction()
+        return _FakeTransaction(self)
 
     def table_exists(self, _name: str, connection=None) -> bool:
         return True
 
-    def execute(self, *_args, **_kwargs):
+    def execute(self, statement, *_args, **_kwargs):
+        self.executed_statements.append(str(statement))
         return None
 
 

@@ -1439,10 +1439,12 @@ class TestIntegration:
         for event in events:
             assert event["context_session_id"] == session_id
 
-        # Verify event sequence
-        event_types = [e["event_type"] for e in reversed(events)]
-        assert event_types[0] == AuditEventType.AUTH_LOGIN_SUCCESS.value
-        assert event_types[-1] == AuditEventType.AUTH_LOGOUT.value
+        # Verify the complete trail without depending on DB tie-break ordering.
+        event_types = [e["event_type"] for e in events]
+        assert event_types.count(AuditEventType.AUTH_LOGIN_SUCCESS.value) == 1
+        assert event_types.count(AuditEventType.DATA_READ.value) == 5
+        assert event_types.count(AuditEventType.DATA_UPDATE.value) == 1
+        assert event_types.count(AuditEventType.AUTH_LOGOUT.value) == 1
 
     @pytest.mark.asyncio
     async def test_rag_workflow_audit(self, audit_service):

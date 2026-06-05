@@ -26620,6 +26620,370 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Error fetching latest sync log change_id: {e}")
             raise
 
+    # --- Chat Grammar Methods ---
+    def ensure_chat_grammars_table(self) -> None:
+        """Ensure the user-scoped chat grammar library table exists."""
+        if self.backend_type == BackendType.POSTGRESQL:
+            ddl_statements = (
+                """
+                CREATE TABLE IF NOT EXISTS chat_grammars(
+                  id                TEXT PRIMARY KEY NOT NULL,
+                  name              TEXT NOT NULL,
+                  description       TEXT,
+                  grammar_text      TEXT NOT NULL,
+                  validation_status TEXT NOT NULL DEFAULT 'unchecked',
+                  is_archived       BOOLEAN NOT NULL DEFAULT FALSE,
+                  created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted           BOOLEAN NOT NULL DEFAULT FALSE,
+                  client_id         TEXT NOT NULL DEFAULT 'unknown',
+                  version           INTEGER NOT NULL DEFAULT 1
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_chat_grammars_client_active_updated
+                  ON chat_grammars(client_id, deleted, is_archived, last_modified DESC)
+                """,
+            )
+            with self.transaction() as conn:
+                for statement in ddl_statements:
+                    conn.execute(statement)
+            return
+
+        with self.transaction() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS chat_grammars(
+                  id                TEXT PRIMARY KEY NOT NULL,
+                  name              TEXT NOT NULL,
+                  description       TEXT,
+                  grammar_text      TEXT NOT NULL,
+                  validation_status TEXT NOT NULL DEFAULT 'unchecked',
+                  is_archived       BOOLEAN NOT NULL DEFAULT 0,
+                  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted           BOOLEAN NOT NULL DEFAULT 0,
+                  client_id         TEXT NOT NULL DEFAULT 'unknown',
+                  version           INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_chat_grammars_client_active_updated
+                  ON chat_grammars(client_id, deleted, is_archived, last_modified DESC);
+                """
+            )
+
+    @staticmethod
+    def _normalize_chat_grammar_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise InputError("Chat grammar name is required.")  # noqa: TRY003
+        if len(value) > 255:
+            raise InputError("Chat grammar name must be 255 characters or fewer.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_chat_grammar_text(grammar_text: str) -> str:
+        value = str(grammar_text or "").strip()
+        if not value:
+            raise InputError("Chat grammar text is required.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_chat_grammar_validation_status(value: Any) -> str:
+        normalized = str(value or "unchecked").strip().lower()
+        if normalized not in _CHAT_GRAMMAR_VALIDATION_STATUSES:
+            raise InputError("Chat grammar validation_status is invalid.")  # noqa: TRY003
+        return normalized
+
+    def _chat_grammar_from_row(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        record = dict(row)
+        return {
+            "id": record.get("id"),
+            "name": record.get("name"),
+            "description": record.get("description"),
+            "grammar_text": record.get("grammar_text"),
+            "validation_status": record.get("validation_status"),
+            "is_archived": bool(record.get("is_archived")),
+            "created_at": record.get("created_at"),
+            "updated_at": record.get("last_modified"),
+            "last_modified": record.get("last_modified"),
+            "deleted": bool(record.get("deleted")),
+            "client_id": record.get("client_id"),
+            "version": int(record.get("version") or 1),
+        }
+
+    def insert_chat_grammar(self, grammar_data: dict[str, Any]) -> str:
+        """Create a saved chat grammar for the current client and return its ID."""
+        self.ensure_chat_grammars_table()
+        name = self._normalize_chat_grammar_name(str(grammar_data.get("name") or ""))
+        grammar_text = self._normalize_chat_grammar_text(str(grammar_data.get("grammar_text") or ""))
+        description = grammar_data.get("description")
+        validation_status = self._normalize_chat_grammar_validation_status(
+            grammar_data.get("validation_status")
+        )
+        grammar_id = str(grammar_data.get("id") or uuid.uuid4())
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+
+        with self.transaction() as conn:
+            existing = conn.execute(
+                """
+                SELECT id FROM chat_grammars
+                 WHERE client_id = ? AND deleted = ? AND LOWER(name) = LOWER(?)
+                 LIMIT 1
+                """,
+                (self.client_id, active_value, name),
+            ).fetchone()
+            if existing is not None:
+                raise ConflictError("Chat grammar name already exists.", entity="chat_grammars", entity_id=name)  # noqa: TRY003
+
+            conn.execute(
+                """
+                INSERT INTO chat_grammars (
+                    id, name, description, grammar_text, validation_status,
+                    is_archived, created_at, last_modified, deleted, client_id, version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    grammar_id,
+                    name,
+                    str(description) if description is not None else None,
+                    grammar_text,
+                    validation_status,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                    now,
+                    now,
+                    active_value,
+                    self.client_id,
+                    1,
+                ),
+            )
+        return grammar_id
+
+    def get_chat_grammar(
+        self,
+        grammar_id: str,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return one saved chat grammar by ID for the current client."""
+        self.ensure_chat_grammars_table()
+        conditions = ["id = ?", "client_id = ?"]
+        params: list[Any] = [str(grammar_id), self.client_id]
+        if not include_deleted:
+            conditions.append("deleted = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if not include_archived:
+            conditions.append("is_archived = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        cursor = self.execute_query(
+            f"""
+            SELECT id, name, description, grammar_text, validation_status,
+                   is_archived, created_at, last_modified, deleted, client_id, version
+              FROM chat_grammars
+             WHERE {' AND '.join(conditions)}
+             LIMIT 1
+            """,  # nosec B608
+            tuple(params),
+        )
+        return self._chat_grammar_from_row(cursor.fetchone())
+
+    def list_chat_grammars(
+        self,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List saved chat grammars for the current client."""
+        self.ensure_chat_grammars_table()
+        safe_limit = max(1, min(int(limit or 100), 500))
+        safe_offset = max(0, int(offset or 0))
+        conditions = ["client_id = ?"]
+        params: list[Any] = [self.client_id]
+        if not include_deleted:
+            conditions.append("deleted = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if not include_archived:
+            conditions.append("is_archived = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        params.extend([safe_limit, safe_offset])
+        cursor = self.execute_query(
+            f"""
+            SELECT id, name, description, grammar_text, validation_status,
+                   is_archived, created_at, last_modified, deleted, client_id, version
+              FROM chat_grammars
+             WHERE {' AND '.join(conditions)}
+             ORDER BY last_modified DESC, name ASC
+             LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple(params),
+        )
+        return [
+            grammar
+            for row in cursor.fetchall()
+            if (grammar := self._chat_grammar_from_row(row)) is not None
+        ]
+
+    def count_chat_grammars(
+        self,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+    ) -> int:
+        """Count saved chat grammars for the current client."""
+        self.ensure_chat_grammars_table()
+        conditions = ["client_id = ?"]
+        params: list[Any] = [self.client_id]
+        if not include_deleted:
+            conditions.append("deleted = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if not include_archived:
+            conditions.append("is_archived = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        cursor = self.execute_query(
+            f"SELECT COUNT(*) AS cnt FROM chat_grammars WHERE {' AND '.join(conditions)}",  # nosec B608
+            tuple(params),
+        )
+        row = cursor.fetchone()
+        return int(row["cnt"] if row else 0)
+
+    def update_chat_grammar(
+        self,
+        grammar_id: str,
+        updates: dict[str, Any],
+        *,
+        expected_version: int,
+    ) -> bool:
+        """Update a saved chat grammar using optimistic version checks."""
+        self.ensure_chat_grammars_table()
+        allowed_fields = {"name", "description", "grammar_text", "validation_status"}
+        update_data = {key: value for key, value in dict(updates or {}).items() if key in allowed_fields}
+        if not update_data:
+            raise InputError("No valid chat grammar fields were provided.")  # noqa: TRY003
+        if "name" in update_data:
+            update_data["name"] = self._normalize_chat_grammar_name(str(update_data["name"] or ""))
+        if "grammar_text" in update_data:
+            update_data["grammar_text"] = self._normalize_chat_grammar_text(str(update_data["grammar_text"] or ""))
+        if "validation_status" in update_data:
+            update_data["validation_status"] = self._normalize_chat_grammar_validation_status(
+                update_data["validation_status"]
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT version FROM chat_grammars WHERE id = ? AND client_id = ? AND deleted = ?",
+                (str(grammar_id), self.client_id, active_value),
+            ).fetchone()
+            if current is None:
+                raise InputError(f"Chat grammar {grammar_id} not found.")  # noqa: TRY003
+            current_version = int(dict(current).get("version") or 1)
+            if current_version != int(expected_version):
+                raise ConflictError("Version mismatch", entity="chat_grammars", entity_id=grammar_id)  # noqa: TRY003
+            if "name" in update_data:
+                duplicate = conn.execute(
+                    """
+                    SELECT id FROM chat_grammars
+                     WHERE client_id = ? AND deleted = ? AND LOWER(name) = LOWER(?) AND id <> ?
+                     LIMIT 1
+                    """,
+                    (self.client_id, active_value, update_data["name"], str(grammar_id)),
+                ).fetchone()
+                if duplicate is not None:
+                    raise ConflictError(
+                        "Chat grammar name already exists.",
+                        entity="chat_grammars",
+                        entity_id=update_data["name"],
+                    )  # noqa: TRY003
+
+            assignments = [f"{field} = ?" for field in update_data]
+            params = list(update_data.values())
+            assignments.extend(["last_modified = ?", "client_id = ?", "version = ?"])
+            params.extend([now, self.client_id, current_version + 1, str(grammar_id), active_value])
+            cursor = conn.execute(
+                f"""
+                UPDATE chat_grammars
+                   SET {', '.join(assignments)}
+                 WHERE id = ? AND deleted = ?
+                """,  # nosec B608
+                tuple(params),
+            )
+            return bool(getattr(cursor, "rowcount", 0))
+
+    def archive_chat_grammar(self, grammar_id: str, *, expected_version: int) -> dict[str, Any]:
+        """Archive a saved chat grammar without deleting it."""
+        archived_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT version FROM chat_grammars WHERE id = ? AND client_id = ? AND deleted = ?",
+                (str(grammar_id), self.client_id, False if self.backend_type == BackendType.POSTGRESQL else 0),
+            ).fetchone()
+            if current is None:
+                raise InputError(f"Chat grammar {grammar_id} not found.")  # noqa: TRY003
+            current_version = int(dict(current).get("version") or 1)
+            if current_version != int(expected_version):
+                raise ConflictError("Version mismatch", entity="chat_grammars", entity_id=grammar_id)  # noqa: TRY003
+            conn.execute(
+                """
+                UPDATE chat_grammars
+                   SET is_archived = ?, last_modified = ?, client_id = ?, version = ?
+                 WHERE id = ?
+                """,
+                (archived_value, now, self.client_id, current_version + 1, str(grammar_id)),
+            )
+        archived = self.get_chat_grammar(grammar_id, include_archived=True, include_deleted=True)
+        if archived is None:
+            raise CharactersRAGDBError(f"Archived grammar {grammar_id} could not be reloaded")  # noqa: TRY003
+        return archived
+
+    def delete_chat_grammar(
+        self,
+        grammar_id: str,
+        *,
+        expected_version: int,
+        hard_delete: bool = False,
+    ) -> bool:
+        """Delete a saved chat grammar, soft-delete by default."""
+        self.ensure_chat_grammars_table()
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT version FROM chat_grammars WHERE id = ? AND client_id = ?",
+                (str(grammar_id), self.client_id),
+            ).fetchone()
+            if current is None:
+                return False
+            current_version = int(dict(current).get("version") or 1)
+            if current_version != int(expected_version):
+                raise ConflictError("Version mismatch", entity="chat_grammars", entity_id=grammar_id)  # noqa: TRY003
+            if hard_delete:
+                cursor = conn.execute(
+                    "DELETE FROM chat_grammars WHERE id = ? AND client_id = ?",
+                    (str(grammar_id), self.client_id),
+                )
+                return bool(getattr(cursor, "rowcount", 0))
+            cursor = conn.execute(
+                """
+                UPDATE chat_grammars
+                   SET deleted = ?, last_modified = ?, client_id = ?, version = ?
+                 WHERE id = ? AND client_id = ?
+                """,
+                (
+                    True if self.backend_type == BackendType.POSTGRESQL else 1,
+                    self._get_current_utc_timestamp_iso(),
+                    self.client_id,
+                    current_version + 1,
+                    str(grammar_id),
+                    self.client_id,
+                ),
+            )
+            return bool(getattr(cursor, "rowcount", 0))
+
     # --- Prompt Preset Methods ---
     @staticmethod
     def _normalize_prompt_preset_id(preset_id: str) -> str:

@@ -29,5 +29,6 @@ def test_unified_eval_inline_webhook_mode_disabled_when_false(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
     assert unified_eval_svc._await_webhook_inline_in_test_mode() is False

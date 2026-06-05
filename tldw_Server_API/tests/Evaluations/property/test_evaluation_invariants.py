@@ -6,9 +6,12 @@ always hold true regardless of input.
 """
 
 import asyncio
+import gc
 import json
 import math
+import os
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -359,7 +362,7 @@ class EvaluationManagerStateMachine(RuleBasedStateMachine):
     def __init__(self):
 
         super().__init__()
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=os.name == "nt")
         self._db_path = Path(self._tmpdir.name) / "state_machine_evals.db"
 
         from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
@@ -384,7 +387,15 @@ class EvaluationManagerStateMachine(RuleBasedStateMachine):
     def teardown(self):
 
         self.manager = None
-        self._tmpdir.cleanup()
+        for attempt in range(3):
+            gc.collect()
+            try:
+                self._tmpdir.cleanup()
+                return
+            except PermissionError:
+                if os.name != "nt" or attempt == 2:
+                    raise
+                time.sleep(0.1)
 
     @rule(target=evaluations, eval_type=evaluation_type_strategy(), score=evaluation_score_strategy(), text=text_strategy())
     def create_evaluation(self, eval_type, score, text):

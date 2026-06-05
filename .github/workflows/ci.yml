@@ -447,16 +447,18 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-retrieval
+          - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/ChromaDB
               tldw_Server_API/tests/Chunking
               tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/VectorStores
+          - name: rag-research
+            paths: >-
               tldw_Server_API/tests/PaperSearch
               tldw_Server_API/tests/RAG
               tldw_Server_API/tests/RAG_NEW
               tldw_Server_API/tests/Research
-              tldw_Server_API/tests/VectorStores
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -469,20 +471,31 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-llm
+          - name: chat-character-legacy
             paths: >-
               tldw_Server_API/tests/Character_Chat
-              tldw_Server_API/tests/Character_Chat_NEW
               tldw_Server_API/tests/Characters
+          - name: chat-character-unit
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit
+              tldw_Server_API/tests/Character_Chat_NEW/property
+          - name: chat-character-integration
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration
+          - name: chat-core
+            paths: >-
               tldw_Server_API/tests/Chat
               tldw_Server_API/tests/Chat_NEW
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Streaming
+          - name: llm-providers
+            paths: >-
               tldw_Server_API/tests/LLM_Adapters
               tldw_Server_API/tests/LLM_Calls
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-              tldw_Server_API/tests/Streaming
           - name: product-modules
             paths: >-
               tldw_Server_API/tests/Claims
@@ -730,7 +743,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -739,7 +752,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -835,16 +848,18 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-retrieval
+          - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/ChromaDB
               tldw_Server_API/tests/Chunking
               tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/VectorStores
+          - name: rag-research
+            paths: >-
               tldw_Server_API/tests/PaperSearch
               tldw_Server_API/tests/RAG
               tldw_Server_API/tests/RAG_NEW
               tldw_Server_API/tests/Research
-              tldw_Server_API/tests/VectorStores
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -857,20 +872,31 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-llm
+          - name: chat-character-legacy
             paths: >-
               tldw_Server_API/tests/Character_Chat
-              tldw_Server_API/tests/Character_Chat_NEW
               tldw_Server_API/tests/Characters
+          - name: chat-character-unit
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit
+              tldw_Server_API/tests/Character_Chat_NEW/property
+          - name: chat-character-integration
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration
+          - name: chat-core
+            paths: >-
               tldw_Server_API/tests/Chat
               tldw_Server_API/tests/Chat_NEW
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Streaming
+          - name: llm-providers
+            paths: >-
               tldw_Server_API/tests/LLM_Adapters
               tldw_Server_API/tests/LLM_Calls
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-              tldw_Server_API/tests/Streaming
           - name: product-modules
             paths: >-
               tldw_Server_API/tests/Claims
@@ -1062,7 +1088,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1071,7 +1097,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1168,16 +1194,18 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-retrieval
+          - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/ChromaDB
               tldw_Server_API/tests/Chunking
               tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/VectorStores
+          - name: rag-research
+            paths: >-
               tldw_Server_API/tests/PaperSearch
               tldw_Server_API/tests/RAG
               tldw_Server_API/tests/RAG_NEW
               tldw_Server_API/tests/Research
-              tldw_Server_API/tests/VectorStores
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -1190,20 +1218,31 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-llm
+          - name: chat-character-legacy
             paths: >-
               tldw_Server_API/tests/Character_Chat
-              tldw_Server_API/tests/Character_Chat_NEW
               tldw_Server_API/tests/Characters
+          - name: chat-character-unit
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit
+              tldw_Server_API/tests/Character_Chat_NEW/property
+          - name: chat-character-integration
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration
+          - name: chat-core
+            paths: >-
               tldw_Server_API/tests/Chat
               tldw_Server_API/tests/Chat_NEW
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Streaming
+          - name: llm-providers
+            paths: >-
               tldw_Server_API/tests/LLM_Adapters
               tldw_Server_API/tests/LLM_Calls
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-              tldw_Server_API/tests/Streaming
           - name: product-modules
             paths: >-
               tldw_Server_API/tests/Claims
@@ -1321,7 +1360,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1330,7 +1369,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1426,16 +1465,18 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-retrieval
+          - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/ChromaDB
               tldw_Server_API/tests/Chunking
               tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/VectorStores
+          - name: rag-research
+            paths: >-
               tldw_Server_API/tests/PaperSearch
               tldw_Server_API/tests/RAG
               tldw_Server_API/tests/RAG_NEW
               tldw_Server_API/tests/Research
-              tldw_Server_API/tests/VectorStores
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -1448,20 +1489,31 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-llm
+          - name: chat-character-legacy
             paths: >-
               tldw_Server_API/tests/Character_Chat
-              tldw_Server_API/tests/Character_Chat_NEW
               tldw_Server_API/tests/Characters
+          - name: chat-character-unit
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit
+              tldw_Server_API/tests/Character_Chat_NEW/property
+          - name: chat-character-integration
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration
+          - name: chat-core
+            paths: >-
               tldw_Server_API/tests/Chat
               tldw_Server_API/tests/Chat_NEW
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Streaming
+          - name: llm-providers
+            paths: >-
               tldw_Server_API/tests/LLM_Adapters
               tldw_Server_API/tests/LLM_Calls
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-              tldw_Server_API/tests/Streaming
           - name: product-modules
             paths: >-
               tldw_Server_API/tests/Claims
@@ -1579,7 +1631,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1588,7 +1640,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1686,16 +1738,18 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-retrieval
+          - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/ChromaDB
               tldw_Server_API/tests/Chunking
               tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/VectorStores
+          - name: rag-research
+            paths: >-
               tldw_Server_API/tests/PaperSearch
               tldw_Server_API/tests/RAG
               tldw_Server_API/tests/RAG_NEW
               tldw_Server_API/tests/Research
-              tldw_Server_API/tests/VectorStores
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -1708,20 +1762,31 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-llm
+          - name: chat-character-legacy
             paths: >-
               tldw_Server_API/tests/Character_Chat
-              tldw_Server_API/tests/Character_Chat_NEW
               tldw_Server_API/tests/Characters
+          - name: chat-character-unit
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit
+              tldw_Server_API/tests/Character_Chat_NEW/property
+          - name: chat-character-integration
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration
+          - name: chat-core
+            paths: >-
               tldw_Server_API/tests/Chat
               tldw_Server_API/tests/Chat_NEW
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Streaming
+          - name: llm-providers
+            paths: >-
               tldw_Server_API/tests/LLM_Adapters
               tldw_Server_API/tests/LLM_Calls
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-              tldw_Server_API/tests/Streaming
           - name: product-modules
             paths: >-
               tldw_Server_API/tests/Claims
@@ -1839,7 +1904,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1848,7 +1913,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: matrix.shard.name == 'ai-retrieval'
+        if: ${{ matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'rag-research' }}
         continue-on-error: true
         shell: bash
         run: |

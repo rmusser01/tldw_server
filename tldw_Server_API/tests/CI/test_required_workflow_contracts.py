@@ -198,3 +198,28 @@ def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
             checked += 1
 
     assert checked >= len(step_names)
+
+
+def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    matrix_jobs = [
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+    ]
+
+    for job_name in matrix_jobs:
+        shards = workflow["jobs"][job_name]["strategy"]["matrix"]["shard"]
+        shard_names = {shard["name"] for shard in shards}
+        assert "ai-retrieval" not in shard_names
+        assert "chat-llm" not in shard_names
+        assert {"ai-embeddings", "rag-research"}.issubset(shard_names)
+        assert {
+            "chat-character-legacy",
+            "chat-character-unit",
+            "chat-character-integration",
+            "chat-core",
+            "llm-providers",
+        }.issubset(shard_names)

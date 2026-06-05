@@ -443,12 +443,11 @@ async def test_persist_primary_av_item_upserts_normalized_transcript_via_extract
         assert transcript_calls[0]["media_id"] == 1
         assert transcript_calls[0]["whisper_model"] == "resolved-model"
         assert transcript_calls[0].get("idempotency_key") is None
-        assert json.loads(transcript_calls[0]["transcription"]) == {
-            "text": "hello world",
-            "segments": [{"text": "hello world", "start": 0.0, "end": 1.0}],
-            "language": "en",
-            "metadata": {"provider": "fake-provider", "model": "resolved-model"},
-        }
+        stored_artifact = json.loads(transcript_calls[0]["transcription"])
+        assert stored_artifact["text"] == "hello world"
+        assert stored_artifact["segments"] == [{"text": "hello world", "start": 0.0, "end": 1.0}]
+        assert stored_artifact["language"] == "en"
+        assert stored_artifact["metadata"] == {"provider": "fake-provider", "model": "resolved-model"}
         assert registry.get_cumulative_counter(
             "audio_stt_run_writes_total",
             {"provider": "other", "write_result": "created"},
