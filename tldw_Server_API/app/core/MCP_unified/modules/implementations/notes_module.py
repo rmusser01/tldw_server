@@ -1015,7 +1015,7 @@ class NotesModule(BaseModule):
                     fetched_tasks = []
                     processed = 0
                     skipped_reconciliation = 0
-                    target_fetch = min(limit + offset, 500)
+                    target_fetch = limit + offset
                     for scoped_note_id in sorted(scoped_note_ids):
                         if len(fetched_tasks) >= target_fetch:
                             break
@@ -1029,18 +1029,25 @@ class NotesModule(BaseModule):
                                 processed += 1
                             else:
                                 skipped_reconciliation += 1
-                        fetched_tasks.extend(
-                            db.list_tasks(
+                        note_offset = 0
+                        while len(fetched_tasks) < target_fetch:
+                            page_limit = min(500, target_fetch - len(fetched_tasks))
+                            batch = db.list_tasks(
                                 note_id=str(scoped_note_id),
                                 status=status,
                                 projection_status=projection_status,
                                 query=query,
                                 metadata_filters=metadata_filters,
-                                offset=0,
+                                offset=note_offset,
                                 include_unlinked=include_unlinked,
-                                limit=target_fetch - len(fetched_tasks),
+                                limit=page_limit,
                             )
-                        )
+                            if not batch:
+                                break
+                            fetched_tasks.extend(batch)
+                            if len(batch) < page_limit:
+                                break
+                            note_offset += len(batch)
                     tasks = fetched_tasks[offset:offset + limit]
                     reconciliation = {
                         "status": "incomplete" if skipped_reconciliation else "clean",
@@ -1232,6 +1239,22 @@ class NotesModule(BaseModule):
                 f"Task projection is stale for task '{task_id}'.",
                 entity="tasks",
                 entity_id=task_id,
+            )
+        note_id = str(task.get("note_id") or projection.get("note_id") or "")
+        note = db.get_note_by_id(note_id)
+        if note is None:
+            raise ConflictError(
+                f"Task note not found for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        current_note_version = int(note.get("version") or 0)
+        if current_note_version != int(expected_note_version):
+            raise ConflictError(
+                f"Note version mismatch for task '{task_id}'. "
+                f"Expected {expected_note_version}, found {current_note_version}.",
+                entity="notes",
+                entity_id=note_id,
             )
 
     def _tasks_delete_sync(self, context: Any | None, args: dict[str, Any], tool_name: str) -> dict[str, Any]:
