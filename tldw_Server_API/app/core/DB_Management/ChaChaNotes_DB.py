@@ -5435,13 +5435,13 @@ UPDATE db_schema_version
 ───────────────────────────────────────────────────────────────*/
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE IF NOT EXISTS note_tasks (
   id                TEXT PRIMARY KEY,
   note_id           TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
   text              TEXT NOT NULL,
   status            TEXT NOT NULL CHECK(status IN ('open','done')),
   metadata_json     TEXT NOT NULL DEFAULT '{}',
-  projection_status TEXT NOT NULL DEFAULT 'live',
+  projection_status TEXT NOT NULL DEFAULT 'live' CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
   deleted           BOOLEAN NOT NULL DEFAULT 0,
   created_at        DATETIME NOT NULL,
   updated_at        DATETIME NOT NULL,
@@ -5450,17 +5450,17 @@ CREATE TABLE IF NOT EXISTS tasks (
   version           INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_client_scope
-  ON tasks(client_id, deleted, updated_at);
-CREATE INDEX IF NOT EXISTS idx_tasks_note
-  ON tasks(note_id, deleted);
-CREATE INDEX IF NOT EXISTS idx_tasks_status
-  ON tasks(status, deleted);
-CREATE INDEX IF NOT EXISTS idx_tasks_projection_status
-  ON tasks(projection_status, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_client_scope
+  ON note_tasks(client_id, deleted, updated_at);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_note
+  ON note_tasks(note_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_status
+  ON note_tasks(status, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_projection_status
+  ON note_tasks(projection_status, deleted);
 
 CREATE TABLE IF NOT EXISTS task_note_projections (
-  task_id              TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  task_id              TEXT PRIMARY KEY REFERENCES note_tasks(id) ON DELETE CASCADE,
   note_id              TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
   note_version         INTEGER NOT NULL,
   line_number          INTEGER NOT NULL,
@@ -5471,7 +5471,7 @@ CREATE TABLE IF NOT EXISTS task_note_projections (
   block_fingerprint    TEXT NOT NULL,
   raw_line             TEXT NOT NULL,
   has_child_content    BOOLEAN NOT NULL DEFAULT 0,
-  projection_status    TEXT NOT NULL DEFAULT 'live',
+  projection_status    TEXT NOT NULL DEFAULT 'live' CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
   updated_at           DATETIME NOT NULL
 );
 
@@ -5482,7 +5482,7 @@ CREATE INDEX IF NOT EXISTS idx_task_note_projections_status
 
 CREATE TABLE IF NOT EXISTS task_events (
   id             TEXT PRIMARY KEY,
-  task_id        TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  task_id        TEXT REFERENCES note_tasks(id) ON DELETE SET NULL,
   note_id        TEXT REFERENCES notes(id) ON DELETE SET NULL,
   event_type     TEXT NOT NULL,
   actor_type     TEXT NOT NULL,
@@ -5542,13 +5542,13 @@ UPDATE db_schema_version
   Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
 ───────────────────────────────────────────────────────────────*/
 
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE IF NOT EXISTS note_tasks (
   id                TEXT PRIMARY KEY,
   note_id           TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
   text              TEXT NOT NULL,
   status            TEXT NOT NULL CHECK(status IN ('open','done')),
   metadata_json     TEXT NOT NULL DEFAULT '{}',
-  projection_status TEXT NOT NULL DEFAULT 'live',
+  projection_status TEXT NOT NULL DEFAULT 'live' CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
   deleted           BOOLEAN NOT NULL DEFAULT FALSE,
   created_at        TIMESTAMP NOT NULL,
   updated_at        TIMESTAMP NOT NULL,
@@ -5557,17 +5557,17 @@ CREATE TABLE IF NOT EXISTS tasks (
   version           INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_client_scope
-  ON tasks(client_id, deleted, updated_at);
-CREATE INDEX IF NOT EXISTS idx_tasks_note
-  ON tasks(note_id, deleted);
-CREATE INDEX IF NOT EXISTS idx_tasks_status
-  ON tasks(status, deleted);
-CREATE INDEX IF NOT EXISTS idx_tasks_projection_status
-  ON tasks(projection_status, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_client_scope
+  ON note_tasks(client_id, deleted, updated_at);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_note
+  ON note_tasks(note_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_status
+  ON note_tasks(status, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tasks_projection_status
+  ON note_tasks(projection_status, deleted);
 
 CREATE TABLE IF NOT EXISTS task_note_projections (
-  task_id              TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  task_id              TEXT PRIMARY KEY REFERENCES note_tasks(id) ON DELETE CASCADE,
   note_id              TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
   note_version         INTEGER NOT NULL,
   line_number          INTEGER NOT NULL,
@@ -5578,7 +5578,7 @@ CREATE TABLE IF NOT EXISTS task_note_projections (
   block_fingerprint    TEXT NOT NULL,
   raw_line             TEXT NOT NULL,
   has_child_content    BOOLEAN NOT NULL DEFAULT FALSE,
-  projection_status    TEXT NOT NULL DEFAULT 'live',
+  projection_status    TEXT NOT NULL DEFAULT 'live' CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
   updated_at           TIMESTAMP NOT NULL
 );
 
@@ -5589,7 +5589,7 @@ CREATE INDEX IF NOT EXISTS idx_task_note_projections_status
 
 CREATE TABLE IF NOT EXISTS task_events (
   id             TEXT PRIMARY KEY,
-  task_id        TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  task_id        TEXT REFERENCES note_tasks(id) ON DELETE SET NULL,
   note_id        TEXT REFERENCES notes(id) ON DELETE SET NULL,
   event_type     TEXT NOT NULL,
   actor_type     TEXT NOT NULL,
