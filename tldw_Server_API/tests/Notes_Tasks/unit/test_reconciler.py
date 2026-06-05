@@ -118,6 +118,28 @@ def test_same_locator_and_hash_preserves_task_id(
     assert updated_alpha["status"] == "done"
 
 
+def test_child_detail_only_edit_preserves_task_id(
+    notes_db: CharactersRAGDB,
+    service: NotesTaskService,
+) -> None:
+    note = _create_note(notes_db, "- [ ] Task\n  detail A\n")
+    _reconcile(service, notes_db, note)
+    original_task = _task_by_text(notes_db, note["id"])["Task"]
+
+    updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [ ] Task\n  detail B\n")
+    result = _reconcile(service, notes_db, updated_note)
+    updated_task = _task_by_text(notes_db, note["id"])["Task"]
+    state = notes_db.get_reconciliation_state(note["id"])
+
+    assert result.created_count == 0
+    assert result.updated_count == 0
+    assert result.unlinked_count == 0
+    assert updated_task["id"] == original_task["id"]
+    assert state is not None
+    assert state["note_version"] == updated_note["version"]
+    assert state["status"] == "clean"
+
+
 def test_unique_reordered_item_preserves_task_id(
     notes_db: CharactersRAGDB,
     service: NotesTaskService,

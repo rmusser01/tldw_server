@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -18,11 +17,6 @@ from tldw_Server_API.app.core.Notes_Tasks.models import (
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
-
-
-_CHECKBOX_STATUS_RE = re.compile(
-    r"^(?P<prefix>[ \t]*[-*+][ \t]+\[)[ xX](?P<suffix>\](?:[ \t]+.*|[ \t]*)?)$"
-)
 
 
 @dataclass(frozen=True)
@@ -288,32 +282,9 @@ class NotesTaskReconciler:
     @staticmethod
     def _projection_matches_locator(projection: dict[str, Any], item: ParsedChecklistItem) -> bool:
         locator = item.locator
-        line_locator_matches = (
+        return (
             projection["line_number"] == locator.line_number
             and projection["start_offset"] == locator.start_offset
-            and projection["end_offset"] == locator.end_offset
             and projection["normalized_text_hash"] == locator.normalized_text_hash
             and projection["occurrence_index"] == locator.occurrence_index
-        )
-        if not line_locator_matches:
-            return False
-        return (
-            projection["block_fingerprint"] == locator.block_fingerprint
-            or NotesTaskReconciler._raw_line_only_changes_checkbox_status(
-                str(projection["raw_line"]),
-                item.raw_line,
-            )
-        )
-
-    @staticmethod
-    def _raw_line_only_changes_checkbox_status(old_raw_line: str, new_raw_line: str) -> bool:
-        if old_raw_line == new_raw_line:
-            return False
-        old_match = _CHECKBOX_STATUS_RE.match(old_raw_line)
-        new_match = _CHECKBOX_STATUS_RE.match(new_raw_line)
-        if old_match is None or new_match is None:
-            return False
-        return (
-            old_match.group("prefix") == new_match.group("prefix")
-            and old_match.group("suffix") == new_match.group("suffix")
         )
