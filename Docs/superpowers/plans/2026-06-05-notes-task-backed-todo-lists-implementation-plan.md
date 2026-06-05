@@ -1013,7 +1013,7 @@ git commit -m "feat: add task-backed checklists to notes page"
 - Modify: `apps/packages/ui/src/store/notes-dock.tsx`
 - Test: `apps/packages/ui/src/components/Common/NotesDock/__tests__/NotesDockPanel.task-backed-todos.test.tsx`
 
-- [ ] **Step 1: Write failing Notes Dock tests**
+- [x] **Step 1: Write failing Notes Dock tests**
 
 Cover:
 
@@ -1024,7 +1024,7 @@ Cover:
 - remote/autonomous change while dirty queues pending-change notice
 - dock does not overwrite dirty content when refreshed
 
-- [ ] **Step 2: Run dock tests to verify they fail**
+- [x] **Step 2: Run dock tests to verify they fail**
 
 Run:
 
@@ -1034,7 +1034,7 @@ bunx vitest run apps/packages/ui/src/components/Common/NotesDock/__tests__/Notes
 
 Expected: FAIL with missing dock task UI.
 
-- [ ] **Step 3: Add dock task loading and rendering**
+- [x] **Step 3: Add dock task loading and rendering**
 
 In `NotesDockPanel.tsx`:
 
@@ -1044,7 +1044,7 @@ In `NotesDockPanel.tsx`:
 - use local markdown toggle and `updateNote` when dirty
 - after successful save, refresh tasks and call existing cache invalidation path
 
-- [ ] **Step 4: Add store fields only if component state is not enough**
+- [x] **Step 4: Add store fields only if component state is not enough**
 
 If pending activity notices must survive panel remount, extend `notes-dock.tsx` with:
 
@@ -1054,7 +1054,7 @@ If pending activity notices must survive panel remount, extend `notes-dock.tsx` 
 
 Keep store additions minimal.
 
-- [ ] **Step 5: Run dock tests**
+- [x] **Step 5: Run dock tests**
 
 Run:
 
@@ -1064,7 +1064,7 @@ bunx vitest run apps/packages/ui/src/components/Common/NotesDock/__tests__/Notes
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit dock slice**
+- [x] **Step 6: Commit dock slice**
 
 ```bash
 git add \
