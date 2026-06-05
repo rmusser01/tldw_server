@@ -62,6 +62,15 @@ def test_parse_ignores_checklist_markers_inside_tilde_fences() -> None:
     assert result.items[0].locator.line_number == 5
 
 
+def test_parse_keeps_indented_fence_marker_inside_top_level_fence_as_code() -> None:
+    markdown = "```\n    ```\n- [ ] should be code\n```\n- [ ] real\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["real"]
+    assert result.items[0].locator.line_number == 5
+
+
 def test_parse_ignores_checklist_markers_inside_nested_backtick_fences() -> None:
     markdown = (
         "\n".join(
