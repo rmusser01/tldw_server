@@ -97,7 +97,10 @@ class TaskStore:
 
     def _clamp_limit(self, limit: int) -> int:
         """Normalize caller-provided row limits before passing them into SQL."""
-        requested_limit = int(limit)
+        try:
+            requested_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise InputError("limit must be an integer.") from exc  # noqa: TRY003
         return min(max(requested_limit, self._MIN_LIMIT), self._MAX_LIMIT)
 
     def _decode_task_row(self, row: Any) -> dict[str, Any] | None:
@@ -105,6 +108,27 @@ class TaskStore:
 
     def _decode_event_row(self, row: Any) -> dict[str, Any] | None:
         return self._decode_row(row, self._EVENT_JSON_FIELDS)
+
+    def _require_active_note(
+        self,
+        note_id: str,
+        task_id: str,
+        *,
+        conn: TaskConnection,
+    ) -> None:
+        """Require a task's owning note to exist and not be soft-deleted."""
+        cursor = self._read(
+            "SELECT deleted FROM notes WHERE id = ?",
+            (note_id,),
+            conn=conn,
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise ConflictError("Task note not found.", entity="tasks", entity_id=task_id)  # noqa: TRY003
+        if bool(row["deleted"]):
+            raise ConflictError(
+                f"Task note '{note_id}' is deleted.", entity="tasks", entity_id=task_id
+            )  # noqa: TRY003
 
     def _fetch_task(
         self,
@@ -114,12 +138,12 @@ class TaskStore:
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
         if include_deleted:
-            cursor = self._read("SELECT * FROM tasks WHERE id = ?", (task_id,), conn=conn)
+            cursor = self._read("SELECT * FROM note_tasks WHERE id = ?", (task_id,), conn=conn)
             return self._decode_task_row(cursor.fetchone())
         cursor = self._read(
             """
             SELECT t.*
-              FROM tasks t
+              FROM note_tasks t
               JOIN notes n ON n.id = t.note_id
              WHERE t.id = ? AND t.deleted = ? AND n.deleted = ?
             """,
@@ -260,10 +284,11 @@ class TaskStore:
         completed_at = now if normalized_status == "done" else None
 
         def _execute_create(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_active_note(note_id, final_task_id, conn=transaction_conn)
             self._execute(
                 transaction_conn,
                 """
-                INSERT INTO tasks (
+                INSERT INTO note_tasks (
                     id, note_id, text, status, metadata_json, projection_status, deleted,
                     created_at, updated_at, completed_at, client_id, version
                 )
@@ -341,7 +366,7 @@ class TaskStore:
             params.append(self._deleted_value(False))
             clauses.append("n.deleted = ?")
             params.append(self._deleted_value(False))
-        query = "SELECT t.* FROM tasks t"
+        query = "SELECT t.* FROM note_tasks t"
         if not include_deleted:
             query += " JOIN notes n ON n.id = t.note_id"
         if clauses:
@@ -383,6 +408,7 @@ class TaskStore:
                 ),
                 task_id,
             )
+            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
             projection_state, _ = self._resolve_projection_state(old, task_id, conn=transaction_conn)
             old["projection_status"] = projection_state
             self._require_record_update_allowed(old, task_id)
@@ -401,7 +427,7 @@ class TaskStore:
             update_cursor = self._execute(
                 transaction_conn,
                 """
-                UPDATE tasks
+                UPDATE note_tasks
                    SET text = ?,
                        status = ?,
                        metadata_json = ?,
@@ -485,6 +511,7 @@ class TaskStore:
                 self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
                 task_id,
             )
+            self._require_active_note(task["note_id"], task_id, conn=transaction_conn)
             self._resolve_projection_state(task, task_id, conn=transaction_conn)
             if task["note_id"] != note_id:
                 raise ConflictError(
@@ -495,7 +522,7 @@ class TaskStore:
             update_cursor = self._execute(
                 transaction_conn,
                 """
-                UPDATE tasks
+                UPDATE note_tasks
                    SET projection_status = ?,
                        updated_at = ?
                  WHERE id = ? AND note_id = ? AND deleted = ?
@@ -572,6 +599,7 @@ class TaskStore:
                 ),
                 task_id,
             )
+            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
             projection_state, _ = self._resolve_projection_state(old, task_id, conn=transaction_conn)
             if projection_state != "live":
                 raise ConflictError(
@@ -583,7 +611,7 @@ class TaskStore:
             update_cursor = self._execute(
                 transaction_conn,
                 """
-                UPDATE tasks
+                UPDATE note_tasks
                    SET projection_status = ?,
                        updated_at = ?,
                        version = version + 1
@@ -649,6 +677,7 @@ class TaskStore:
                 ),
                 task_id,
             )
+            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
             projection_status, projection = self._resolve_projection_state(old, task_id, conn=transaction_conn)
             if projection_status == "ambiguous":
                 raise ConflictError(
@@ -678,7 +707,7 @@ class TaskStore:
             update_cursor = self._execute(
                 transaction_conn,
                 """
-                UPDATE tasks
+                UPDATE note_tasks
                    SET deleted = ?,
                        projection_status = ?,
                        updated_at = ?,

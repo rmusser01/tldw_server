@@ -77,7 +77,7 @@ def _force_projection_status_drift(
 ) -> None:
     with db.transaction() as conn:
         conn.execute(
-            "UPDATE tasks SET projection_status = ? WHERE id = ?",
+            "UPDATE note_tasks SET projection_status = ? WHERE id = ?",
             (task_status, task_id),
         )
         conn.execute(
@@ -92,6 +92,15 @@ def _force_projection_note_drift(db: CharactersRAGDB, task_id: str, note_id: str
             "UPDATE task_note_projections SET note_id = ? WHERE task_id = ?",
             (note_id, task_id),
         )
+
+
+def _projection_count(db: CharactersRAGDB, task_id: str) -> int:
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM task_note_projections WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+    return int(row["count"])
 
 
 def test_create_task_record_and_list_by_note(db: CharactersRAGDB) -> None:
@@ -125,6 +134,21 @@ def test_active_task_reads_exclude_tasks_for_soft_deleted_notes(db: CharactersRA
     assert db.list_tasks(note_id=note_id) == []  # nosec B101
 
 
+def test_create_task_rejects_soft_deleted_notes(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    assert db.soft_delete_note(note_id, expected_version=1) is True  # nosec B101
+
+    with pytest.raises(ConflictError, match="note.*deleted"):
+        db.create_task(
+            task_id="task-soft-deleted-note",
+            note_id=note_id,
+            text="Review source",
+            actor_type="user",
+            actor_id="user-1",
+        )
+    assert db.list_tasks(include_deleted=True) == []  # nosec B101
+
+
 def test_create_task_rejects_deleted_projection_status(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
 
@@ -147,6 +171,14 @@ def test_list_helpers_clamp_negative_limits(db: CharactersRAGDB) -> None:
 
     assert len(db.list_tasks(limit=-10)) == 1  # nosec B101
     assert len(db.list_task_activity(limit=-10)) == 1  # nosec B101
+
+
+def test_list_helpers_reject_nonnumeric_limits(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+
+    with pytest.raises(InputError, match="limit"):
+        db.list_tasks(limit="many")
 
 
 def test_candidate_notes_for_task_discovery_clamps_oversized_limits(
@@ -199,7 +231,7 @@ def test_update_task_record_rejects_zero_rowcount_update(
         rowcount = 0
 
     def _simulate_concurrent_update(conn, query, params=None):
-        if "UPDATE tasks" in query and "version = version + 1" in query:
+        if "UPDATE note_tasks" in query and "version = version + 1" in query:
             return _ZeroRowcount()
         return original_execute(conn, query, params)
 
@@ -264,6 +296,24 @@ def test_update_task_record_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
     task = db.get_task("task-1", include_deleted=True)
     assert task["version"] == deleted["version"]  # nosec B101
     assert task["deleted"] in (1, True)  # nosec B101
+
+
+def test_update_task_record_rejects_soft_deleted_parent_note(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    assert db.soft_delete_note(note_id, expected_version=1) is True  # nosec B101
+
+    with pytest.raises(ConflictError, match="note.*deleted"):
+        db.update_task_record(
+            task_id="task-1",
+            expected_version=1,
+            status="done",
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["status"] == "open"  # nosec B101
+    assert task["version"] == 1  # nosec B101
 
 
 def test_update_task_record_rejects_projection_status_updates(db: CharactersRAGDB) -> None:
@@ -410,7 +460,7 @@ def test_mark_task_unlinked_rejects_zero_rowcount_update(
 
     def _simulate_concurrent_update(conn, query, params=None):
         nonlocal projection_update_attempted
-        if "UPDATE tasks" in query and "version = version + 1" in query:
+        if "UPDATE note_tasks" in query and "version = version + 1" in query:
             return _ZeroRowcount()
         if "UPDATE task_note_projections" in query:
             projection_update_attempted = True
@@ -454,6 +504,24 @@ def test_mark_task_unlinked_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
     assert task["version"] == deleted["version"]  # nosec B101
 
 
+def test_mark_task_unlinked_rejects_soft_deleted_parent_note(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    assert db.soft_delete_note(note_id, expected_version=1) is True  # nosec B101
+
+    with pytest.raises(ConflictError, match="note.*deleted"):
+        db.mark_task_unlinked(
+            task_id="task-1",
+            expected_version=1,
+            actor_type="system",
+            actor_id="reconciler",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+
+
 def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -484,6 +552,29 @@ def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeyp
     included = db.get_task("task-1", include_deleted=True)
     assert included is not None  # nosec B101
     assert included["deleted"] in (1, True)  # nosec B101
+
+
+def test_soft_delete_task_rejects_soft_deleted_parent_note(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    assert db.soft_delete_note(note_id, expected_version=1) is True  # nosec B101
+
+    with pytest.raises(ConflictError, match="note.*deleted"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=1,
+            projection_note_id=note_id,
+            projection_note_version=1,
+            projection_line_number=1,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    delete_events = [event for event in db.list_task_activity(task_id="task-1") if event["event_type"] == "deleted"]
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert delete_events == []  # nosec B101
 
 
 def test_soft_delete_task_rejects_repeat_delete_without_new_version_or_event(db: CharactersRAGDB) -> None:
@@ -546,6 +637,29 @@ def test_set_task_projection_rejects_deleted_tasks(db: CharactersRAGDB) -> None:
     task = db.get_task("task-1", include_deleted=True)
     assert task["projection_status"] == "deleted"  # nosec B101
     assert task["version"] == deleted["version"]  # nosec B101
+
+
+def test_set_task_projection_rejects_soft_deleted_parent_note(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    assert db.soft_delete_note(note_id, expected_version=1) is True  # nosec B101
+
+    with pytest.raises(ConflictError, match="note.*deleted"):
+        db.set_task_projection(
+            task_id="task-1",
+            note_id=note_id,
+            note_version=2,
+            line_number=1,
+            start_offset=0,
+            end_offset=20,
+            normalized_text_hash="sha256:review-again",
+            occurrence_index=0,
+            block_fingerprint="block-2",
+            raw_line="- [ ] Review source",
+            has_child_content=False,
+            projection_status="live",
+        )
+    assert _projection_count(db, "task-1") == 0  # nosec B101
 
 
 def test_soft_delete_task_rejects_ambiguous_projection_without_mutation(db: CharactersRAGDB) -> None:
@@ -719,7 +833,7 @@ def test_soft_delete_task_rejects_zero_rowcount_update(
 
     def _simulate_concurrent_update(conn, query, params=None):
         nonlocal projection_update_attempted
-        if "UPDATE tasks" in query and "version = version + 1" in query:
+        if "UPDATE note_tasks" in query and "version = version + 1" in query:
             return _ZeroRowcount()
         if "UPDATE task_note_projections" in query:
             projection_update_attempted = True

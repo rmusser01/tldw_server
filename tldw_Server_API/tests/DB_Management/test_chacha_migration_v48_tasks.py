@@ -19,6 +19,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
             "task_note_projections",
             "task_events",
             "note_task_reconciliation_state",
+            "note_tasks",
             "tasks",
         ):
             conn.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - test-only fixed table list
@@ -33,10 +34,19 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
 
     with sqlite3.connect(db_path) as conn:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        note_tasks_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'note_tasks'"
+        ).fetchone()[0]
+        projection_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_note_projections'"
+        ).fetchone()[0]
     assert {  # nosec B101
-        "tasks",
+        "note_tasks",
         "task_events",
         "task_event_read_state",
         "task_note_projections",
         "note_task_reconciliation_state",
     } <= tables
+    assert "tasks" not in tables  # nosec B101
+    assert "projection_status IN ('live','unlinked','ambiguous','deleted')" in note_tasks_sql  # nosec B101
+    assert "projection_status IN ('live','unlinked','ambiguous','deleted')" in projection_sql  # nosec B101
