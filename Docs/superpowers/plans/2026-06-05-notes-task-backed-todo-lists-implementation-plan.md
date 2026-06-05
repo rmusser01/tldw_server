@@ -1253,13 +1253,27 @@ Results for Task 9:
 - `bunx vitest run src/services/__tests__/notes-tasks.test.ts src/components/Notes/__tests__/task-markdown.test.ts src/components/Notes/__tests__/TaskChecklistPreview.test.tsx src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx src/components/Notes/__tests__/NotesManagerPage.task-activity.test.tsx src/components/Common/NotesDock/__tests__/NotesDockPanel.task-backed-todos.test.tsx src/components/Common/NotesDock/__tests__/NotesDockPanel.task-activity.test.tsx`: 7 files passed, 20 tests passed.
 - Broader backend command including `tldw_Server_API/tests/Services/test_router_groups_contract.py`: failed in unrelated dirty router contract tests expecting missing `tldw_Server_API.app.api.v1.router_groups.selection` and route-key behavior; task-focused backend tests passed.
 
-- [ ] **Step 2: Run broader regression tests if time allows**
+Parent closeout results after TASK-514.6:
+
+- `python -m pytest tldw_Server_API/tests/Notes_Tasks tldw_Server_API/tests/ChaChaNotesDB/test_chacha_task_store.py tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_api.py tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_reconciliation_api.py tldw_Server_API/tests/MCP_unified/test_notes_task_tools.py tldw_Server_API/tests/Services/test_router_groups_contract.py -v`: 348 passed, 32 warnings.
+- `bunx vitest run src/services/__tests__/notes-tasks.test.ts src/components/Notes/__tests__/task-markdown.test.ts src/components/Notes/__tests__/TaskChecklistPreview.test.tsx src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx src/components/Notes/__tests__/NotesManagerPage.task-activity.test.tsx src/components/Common/NotesDock/__tests__/NotesDockPanel.task-backed-todos.test.tsx src/components/Common/NotesDock/__tests__/NotesDockPanel.task-activity.test.tsx`: 7 files passed, 20 tests passed.
+- `bun run verify:openapi`: passed with 10 reviewed client-path exceptions.
+- `python -m bandit -r <notes task backend scope plus router_groups/minimal.py router_groups/selection.py> -f json -o /tmp/bandit_notes_tasks_parent_closeout.json`: zero findings.
+
+- [x] **Step 2: Run broader regression tests if time allows**
 
 ```bash
 source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Notes_NEW tldw_Server_API/tests/MCP_unified -v
 bunx vitest run apps/packages/ui/src/components/Notes apps/packages/ui/src/components/Common/NotesDock
 ```
+
+Results:
+
+- `python -m pytest tldw_Server_API/tests/Notes_NEW tldw_Server_API/tests/MCP_unified -v`: 4 failed, 604 passed, 2 skipped, 734 warnings. The Notes task-specific tests passed. Follow-up: `TASK-514.8`.
+- Isolated MCP rerun for the broad backend failures: 3 policy resolver tests still failed on authored/resolved policy-document default-key mismatch; `test_tool_catalogs_flow` passed in isolation.
+- `bunx vitest run src/components/Notes src/components/Common/NotesDock`: 2 files failed, 71 passed; 4 failed, 206 passed. The Notes task-specific tests passed. Follow-up: `TASK-514.7`.
+- Isolated frontend rerun for the broad frontend failures reproduced the same 4 failures in `NotesManagerPage.stage10.ai-title.test.tsx` and `NotesManagerPage.stage26.backlink-labels.test.tsx`.
 
 - [x] **Step 3: Run Bandit**
 
