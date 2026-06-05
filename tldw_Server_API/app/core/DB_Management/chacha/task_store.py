@@ -176,6 +176,24 @@ class TaskStore:
             )  # noqa: TRY003
         return task
 
+    @staticmethod
+    def _require_record_update_allowed(task: dict[str, Any], task_id: str) -> None:
+        projection_status = task["projection_status"]
+        if projection_status == "ambiguous":
+            raise ConflictError(
+                f"Task projection is ambiguous for task '{task_id}'.", entity="tasks", entity_id=task_id
+            )  # noqa: TRY003
+        if projection_status == "unlinked":
+            raise ConflictError(
+                f"Task projection is unlinked for task '{task_id}'. Record-only update mode is required.",
+                entity="tasks",
+                entity_id=task_id,
+            )  # noqa: TRY003
+        if projection_status == "deleted":
+            raise ConflictError(
+                f"Task projection is deleted for active task '{task_id}'.", entity="tasks", entity_id=task_id
+            )  # noqa: TRY003
+
     def create_task(
         self,
         *,
@@ -320,6 +338,7 @@ class TaskStore:
                 ),
                 task_id,
             )
+            self._require_record_update_allowed(old, task_id)
             now = self._db._get_current_utc_timestamp_iso()
             new_text = text.strip() if text is not None else old["text"]
             new_status = normalized_status or old["status"]
@@ -410,6 +429,8 @@ class TaskStore:
     ) -> dict[str, Any]:
         """Create or replace a task's markdown projection locator."""
         normalized_projection_status = self._validate_projection_status(projection_status)
+        if normalized_projection_status == "deleted":
+            raise InputError("projection_status 'deleted' is reserved for soft_delete_task.")  # noqa: TRY003
         now = self._db._get_current_utc_timestamp_iso()
 
         def _execute_projection(transaction_conn: TaskConnection) -> dict[str, Any]:
@@ -574,6 +595,21 @@ class TaskStore:
                 task_id,
             )
             projection = self._fetch_projection(task_id, conn=transaction_conn)
+            projection_status = projection["projection_status"] if projection else old["projection_status"]
+            if projection_status == "ambiguous":
+                raise ConflictError(
+                    f"Task projection is ambiguous for task '{task_id}'.", entity="tasks", entity_id=task_id
+                )  # noqa: TRY003
+            if projection_status == "unlinked" and not allow_record_only:
+                raise ConflictError(
+                    f"Task projection is unlinked for task '{task_id}'. Record-only delete mode is required.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
+            if projection_status == "deleted":
+                raise ConflictError(
+                    f"Task projection is deleted for active task '{task_id}'.", entity="tasks", entity_id=task_id
+                )  # noqa: TRY003
             if projection and projection["projection_status"] == "live" and not allow_record_only:
                 matches_projection = (
                     projection_note_id == projection["note_id"]
