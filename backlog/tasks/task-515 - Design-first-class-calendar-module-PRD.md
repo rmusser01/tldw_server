@@ -38,7 +38,7 @@ Docs/superpowers/specs/2026-06-05-calendar-module-prd-design.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Spec written and committed in 10a178ab81. Spec review loop ran three passes: first two found implementation-planning blockers, which were fixed by choosing a dedicated shared Calendar DB, clarifying local tags/annotations as first-party Calendar DB overlay data, and defining calendar-created reminders as calls into existing reminder primitives. Third review pass approved the spec with no blockers. Bandit is not applicable yet because this is documentation-only design work. Awaiting user review before implementation planning.
+Spec written and committed, then reviewed again on user request before implementation planning. The second review resolved remaining planning ambiguity by excluding external VTODO from v1, choosing Fastmail as the first real-provider CalDAV smoke target, keeping personal external provider imports private to the account owner, adding bounded sync windows and recurrence expansion limits, defining minimal CalendarMembership ACL semantics, tightening credential/job payload rules, and adding provider capability fallback guidance. Bandit is not applicable yet because this is documentation-only design work. Awaiting user review before implementation planning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

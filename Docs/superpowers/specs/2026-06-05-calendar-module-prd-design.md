@@ -11,7 +11,7 @@ Create a first-class Calendar module for tldw that stores local calendars, event
 
 The module should be a calendar product, not only a Scheduled Tasks view. It should still integrate tightly with Scheduled Tasks, reminders, Watchlists, Workflows, Jobs, ACP schedules, notes, media, RAG, meetings, and other tldw objects through typed links and time-based projections.
 
-V1 is intentionally read-only for external providers. Users can create and edit tldw-owned calendar items locally. External provider events are imported as locked records that can be annotated, linked, searched, copied into tldw, and displayed in agenda/week views, but cannot be edited or pushed back to providers. Outbound push, two-way sync, Microsoft, Proton, and richer policy controls are backlog items.
+V1 is intentionally read-only for external providers. Users can create and edit tldw-owned calendar items locally. External provider events are imported as locked records that can be annotated, linked, searched, copied into tldw, and displayed in agenda/week views, but cannot be edited or pushed back to providers. V1 CalDAV import is VEVENT-only, bounded by configurable sync windows, and user-scoped by default so personal external calendars are not accidentally exposed through org calendars. Outbound push, external VTODO import, two-way sync, Microsoft, Proton, org-managed provider accounts, and richer policy controls are backlog items.
 
 ## Product Decision
 
@@ -28,7 +28,7 @@ tldw owns the local writable calendar model:
 - links to other tldw objects;
 - agenda/week calendar views.
 
-External providers are read-only inputs in v1. Generic CalDAV is the first provider family, with configuration profiles for providers such as Fastmail when practical. Google Calendar should be the first non-CalDAV provider after the model and CalDAV adapter are stable. Microsoft and Proton remain named roadmap targets because they require provider-specific integration decisions that should not block first value.
+External providers are read-only inputs in v1. Generic CalDAV is the first provider family, with Fastmail as the first documented real-provider smoke target. Google Calendar should be the first non-CalDAV provider after the model and CalDAV adapter are stable. Microsoft and Proton remain named roadmap targets because they require provider-specific integration decisions that should not block first value.
 
 This approach gives tldw a durable local calendar module while avoiding the complexity and user-risk of pretending v1 is full two-way calendar sync.
 
@@ -91,6 +91,8 @@ The hard product challenge is preserving a simple v1 while supporting future exp
 - No replacement for Watchlists, Workflows, ACP, Jobs, notes, meetings, or RAG surfaces.
 - No Microsoft Graph calendar adapter in v1.
 - No Proton-specific sync adapter in v1.
+- No external VTODO import in v1.
+- No org-managed provider accounts or shared external provider imports in v1.
 - No month/day/free-busy UI in the first practical UI slice.
 - No rich org policy engine, resource calendars, delegation, or admin transfer controls in v1.
 
@@ -166,17 +168,18 @@ V1 includes:
 - generic CalDAV account configuration;
 - provider profiles where useful, starting with Fastmail-style CalDAV configuration guidance;
 - remote calendar discovery;
-- external calendar binding and visibility settings;
+- user-scoped external calendar binding and visibility settings;
 - read-only import of provider-owned VEVENT records;
-- provider ID, UID, ETag/CTag, sync cursor/state, deletion/tombstone, and recurrence preservation;
+- provider ID, UID, ETag/CTag, sync cursor/state, deletion/tombstone, provider capability metadata, and recurrence preservation;
+- bounded import windows with configurable lookback/lookahead limits;
 - sync now and periodic sync jobs;
 - sync status with last sync, next sync, item counts, stale state, and errors;
 - annotations, local tags, and links on provider-owned records;
 - copy-into-tldw flow for read-only provider events;
 - mocked CalDAV integration tests;
-- at least one real-provider smoke path documented for maintainers.
+- Fastmail real-provider smoke path documented for maintainers.
 
-V1 may include read-only external VTODO only if provider behavior is predictable and testable. It should not block VEVENT import.
+V1 excludes external VTODO import even when a provider supports it. External todos/tasks should remain roadmap until VEVENT import, recurrence preservation, tombstones, and provider diagnostics are stable.
 
 ### Roadmap
 
@@ -187,7 +190,8 @@ Roadmap items:
 - Proton-specific strategy after provider capability review;
 - outbound push to dedicated tldw-owned provider calendars;
 - full two-way sync;
-- external VTODO import if deferred from v1;
+- external VTODO import after VEVENT sync proves stable;
+- org-managed provider accounts and shared external provider imports;
 - month view;
 - day view;
 - free-busy and availability;
@@ -221,6 +225,28 @@ Key fields:
 - `created_at`;
 - `updated_at`.
 
+### CalendarMembership
+
+Minimum v1 ACL row for calendar access. It should adapt existing AuthNZ/org role resolution rather than become a separate policy engine.
+
+Fields:
+
+- `id`;
+- `calendar_id`;
+- `principal_type`: `user` or `org_role`;
+- `principal_id`;
+- `role`: `owner`, `editor`, `commenter`, or `viewer`;
+- `created_at`;
+- `updated_at`.
+
+Role semantics:
+
+- `owner` can manage calendar settings, membership, local items, annotations, links, and archive/delete behavior.
+- `editor` can create and edit tldw-owned local items, annotations, and links.
+- `commenter` can create and edit their own annotations and links where permitted.
+- `viewer` can read visible items and open linked objects only when the linked object's own permissions also allow access.
+- Provider-owned fields remain read-only for every role in v1.
+
 ### CalendarItem
 
 Shared base for events and dated todos/checkpoints.
@@ -248,6 +274,7 @@ Key fields:
 - `source_uid`;
 - `provider_metadata_json`;
 - `read_only_reason`;
+- `remote_deleted_at`;
 - `deleted_at`;
 - `created_at`;
 - `updated_at`.
@@ -260,6 +287,7 @@ Rules:
 - Lightweight todos/checkpoints are calendar-native dated items, not a full task-list replacement.
 - Calendar tags are stored as local overlay metadata through `CalendarAnnotation`, not as provider-updated `CalendarItem` fields.
 - Provider categories, colors, and raw event metadata are stored in `provider_metadata_json` for imported records.
+- Remote-deleted provider items are hidden from normal agenda/week views by default, retained as tombstones for sync correctness and local annotation/link recovery, and surfaced only through diagnostics or explicit deleted-item filters.
 
 ### Recurrence
 
@@ -329,7 +357,7 @@ Supported link targets:
 
 ### ExternalCalendarAccount
 
-Represents user-owned external calendar credentials and provider metadata.
+Represents user-owned external calendar credentials and provider metadata. V1 accounts are scoped to a single user. Org-managed service accounts and shared external imports require a later design.
 
 Fields:
 
@@ -347,11 +375,11 @@ Fields:
 - `created_at`;
 - `updated_at`.
 
-Credentials must be stored encrypted using existing secret-storage/security patterns where possible. Raw passwords, app passwords, tokens, and auth headers must never be logged or returned.
+Credentials must be stored encrypted through an existing secret-storage/security pattern, or the implementation plan must add a minimal encrypted secret reference layer before any provider account endpoint ships. Raw passwords, app passwords, tokens, auth headers, and provider credential payloads must never be stored in Calendar DB rows, Jobs payloads, logs, or API responses.
 
 ### ExternalCalendarBinding
 
-Maps a provider account and remote calendar to a local calendar or imported provider-owned item namespace.
+Maps a provider account and remote calendar to a local owner-visible import namespace. In v1, bindings from personal external accounts must not publish provider-owned events into shared org calendars. A user can copy a provider-owned event into a tldw-owned local or org calendar, subject to permissions, but that copied item becomes independent local data.
 
 Fields:
 
@@ -361,6 +389,10 @@ Fields:
 - `remote_calendar_id`;
 - `remote_display_name`;
 - `remote_color`;
+- `provider_capabilities_json`;
+- `lookback_days`;
+- `lookahead_days`;
+- `remote_deleted_retention_days`;
 - `sync_enabled`;
 - `import_visibility`;
 - `sync_cursor`;
@@ -386,11 +418,19 @@ Flow:
 3. Server discovers remote calendars.
 4. User binds selected remote calendars.
 5. Calendar sync scheduler periodically enqueues sync Jobs.
-6. Sync worker fetches changes and upserts provider-owned records.
+6. Sync worker fetches changes within the binding's configured sync window and upserts provider-owned records.
 7. Provider field changes replace cached provider fields.
 8. Local annotations, local tags, and links remain untouched.
 9. Deleted remote events are marked as remote-deleted/tombstoned locally.
 10. Agenda/week queries include local items, provider-owned items, and linked projections according to filters and permissions.
+
+Sync window rules:
+
+- V1 must not attempt an unbounded historical import.
+- Each binding has a configurable lookback/lookahead window, with conservative defaults chosen during implementation planning.
+- Agenda/week APIs must require explicit query windows and enforce a maximum range.
+- Recurrence expansion must be bounded by the query window and server-side maximum occurrence limits.
+- Provider-owned tombstones should be retained long enough to prevent deleted events from reappearing during cursor fallback, then become eligible for cleanup unless local annotations or links require retention.
 
 Conflict rules:
 
@@ -404,11 +444,21 @@ Scheduler/Jobs behavior:
 
 - Periodic sync scan uses APScheduler as a bridge.
 - Actual sync execution uses Jobs.
-- Jobs should be source-scoped and idempotent.
+- Jobs should be binding-scoped and idempotent.
+- Sync jobs should use stable idempotency keys such as `calendar_sync:{binding_id}:{window_start}:{window_end}:{reason}`.
 - A binding should not have overlapping active sync jobs.
 - Retry/backoff should handle transient network/provider failures.
 - Manual sync should queue a job and return immediately.
 - Provider callbacks/webhooks are not required for v1.
+- Provider credentials must be resolved at execution time from `secret_ref`; raw credentials must not be embedded in job payloads.
+
+CalDAV capability behavior:
+
+- The adapter should record provider capabilities discovered during verification/discovery.
+- Do not assume every CalDAV server supports the same sync-token, CTag, or ETag behavior.
+- Prefer incremental sync when provider capability is reliable.
+- Fall back to bounded window polling and ETag comparison when incremental sync metadata is missing or inconsistent.
+- Capability fallbacks must be visible in sync diagnostics so maintainers can understand provider-specific behavior.
 
 ## Calendar And Scheduled Tasks Boundary
 
@@ -486,7 +536,10 @@ API groups:
 Permission model:
 
 - Reuse AuthNZ and org roles/permissions.
-- Calendar-level overrides can exist as narrow ACL rows.
+- Calendar-level overrides can exist as `CalendarMembership` ACL rows.
+- External provider imports are private to the external account owner in v1.
+- Shared org calendars can contain tldw-owned local items and copied provider items, but not live provider-owned imports from a user's personal external account.
+- Every linked-object read still checks the linked object's owning permission model.
 - Avoid a separate policy engine in v1.
 - Prepare the model for future rich policy controls.
 
@@ -496,7 +549,7 @@ Storage decision:
 - The dedicated DB needs tenant, org, owner, and calendar membership columns because org calendars must be queryable across users.
 - Per-user database placement would make shared org calendar queries, sync workers, and RBAC enforcement harder.
 - Collections DB should remain available for existing reminders and collections behavior, with Calendar linking to those records instead of absorbing them.
-- External account secrets should reuse existing encrypted secret-storage/AuthNZ patterns where possible; Calendar DB stores only account metadata and secret references.
+- External account secrets must use encrypted secret references; Calendar DB stores only account metadata and secret references.
 
 ## Frontend UX
 
@@ -611,6 +664,7 @@ Requirements:
 - Never log credentials.
 - Enforce owner/org permissions on every calendar, item, annotation, link, and sync status read.
 - Scope external accounts to users unless future org-managed service accounts are explicitly designed.
+- Keep live provider-owned imports private to the external account owner in v1; sharing requires copying into tldw-owned data and then applying normal tldw permissions.
 - Make account revoke/delete behavior explicit.
 - Provide clear deletion semantics for imported provider-owned records.
 - Preserve local/self-hosted privacy expectations.
@@ -633,7 +687,10 @@ Backend unit tests:
 - local tag survival across provider refresh;
 - calendar-created reminders call existing reminder primitives rather than creating arbitrary Jobs;
 - link normalization;
-- sync state transitions.
+- sync state transitions;
+- bounded recurrence expansion;
+- sync idempotency keys;
+- provider capability fallback decisions.
 
 Backend integration tests:
 
@@ -646,7 +703,9 @@ Backend integration tests:
 - remote calendar discovery with mock provider;
 - sync job enqueue and completion;
 - provider update/delete import behavior;
+- provider tombstone retention behavior;
 - sync failure and retry status.
+- external account owner privacy for provider-owned imports.
 
 Frontend tests:
 
@@ -676,12 +735,13 @@ Security verification:
 - Bandit on touched backend scope during implementation.
 - Secret logging regression tests for provider auth paths.
 - Permission regression tests for org/private calendar access.
+- Regression tests that provider-owned imports from personal external accounts are not visible through shared org calendar queries.
 
 ## Provider Notes
 
 These notes are planning constraints, not implementation commitments.
 
-- Fastmail supports syncing from Google, iCloud, or other CalDAV servers and notes that tasks, reminders, or todos are not synced by default from external calendars. This supports treating external VTODO as optional rather than a v1 blocker.
+- Fastmail supports syncing from Google, iCloud, or other CalDAV servers and notes that tasks, reminders, or todos are not synced by default from external calendars. This supports excluding external VTODO from v1.
 - Google Calendar recurrence uses RFC 5545-style recurrence fields including RRULE, RDATE, and EXDATE. This supports preserving raw recurrence data and avoiding premature full recurrence editing.
 - Microsoft Graph supports event delta queries for calendar views. This supports a future Microsoft adapter, but the date-range delta model is provider-specific enough to stay roadmap.
 - Proton Calendar support material describes read-only external calendar subscriptions and public-link sharing for non-Proton users. Proton should remain a named roadmap target pending a provider capability review.
@@ -693,10 +753,12 @@ Reference links:
 - Microsoft Graph calendar view delta: https://learn.microsoft.com/en-us/graph/delta-query-events
 - Proton Calendar support: https://proton.me/support/calendar
 
-## Open Questions
+## Resolved Review Decisions
 
-1. Should external CalDAV VTODO import be included in v1 when a provider supports it, or should all external todos remain roadmap until VEVENT import proves stable?
-2. Should the first CalDAV real-provider smoke test target Fastmail specifically?
+1. External CalDAV VTODO import is roadmap, not v1.
+2. Fastmail is the first documented real-provider smoke target for CalDAV.
+3. Personal external provider imports remain private to the account owner in v1 and cannot be live-shared into org calendars.
+4. V1 sync uses bounded import windows and bounded recurrence expansion, not unbounded historical import.
 
 ## Acceptance Criteria
 
@@ -709,9 +771,12 @@ Reference links:
 - The PRD keeps Scheduled Tasks as the automation workbench and Calendar as the time/context surface.
 - The PRD includes org RBAC integration without a new rich policy engine in v1.
 - The PRD chooses a dedicated shared Calendar DB with tenant/org/user scoping.
+- The PRD defines a minimal `CalendarMembership` ACL model and v1 role semantics.
 - The PRD defines tldw-local tags as annotation overlay data, separate from provider metadata.
 - The PRD defines calendar annotations as first-party plain-text Calendar DB records, with Notes linked through `CalendarLink` rather than reused as storage.
 - The PRD defines calendar-created reminders as calls into existing reminder primitives, not a new task/job backend.
+- The PRD bounds external sync windows and recurrence expansion.
+- The PRD keeps personal external provider imports private unless copied into tldw-owned data.
 - The PRD includes backend architecture, API groups, data model, sync model, UX, error handling, security, testing, and rollout risks.
 
 ## Risks And Mitigations
@@ -725,6 +790,9 @@ Reference links:
 | Calendar duplicates Scheduled Tasks | Confusing IA | Calendar shows projections; Scheduled Tasks owns automation lifecycle |
 | CalDAV provider quirks cause inconsistent imports | Bad sync trust | Mock tests, provider profiles, sync diagnostics, and real-provider smoke docs |
 | Credentials leak through logs or errors | Security incident | Encrypted storage, scrubbing, logging tests, no raw payload logging |
+| Unbounded sync or recurrence expansion causes performance problems | Slow imports and expensive queries | Configurable sync windows, required query windows, maximum range limits |
+| Personal external events leak into org contexts | Privacy incident | User-scoped external accounts, private provider-owned imports, copy-before-sharing rule |
+| Provider incremental sync metadata is unreliable | Duplicate or missing events | Capability detection, fallback polling, ETag comparison, diagnostics |
 
 ## Rollout Plan
 
@@ -744,6 +812,8 @@ Reference links:
    - Account verification.
    - Remote discovery.
    - Binding management.
+   - Provider capability recording.
+   - Bounded sync windows.
    - Jobs-backed sync worker.
    - Sync health states.
 4. Provider-owned context:
@@ -752,7 +822,7 @@ Reference links:
    - Links.
    - Copy-into-tldw.
 5. Hardening:
-   - Real-provider smoke documentation.
+   - Fastmail real-provider smoke documentation.
    - Stale/error recovery.
    - Permission/security regression tests.
    - Roadmap adapter planning for Google.
