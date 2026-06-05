@@ -828,11 +828,11 @@ git commit -m "feat: expose notes task tools through MCP"
 - Test: `apps/packages/ui/src/components/Notes/__tests__/task-markdown.test.ts`
 - Test: `apps/packages/ui/src/components/Notes/__tests__/TaskChecklistPreview.test.tsx`
 
-- [ ] **Step 1: Write failing frontend service tests**
+- [x] **Step 1: Write failing frontend service tests**
 
 Assert each wrapper calls the correct endpoint with expected method, query, and body.
 
-- [ ] **Step 2: Write failing local markdown helper tests**
+- [x] **Step 2: Write failing local markdown helper tests**
 
 Cover:
 
@@ -841,7 +841,7 @@ Cover:
 - preserve unknown metadata tokens
 - detect nested child content
 
-- [ ] **Step 3: Write failing renderer tests**
+- [x] **Step 3: Write failing renderer tests**
 
 Render a note with two task items and assert:
 
@@ -851,7 +851,7 @@ Render a note with two task items and assert:
 - clean mode calls task status callback
 - conflict/ambiguous/unlinked badges render non-blocking status
 
-- [ ] **Step 4: Run frontend tests to verify they fail**
+- [x] **Step 4: Run frontend tests to verify they fail**
 
 Run:
 
@@ -864,7 +864,7 @@ bunx vitest run \
 
 Expected: FAIL with missing files.
 
-- [ ] **Step 5: Implement `notes-tasks.ts`**
+- [x] **Step 5: Implement `notes-tasks.ts`**
 
 Use `bgRequest` and `AllowedPath`. Export typed helpers:
 
@@ -879,7 +879,7 @@ Use `bgRequest` and `AllowedPath`. Export typed helpers:
 - `listTaskActivity`
 - `markTaskActivityRead`
 
-- [ ] **Step 6: Update `openapi-guard.ts`**
+- [x] **Step 6: Update `openapi-guard.ts`**
 
 Add the task paths used by WebUI:
 
@@ -893,11 +893,11 @@ Add the task paths used by WebUI:
 | "/api/v1/notes/{note_id}/tasks/reconcile"
 ```
 
-- [ ] **Step 7: Implement `task-markdown.ts` and `TaskChecklistPreview.tsx`**
+- [x] **Step 7: Implement `task-markdown.ts` and `TaskChecklistPreview.tsx`**
 
 Keep renderer compact and reusable. Do not put full note editing logic inside the renderer.
 
-- [ ] **Step 8: Run frontend shared tests**
+- [x] **Step 8: Run frontend shared tests**
 
 Run:
 
@@ -910,7 +910,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit frontend shared slice**
+- [x] **Step 9: Commit frontend shared slice**
 
 ```bash
 git add \
@@ -933,7 +933,7 @@ git commit -m "feat: add notes task frontend client and renderer"
 - Modify: `apps/packages/ui/src/public/_locales/en/option.json`
 - Test: `apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx`
 
-- [ ] **Step 1: Write failing `/notes` interaction tests**
+- [x] **Step 1: Write failing `/notes` interaction tests**
 
 Cover:
 
@@ -944,7 +944,7 @@ Cover:
 - dirty save after remote version change reports conflict and preserves local draft
 - agent activity notice appears for unread events and can be dismissed
 
-- [ ] **Step 2: Run `/notes` tests to verify they fail**
+- [x] **Step 2: Run `/notes` tests to verify they fail**
 
 Run:
 
@@ -954,7 +954,7 @@ bunx vitest run apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage
 
 Expected: FAIL with missing task integration.
 
-- [ ] **Step 3: Add task state to editor hook**
+- [x] **Step 3: Add task state to editor hook**
 
 In `useNotesEditorState.tsx`:
 
@@ -966,7 +966,7 @@ In `useNotesEditorState.tsx`:
 - on dirty save, keep using `selectedVersion`; backend conflict must surface existing stale-version behavior
 - after successful save, reload tasks and activity
 
-- [ ] **Step 4: Render task checklist in preview/split**
+- [x] **Step 4: Render task checklist in preview/split**
 
 In `NotesEditorPane.tsx`:
 
@@ -974,7 +974,7 @@ In `NotesEditorPane.tsx`:
 - keep raw textarea/WYSIWYG behavior unchanged
 - render conflict/activity notices near existing save/monitoring notices
 
-- [ ] **Step 5: Add copy strings**
+- [x] **Step 5: Add copy strings**
 
 Add concise labels in `option.json` for:
 
@@ -984,7 +984,7 @@ Add concise labels in `option.json` for:
 - incomplete reconciliation warning
 - task continuity notice: "Portable markdown with best-effort task continuity"
 
-- [ ] **Step 6: Run `/notes` tests**
+- [x] **Step 6: Run `/notes` tests**
 
 Run:
 
@@ -994,7 +994,7 @@ bunx vitest run apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit `/notes` UI slice**
+- [x] **Step 7: Commit `/notes` UI slice**
 
 ```bash
 git add \

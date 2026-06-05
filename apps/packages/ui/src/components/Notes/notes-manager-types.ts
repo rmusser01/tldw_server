@@ -1,6 +1,13 @@
 export type { NoteListItem } from './types'
 
 export type {
+  NoteTask,
+  NoteTaskActivityEvent,
+  NoteTaskReconciliationSummary,
+  NoteTaskStatus,
+} from '@/services/notes-tasks'
+
+export type {
   KeywordSyncWarning,
   SaveNoteOptions,
   SaveIndicatorState,

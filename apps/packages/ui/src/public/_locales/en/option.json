@@ -1220,6 +1220,27 @@
   "notesSearch_tagsHelp": {
     "message": "Keywords help you find this note using the keyword filter on the left."
   },
+  "notesSearch_taskCheckboxAria": {
+    "message": "Task checkbox"
+  },
+  "notesSearch_taskConflictNotice": {
+    "message": "Task changed on the server. Reload the note and try again."
+  },
+  "notesSearch_taskAgentActivityNotice": {
+    "message": "Agent updated this note's tasks."
+  },
+  "notesSearch_taskActivityDismiss": {
+    "message": "Dismiss"
+  },
+  "notesSearch_taskActivityDismissAria": {
+    "message": "Dismiss task activity"
+  },
+  "notesSearch_taskIncompleteReconciliationWarning": {
+    "message": "Some task updates are still reconciling."
+  },
+  "notesSearch_taskContinuityNotice": {
+    "message": "Portable markdown with best-effort task continuity"
+  },
   "notesSearch_notesStudioAction": {
     "message": "Notes Studio"
   },
