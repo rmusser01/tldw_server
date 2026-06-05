@@ -119,6 +119,18 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         ),
     )
 
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.calendar",
+            log_name="calendar",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("calendar",),
+            route_key="calendar",
+            default_stable=False,
+        ),
+    )
+
     # Audio endpoints can import heavyweight optional transcriber dependencies.
     if audio_imports_enabled_for_runtime():
         append_imported_router_spec(

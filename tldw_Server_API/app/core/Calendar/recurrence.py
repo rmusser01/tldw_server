@@ -38,6 +38,7 @@ _WEEKDAYS = {
     "SA": rrule.SA,
     "SU": rrule.SU,
 }
+_SUPPORTED_RRULE_KEYS = {"FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL"}
 
 
 @dataclass(frozen=True)
@@ -94,17 +95,26 @@ class LocalRecurrenceRule:
             if "=" not in part:
                 raise CalendarValidationError(f"Invalid recurrence rule part: {part}")
             key, raw_value = part.split("=", 1)
-            fields[key.upper()] = raw_value
+            normalized_key = key.upper()
+            if normalized_key not in _SUPPORTED_RRULE_KEYS:
+                raise CalendarValidationError(f"Unsupported recurrence rule key: {normalized_key}")
+            fields[normalized_key] = raw_value
 
         raw_frequency = fields.get("FREQ", "").upper()
         frequency = _DATEUTIL_TO_FREQUENCY.get(raw_frequency)
         if frequency is None:
             raise CalendarValidationError(f"Unsupported recurrence frequency: {raw_frequency}")
 
-        interval = int(fields.get("INTERVAL", "1"))
-        count = int(fields["COUNT"]) if "COUNT" in fields else None
+        try:
+            interval = int(fields.get("INTERVAL", "1"))
+            count = int(fields["COUNT"]) if "COUNT" in fields else None
+        except ValueError as exc:
+            raise CalendarValidationError("Recurrence interval and count must be integers") from exc
         weekdays = tuple(day.strip().upper() for day in fields.get("BYDAY", "").split(",") if day.strip())
-        until = _parse_until(fields["UNTIL"]) if "UNTIL" in fields else None
+        try:
+            until = _parse_until(fields["UNTIL"]) if "UNTIL" in fields else None
+        except (TypeError, ValueError) as exc:
+            raise CalendarValidationError("Recurrence UNTIL must be a valid date or timestamp") from exc
         return cls(
             frequency=frequency,  # type: ignore[arg-type]
             interval=interval,

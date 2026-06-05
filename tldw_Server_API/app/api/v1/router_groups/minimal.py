@@ -44,6 +44,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "character_messages",
     "workspace_migrations",
     "workspaces",
+    "calendar",
 )
 
 
