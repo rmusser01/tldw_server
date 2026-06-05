@@ -46,6 +46,13 @@ class _LineContext:
 
 
 @dataclass(frozen=True)
+class _Fence:
+    char: str
+    length: int
+    allow_indented_close: bool
+
+
+@dataclass(frozen=True)
 class _ChecklistLine:
     line_index: int
     line_number: int
@@ -121,7 +128,7 @@ def _split_lines(content: str) -> list[_Line]:
 
 def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
     contexts: list[_LineContext] = []
-    active_fence: tuple[str, int] | None = None
+    active_fence: _Fence | None = None
     list_indent_stack: list[int] = []
 
     for line in lines:
@@ -132,12 +139,18 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
                 list_indent_stack.pop()
 
         is_fenced_code = active_fence is not None
+        list_context_active = bool(list_indent_stack)
         fence_marker = _find_fence_marker(
             raw_line=line.raw,
-            allow_indented=bool(list_indent_stack),
+            allow_indented=list_context_active,
         )
         if active_fence is None and fence_marker is not None:
-            active_fence = fence_marker
+            fence_char, fence_length = fence_marker
+            active_fence = _Fence(
+                char=fence_char,
+                length=fence_length,
+                allow_indented_close=list_context_active,
+            )
             is_fenced_code = True
         elif active_fence is not None and _is_closing_fence(line.raw, active_fence):
             active_fence = None
@@ -171,13 +184,23 @@ def _find_fence_marker(*, raw_line: str, allow_indented: bool) -> tuple[str, int
     return fence[0], len(fence)
 
 
-def _is_closing_fence(raw_line: str, active_fence: tuple[str, int]) -> bool:
-    fence_char, fence_length = active_fence
+def _is_closing_fence(raw_line: str, active_fence: _Fence) -> bool:
+    fence_marker = _find_fence_marker(
+        raw_line=raw_line,
+        allow_indented=active_fence.allow_indented_close,
+    )
+    if fence_marker is None:
+        return False
+
+    fence_char, fence_length = fence_marker
+    if fence_char != active_fence.char or fence_length < active_fence.length:
+        return False
+
     stripped = raw_line.strip()
     return (
-        len(stripped) >= fence_length
-        and set(stripped) == {fence_char}
-        and stripped.startswith(fence_char * fence_length)
+        len(stripped) >= active_fence.length
+        and set(stripped) == {active_fence.char}
+        and stripped.startswith(active_fence.char * active_fence.length)
     )
 
 
