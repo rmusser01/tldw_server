@@ -23,6 +23,7 @@ from tldw_Server_API.app.services.mcp_hub_external_registry_service import (
     get_mcp_hub_external_registry_service,
 )
 
+from ...tool_observability import ensure_tool_definition_eval_metadata
 from ..base import BaseModule, create_tool_definition
 
 
@@ -119,20 +120,25 @@ class ExternalFederationModule(BaseModule):
             return tools
 
         for virtual_tool in self._manager.list_virtual_tools():
+            virtual_metadata = dict(virtual_tool.metadata or {})
+            virtual_metadata.pop("eval", None)
             tools.append(
-                {
-                    "name": virtual_tool.virtual_name,
-                    "description": virtual_tool.description,
-                    "inputSchema": virtual_tool.input_schema,
-                    "metadata": {
-                        "category": "external",
-                        "federated": True,
-                        "server_id": virtual_tool.server_id,
-                        "upstream_tool": virtual_tool.upstream_tool_name,
-                        **(virtual_tool.metadata or {}),
-                        "write_capable": bool(virtual_tool.is_write),
+                ensure_tool_definition_eval_metadata(
+                    {
+                        "name": virtual_tool.virtual_name,
+                        "description": virtual_tool.description,
+                        "inputSchema": virtual_tool.input_schema,
+                        "metadata": {
+                            "category": "external",
+                            "federated": True,
+                            "server_id": virtual_tool.server_id,
+                            "upstream_tool": virtual_tool.upstream_tool_name,
+                            **virtual_metadata,
+                            "write_capable": bool(virtual_tool.is_write),
+                        },
                     },
-                }
+                    prompt_variant="external_federated",
+                )
             )
 
         return tools

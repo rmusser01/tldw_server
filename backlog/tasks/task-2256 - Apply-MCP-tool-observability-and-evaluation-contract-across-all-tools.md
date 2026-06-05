@@ -1,12 +1,16 @@
 ---
 id: TASK-2256
 title: Apply MCP tool observability and evaluation contract across all tools
-status: To Do
+status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-05 00:55
 labels:
 - mcp
 - observability
 - evals
 - tools
+dependencies: []
 references:
 - Docs/superpowers/specs/2026-06-04-mcp-git-read-tools-design.md
 ---
@@ -23,22 +27,30 @@ Define and apply the shared MCP tool observability/evaluation metadata and execu
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:NOTES:BEGIN -->
+Implemented shared MCP tool observability/eval metadata helpers; create_tool_definition now fills sanitized metadata.eval defaults while preserving safe explicit eval blocks.
 
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Protocol tools/list enriches copied descriptors, prepare_tool_call normalizes resolved definitions, and tools/call responses now include safe execution eval metadata with structured results receiving embedded eval when absent.
+
+External federated virtual tools now attach local external_federated eval metadata and strip upstream eval blocks to prevent untrusted prompt-id/metadata override.
+
+Docs updated in tldw_Server_API/app/core/MCP_unified/README.md; plan recorded in Docs/superpowers/plans/2026-06-04-mcp-tool-observability-contract-implementation-plan.md.
+
+Verification: 126 targeted MCP tests passed; Bandit on touched production files exited 0 with zero findings.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the cross-tool MCP observability/evaluation contract with sanitized definition metadata, protocol execution eval enrichment, direct external federation coverage, documentation, and targeted verification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
