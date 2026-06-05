@@ -209,6 +209,50 @@ class TaskStore:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def list_live_projected_tasks(
+        self,
+        *,
+        note_id: str,
+        conn: TaskConnection | None = None,
+    ) -> list[dict[str, dict[str, Any]]]:
+        """Return live tasks for a note together with their projection rows.
+
+        A task row that claims to be live without a projection row is an
+        inconsistent projection state. Reconciliation must fail closed in that
+        case rather than creating a replacement task beside an orphaned live row.
+        """
+        cursor = self._read(
+            """
+            SELECT *
+              FROM note_tasks
+             WHERE note_id = ?
+               AND deleted = ?
+               AND projection_status = ?
+             ORDER BY created_at ASC, id ASC
+            """,
+            (note_id, self._deleted_value(False), "live"),
+            conn=conn,
+        )
+        projected_tasks: list[dict[str, dict[str, Any]]] = []
+        for row in cursor.fetchall():
+            task = self._decode_task_row(row)
+            if task is None:
+                continue
+            projection_state, projection = self._resolve_projection_state(task, task["id"], conn=conn)
+            if projection_state != "live":
+                raise ConflictError(
+                    f"Task projection is {projection_state} for live task '{task['id']}'.",
+                    entity="tasks",
+                    entity_id=task["id"],
+                )  # noqa: TRY003
+            projected_tasks.append(
+                {
+                    "task": task,
+                    "projection": self._require_live_projection_row(task["id"], projection),
+                }
+            )
+        return projected_tasks
+
     @staticmethod
     def _validate_status(status: str) -> str:
         if status not in TaskStore._TASK_STATUSES:

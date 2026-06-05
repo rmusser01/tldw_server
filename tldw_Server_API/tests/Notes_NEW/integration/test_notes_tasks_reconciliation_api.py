@@ -22,6 +22,11 @@ class _NoopRateLimiter:
         return True, {}
 
 
+class _FailingNotesTaskService:
+    def reconcile_note(self, **_kwargs):
+        raise RuntimeError("injected reconciliation failure")
+
+
 @pytest.fixture()
 def notes_tasks_client(tmp_path: Path) -> Generator[tuple[TestClient, CharactersRAGDB], None, None]:
     db = CharactersRAGDB(str(tmp_path / "notes_tasks_api.db"), client_id="notes_tasks_api_user")
@@ -50,6 +55,78 @@ def notes_tasks_client(tmp_path: Path) -> Generator[tuple[TestClient, Characters
 
 def _tasks_by_text(db: CharactersRAGDB, note_id: str) -> dict[str, dict]:
     return {task["text"]: task for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100)}
+
+
+def test_note_create_returns_saved_note_when_reconciliation_raises(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, db = notes_tasks_client
+    monkeypatch.setattr(notes_endpoint, "_NOTES_TASK_SERVICE", _FailingNotesTaskService())
+
+    create_response = client.post(
+        "/api/v1/notes/",
+        json={"title": "Tasks", "content": "- [ ] Alpha\n"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    saved_note = db.get_note_by_id(created["id"])
+    assert saved_note is not None
+    assert saved_note["content"] == "- [ ] Alpha\n"
+    assert db.get_reconciliation_state(created["id"]) is None
+    assert db.list_tasks(note_id=created["id"], include_deleted=True, limit=100) == []
+
+
+def test_note_patch_returns_saved_note_when_reconciliation_raises(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, db = notes_tasks_client
+
+    create_response = client.post(
+        "/api/v1/notes/",
+        json={"title": "Tasks", "content": "- [ ] Alpha\n"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    original_state = db.get_reconciliation_state(created["id"])
+    assert original_state is not None
+    monkeypatch.setattr(notes_endpoint, "_NOTES_TASK_SERVICE", _FailingNotesTaskService())
+
+    patch_response = client.patch(
+        f"/api/v1/notes/{created['id']}",
+        json={"content": "- [x] Alpha\n"},
+        headers={"expected-version": str(created["version"])},
+    )
+
+    assert patch_response.status_code == 200, patch_response.text
+    patched = patch_response.json()
+    saved_note = db.get_note_by_id(created["id"])
+    assert patched["content"] == "- [x] Alpha\n"
+    assert saved_note is not None
+    assert saved_note["content"] == "- [x] Alpha\n"
+    assert db.get_reconciliation_state(created["id"]) == original_state
+
+
+def test_note_create_ignores_empty_checklist_placeholder_with_warning_state(
+    notes_tasks_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_client
+
+    create_response = client.post(
+        "/api/v1/notes/",
+        json={"title": "Tasks", "content": "- [ ]\n- [ ] Alpha\n"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    state = db.get_reconciliation_state(created["id"])
+    tasks = db.list_tasks(note_id=created["id"], include_deleted=True, limit=100)
+    assert [task["text"] for task in tasks] == ["Alpha"]
+    assert state is not None
+    assert state["status"] == "warnings"
+    assert state["warning_count"] == 1
 
 
 def test_note_create_update_and_conflict_reconcile_tasks_after_successful_saves(

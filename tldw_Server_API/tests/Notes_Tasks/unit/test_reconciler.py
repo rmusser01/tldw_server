@@ -67,10 +67,8 @@ def _task_by_text(db: CharactersRAGDB, note_id: str) -> dict[str, dict]:
 
 def _live_tasks_by_line(db: CharactersRAGDB, note_id: str) -> dict[int, dict]:
     tasks_by_line: dict[int, dict] = {}
-    for task in db.list_tasks(note_id=note_id, include_deleted=True, limit=100):
-        projection = db.task_store._fetch_projection(task["id"])
-        if task["projection_status"] == "live" and projection is not None:
-            tasks_by_line[int(projection["line_number"])] = task
+    for pair in db.task_store.list_live_projected_tasks(note_id=note_id):
+        tasks_by_line[int(pair["projection"]["line_number"])] = pair["task"]
     return tasks_by_line
 
 
@@ -159,12 +157,23 @@ def test_duplicate_text_reorder_becomes_ambiguous_or_distinct(
     tasks = notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100)
     live_ids = {task["id"] for task in tasks if task["projection_status"] == "live"}
     live_same_ids = {task["id"] for task in tasks if task["projection_status"] == "live" and task["text"] == "Same"}
-    ambiguous_ids = {task["id"] for task in tasks if task["projection_status"] == "ambiguous"}
+    unlinked_same_ids = {
+        task["id"]
+        for task in tasks
+        if task["projection_status"] == "unlinked" and task["text"] == "Same"
+    }
 
-    assert len(tasks) >= 2
-    assert result.ambiguous_count > 0 or live_ids != original_live_ids
-    assert result.ambiguous_count > 0 or live_same_ids != original_same_ids
-    assert ambiguous_ids or len(live_same_ids) == 2
+    assert len(tasks) == 4
+    assert result.created_count == 1
+    assert result.updated_count == 0
+    assert result.unlinked_count == 1
+    assert result.ambiguous_count == 1
+    assert len(live_ids) == 3
+    assert live_ids != original_live_ids
+    assert len(live_same_ids) == 2
+    assert len(unlinked_same_ids) == 1
+    assert live_same_ids != original_same_ids
+    assert unlinked_same_ids < original_same_ids
 
 
 def test_duplicate_stable_lines_preserve_ids_when_one_status_changes(
@@ -213,6 +222,47 @@ def test_unique_hash_fallback_requires_same_block_fingerprint(
     assert live_move_tasks[0]["id"] != original_move_task["id"]
     assert original_after is not None
     assert original_after["projection_status"] == "unlinked"
+
+
+def test_missing_live_projection_row_fails_closed_without_duplicate_task(
+    notes_db: CharactersRAGDB,
+    service: NotesTaskService,
+) -> None:
+    note = _create_note(notes_db, "- [ ] Alpha\n")
+    _reconcile(service, notes_db, note)
+    original_alpha = _task_by_text(notes_db, note["id"])["Alpha"]
+    original_state = notes_db.get_reconciliation_state(note["id"])
+    assert original_state is not None
+    notes_db.execute_query(
+        "DELETE FROM task_note_projections WHERE task_id = ?",
+        (original_alpha["id"],),
+    )
+
+    updated_note = _update_note(notes_db, note["id"], int(note["version"]), "- [ ] Alpha\n- [ ] Beta\n")
+    with pytest.raises(ConflictError):
+        _reconcile(service, notes_db, updated_note)
+
+    tasks = notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100)
+    assert [task["text"] for task in tasks] == ["Alpha"]
+    assert notes_db.get_reconciliation_state(note["id"]) == original_state
+
+
+def test_empty_checklist_placeholder_is_warning_not_task(
+    notes_db: CharactersRAGDB,
+    service: NotesTaskService,
+) -> None:
+    note = _create_note(notes_db, "- [ ]\n- [ ] Alpha\n")
+
+    result = _reconcile(service, notes_db, note)
+    tasks = notes_db.list_tasks(note_id=note["id"], include_deleted=True, limit=100)
+    state = notes_db.get_reconciliation_state(note["id"])
+
+    assert result.created_count == 1
+    assert result.warning_count == 1
+    assert [task["text"] for task in tasks] == ["Alpha"]
+    assert state is not None
+    assert state["status"] == "warnings"
+    assert state["warning_count"] == 1
 
 
 def test_missing_line_marks_previous_task_unlinked(
