@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn()
 }))
 
-vi.mock("@/services/background-proxy", () => ({
+vi.mock("../background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.bgRequest(...args)
 }))
 
@@ -12,6 +12,8 @@ import {
   copyCalendarItemIntoTldw,
   createCalDavAccount,
   createCalendarItem,
+  createExternalCalendarBinding,
+  deleteCalendarItem,
   deleteCalDavAccount,
   discoverExternalCalendars,
   getCalendarAgenda,
@@ -22,7 +24,7 @@ import {
   verifyCalDavAccount,
   type CalendarAgendaQuery,
   type CalendarItemCreateRequest
-} from "@/services/calendar"
+} from "../calendar"
 
 describe("calendar service contract", () => {
   beforeEach(() => {
@@ -92,6 +94,41 @@ describe("calendar service contract", () => {
     ).rejects.toThrow("Provider-owned calendar items are read-only")
 
     expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("rejects provider-owned and read-only item deletes before sending a request", async () => {
+    await expect(
+      deleteCalendarItem({
+        id: 42,
+        source_owner: "provider"
+      })
+    ).rejects.toThrow("Provider-owned calendar items are read-only")
+    await expect(
+      deleteCalendarItem({
+        id: 43,
+        read_only_reason: "Linked scheduled task projection"
+      })
+    ).rejects.toThrow("Read-only calendar items cannot be deleted")
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("deletes local items with explicit mutation context", async () => {
+    mocks.bgRequest.mockResolvedValue({ deleted: true })
+
+    const response = await deleteCalendarItem({
+      id: 42,
+      source_owner: "tldw",
+      provider_owned: false
+    })
+
+    expect(response.deleted).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "DELETE",
+        path: "/api/v1/calendar/items/42"
+      })
+    )
   })
 
   it("builds encoded agenda queries and requires a bounded window", async () => {
@@ -173,5 +210,61 @@ describe("calendar service contract", () => {
     for (const call of mocks.bgRequest.mock.calls.slice(2)) {
       expect(JSON.stringify(call[0])).not.toContain("ignored-secret")
     }
+  })
+
+  it("recursively strips secret fields from non-create and non-verify payloads", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      id: 8,
+      account_id: 3,
+      calendar_id: 7,
+      remote_calendar_id: "remote-calendar",
+      sync_enabled: true,
+      lookback_days: 90,
+      lookahead_days: 365,
+      provider_capabilities: {
+        display_name: "Research calendar",
+        nested: { safe: true },
+        auth_modes: [{ name: "app-password" }]
+      },
+      created_at: "2026-06-05T09:00:00+00:00",
+      updated_at: "2026-06-05T09:00:00+00:00"
+    })
+
+    await createExternalCalendarBinding({
+      account_id: 3,
+      calendar_id: 7,
+      remote_calendar_id: "remote-calendar",
+      provider_capabilities: {
+        display_name: "Research calendar",
+        password: "nested-secret",
+        nested: {
+          safe: true,
+          token: "nested-token"
+        },
+        auth_modes: [
+          {
+            name: "app-password",
+            client_secret: "nested-client-secret"
+          }
+        ]
+      }
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/v1/calendar/external/bindings",
+        body: expect.objectContaining({
+          provider_capabilities: {
+            display_name: "Research calendar",
+            nested: { safe: true },
+            auth_modes: [{ name: "app-password" }]
+          }
+        })
+      })
+    )
+    expect(JSON.stringify(mocks.bgRequest.mock.calls[0]?.[0])).not.toContain("nested-secret")
+    expect(JSON.stringify(mocks.bgRequest.mock.calls[0]?.[0])).not.toContain("nested-token")
+    expect(JSON.stringify(mocks.bgRequest.mock.calls[0]?.[0])).not.toContain("nested-client-secret")
   })
 })

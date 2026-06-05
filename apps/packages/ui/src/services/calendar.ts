@@ -2,8 +2,8 @@
  * Calendar API client.
  */
 
-import { bgRequest } from "@/services/background-proxy"
-import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import { bgRequest } from "./background-proxy"
+import { appendPathQuery, toAllowedPath } from "./tldw/path-utils"
 
 export type CalendarItemKind = "event" | "todo"
 export type CalendarRole = "owner" | "editor" | "commenter" | "viewer"
@@ -94,6 +94,17 @@ export interface CalendarItemUpdateRequest {
   recurrence?: CalendarRecurrenceRequest | null
   source_owner?: CalendarSourceOwner
   provider_owned?: boolean
+}
+
+export interface CalendarItemMutationContext {
+  source_owner?: CalendarSourceOwner | string
+  provider_owned?: boolean
+  read_only_reason?: string | null
+}
+
+export interface CalendarItemDeleteTarget extends CalendarItemMutationContext {
+  id?: string | number | null
+  calendar_item_id?: string | number | null
 }
 
 export interface CalendarItemResponse {
@@ -365,6 +376,27 @@ const assertLocalItemMutation = (payload: CalendarItemUpdateRequest): void => {
   }
 }
 
+const assertDeletableItem = (context?: CalendarItemMutationContext): void => {
+  if (!context) {
+    return
+  }
+  if (context.source_owner === "provider" || context.provider_owned === true) {
+    throw new Error("Provider-owned calendar items are read-only")
+  }
+  if (context.source_owner === "linked_projection" || context.read_only_reason) {
+    throw new Error("Read-only calendar items cannot be deleted")
+  }
+}
+
+const resolveDeleteTargetId = (target: CalendarItemDeleteTarget): string | number => {
+  assertDeletableItem(target)
+  const id = target.calendar_item_id ?? target.id
+  if (id === undefined || id === null || String(id).trim() === "") {
+    throw new Error("calendar item id is required")
+  }
+  return id
+}
+
 const stripMutationHints = (payload: CalendarItemUpdateRequest): Omit<
   CalendarItemUpdateRequest,
   "source_owner" | "provider_owned"
@@ -373,13 +405,18 @@ const stripMutationHints = (payload: CalendarItemUpdateRequest): Omit<
   return updates
 }
 
-const withoutSecrets = <T extends Record<string, unknown>>(payload?: T): Partial<T> => {
-  if (!payload) {
-    return {}
+const withoutSecrets = <T>(payload: T): T => {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => withoutSecrets(item)) as T
   }
-  return Object.fromEntries(
-    Object.entries(payload).filter(([key]) => !SECRET_KEYS.has(key))
-  ) as Partial<T>
+  if (payload && typeof payload === "object") {
+    return Object.fromEntries(
+      Object.entries(payload as Record<string, unknown>)
+        .filter(([key]) => !SECRET_KEYS.has(key))
+        .map(([key, value]) => [key, withoutSecrets(value)])
+    ) as T
+  }
+  return payload
 }
 
 export async function listCalendars(): Promise<CalendarListResponse> {
@@ -419,7 +456,10 @@ export async function updateCalendarItem(
   })
 }
 
-export async function deleteCalendarItem(itemId: string | number): Promise<CalendarItemDeleteResponse> {
+export async function deleteCalendarItem(
+  target: CalendarItemDeleteTarget
+): Promise<CalendarItemDeleteResponse> {
+  const itemId = resolveDeleteTargetId(target)
   return await bgRequest<CalendarItemDeleteResponse>({
     path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}`),
     method: "DELETE"
@@ -475,7 +515,7 @@ export async function copyCalendarItemIntoTldw(
   return await bgRequest<CalendarItemResponse>({
     path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/copy`),
     method: "POST",
-    body: withoutSecrets(payload as unknown as Record<string, unknown>)
+    body: withoutSecrets(payload)
   })
 }
 
@@ -546,7 +586,7 @@ export async function createExternalCalendarBinding(
   return await bgRequest<ExternalCalendarBindingResponse>({
     path: toAllowedPath(`${CALENDAR_BASE}/external/bindings`),
     method: "POST",
-    body: withoutSecrets(payload as unknown as Record<string, unknown>)
+    body: withoutSecrets(payload)
   })
 }
 
