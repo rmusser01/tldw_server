@@ -3516,8 +3516,7 @@ async def update_note(
         if not updated_note_data:
             logger.error(f"Note '{note_id}' not found after successful update for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
-        if "content" in update_data:
-            _reconcile_note_tasks_after_save(db=db, note_data=updated_note_data, current_user=current_user)
+        _reconcile_note_tasks_after_save(db=db, note_data=updated_note_data, current_user=current_user)
         updated_note_data = _attach_keywords_inline(db, updated_note_data)
         updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
@@ -3656,8 +3655,7 @@ async def patch_note(
         updated_note_data = db.get_note_by_id(note_id=note_id)
         if not updated_note_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
-        if "content" in update_data:
-            _reconcile_note_tasks_after_save(db=db, note_data=updated_note_data, current_user=current_user)
+        _reconcile_note_tasks_after_save(db=db, note_data=updated_note_data, current_user=current_user)
         updated_note_data = _attach_keywords_inline(db, updated_note_data)
         updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
