@@ -73,6 +73,10 @@ class TaskActor:
 
     actor_type: str
     actor_id: str | None = None
+    tool_name: str | None = None
+    policy_mode: str | None = None
+    approval_id: str | None = None
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True)
