@@ -26,6 +26,8 @@ def _reset_config(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     config.clear_config_cache()
     yield
+    for key in (*_DIALOGUE_TREE_ENV_KEYS, "TLDW_CONFIG_FILE", "TLDW_CONFIG_PATH", "TLDW_CONFIG_DIR"):
+        monkeypatch.delenv(key, raising=False)
     config.clear_config_cache()
 
 

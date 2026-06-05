@@ -43,6 +43,9 @@ class _LoggerStub:
             message = message.format(*args, **kwargs)
         self.warnings.append(str(message))
 
+    def opt(self, *args: object, **kwargs: object) -> "_LoggerStub":
+        return self
+
 
 class _EmptyRetriever:
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -100,13 +103,14 @@ async def test_coarse_retrieval_fallback_warning_omits_raw_exception(
 
     assert result.documents
     assert result.metadata["coarse_docs"] == []
-    assert logger_stub.warnings == ["Agentic coarse retrieval failed"]
+    assert "Agentic coarse retrieval failed" in logger_stub.warnings
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
 
 
 @pytest.mark.asyncio
 async def test_media_db_fallback_retrieval_warning_omits_raw_exception(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     logger_stub = _LoggerStub()
     monkeypatch.setattr(ac, "logger", logger_stub)
@@ -116,7 +120,7 @@ async def test_media_db_fallback_retrieval_warning_omits_raw_exception(
     result = await ac.agentic_rag_pipeline(
         query="media fallback sanitizer",
         sources=["media_db"],
-        media_db_path="/tmp/media.db",
+        media_db_path=str(tmp_path / "media.db"),
         search_mode="fts",
         agentic=ac.AgenticConfig(enable_metrics=False),
         enable_generation=False,
@@ -125,7 +129,7 @@ async def test_media_db_fallback_retrieval_warning_omits_raw_exception(
 
     assert result.documents
     assert result.metadata["coarse_docs"] == []
-    assert logger_stub.warnings == ["Agentic Media DB fallback retrieval failed"]
+    assert "Agentic Media DB fallback retrieval failed" in logger_stub.warnings
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
 
 

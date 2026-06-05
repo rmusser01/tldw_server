@@ -1,3 +1,4 @@
+import fnmatch
 import re
 from pathlib import Path
 
@@ -215,11 +216,85 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         shard_names = {shard["name"] for shard in shards}
         assert "ai-retrieval" not in shard_names
         assert "chat-llm" not in shard_names
-        assert {"ai-embeddings", "rag-research"}.issubset(shard_names)
+        assert "product-modules" not in shard_names
+        assert "chat-character-unit" not in shard_names
+        assert "rag-research" not in shard_names
+        assert {
+            "admin-a-b",
+            "admin-c-d",
+            "admin-e-l",
+            "admin-m-r",
+            "admin-s-z",
+        }.issubset(shard_names)
+        assert {
+            "ai-chromadb-chunking",
+            "ai-embeddings",
+            "vector-stores",
+            "paper-search",
+            "rag-legacy",
+            "rag-new",
+            "research-websearch",
+        }.issubset(shard_names)
         assert {
             "chat-character-legacy",
-            "chat-character-unit",
+            "chat-character-db",
+            "chat-character-unit-core",
+            "chat-character-unit-chat",
+            "chat-character-unit-persona",
+            "chat-character-unit-prd",
+            "chat-character-property",
             "chat-character-integration",
             "chat-core",
             "llm-providers",
         }.issubset(shard_names)
+        assert {
+            "product-claims",
+            "product-collections",
+            "product-evaluations",
+            "product-notes-persona",
+            "product-prompts-workflows",
+        }.issubset(shard_names)
+        shard_paths = {shard["name"]: shard["paths"] for shard in shards}
+        shard_path_sets = {
+            name: set(str(paths).split()) for name, paths in shard_paths.items()
+        }
+        assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings"]
+        assert "tldw_Server_API/tests/Admin" not in shard_path_sets["core-smoke"]
+        assert "tldw_Server_API/tests/RAG_NEW" not in shard_path_sets["rag-legacy"]
+        assert "tldw_Server_API/tests/RAG" not in shard_path_sets["rag-new"]
+        assert "tldw_Server_API/tests/PaperSearch" not in shard_path_sets["research-websearch"]
+        assert "tldw_Server_API/tests/WebSearch" not in shard_path_sets["paper-search"]
+        assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-legacy"]
+        assert "tldw_Server_API/tests/Character_Chat_NEW/unit" not in shard_path_sets["chat-character-property"]
+        assert "tldw_Server_API/tests/Claims" not in shard_path_sets["product-collections"]
+        assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims"]
+
+        admin_shards = {
+            "admin-a-b",
+            "admin-c-d",
+            "admin-e-l",
+            "admin-m-r",
+            "admin-s-z",
+        }
+        admin_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Admin").glob("test*.py")
+        }
+        covered_admin_files: dict[str, str] = {}
+        for shard_name in admin_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Admin/")
+                matches = {
+                    filename
+                    for filename in admin_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_admin_files, (
+                        f"{filename} matched both "
+                        f"{covered_admin_files[filename]} and {shard_name}"
+                    )
+                    covered_admin_files[filename] = shard_name
+
+        assert set(covered_admin_files) == admin_files

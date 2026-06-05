@@ -88,6 +88,16 @@ def _get_python_magic_module():
     return _python_magic
 
 
+def _is_epub_archive(file_path: Path) -> bool:
+    """Return True when a ZIP-shaped file has the required EPUB marker."""
+    try:
+        with zipfile.ZipFile(file_path, "r") as archive:
+            marker = archive.read("mimetype", pwd=None)
+    except (OSError, KeyError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return False
+    return marker.strip() == b"application/epub+zip"
+
+
 class FileValidationError(Exception):
     """Custom exception for critical validation/setup errors."""
 
@@ -675,12 +685,21 @@ class FileValidator:
             if detected_mime_type:
                 detected_lower = detected_mime_type.lower()
                 if detected_lower not in normalized_allowed_mimetypes:
-                    # Hard-fail if we have a detected MIME and it is not allowed.
-                    # Do NOT fall back to extension-derived MIME in this case.
-                    issues.append(
-                        f"Detected MIME type '{detected_mime_type}' for file '{_original_filename}' is not allowed. "
-                        f"Allowed: {final_allowed_mimetypes}"
+                    is_epub_zip = (
+                        media_type_key == "ebook"
+                        and detected_lower in {"application/zip", "application/x-zip-compressed"}
+                        and ".epub" in claimed_candidates
+                        and _is_epub_archive(current_file_path)
                     )
+                    if is_epub_zip:
+                        detected_mime_type = "application/epub+zip"
+                    else:
+                        # Hard-fail if we have a detected MIME and it is not allowed.
+                        # Do NOT fall back to extension-derived MIME in this case.
+                        issues.append(
+                            f"Detected MIME type '{detected_mime_type}' for file '{_original_filename}' is not allowed. "
+                            f"Allowed: {final_allowed_mimetypes}"
+                        )
             else:
                 # No detected MIME available; rely on extension guess if present
                 if fallback_lower is None or fallback_lower not in normalized_allowed_mimetypes:

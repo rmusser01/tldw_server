@@ -70,7 +70,7 @@ def client(monkeypatch):
 def test_create_from_media_chunking_words_language(client, monkeypatch):
     # Fake DB returning one item with English content
     class FakeDB:
-        def get_media_by_id(self, mid):
+        def get_media_by_id(self, mid, **kwargs):
             return {'id': mid, 'title': 'T', 'content': 'This is a sentence. And another.'}
     from tldw_Server_API.app.api.v1.endpoints.vector_stores_openai import get_media_db_for_user
     app.dependency_overrides[get_media_db_for_user] = lambda: FakeDB()

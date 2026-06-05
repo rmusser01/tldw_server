@@ -13,11 +13,19 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 
-def test_flashcard_template_create_update_delete_round_trip():
+@contextmanager
+def _temp_chacha_db():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "ChaChaNotes.db")
         db = CharactersRAGDB(db_path, client_id="test")
+        try:
+            yield db
+        finally:
+            db.close_all_connections()
 
+
+def test_flashcard_template_create_update_delete_round_trip():
+    with _temp_chacha_db() as db:
         template_id = db.add_flashcard_template(
             name="Vocabulary Definition",
             model_type="basic",
@@ -68,10 +76,7 @@ def test_flashcard_template_create_update_delete_round_trip():
 
 
 def test_flashcard_template_validation_requires_matching_placeholders():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         with pytest.raises(InputError):
             db.add_flashcard_template(
                 name="Broken",
@@ -90,9 +95,7 @@ def test_flashcard_template_validation_requires_matching_placeholders():
 
 
 def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         captured: list[tuple[str, object]] = []
 
         class _Cursor:
@@ -133,10 +136,7 @@ def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch
 
 
 def test_flashcard_template_update_returns_false_for_deleted_template():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         template_id = db.add_flashcard_template(
             name="Delete then update",
             model_type="basic",
@@ -172,10 +172,7 @@ def test_flashcard_template_update_returns_false_for_deleted_template():
 
 
 def test_flashcard_template_empty_update_is_noop():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         template_id = db.add_flashcard_template(
             name="No-op update",
             model_type="basic",
@@ -208,9 +205,7 @@ def test_flashcard_template_empty_update_is_noop():
 
 
 def test_flashcard_template_serialize_logs_invalid_placeholder_json(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         warnings: list[str] = []
 
         def _capture_warning(message, *args):
@@ -236,9 +231,7 @@ def test_flashcard_template_serialize_logs_invalid_placeholder_json(monkeypatch)
 
 
 def test_flashcard_template_sync_log_tracks_create_update_and_delete():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         start_change_id = db.get_latest_sync_log_change_id()
 
         template_id = db.add_flashcard_template(
@@ -285,9 +278,7 @@ def test_flashcard_template_sync_log_tracks_create_update_and_delete():
 
 
 def test_flashcard_template_schema_postgres_registers_sync_log_trigger(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         executed: list[str] = []
 
         class _Backend:
@@ -315,9 +306,7 @@ def test_flashcard_template_schema_postgres_registers_sync_log_trigger(monkeypat
 
 
 def test_flashcard_template_delete_uses_version_in_update_query(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         executed: list[tuple[str, tuple[object, ...]]] = []
 
         class _Cursor:
@@ -356,9 +345,7 @@ def test_flashcard_template_delete_uses_version_in_update_query(monkeypatch):
 
 
 def test_flashcard_template_restore_prefers_most_recent_deleted_row():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         placeholder_definitions = [
             {
                 "key": "term",
@@ -427,10 +414,7 @@ def test_flashcard_template_restore_prefers_most_recent_deleted_row():
 
 
 def test_flashcard_template_delete_wraps_backend_database_errors(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         @contextmanager
         def _fake_transaction():
             raise BackendDatabaseError("pg down")

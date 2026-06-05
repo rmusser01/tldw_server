@@ -5376,6 +5376,9 @@ UPDATE db_schema_version
 ───────────────────────────────────────────────────────────────*/
 PRAGMA foreign_keys = ON;
 
+ALTER TABLE persona_visual_candidates
+  ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}';
+
 CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
   id                     TEXT PRIMARY KEY NOT NULL,
   target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -5425,6 +5428,9 @@ UPDATE db_schema_version
 /*───────────────────────────────────────────────────────────────
   Migration to Version 47 — Research Workspace migration protocol state (2026-05-23) [Postgres]
 ───────────────────────────────────────────────────────────────*/
+
+ALTER TABLE persona_visual_candidates
+  ADD COLUMN IF NOT EXISTS generation_provenance_json TEXT NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
   id                     TEXT PRIMARY KEY NOT NULL,

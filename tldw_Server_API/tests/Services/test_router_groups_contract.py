@@ -4325,7 +4325,7 @@ def test_minimal_test_router_specs_participate_in_route_policy(
         ("health", True),
         ("auth", True),
         ("research", True),
-        ("research", True),
+        ("research-runs", True),
         ("research-workspace", True),
         ("paper-search", True),
         ("chat", True),

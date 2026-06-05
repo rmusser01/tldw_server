@@ -130,6 +130,47 @@ class TestMimeTypeDetection:
         assert "unsupported" in message.lower() or "no validation rules" in message.lower()
 
     @pytest.mark.unit
+    def test_epub_zip_mime_allowed_only_with_epub_marker(self, tmp_path):
+        """Accept ZIP-detected EPUBs only when the required EPUB marker is present."""
+        epub_path = tmp_path / "book.epub"
+        with zipfile.ZipFile(epub_path, "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+            archive.writestr("META-INF/container.xml", "<container />")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+        with patch("mimetypes.guess_type", return_value=("application/zip", None)):
+            result = validator.validate_file(
+                epub_path,
+                original_filename=epub_path.name,
+                media_type_key="ebook",
+            )
+
+        assert result.is_valid
+        assert result.detected_mime_type == "application/epub+zip"
+
+    @pytest.mark.unit
+    def test_epub_zip_mime_rejected_without_epub_marker(self, tmp_path):
+        """Reject generic ZIP files even when they are named with an EPUB extension."""
+        epub_path = tmp_path / "not-a-book.epub"
+        with zipfile.ZipFile(epub_path, "w") as archive:
+            archive.writestr("payload.txt", "not an epub")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+        with patch("mimetypes.guess_type", return_value=("application/zip", None)):
+            result = validator.validate_file(
+                epub_path,
+                original_filename=epub_path.name,
+                media_type_key="ebook",
+            )
+
+        assert not result.is_valid
+        assert any("application/zip" in issue for issue in result.issues)
+
+    @pytest.mark.unit
     def test_mime_validation_without_magic_allows_plaintext(self, tmp_path, monkeypatch):
         """Fallback MIME detection should succeed when puremagic is unavailable."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing import Upload_Sink as sink

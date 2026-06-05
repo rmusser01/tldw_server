@@ -115,7 +115,7 @@ def test_build_legacy_shutdown_context_uses_explicit_fields() -> None:
 def test_main_source_does_not_define_legacy_display_startup_info_helper() -> None:
     from tldw_Server_API.app import main as main_module
 
-    main_source = Path(main_module.__file__).read_text()
+    main_source = Path(main_module.__file__).read_text(encoding="utf-8")
 
     assert "async def _display_startup_info_and_warm" not in main_source
 

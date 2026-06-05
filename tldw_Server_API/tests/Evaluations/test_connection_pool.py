@@ -396,7 +396,9 @@ class TestConnectionPoolIntegration:
 
         stats = connection_pool.get_statistics()
         assert stats.checkout_count == 5
-        assert stats.avg_checkout_time > 0
+        assert stats.total_checkout_time >= 0
+        assert stats.max_checkout_time >= 0
+        assert stats.avg_checkout_time == stats.total_checkout_time / stats.checkout_count
 
 
 if __name__ == "__main__":

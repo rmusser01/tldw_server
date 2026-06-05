@@ -97,12 +97,13 @@ class _PrincipalInjectorMiddleware(BaseHTTPMiddleware):
 
 
 @pytest.mark.asyncio
-async def test_middleware_logs_usage(monkeypatch):
+async def test_middleware_logs_usage(tmp_path, monkeypatch):
     # Configure single-user + enable usage logging
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "middleware-test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'usage.db'}")
     monkeypatch.setenv("USAGE_LOG_ENABLED", "true")
-    # Keep exclusions default; /api/v1/health is not excluded by default
+    monkeypatch.setenv("USAGE_LOG_EXCLUDE_PREFIXES", "[]")
 
     # Reset settings/db/session
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -129,10 +130,11 @@ async def test_middleware_logs_usage(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_middleware_excludes_prefix(monkeypatch):
+async def test_middleware_excludes_prefix(tmp_path, monkeypatch):
     # Configure single-user + enable usage logging + exclude health prefix
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "middleware-test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'usage_excluded.db'}")
     monkeypatch.setenv("USAGE_LOG_ENABLED", "true")
     monkeypatch.setenv("USAGE_LOG_EXCLUDE_PREFIXES", "[\"/api/v1/health\"]")
     # Ensure exclusion even if middleware cached settings from previous test

@@ -75,6 +75,48 @@ def create_dummy_file(path: Path, content: str = "dummy content"):
             logger.error(f"Failed to create dummy file {path}: {e}")
             pytest.skip(f"Failed to create required test file: {path}")
 
+
+def create_valid_epub(path: Path):
+    if path.exists():
+        return
+    try:
+        container_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"""
+        content_opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" unique-identifier="bookid" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">sample</dc:identifier>
+    <dc:title>Sample EPUB</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>"""
+        chapter = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Sample EPUB</title></head>
+  <body><p>Sample EPUB content.</p></body>
+</html>"""
+        with zipfile.ZipFile(path, "w") as archive:
+            marker = zipfile.ZipInfo("mimetype")
+            marker.compress_type = zipfile.ZIP_STORED
+            archive.writestr(marker, "application/epub+zip")
+            archive.writestr("META-INF/container.xml", container_xml)
+            archive.writestr("content.opf", content_opf)
+            archive.writestr("chapter.xhtml", chapter)
+        logger.info(f"Created valid EPUB test file: {path}")
+    except Exception as e:
+        logger.error(f"Failed to create EPUB file {path}: {e}")
+        pytest.skip(f"Failed to create valid EPUB file: {path}")
+
 # Define paths
 SAMPLE_VIDEO_PATH = TEST_MEDIA_DIR / "sample.mp4"
 SAMPLE_AUDIO_PATH = TEST_MEDIA_DIR / "sample.wav"
@@ -110,7 +152,7 @@ def create_valid_wav(path: Path, duration_sec: float = 1.0, sample_rate: int = 1
 
 create_valid_wav(SAMPLE_AUDIO_PATH)
 create_dummy_file(SAMPLE_PDF_PATH, "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0>>endobj\nxref\n0 3\n0000000000 65535 f \n0000000010 00000 n \n0000000059 00000 n \ntrailer<</Size 3/Root 1 0 R>>\nstartxref\n114\n%%EOF") # Minimal PDF
-create_dummy_file(SAMPLE_EPUB_PATH, "dummy epub data") # Content doesn't need to be valid epub
+create_valid_epub(SAMPLE_EPUB_PATH)
 create_dummy_file(SAMPLE_TXT_PATH, "Sample TXT content.")
 create_dummy_file(SAMPLE_MD_PATH, "# Sample MD\nContent.")
 create_dummy_file(SAMPLE_DOCX_PATH, "dummy docx data") # Content doesn't need to be valid docx
@@ -268,6 +310,7 @@ def create_upload_file(dummy_file_content):
             pytest.skip(f"Required test file missing: {filepath}")
         mime_map = {
             ".mp4": "video/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".pdf": "application/pdf",
+            ".epub": "application/epub+zip",
             # Add other types as needed
         }
         mime_type = mime_map.get(filepath.suffix.lower(), "application/octet-stream")
