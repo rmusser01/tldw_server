@@ -109,6 +109,15 @@ class TaskStore:
     def _decode_event_row(self, row: Any) -> dict[str, Any] | None:
         return self._decode_row(row, self._EVENT_JSON_FIELDS)
 
+    @staticmethod
+    def _require_live_projection_row(task_id: str, projection: dict[str, Any] | None) -> dict[str, Any]:
+        """Require an existing projection row for mutations of live projected tasks."""
+        if projection is None:
+            raise ConflictError(
+                f"Task projection is missing for live task '{task_id}'.", entity="tasks", entity_id=task_id
+            )  # noqa: TRY003
+        return projection
+
     def _require_active_note(
         self,
         note_id: str,
@@ -129,6 +138,40 @@ class TaskStore:
             raise ConflictError(
                 f"Task note '{note_id}' is deleted.", entity="tasks", entity_id=task_id
             )  # noqa: TRY003
+
+    @staticmethod
+    def _raise_write_integrity_error(
+        exc: sqlite3.IntegrityError,
+        *,
+        operation: str,
+        entity_id: str,
+        reference: str = "reference",
+    ) -> None:
+        msg = str(exc).lower()
+        if "foreign key constraint failed" in msg:
+            raise ConflictError(
+                f"{operation} {reference} reference not found.", entity="tasks", entity_id=entity_id
+            ) from exc  # noqa: TRY003
+        if "unique constraint failed" in msg:
+            raise ConflictError(f"{operation} already exists.", entity="tasks", entity_id=entity_id) from exc  # noqa: TRY003
+        raise CharactersRAGDBError(f"Database integrity error during {operation}: {exc}") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _raise_write_backend_error(
+        exc: BackendDatabaseError,
+        *,
+        operation: str,
+        entity_id: str,
+        reference: str = "reference",
+    ) -> None:
+        msg = str(exc).lower()
+        if "foreign key" in msg:
+            raise ConflictError(
+                f"{operation} {reference} reference not found.", entity="tasks", entity_id=entity_id
+            ) from exc  # noqa: TRY003
+        if "duplicate key" in msg or "unique constraint" in msg:
+            raise ConflictError(f"{operation} already exists.", entity="tasks", entity_id=entity_id) from exc  # noqa: TRY003
+        raise CharactersRAGDBError(f"Backend error during {operation}: {exc}") from exc  # noqa: TRY003
 
     def _fetch_task(
         self,
@@ -512,7 +555,7 @@ class TaskStore:
                 task_id,
             )
             self._require_active_note(task["note_id"], task_id, conn=transaction_conn)
-            self._resolve_projection_state(task, task_id, conn=transaction_conn)
+            projection_state, _ = self._resolve_projection_state(task, task_id, conn=transaction_conn)
             if task["note_id"] != note_id:
                 raise ConflictError(
                     f"Task projection note does not match owning note for task '{task_id}'.",
@@ -524,14 +567,28 @@ class TaskStore:
                 """
                 UPDATE note_tasks
                    SET projection_status = ?,
-                       updated_at = ?
-                 WHERE id = ? AND note_id = ? AND deleted = ?
+                       updated_at = ?,
+                       version = CASE
+                           WHEN projection_status != ? THEN version + 1
+                           ELSE version
+                       END
+                 WHERE id = ? AND note_id = ? AND deleted = ? AND projection_status = ?
                 """,
-                (normalized_projection_status, now, task_id, note_id, self._deleted_value(False)),
+                (
+                    normalized_projection_status,
+                    now,
+                    normalized_projection_status,
+                    task_id,
+                    note_id,
+                    self._deleted_value(False),
+                    projection_state,
+                ),
             )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
-                    f"Task with ID '{task_id}' is deleted.", entity="tasks", entity_id=task_id
+                    f"Task projection changed concurrently for task '{task_id}'.",
+                    entity="tasks",
+                    entity_id=task_id,
                 )  # noqa: TRY003
             self._execute(
                 transaction_conn,
@@ -600,13 +657,14 @@ class TaskStore:
                 task_id,
             )
             self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
-            projection_state, _ = self._resolve_projection_state(old, task_id, conn=transaction_conn)
+            projection_state, projection = self._resolve_projection_state(old, task_id, conn=transaction_conn)
             if projection_state != "live":
                 raise ConflictError(
                     f"Task projection is {projection_state} for task '{task_id}'.",
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
+            self._require_live_projection_row(task_id, projection)
             now = self._db._get_current_utc_timestamp_iso()
             update_cursor = self._execute(
                 transaction_conn,
@@ -615,9 +673,9 @@ class TaskStore:
                    SET projection_status = ?,
                        updated_at = ?,
                        version = version + 1
-                 WHERE id = ? AND version = ?
+                 WHERE id = ? AND version = ? AND projection_status = ?
                 """,
-                ("unlinked", now, task_id, expected_version),
+                ("unlinked", now, task_id, expected_version, projection_state),
             )
             if getattr(update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
@@ -625,16 +683,22 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            self._execute(
+            projection_update_cursor = self._execute(
                 transaction_conn,
                 """
                 UPDATE task_note_projections
                    SET projection_status = ?,
                        updated_at = ?
-                 WHERE task_id = ?
+                 WHERE task_id = ? AND projection_status = ?
                 """,
-                ("unlinked", now, task_id),
+                ("unlinked", now, task_id, projection_state),
             )
+            if getattr(projection_update_cursor, "rowcount", None) == 0:
+                raise ConflictError(
+                    f"Task projection changed concurrently for task '{task_id}'.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
             updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
             if actor_type:
                 self.record_task_event(
@@ -693,7 +757,8 @@ class TaskStore:
                 raise ConflictError(
                     f"Task projection is deleted for active task '{task_id}'.", entity="tasks", entity_id=task_id
                 )  # noqa: TRY003
-            if projection and projection["projection_status"] == "live" and not allow_record_only:
+            if projection_status == "live" and not allow_record_only:
+                projection = self._require_live_projection_row(task_id, projection)
                 matches_projection = (
                     projection_note_id == projection["note_id"]
                     and projection_note_version == projection["note_version"]
@@ -712,7 +777,7 @@ class TaskStore:
                        projection_status = ?,
                        updated_at = ?,
                        version = version + 1
-                 WHERE id = ? AND version = ? AND deleted = ?
+                 WHERE id = ? AND version = ? AND deleted = ? AND projection_status = ?
                 """,
                 (
                     self._deleted_value(True),
@@ -721,6 +786,7 @@ class TaskStore:
                     task_id,
                     expected_version,
                     self._deleted_value(False),
+                    projection_status,
                 ),
             )
             if getattr(update_cursor, "rowcount", None) == 0:
@@ -729,7 +795,7 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            self._execute(
+            projection_update_cursor = self._execute(
                 transaction_conn,
                 """
                 UPDATE task_note_projections
@@ -739,6 +805,13 @@ class TaskStore:
                 """,
                 ("deleted", now, task_id),
             )
+            if projection_status == "live" and not allow_record_only:
+                if getattr(projection_update_cursor, "rowcount", None) == 0:
+                    raise ConflictError(
+                        f"Task projection changed concurrently for task '{task_id}'.",
+                        entity="tasks",
+                        entity_id=task_id,
+                    )  # noqa: TRY003
             updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
             if actor_type:
                 self.record_task_event(
@@ -811,7 +884,23 @@ class TaskStore:
                 raise CharactersRAGDBError(f"Failed to read task event '{final_event_id}'.")  # noqa: TRY003
             return event
 
-        return self._with_transaction(_execute_event, conn)
+        try:
+            return self._with_transaction(_execute_event, conn)
+        except sqlite3.IntegrityError as exc:
+            self._raise_write_integrity_error(
+                exc,
+                operation="Task event",
+                entity_id=final_event_id,
+                reference="task or note",
+            )
+        except BackendDatabaseError as exc:
+            self._raise_write_backend_error(
+                exc,
+                operation="Task event",
+                entity_id=final_event_id,
+                reference="task or note",
+            )
+        raise CharactersRAGDBError(f"Failed to record task event '{final_event_id}'.")  # noqa: TRY003
 
     def list_task_activity(
         self,
@@ -866,7 +955,23 @@ class TaskStore:
                 raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
             return state
 
-        return self._with_transaction(_execute_read, conn)
+        try:
+            return self._with_transaction(_execute_read, conn)
+        except sqlite3.IntegrityError as exc:
+            self._raise_write_integrity_error(
+                exc,
+                operation="Task event read state",
+                entity_id=event_id,
+                reference="event",
+            )
+        except BackendDatabaseError as exc:
+            self._raise_write_backend_error(
+                exc,
+                operation="Task event read state",
+                entity_id=event_id,
+                reference="event",
+            )
+        raise CharactersRAGDBError(f"Failed to mark task event '{event_id}' read.")  # noqa: TRY003
 
     def mark_task_activity_dismissed(
         self,
@@ -895,7 +1000,23 @@ class TaskStore:
                 raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
             return state
 
-        return self._with_transaction(_execute_dismiss, conn)
+        try:
+            return self._with_transaction(_execute_dismiss, conn)
+        except sqlite3.IntegrityError as exc:
+            self._raise_write_integrity_error(
+                exc,
+                operation="Task event read state",
+                entity_id=event_id,
+                reference="event",
+            )
+        except BackendDatabaseError as exc:
+            self._raise_write_backend_error(
+                exc,
+                operation="Task event read state",
+                entity_id=event_id,
+                reference="event",
+            )
+        raise CharactersRAGDBError(f"Failed to mark task event '{event_id}' dismissed.")  # noqa: TRY003
 
     def get_task_activity_read_state(
         self,
@@ -974,7 +1095,23 @@ class TaskStore:
                 raise CharactersRAGDBError(f"Failed to read reconciliation state for note '{note_id}'.")  # noqa: TRY003
             return state
 
-        return self._with_transaction(_execute_state, conn)
+        try:
+            return self._with_transaction(_execute_state, conn)
+        except sqlite3.IntegrityError as exc:
+            self._raise_write_integrity_error(
+                exc,
+                operation="Task reconciliation state",
+                entity_id=note_id,
+                reference="note",
+            )
+        except BackendDatabaseError as exc:
+            self._raise_write_backend_error(
+                exc,
+                operation="Task reconciliation state",
+                entity_id=note_id,
+                reference="note",
+            )
+        raise CharactersRAGDBError(f"Failed to set reconciliation state for note '{note_id}'.")  # noqa: TRY003
 
     def _get_reconciliation_state_in_conn(self, note_id: str, conn: TaskConnection) -> dict[str, Any] | None:
         cursor = self._read(

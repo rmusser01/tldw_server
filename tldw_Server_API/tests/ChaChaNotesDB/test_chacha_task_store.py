@@ -103,6 +103,16 @@ def _projection_count(db: CharactersRAGDB, task_id: str) -> int:
     return int(row["count"])
 
 
+def _delete_projection(db: CharactersRAGDB, task_id: str) -> None:
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM task_note_projections WHERE task_id = ?", (task_id,))
+
+
+def _event_count(db: CharactersRAGDB, task_id: str, event_type: str) -> int:
+    events = db.list_task_activity(task_id=task_id)
+    return sum(1 for event in events if event["event_type"] == event_type)
+
+
 def test_create_task_record_and_list_by_note(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
 
@@ -342,14 +352,14 @@ def test_update_task_record_rejects_ambiguous_projected_tasks(db: CharactersRAGD
     with pytest.raises(ConflictError, match="ambiguous"):
         db.update_task_record(
             task_id="task-1",
-            expected_version=1,
+            expected_version=2,
             status="done",
             actor_type="user",
             actor_id="user-1",
         )
     task = db.get_task("task-1", include_deleted=True)
     assert task["status"] == "open"  # nosec B101
-    assert task["version"] == 1  # nosec B101
+    assert task["version"] == 2  # nosec B101
 
 
 def test_update_task_record_rejects_drifted_ambiguous_projection_status(db: CharactersRAGDB) -> None:
@@ -522,6 +532,58 @@ def test_mark_task_unlinked_rejects_soft_deleted_parent_note(db: CharactersRAGDB
     assert task["version"] == 1  # nosec B101
 
 
+def test_mark_task_unlinked_rejects_missing_live_projection_row(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    _delete_projection(db, "task-1")
+
+    with pytest.raises(ConflictError, match="projection.*missing"):
+        db.mark_task_unlinked(
+            task_id="task-1",
+            expected_version=1,
+            actor_type="system",
+            actor_id="reconciler",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert _event_count(db, "task-1", "unlinked") == 0  # nosec B101
+
+
+def test_mark_task_unlinked_rejects_projection_update_zero_rowcount(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_execute = db.task_store._execute
+    race_applied = False
+
+    def _simulate_projection_delete_race(conn, query, params=None):
+        nonlocal race_applied
+        if not race_applied and "UPDATE task_note_projections" in query:
+            race_applied = True
+            original_execute(conn, "DELETE FROM task_note_projections WHERE task_id = ?", ("task-1",))
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_projection_delete_race)
+
+    with pytest.raises(ConflictError, match="projection.*changed"):
+        db.mark_task_unlinked(
+            task_id="task-1",
+            expected_version=1,
+            actor_type="system",
+            actor_id="reconciler",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert _projection_count(db, "task-1") == 1  # nosec B101
+    assert _event_count(db, "task-1", "unlinked") == 0  # nosec B101
+
+
 def test_soft_delete_projected_task_transactionally(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -662,6 +724,99 @@ def test_set_task_projection_rejects_soft_deleted_parent_note(db: CharactersRAGD
     assert _projection_count(db, "task-1") == 0  # nosec B101
 
 
+def test_set_task_projection_rejects_projection_status_race(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_execute = db.task_store._execute
+    race_applied = False
+
+    def _simulate_projection_status_race(conn, query, params=None):
+        nonlocal race_applied
+        if not race_applied and "UPDATE note_tasks" in query and "SET projection_status" in query:
+            race_applied = True
+            original_execute(
+                conn,
+                "UPDATE note_tasks SET projection_status = ? WHERE id = ?",
+                ("unlinked", "task-1"),
+            )
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_projection_status_race)
+
+    with pytest.raises(ConflictError, match="projection.*changed"):
+        db.set_task_projection(
+            task_id="task-1",
+            note_id=note_id,
+            note_version=2,
+            line_number=1,
+            start_offset=0,
+            end_offset=20,
+            normalized_text_hash="sha256:review-race",
+            occurrence_index=0,
+            block_fingerprint="block-race",
+            raw_line="- [ ] Review source",
+            has_child_content=False,
+            projection_status="live",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+
+
+def test_set_task_projection_bumps_version_when_projection_status_changes(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+
+    db.set_task_projection(
+        task_id="task-1",
+        note_id=note_id,
+        note_version=2,
+        line_number=1,
+        start_offset=0,
+        end_offset=20,
+        normalized_text_hash="sha256:review-ambiguous",
+        occurrence_index=0,
+        block_fingerprint="block-ambiguous",
+        raw_line="- [ ] Review source",
+        has_child_content=False,
+        projection_status="ambiguous",
+    )
+
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "ambiguous"  # nosec B101
+    assert task["version"] == 2  # nosec B101
+
+
+def test_set_task_projection_refresh_does_not_bump_live_task_version(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+
+    db.set_task_projection(
+        task_id="task-1",
+        note_id=note_id,
+        note_version=2,
+        line_number=2,
+        start_offset=1,
+        end_offset=21,
+        normalized_text_hash="sha256:review-refresh",
+        occurrence_index=0,
+        block_fingerprint="block-refresh",
+        raw_line="- [ ] Review source",
+        has_child_content=False,
+        projection_status="live",
+    )
+
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+
+
 def test_soft_delete_task_rejects_ambiguous_projection_without_mutation(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -670,7 +825,7 @@ def test_soft_delete_task_rejects_ambiguous_projection_without_mutation(db: Char
     with pytest.raises(ConflictError, match="ambiguous"):
         db.soft_delete_task(
             task_id="task-1",
-            expected_version=1,
+            expected_version=2,
             projection_note_id=note_id,
             projection_note_version=1,
             projection_line_number=1,
@@ -681,7 +836,7 @@ def test_soft_delete_task_rejects_ambiguous_projection_without_mutation(db: Char
     delete_events = [event for event in db.list_task_activity(task_id="task-1") if event["event_type"] == "deleted"]
     assert task["deleted"] in (0, False)  # nosec B101
     assert task["projection_status"] == "ambiguous"  # nosec B101
-    assert task["version"] == 1  # nosec B101
+    assert task["version"] == 2  # nosec B101
     assert delete_events == []  # nosec B101
 
 
@@ -818,6 +973,86 @@ def test_soft_delete_task_rejects_drifted_projection_note_ownership(db: Characte
     assert delete_events == []  # nosec B101
 
 
+def test_soft_delete_task_rejects_missing_live_projection_row(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    _delete_projection(db, "task-1")
+
+    with pytest.raises(ConflictError, match="projection.*missing"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=1,
+            projection_note_id=note_id,
+            projection_note_version=1,
+            projection_line_number=1,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert _event_count(db, "task-1", "deleted") == 0  # nosec B101
+
+
+def test_record_only_soft_delete_allows_missing_live_projection_row(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    _delete_projection(db, "task-1")
+
+    deleted = db.soft_delete_task(
+        task_id="task-1",
+        expected_version=1,
+        allow_record_only=True,
+        actor_type="user",
+        actor_id="user-1",
+    )
+
+    assert deleted["deleted"] in (1, True)  # nosec B101
+    assert deleted["projection_status"] == "deleted"  # nosec B101
+    assert deleted["version"] == 2  # nosec B101
+    assert _projection_count(db, "task-1") == 0  # nosec B101
+
+
+def test_soft_delete_task_rejects_projection_update_zero_rowcount(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    _set_projection(db, "task-1", note_id)
+    original_execute = db.task_store._execute
+    race_applied = False
+
+    def _simulate_projection_delete_race(conn, query, params=None):
+        nonlocal race_applied
+        if not race_applied and "UPDATE task_note_projections" in query:
+            race_applied = True
+            original_execute(conn, "DELETE FROM task_note_projections WHERE task_id = ?", ("task-1",))
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_projection_delete_race)
+
+    with pytest.raises(ConflictError, match="projection.*changed"):
+        db.soft_delete_task(
+            task_id="task-1",
+            expected_version=1,
+            projection_note_id=note_id,
+            projection_note_version=1,
+            projection_line_number=1,
+            actor_type="user",
+            actor_id="user-1",
+        )
+    task = db.get_task("task-1", include_deleted=True)
+    assert task["deleted"] in (0, False)  # nosec B101
+    assert task["projection_status"] == "live"  # nosec B101
+    assert task["version"] == 1  # nosec B101
+    assert _projection_count(db, "task-1") == 1  # nosec B101
+    assert _event_count(db, "task-1", "deleted") == 0  # nosec B101
+
+
 def test_soft_delete_task_rejects_zero_rowcount_update(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
@@ -944,6 +1179,54 @@ def test_reconciliation_state_is_recorded_per_note_version(db: CharactersRAGDB) 
     assert second["status"] == "warnings"  # nosec B101
     fetched = db.get_reconciliation_state(note_id)
     assert fetched == second  # nosec B101
+
+
+def test_set_reconciliation_state_maps_missing_note_fk_to_conflict(db: CharactersRAGDB) -> None:
+    with pytest.raises(ConflictError, match="note"):
+        db.set_reconciliation_state(
+            note_id="missing-note",
+            note_version=1,
+            status="clean",
+            item_count=0,
+            warning_count=0,
+        )
+
+
+def test_record_task_event_maps_duplicate_event_id_to_conflict(db: CharactersRAGDB) -> None:
+    db.record_task_event(
+        event_id="event-1",
+        event_type="created",
+        actor_type="user",
+        actor_id="user-1",
+    )
+
+    with pytest.raises(ConflictError, match="event.*already exists"):
+        db.record_task_event(
+            event_id="event-1",
+            event_type="created",
+            actor_type="user",
+            actor_id="user-1",
+        )
+
+
+def test_record_task_event_maps_missing_task_fk_to_conflict(db: CharactersRAGDB) -> None:
+    with pytest.raises(ConflictError, match="event.*reference"):
+        db.record_task_event(
+            task_id="missing-task",
+            event_type="updated",
+            actor_type="user",
+            actor_id="user-1",
+        )
+
+
+def test_mark_task_activity_read_maps_missing_event_fk_to_conflict(db: CharactersRAGDB) -> None:
+    with pytest.raises(ConflictError, match="event"):
+        db.mark_task_activity_read("missing-event", user_id="user-1")
+
+
+def test_mark_task_activity_dismissed_maps_missing_event_fk_to_conflict(db: CharactersRAGDB) -> None:
+    with pytest.raises(ConflictError, match="event"):
+        db.mark_task_activity_dismissed("missing-event", user_id="user-1")
 
 
 def test_activity_read_and_dismiss_state_is_per_user(db: CharactersRAGDB) -> None:
