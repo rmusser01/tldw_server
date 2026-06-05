@@ -4,7 +4,7 @@ title: Implement calendar permissions and local domain service
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-05 21:08'
+updated_date: '2026-06-05 21:19'
 labels:
   - implementation
   - calendar
@@ -34,15 +34,13 @@ Implement Task 2 from the Calendar module implementation plan: calendar permissi
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-No Task 3+ recurrence, view, API, frontend, or CalDAV sync behavior was implemented.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Follow-up review fix completed. Critical finding addressed: provider-owned personal imports are no longer authorized by generic calendar membership in CalendarService.get_item() or list_items_window(); item visibility now requires the calendar/external-account owner for provider-owned imports. Normal sharing remains available for tldw-owned local items and copied provider items. No Task 3+ recurrence, view, API, frontend, or CalDAV sync behavior was implemented.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Calendar Task 2 local permissions and service layer. Added AuthNZ calendar permission constants; added calendar role evaluation helpers with injectable org-role resolution; added CalendarService for calendar CRUD, membership management, local item CRUD, provider-owned read-only guards, annotations, local tag overlays, links, and provider item copy-to-local. Added focused unit tests for viewer/editor/commenter/owner behavior, org-role resolver gating, provider read-only enforcement, annotation overlays, links, and provider-copy independence. Verification: focused permission/service tests passed (15 passed); Calendar DB regression plus permission/service tests passed (37 passed); Bandit JSON report at /tmp/bandit_calendar_task518.json had 0 findings.
+Implemented Calendar Task 2 local permissions and service layer, then applied follow-up privacy hardening for the spec review critical finding. Added AuthNZ calendar permission constants; added calendar role evaluation helpers with injectable org-role resolution; added CalendarService for calendar CRUD, membership management, local item CRUD, provider-owned read-only guards, annotations, local tag overlays, links, and provider item copy-to-local. Follow-up fix adds item-level provider import visibility so shared viewers can read/list tldw-owned local items and copied provider items, but cannot get/list provider-owned personal imports; calendar/external-account owners can still read/list provider-owned imports. Added regression tests for provider import privacy, owner visibility, copied item sharing, and existing local-item edit denial for viewers. Verification: focused permission/service tests passed (18 passed); Calendar DB regression plus permission/service tests passed (40 passed); Bandit JSON report at /tmp/bandit_calendar_task518.json had 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

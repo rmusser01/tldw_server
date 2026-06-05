@@ -226,11 +226,16 @@ class CalendarService:
             for calendar_id in calendar_ids
             if self._can_read_calendar(actor_user_id, calendar_id)
         ]
-        return self.db.list_items_window(
+        items = self.db.list_items_window(
             calendar_ids=readable_calendar_ids,
             window_start=window_start,
             window_end=window_end,
         )
+        return [
+            item
+            for item in items
+            if self._can_read_item(actor_user_id=actor_user_id, item=item)
+        ]
 
     def create_annotation(
         self,
@@ -374,6 +379,14 @@ class CalendarService:
             return False
         return True
 
+    def _can_read_item(self, *, actor_user_id: int, item: CalendarItemRow) -> bool:
+        try:
+            context = self._assert_calendar_access(actor_user_id, item.calendar_id, "read")
+            self._assert_provider_item_visible(actor_user_id, item, context)
+        except CalendarPermissionDenied:
+            return False
+        return True
+
     def _assert_calendar_access(
         self,
         actor_user_id: int,
@@ -392,6 +405,7 @@ class CalendarService:
     ) -> tuple[CalendarItemRow, CalendarAccessContext]:
         item = self.db.get_item(item_id)
         context = self._assert_calendar_access(actor_user_id, item.calendar_id, "read")
+        self._assert_provider_item_visible(actor_user_id, item, context)
         return item, context
 
     def _access_context(
@@ -410,6 +424,23 @@ class CalendarService:
     def _raise_if_provider_owned(item: CalendarItemRow) -> None:
         if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER:
             raise CalendarReadOnlyError("Provider-owned items are read-only")
+
+    def _assert_provider_item_visible(
+        self,
+        actor_user_id: int,
+        item: CalendarItemRow,
+        context: CalendarAccessContext,
+    ) -> None:
+        if not item.provider_owned and item.source_owner != CALENDAR_SOURCE_OWNER_PROVIDER:
+            return
+        if actor_user_id == context.calendar.owner_user_id:
+            return
+        if item.external_binding_id is not None:
+            binding = self.db.get_external_binding(item.external_binding_id, include_deleted=True)
+            account = self.db.get_external_account(binding.account_id, include_deleted=True)
+            if actor_user_id == account.user_id:
+                return
+        raise CalendarPermissionDenied("Provider-owned personal calendar imports are private")
 
     @staticmethod
     def _validate_membership(*, principal_type: str, role: str) -> None:
