@@ -329,6 +329,12 @@ EMBEDDINGS_ADMIN = "embeddings.admin"
 CLAIMS_REVIEW = "claims.review"
 CLAIMS_ADMIN = "claims.admin"
 
+# Calendar permissions
+CALENDAR_READ = "calendar.read"
+CALENDAR_WRITE = "calendar.write"
+CALENDAR_SYNC = "calendar.sync"
+CALENDAR_ADMIN = "calendar.admin"
+
 # Reminders / notifications permissions
 TASKS_READ = "tasks.read"
 TASKS_CONTROL = "tasks.control"

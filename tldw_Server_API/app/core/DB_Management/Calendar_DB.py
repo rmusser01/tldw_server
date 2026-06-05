@@ -685,6 +685,29 @@ class CalendarDatabase:
         with self.connection() as conn:
             return self._get_calendar_row(conn, calendar_id, include_archived=include_archived)
 
+    def list_calendars(
+        self,
+        *,
+        tenant_id: str | None = None,
+        include_archived: bool = False,
+    ) -> list[CalendarRow]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if tenant_id is not None:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        if not include_archived:
+            clauses.append("archived_at IS NULL")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"""
+            SELECT * FROM calendars
+            {where}
+            ORDER BY name ASC, id ASC
+            """  # nosec B608
+        with self.connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [self._calendar_from_row(row) for row in rows]
+
     def list_calendars_for_user(
         self,
         *,
@@ -1140,6 +1163,19 @@ class CalendarDatabase:
             )
             return self._get_annotation_row(conn, annotation_id, include_deleted=True)
 
+    def get_annotation(
+        self,
+        annotation_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> CalendarAnnotationRow:
+        with self.connection() as conn:
+            return self._get_annotation_row(
+                conn,
+                annotation_id,
+                include_deleted=include_deleted,
+            )
+
     def delete_annotation(self, annotation_id: int, *, deleted_at: str | None = None) -> int:
         with self.transaction() as conn:
             cursor = conn.execute(
@@ -1207,6 +1243,10 @@ class CalendarDatabase:
         with self.transaction() as conn:
             cursor = conn.execute("DELETE FROM calendar_links WHERE id = ?", (link_id,))
             return int(cursor.rowcount or 0)
+
+    def get_link(self, link_id: int) -> CalendarLinkRow:
+        with self.connection() as conn:
+            return self._get_link_row(conn, link_id)
 
     def list_links(self, calendar_item_id: int) -> list[CalendarLinkRow]:
         with self.connection() as conn:
