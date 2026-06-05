@@ -1277,9 +1277,10 @@ class TestUnifiedAuditService:
         await audit_service.flush()
 
         events = await audit_service.query_events()
+        severities_by_type = {event["event_type"]: event["severity"] for event in events}
 
-        for event, (_, _, expected_severity) in zip(reversed(events), test_cases):
-            assert event["severity"] == expected_severity.value
+        for event_type, _, expected_severity in test_cases:
+            assert severities_by_type[event_type.value] == expected_severity.value
 
 
 # ============================================================================

@@ -51,6 +51,7 @@ modified_files:
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
 - tldw_Server_API/tests/Audit/test_unified_audit_service.py
 - tldw_Server_API/tests/AuthNZ/integration/test_jwt_refresh_rotation_blacklist.py
+- tldw_Server_API/tests/AuthNZ_SQLite/test_quota_enforcement_http_sqlite.py
 - tldw_Server_API/tests/AuthNZ/unit/test_session_manager_configured_key.py
 - tldw_Server_API/tests/AuthNZ/unit/test_email_service.py
 - tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_api_keys.py
@@ -58,12 +59,15 @@ modified_files:
 - tldw_Server_API/tests/ChaChaNotesDB/test_flashcard_templates_db.py
 - tldw_Server_API/tests/Collections/test_collections_close.py
 - tldw_Server_API/tests/Collections/test_embedding_queue.py
+- tldw_Server_API/tests/Collections/test_reading_digests.py
 - tldw_Server_API/tests/Collections/test_reminders_notifications_db.py
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 - tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py
 - tldw_Server_API/tests/Evaluations/integration/test_webhook_multi_user_api.py
 - tldw_Server_API/tests/Evaluations/test_embeddings_abtest_idempotency.py
 - tldw_Server_API/tests/Infrastructure/test_distributed_lock.py
+- tldw_Server_API/tests/Logging/test_trace_context.py
+- tldw_Server_API/tests/MCP_unified/test_mcp_hub_governance_pack_import.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_overrides.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_shared_workspace_registry.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_hub_workspace_set_objects.py
@@ -71,10 +75,12 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
+- tldw_Server_API/tests/Monitoring/test_metrics_surface_contracts.py
 - tldw_Server_API/tests/Media/test_json_url_download.py
 - tldw_Server_API/tests/Media/test_process_code_and_uploads.py
 - tldw_Server_API/tests/MediaIngestion_NEW/conftest.py
 - tldw_Server_API/tests/MediaIngestion_NEW/integration/test_video_download_integration.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
@@ -83,12 +89,14 @@ modified_files:
 - tldw_Server_API/tests/Resource_Governance/test_e2e_workflows_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_rg_shadow_metrics.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
+- tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py
 - tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
 - tldw_Server_API/tests/Web_Scraping/test_enhanced_web_scraping_guards.py
 - tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
 - tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
+- tldw_Server_API/tests/integration/test_setup_audio_packs.py
 references:
 - https://github.com/rmusser01/tldw_server/pull/2258
 ---
@@ -148,6 +156,12 @@ CI investigation on 2026-06-04 found PR #2258 failing because the branch was sta
 2026-06-05 continued current-head recheck of run 26989907418 found additional completed shard failures before pushing: RAG query rewriting returned no fallback when WordNet was unavailable, Web Scraping guard tests mocked stale policy APIs, Audit auto-category assertions depended on nondeterministic ordering, Loguru placeholder guard found percent-style placeholders in touched production paths, Character Chat property tests expected unnormalized whitespace tags, claims rebuild health tests could still fall back to live service health, web-scraping persistence tests called a changed helper signature and exposed a missing `api_name` data-flow parameter, MCP governance-pack symlink tests parsed Windows file URIs incorrectly, MediaIngestion temp DB fixtures leaked open SQLite handles on Windows, and A/B test idempotency used shared evaluation service state. Local fixes now add a deterministic RAG keyword fallback, align tests with current policy/storage/service APIs, close temp MediaDatabase fixtures, normalize Windows file URLs, isolate evaluation storage and cache rebinding, and pass `api_name` into web storage chunking resolution. Local verification passed the combined targeted failure matrix (15 passed, 1 skipped due local ffmpeg absence), compileall on touched files, `git diff --check`, production Bandit on touched app files, and test-scope Bandit with test-only assert/random/subprocess skips. Several old-head CI jobs were still in progress, so the branch was not pushed yet.
 
 2026-06-05 continued current-head recheck of run 26989907418 found a newly completed Windows auth-db failure in `test_session_manager_persists_generated_key`. Windows reported the freshly persisted Fernet key as mode `0o666`, so `_is_valid_key_file` rejected the key on reload and the second SessionManager fell back to derived secrets that could not decrypt the generated-key token. The fix keeps Unix group/other permission-bit rejection on non-Windows platforms while allowing Windows mode bits, where ACLs are not represented by those POSIX bits, and adds regression coverage for the Windows mode-bit case.
+
+2026-06-05 pushed-head recheck of run 26996945045 found `Full Suite shard (Ubuntu / Python 3.12 / platform-mcp)` failing in `test_root_metrics_matches_router_text_export`. The test byte-compared two Prometheus text exports generated at different moments, and the process collector changed naturally between the root `/metrics` export and router text export. The fix stubs volatile stage-refresh and Prometheus process collector output in the route-surface contract test so it continues to verify the shared route builder, app-owned metrics, headers, and media type without depending on process CPU/file-descriptor samples being identical across sequential scrapes.
+
+2026-06-05 continued pushed-head recheck of run 26996945045 found additional completed failures before pushing: integrations lacked the `mocker` fixture used by setup audio-pack tests, setup audio-pack assertions used stale bundle-error wording, MediaIngestion form tests expected string collection IDs after schema normalization moved them to integers, RAG query-rewrite tests monkeypatched an NLTK LazyCorpusLoader path that could raise before patching, lifecycle worker catalog tests missed the new workspace-file inventory job poller, MCP governance-pack tests parsed Windows `file:///C:/...` repo URLs as invalid POSIX paths, Evaluations A/B idempotency and trace-context request-propagation tests inherited leaked shared-app drain state, Reading Digest scheduler tests asserted against jobs from other schedules, Windows MediaIngestion cleanup could fail on a locked temp DB file, and Audit severity tests depended on query ordering even though high-risk events can auto-flush early. Local fixes add a minimal setup-audio mocker shim, align assertions with current schemas/messages, patch RAG/MCP/worker tests at stable module boundaries, reset shared app lifecycle around affected API tests, filter Reading Digest assertions by schedule, tolerate Windows temp cleanup timing, and assert audit severity by event type instead of row order. Verification on 2026-06-05: expanded focused matrix passed locally (22 passed), compileall passed for touched tests, `git diff --check` passed, and test-scope Bandit passed with test-only skips.
+
+2026-06-05 continued pushed-head recheck of run 26996945045 found a later completed Windows auth-db failure in `test_jwt_quota_enforced_for_chat_and_rag_sqlite`. The test used `CharactersRAGDB(db_path=":memory:")` as its ChaChaNotes dependency override, but the chat endpoint persists through executor threads and SQLite in-memory databases are per connection/thread. Windows CI created schema on one connection and later queried an empty per-thread database, returning `no such table: messages` through the chat module DB error wrapper. The quota tests now use temp file-backed ChaChaNotes DB overrides and explicitly close opened connections. Verification on 2026-06-05: the full quota enforcement SQLite file passed locally (2 passed), the expanded focused matrix passed locally (91 passed), compileall passed for touched tests, and `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -182,6 +196,10 @@ Merge-state remediation for PR #2258: merged `origin/dev`, resolved the user-gui
 Current-head recheck follow-up on 2026-06-05 fixed the remaining completed failure signatures observed so far in run 26989907418 across RAG, Web Scraping, Audit, Logging, Character Chat, Claims, Evaluations A/B tests, MCP governance-pack distribution, and Windows MediaIngestion cleanup. Verification on 2026-06-05: targeted CI failure matrix passed locally (15 passed, 1 skipped because local ffmpeg is unavailable), compileall passed for touched files, `git diff --check` passed, production Bandit passed, and test-scope Bandit passed with test-only skips.
 
 Final current-head recheck follow-up on 2026-06-05 waited for all old-head CI checks in run 26989907418 to finish before pushing. The last completed failure was Windows auth-db `test_session_manager_persists_generated_key`, where Windows mode bits caused a freshly persisted Fernet key to be rejected on reload; the fix now keeps Unix permission-bit rejection on non-Windows platforms and adds Windows mode-bit regression coverage. The final Ubuntu 3.12/3.13 and macOS/Windows full-suite rows were aggregate failures caused by shard failures already inspected; the remaining long-running Ubuntu ai/chat shards canceled after earlier failures without new pytest failure summaries. Verification on 2026-06-05: expanded targeted matrix passed locally (17 passed, 1 skipped because local ffmpeg is unavailable), compileall passed for touched files, `git diff --check` passed, test-scope Bandit passed with test-only skips, and production Bandit had no findings after skipping existing `B106` token-label false positives in untouched `session_manager.py` lines.
+
+Pushed-head recheck remediation on 2026-06-05 addressed the new run 26996945045 failures across metrics route-surface comparison, setup audio-pack fixtures, MediaIngestion form schema expectations, RAG WordNet monkeypatching, lifecycle worker inventory, MCP Windows file URI handling, Evaluations and Logging shared-app lifecycle leakage, Reading Digest schedule isolation, Windows temp DB cleanup, and Audit severity order assumptions. Verification on 2026-06-05: expanded focused matrix passed locally (22 passed), compileall passed for touched tests, `git diff --check` passed, and test-scope Bandit passed with test-only skips.
+
+Additional pushed-head recheck remediation on 2026-06-05 fixed the Windows auth-db quota test failure by replacing per-thread SQLite `:memory:` ChaChaNotes overrides with temp file-backed databases in the quota HTTP tests. Verification on 2026-06-05: quota enforcement SQLite file passed locally (2 passed); expanded focused matrix passed locally (91 passed); compileall and `git diff --check` passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

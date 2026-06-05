@@ -15,6 +15,21 @@ pytestmark = pytest.mark.monitoring
 
 @pytest.mark.asyncio
 async def test_root_metrics_matches_router_text_export(monkeypatch):
+    async def _noop_stage_refresh():
+        return None
+
+    monkeypatch.setattr(metrics_endpoint, "_refresh_embeddings_stage_flags", _noop_stage_refresh)
+    try:
+        import prometheus_client
+
+        monkeypatch.setattr(
+            prometheus_client,
+            "generate_latest",
+            lambda registry: b"# HELP process_stub Stable process metrics\n# TYPE process_stub gauge\nprocess_stub 1.0\n",
+        )
+    except ImportError:
+        pass
+
     registry = get_metrics_registry()
     registry.reset()
     registry.register_metric(

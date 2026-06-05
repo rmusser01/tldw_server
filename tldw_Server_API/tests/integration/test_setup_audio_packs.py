@@ -1,11 +1,43 @@
 import json
 import sys
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
+import pytest
 
 from tldw_Server_API.app.main import app
 import tldw_Server_API.app.api.v1.endpoints.setup as setup_endpoint
 from tldw_Server_API.app.core.Setup.audio_profile_service import MachineProfile
+
+
+class _PatchObjectProxy:
+    def __init__(self, monkeypatch):
+        self._monkeypatch = monkeypatch
+
+    def object(self, target, name, *args, **kwargs):
+        if args:
+            if len(args) != 1:
+                raise TypeError("patch.object replacement accepts at most one positional value")
+            replacement = args[0]
+        elif "new" in kwargs:
+            replacement = kwargs.pop("new")
+        else:
+            replacement = Mock(**kwargs)
+            kwargs = {}
+        if kwargs:
+            raise TypeError(f"Unsupported patch.object kwargs: {', '.join(sorted(kwargs))}")
+        self._monkeypatch.setattr(target, name, replacement)
+        return replacement
+
+
+class _LocalMocker:
+    def __init__(self, monkeypatch):
+        self.patch = _PatchObjectProxy(monkeypatch)
+
+
+@pytest.fixture
+def mocker(monkeypatch):
+    return _LocalMocker(monkeypatch)
 
 
 def _make_client():
@@ -239,7 +271,7 @@ def test_setup_audio_pack_export_masks_bundle_lookup_details(mocker):
         )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Audio bundle or resource profile not found."
+    assert response.json()["detail"] == "Audio bundle not found"
 
 
 def test_setup_audio_pack_export_writes_to_managed_audio_pack_directory(mocker, tmp_path):

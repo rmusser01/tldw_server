@@ -1,5 +1,6 @@
 import os
 import stat
+from types import SimpleNamespace
 
 import pytest
 from cryptography.fernet import Fernet
@@ -121,7 +122,12 @@ def test_session_key_validation_allows_windows_mode_bits(monkeypatch, tmp_path):
     key_path.write_text(Fernet.generate_key().decode("utf-8"), encoding="utf-8")
     key_path.chmod(0o666)
 
-    monkeypatch.setattr(session_manager_module.os, "name", "nt", raising=False)
+    fake_os = SimpleNamespace(
+        name="nt",
+        stat=os.stat,
+        getuid=os.getuid if hasattr(os, "getuid") else lambda: key_path.stat().st_uid,
+    )
+    monkeypatch.setattr(session_manager_module, "os", fake_os)
 
     manager = object.__new__(SessionManager)
     assert manager._is_valid_key_file(key_path) is True

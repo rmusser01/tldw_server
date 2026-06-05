@@ -78,7 +78,7 @@ def test_env_vars():
 @pytest.fixture
 def temp_db_path() -> Generator[Path, None, None]:
     """Create a temporary database path."""
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         db_path = Path(temp_dir) / "test_media.db"
         yield db_path
 

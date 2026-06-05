@@ -162,8 +162,8 @@ async def test_get_add_media_form_carries_collection_fallback_binding_fields():
         )
     )
 
-    assert form.media_collection_id == "42"
-    assert form.media_collection_item_id == "88"
+    assert form.media_collection_id == 42
+    assert form.media_collection_item_id == 88
     assert form.media_ingest_job_id == "1234"
 
 

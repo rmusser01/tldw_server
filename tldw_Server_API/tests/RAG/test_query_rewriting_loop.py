@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.RAG.rag_service.query_features import (
     QueryIntent,
     QueryComplexity,
 )
+import tldw_Server_API.app.core.RAG.rag_service.query_features as query_features_module
 
 
 @dataclass
@@ -78,13 +79,11 @@ class TestQueryRewriterImproveForRetrieval:
 
     def test_improve_for_retrieval_without_wordnet_still_rewrites(self, monkeypatch, rewriter):
         """WordNet-free test environments still get a deterministic retrieval rewrite."""
-        def _missing_wordnet(_term):
-            raise LookupError("wordnet unavailable")
+        class _MissingWordnet:
+            def synsets(self, _term):
+                raise LookupError("wordnet unavailable")
 
-        monkeypatch.setattr(
-            "tldw_Server_API.app.core.RAG.rag_service.query_features.wordnet.synsets",
-            _missing_wordnet,
-        )
+        monkeypatch.setattr(query_features_module, "wordnet", _MissingWordnet())
 
         rewrites = rewriter.rewrite_query(
             "what is machine learning",

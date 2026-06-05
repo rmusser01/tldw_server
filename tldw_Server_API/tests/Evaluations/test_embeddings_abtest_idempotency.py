@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.Evaluations import unified_evaluation_service as eval_service_module
+from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
 
 @pytest.fixture()
@@ -15,10 +16,12 @@ def isolated_evaluations_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("EVALUATIONS_TEST_DB_PATH", str(tmp_path / "evals.db"))
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_db"))
     reset_settings()
+    reset_lifecycle_state(app)
     eval_service_module._service_instance = None
     eval_service_module._service_instances_by_user.clear()
     headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
     yield headers
+    reset_lifecycle_state(app)
     eval_service_module._service_instance = None
     eval_service_module._service_instances_by_user.clear()
     reset_settings()
