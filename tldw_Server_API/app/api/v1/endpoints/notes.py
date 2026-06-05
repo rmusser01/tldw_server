@@ -316,13 +316,23 @@ def _reconcile_note_tasks_after_save(
     current_user: User,
 ) -> None:
     """Synchronize markdown checklist tasks for a note row that was just saved."""
-    _NOTES_TASK_SERVICE.reconcile_note(
-        db=db,
-        note_id=str(note_data["id"]),
-        note_version=int(note_data["version"]),
-        content=str(note_data.get("content") or ""),
-        actor=TaskActor(actor_type="user", actor_id=str(current_user.id)),
-    )
+    note_id = str(note_data["id"])
+    note_version = int(note_data["version"])
+    try:
+        _NOTES_TASK_SERVICE.reconcile_note(
+            db=db,
+            note_id=note_id,
+            note_version=note_version,
+            content=str(note_data.get("content") or ""),
+            actor=TaskActor(actor_type="user", actor_id=str(current_user.id)),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Note task reconciliation failed after saved note {} version {}: {}",
+            note_id,
+            note_version,
+            exc,
+        )
 
 
 def _safe_note_attachment_dirname(note_id: str) -> str:

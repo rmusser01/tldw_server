@@ -67,8 +67,13 @@ class NotesTaskReconciler:
             created_count = 0
             updated_count = 0
             ambiguous_count = 0
+            placeholder_warning_count = 0
 
             for item in parsed.items:
+                if not item.text.strip():
+                    placeholder_warning_count += 1
+                    continue
+
                 match_index = self._find_match(
                     item=item,
                     live_tasks=live_tasks,
@@ -153,7 +158,7 @@ class NotesTaskReconciler:
                 unlinked_task_ids.append(unlinked["id"])
 
             parser_warning_count = sum(len(item.warnings) for item in parsed.items)
-            warning_count = parser_warning_count + ambiguous_count
+            warning_count = parser_warning_count + ambiguous_count + placeholder_warning_count
             db.set_reconciliation_state(
                 note_id=note_id,
                 note_version=note_version,
@@ -229,28 +234,14 @@ class NotesTaskReconciler:
         conn: TaskConnection,
         note_id: str,
     ) -> list[_ProjectedTask]:
-        cursor = db.task_store._read(
-            """
-            SELECT *
-              FROM note_tasks
-             WHERE note_id = ?
-               AND deleted = ?
-               AND projection_status = ?
-             ORDER BY created_at ASC, id ASC
-            """,
-            (note_id, db.task_store._deleted_value(False), "live"),
+        projected_pairs = db.task_store.list_live_projected_tasks(
+            note_id=note_id,
             conn=conn,
         )
-        projected_tasks: list[_ProjectedTask] = []
-        for row in cursor.fetchall():
-            task = db.task_store._decode_task_row(row)
-            if task is None:
-                continue
-            projection = db.task_store._fetch_projection(task["id"], conn=conn)
-            if projection is None:
-                continue
-            projected_tasks.append(_ProjectedTask(task=task, projection=projection))
-        return projected_tasks
+        return [
+            _ProjectedTask(task=pair["task"], projection=pair["projection"])
+            for pair in projected_pairs
+        ]
 
     def _find_match(
         self,
