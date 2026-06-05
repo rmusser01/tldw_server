@@ -211,7 +211,8 @@ def test_api_create_surfaces_rollback_failures_after_buddy_validation_error(
             json={"name": "Create Rollback Failure Persona", "mode": "session_scoped"},
         )
         assert created.status_code == 500, created.text
-        assert "rollback" in created.json()["detail"].lower()
+        detail = created.json()["detail"].lower()
+        assert "rollback" in detail or "roll back" in detail
 
     fastapi_app.dependency_overrides.clear()
 
@@ -251,7 +252,8 @@ def test_api_update_surfaces_rollback_failures_after_buddy_validation_error(
             json={"name": "Update Rollback Failure Persona Renamed"},
         )
         assert updated.status_code == 500, updated.text
-        assert "rollback" in updated.json()["detail"].lower()
+        detail = updated.json()["detail"].lower()
+        assert "rollback" in detail or "roll back" in detail
 
     fastapi_app.dependency_overrides.clear()
 

@@ -182,6 +182,7 @@ class PolicyLoader:
         # Use a lock to avoid concurrent loads
         async with self._lock:
             snap = self._snapshot
+            cur_version: int | None = None
             if self._store is not None:
                 try:
                     _res = await self._store.get_latest_policy()
@@ -191,6 +192,7 @@ class PolicyLoader:
                             _v, _p, _t, updated_at = _res
                         else:
                             _v, _p, _t, _rm, updated_at = _res[0], _res[1], _res[2], _res[3], _res[4]
+                        cur_version = int(_v)
                         cur_mtime = float(updated_at)
                     else:
                         cur_mtime = time.time()
@@ -205,7 +207,8 @@ class PolicyLoader:
                     return
             else:
                 cur_mtime = self._path.stat().st_mtime if self._path.exists() else 0
-            if snap is None or cur_mtime > snap.mtime:
+            version_changed = cur_version is not None and snap is not None and cur_version != snap.version
+            if snap is None or version_changed or cur_mtime > snap.mtime:
                 await self.load_once()
 
     async def shutdown(self) -> None:

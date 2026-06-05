@@ -17,9 +17,24 @@ import json
 from pathlib import Path
 import tempfile
 import sqlite3
+import gc
+import time
 
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+
+
+def _unlink_sqlite_file(path: Path) -> None:
+    """Remove a SQLite temp file after releasing delayed Windows handles."""
+    for attempt in range(5):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            gc.collect()
+            time.sleep(0.05)
 
 
 @pytest.mark.usefixtures("mock_llm_analyze")
@@ -180,15 +195,14 @@ class TestErrorScenarios:
             assert evaluator.embedding_available == False
 
     @pytest.mark.asyncio
-    async def test_database_corruption(self):
+    async def test_database_corruption(self, tmp_path, monkeypatch):
         """Test handling of database corruption."""
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            db_path = Path(f.name)
+        db_path = tmp_path / "corrupt_evaluations.db"
 
         try:
             # Corrupt the database
-            with open(db_path, 'wb') as f:
-                f.write(b"This is not a valid SQLite database")
+            db_path.write_bytes(b"This is not a valid SQLite database")
+            monkeypatch.setenv("ENVIRONMENT", "production")
 
             # Patch the db_path for the manager
             with patch('tldw_Server_API.app.core.Evaluations.evaluation_manager.EvaluationManager._get_db_path') as mock_path:
@@ -199,8 +213,7 @@ class TestErrorScenarios:
                 with pytest.raises((sqlite3.DatabaseError, RuntimeError)):
                     manager = EvaluationManager()
         finally:
-            if db_path.exists():
-                db_path.unlink()
+            _unlink_sqlite_file(db_path)
 
     @pytest.mark.asyncio
     async def test_circular_reference_handling(self, evaluation_manager):
@@ -431,8 +444,7 @@ class TestEdgeCases:
 
             assert version >= 4  # Should be at latest version
         finally:
-            if db_path.exists():
-                db_path.unlink()
+            _unlink_sqlite_file(db_path)
 
 
 if __name__ == "__main__":

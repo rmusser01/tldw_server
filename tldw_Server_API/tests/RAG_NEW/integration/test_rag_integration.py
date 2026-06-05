@@ -600,6 +600,16 @@ class TestPerformanceIntegration:
         import gc
 
         process = psutil.Process()
+
+        # Exclude one-time module/retriever initialization from the leak guard.
+        _ = await unified_rag_pipeline(
+            query="warmup",
+            top_k=10,
+            enable_cache=False,
+            search_mode="fts",
+            media_db_path=str(populated_media_db.db_path)
+        )
+        gc.collect()
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
 
         # Run many queries
@@ -608,6 +618,7 @@ class TestPerformanceIntegration:
                 query=f"Query {i}",
                 top_k=10,
                 enable_cache=False,
+                search_mode="fts",
                 media_db_path=str(populated_media_db.db_path)
             )
             if i % 10 == 0:

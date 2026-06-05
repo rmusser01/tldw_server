@@ -1166,10 +1166,10 @@ def test_add_media_multiple_failures_and_success_pdf(
     if not SAMPLE_PDF_PATH.exists(): pytest.skip(f"Test file not found: {SAMPLE_PDF_PATH}")
 
     good_pdf_file_tuple = create_upload_file(SAMPLE_PDF_PATH)
-    # Create an invalid PDF (wrong content but .pdf extension) so it passes upload
+    # Create an invalid PDF with a PDF header so MIME validation passes and PDF parsing fails.
     invalid_pdf_path = TEST_MEDIA_DIR / "invalid.pdf"
     try:
-        invalid_pdf_path.write_bytes(b"not a pdf")
+        invalid_pdf_path.write_bytes(b"%PDF-1.4\n% invalid fixture\nnot a valid xref\n%%EOF\n")
     except Exception as e:
         pytest.skip(f"Failed to create invalid PDF for test: {e}")
     invalid_format_file_tuple = create_upload_file(invalid_pdf_path)
@@ -1291,6 +1291,7 @@ def test_add_media_multiple_failures_and_success_pdf(
     "failed to open file" in error_msg or \
     "invalid file" in error_msg or \
     "cannot parse" in error_msg or \
+    "validation failed" in error_msg or \
     "pymupdf" in error_msg, f"Expected PDF processing error for real invalid file, got: {error_msg}"
     assert results_map[invalid_pdf_path.name].get("db_id") is None
 
@@ -1640,16 +1641,18 @@ def test_process_audio_with_analysis_mocked(mock_analyze, test_api_client, db_se
     check_processing_only_item_result_structure(result, "audio", mock_analysis_text, "mock_llm", check_content=False)
 
 
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.perform_transcription")
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.analyze")
 @pytest.mark.timeout(240)  # Video processing can be very slow
-def test_process_video_with_analysis_mocked(mock_analyze, test_api_client, db_session, create_upload_file,
+def test_process_video_with_analysis_mocked(mock_analyze, mock_transcription, test_api_client, db_session, create_upload_file,
                                             dummy_headers):
-    """Test Video analysis via /process-videos, mocking only the analyze call."""
+    """Test Video analysis via /process-videos without invoking local transcription models."""
     if not SAMPLE_VIDEO_PATH.exists():
         pytest.skip(f"Test file not found: {SAMPLE_VIDEO_PATH}")
 
     mock_analysis_text = "Mocked analysis for Video."
     mock_analyze.return_value = mock_analysis_text
+    mock_transcription.return_value = ("Mocked video transcript.", [])
 
     skip_if_transcription_model_unavailable(TEST_VIDEO_TRANSCRIPTION_MODEL)
     form_data_dict = create_add_media_form_data(

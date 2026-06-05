@@ -2,9 +2,11 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MediaDBRetriever, RetrievalConfig
 
 
@@ -62,7 +64,7 @@ def _setup_sqlite_media_db(db_path: str):
 
 @pytest.mark.integration
 def test_bm25_title_vs_content_weights_flip_order(monkeypatch):
-     # Ensure raw SQL fallback is allowed (not production)
+    # Ensure raw SQL fallback is allowed (not production)
     os.environ["tldw_production"] = "false"
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -85,6 +87,7 @@ def test_bm25_title_vs_content_weights_flip_order(monkeypatch):
                 return [str(d.id) for d in docs]
             finally:
                 retr.close()
+                reset_managed_sqlite_backends(sqlite_targets=[db_path, str(Path(db_path).resolve())])
 
         try:
             # Title weight high
@@ -95,6 +98,4 @@ def test_bm25_title_vs_content_weights_flip_order(monkeypatch):
             # Expect that the ordering flips with strong weight changes
             assert order_title[0] != order_content[0], f"Expected different top result; got {order_title[0]} vs {order_content[0]}"
         finally:
-            from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
-
-            reset_managed_sqlite_backends(sqlite_targets=[db_path])
+            reset_managed_sqlite_backends(sqlite_targets=[db_path, str(Path(db_path).resolve())])

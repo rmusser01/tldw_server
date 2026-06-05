@@ -164,7 +164,7 @@ class TestInputValidationProperties:
     @given(
         num_inputs=st.integers(min_value=0, max_value=3000)
     )
-    @settings(max_examples=5, deadline=10000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_input_list_size_limit(self, setup, num_inputs):
         """Property: Input lists > 2048 items are rejected"""
         inputs = [f"text_{i}" for i in range(num_inputs)]

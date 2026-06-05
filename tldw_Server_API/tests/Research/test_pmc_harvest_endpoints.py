@@ -131,6 +131,9 @@ async def test_pmc_oa_ingest_pdf_success(monkeypatch, paper_search_app):
     from tldw_Server_API.app.core.Third_Party import PMC_OA as _OA
     monkeypatch.setattr(_OA, "download_pmc_pdf", _fake_download_pdf)
 
+    from tldw_Server_API.app.core.Third_Party import PMC_OAI as _OAI
+    monkeypatch.setattr(_OAI, "pmc_oai_get_record", lambda identifier, metadataPrefix: (None, None))
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib as _PDF
     monkeypatch.setattr(_PDF, "process_pdf_task", _fake_process_pdf_task)
 

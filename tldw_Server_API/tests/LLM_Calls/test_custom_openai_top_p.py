@@ -157,6 +157,7 @@ def test_custom_openai_2_merges_extra_body_and_headers():
             {
                 "messages": [{"role": "user", "content": "ping"}],
                 "model": "model-2",
+                "base_url": "https://custom-openai-2.test/v1",
                 "extra_headers": {"X-Test": "1"},
                 "extra_body": {"custom_flag": True, "model": "override"},
             }

@@ -96,7 +96,7 @@ async def test_shutdown_job_poller_handoff_uses_session_engine_env_and_job_manag
         recorded["active_processing"] = count_active_processing()
         await stop_registered_job_pollers(current_app, poller_handles)
 
-    monkeypatch.setattr(handoff_module._env_os, "getenv", lambda *_args, **_kwargs: "12")
+    monkeypatch.setenv("JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC", "12")
     monkeypatch.setattr(handoff_module, "_load_shutdown_job_manager", lambda: _FakeJobManager)
 
     handles = await handoff_module.shutdown_job_poller_handoff(
@@ -152,7 +152,7 @@ async def test_shutdown_job_poller_handoff_filters_to_tasked_job_poller_phase(
         recorded["poller_handles"] = poller_handles
         await stop_registered_job_pollers(current_app, poller_handles)
 
-    monkeypatch.setattr(handoff_module._env_os, "getenv", lambda *_args, **_kwargs: "0")
+    monkeypatch.setenv("JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC", "0")
 
     handles = await handoff_module.shutdown_job_poller_handoff(
         app=app,
@@ -205,7 +205,7 @@ async def test_shutdown_job_poller_handoff_preserves_already_quiesced_names(
     def _raise_import_error() -> type[object]:
         raise ImportError("jobs manager unavailable")
 
-    monkeypatch.setattr(handoff_module._env_os, "getenv", lambda *_args, **_kwargs: "not-an-int")
+    monkeypatch.setenv("JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC", "not-an-int")
     monkeypatch.setattr(handoff_module, "_load_shutdown_job_manager", _raise_import_error)
 
     handles = await handoff_module.shutdown_job_poller_handoff(

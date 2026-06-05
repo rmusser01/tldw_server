@@ -17,6 +17,16 @@ def _make_client():
 def test_complete_setup_with_install_plan_triggers_background_task(mocker):
     install_calls = []
 
+    class _FakeFirstRunStore:
+        def validate_completion_ready(self):
+            return None
+
+        def mark_completed_with_legacy_flag(self, mark_legacy_complete):
+            mark_legacy_complete()
+
+    async def _fake_first_run_store_call(callback):
+        return callback(_FakeFirstRunStore())
+
     mocker.patch.object(
         setup_endpoint.setup_manager,
         'get_status_snapshot',
@@ -28,6 +38,11 @@ def test_complete_setup_with_install_plan_triggers_background_task(mocker):
         setup_endpoint,
         'execute_install_plan',
         side_effect=lambda payload: install_calls.append(payload),
+    )
+    mocker.patch.object(
+        setup_endpoint,
+        '_run_first_run_store_call',
+        side_effect=_fake_first_run_store_call,
     )
 
     payload = {
@@ -46,7 +61,7 @@ def test_complete_setup_with_install_plan_triggers_background_task(mocker):
     with _make_client() as client:
         response = client.post('/api/v1/setup/complete', json=payload)
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body['install_plan_submitted'] is True
     assert install_calls == [payload['install_plan']]

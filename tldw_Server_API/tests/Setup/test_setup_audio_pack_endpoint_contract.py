@@ -1,4 +1,5 @@
 import json
+from pathlib import PurePosixPath
 
 import pytest
 
@@ -55,7 +56,9 @@ async def test_export_audio_pack_writes_to_managed_directory(mocker, tmp_path):
         None,
     )
 
-    assert result["pack_path"] == "audio_packs/managed-pack.json"
+    assert PurePosixPath(result["pack_path"].replace("\\", "/")) == PurePosixPath(
+        "audio_packs/managed-pack.json"
+    )
     assert (config_root / "audio_packs" / "managed-pack.json").is_file()
 
 

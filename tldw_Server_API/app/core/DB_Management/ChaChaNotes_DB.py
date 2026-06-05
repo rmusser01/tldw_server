@@ -668,6 +668,7 @@ class CharactersRAGDB:
     _SQLITE_SCHEMA_TABLE_INFO_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA table_info('persona_profiles')",
         "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
+        "persona_visual_candidates": "PRAGMA table_info('persona_visual_candidates')",
     }
     _SQLITE_SCHEMA_INDEX_LIST_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA index_list('persona_profiles')",
@@ -5376,9 +5377,6 @@ UPDATE db_schema_version
 ───────────────────────────────────────────────────────────────*/
 PRAGMA foreign_keys = ON;
 
-ALTER TABLE persona_visual_candidates
-  ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}';
-
 CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
   id                     TEXT PRIMARY KEY NOT NULL,
   target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -7709,6 +7707,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V46 to V47 for DB: {self.db_path_str}...")
         try:
             self._ensure_workspace_migration_schema_sqlite(conn)
+            candidate_columns = self._sqlite_column_names(conn, "persona_visual_candidates")
+            if "generation_provenance_json" not in candidate_columns:
+                conn.execute(
+                    "ALTER TABLE persona_visual_candidates "
+                    "ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}'"
+                )
             conn.executescript(self._MIGRATION_SQL_V46_TO_V47)
             final_version = self._get_db_version(conn)
             if final_version != 47:
