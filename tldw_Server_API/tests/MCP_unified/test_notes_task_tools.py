@@ -497,6 +497,37 @@ async def test_notes_tasks_list_skips_reconciliation_when_reconcile_limit_is_zer
 
 
 @pytest.mark.asyncio
+async def test_notes_tasks_list_queries_all_scoped_notes_after_reconcile_budget_is_exhausted() -> None:
+    module, db, service = _module_with_fakes()
+    db.tasks["task-late-scope"] = db._task(
+        "task-late-scope",
+        note_id="note-2",
+        text="Later scoped match",
+        version=1,
+    )
+    db.projections["task-late-scope"] = {
+        "note_id": "note-2",
+        "note_version": 3,
+        "line_number": 1,
+        "start_offset": 0,
+        "end_offset": 24,
+        "raw_line": "- [ ] Later scoped match",
+        "has_child_content": False,
+        "projection_status": "live",
+    }
+
+    listed = await module.execute_tool(
+        "notes.tasks.list",
+        {"query": "Later scoped", "reconcile_limit": 1, "limit": 10},
+        context=_ctx(persona_scope={"explicit_ids": {"note_id": ["note-1", "note-2"]}}),
+    )
+
+    assert [task["id"] for task in listed["tasks"]] == ["task-late-scope"]  # nosec B101
+    assert service.ensure_note_calls == ["note-1"]  # nosec B101
+    assert listed["reconciliation"]["processed_notes"] == 1  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_agent_write_requires_confirmation_and_autonomous_write_is_denied_without_mutation() -> None:
     module, db, service = _module_with_fakes()
 

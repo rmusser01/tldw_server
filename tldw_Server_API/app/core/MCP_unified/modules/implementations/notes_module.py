@@ -1014,18 +1014,21 @@ class NotesModule(BaseModule):
                 else:
                     fetched_tasks = []
                     processed = 0
+                    skipped_reconciliation = 0
+                    target_fetch = min(limit + offset, 500)
                     for scoped_note_id in sorted(scoped_note_ids):
-                        if len(fetched_tasks) >= min(limit + offset, 500):
+                        if len(fetched_tasks) >= target_fetch:
                             break
                         if reconcile_limit > 0:
-                            if processed >= reconcile_limit:
-                                break
-                            self._task_service.ensure_note_reconciled(
-                                db=db,
-                                note_id=str(scoped_note_id),
-                                actor=actor,
-                            )
-                            processed += 1
+                            if processed < reconcile_limit:
+                                self._task_service.ensure_note_reconciled(
+                                    db=db,
+                                    note_id=str(scoped_note_id),
+                                    actor=actor,
+                                )
+                                processed += 1
+                            else:
+                                skipped_reconciliation += 1
                         fetched_tasks.extend(
                             db.list_tasks(
                                 note_id=str(scoped_note_id),
@@ -1035,14 +1038,14 @@ class NotesModule(BaseModule):
                                 metadata_filters=metadata_filters,
                                 offset=0,
                                 include_unlinked=include_unlinked,
-                                limit=min(limit + offset, 500) - len(fetched_tasks),
+                                limit=target_fetch - len(fetched_tasks),
                             )
                         )
                     tasks = fetched_tasks[offset:offset + limit]
                     reconciliation = {
-                        "status": "clean",
+                        "status": "incomplete" if skipped_reconciliation else "clean",
                         "processed_notes": processed,
-                        "remaining_stale_notes": 0,
+                        "remaining_stale_notes": skipped_reconciliation,
                     }
 
             return {
