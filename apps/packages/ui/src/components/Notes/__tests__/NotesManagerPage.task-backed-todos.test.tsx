@@ -253,7 +253,7 @@ const setupTaskBackedNoteMock = (options: { conflictOnSave?: boolean } = {}) => 
       return { tasks: [] }
     }
 
-    if (path.startsWith("/api/v1/notes/note-1?expected_version=") && method === "PUT") {
+    if (path === "/api/v1/notes/note-1" && method === "PUT") {
       if (options.conflictOnSave) {
         const error = new Error("version mismatch") as Error & { status?: number }
         error.status = 409
