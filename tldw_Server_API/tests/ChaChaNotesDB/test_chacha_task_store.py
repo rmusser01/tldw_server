@@ -207,6 +207,20 @@ def test_list_helpers_clamp_negative_limits(db: CharactersRAGDB) -> None:
     assert len(db.list_task_activity(limit=-10)) == 1  # nosec B101
 
 
+def test_list_recent_task_activity_returns_newest_without_changing_default_order(db: CharactersRAGDB) -> None:
+    note_id = _create_note(db)
+    task = _create_task(db, note_id)
+    first = db.record_task_event(task_id=task["id"], note_id=note_id, event_type="updated", actor_type="user")
+    second = db.record_task_event(task_id=task["id"], note_id=note_id, event_type="updated", actor_type="agent")
+    third = db.record_task_event(task_id=task["id"], note_id=note_id, event_type="updated", actor_type="agent")
+
+    ascending_events = db.list_task_activity(task_id=task["id"], limit=10)
+    recent_events = db.list_recent_task_activity(task_id=task["id"], limit=2)
+
+    assert [event["id"] for event in ascending_events[-3:]] == [first["id"], second["id"], third["id"]]  # nosec B101
+    assert [event["id"] for event in recent_events] == [third["id"], second["id"]]  # nosec B101
+
+
 def test_list_helpers_reject_nonnumeric_limits(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
