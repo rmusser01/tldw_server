@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.Notes_Tasks.models import (
 _CHECKLIST_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])[ \t]+\[(?P<marker>[ xX])\](?:[ \t]+(?P<body>.*)|[ \t]*)$"
 )
-_FENCE_RE = re.compile(r"^(?P<indent>[ \t]{0,3})(?P<fence>`{3,}|~{3,})")
+_FENCE_RE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})")
 _INDENTED_FENCE_RE = re.compile(r"^(?P<indent>[ \t]+)(?P<fence>`{3,}|~{3,})")
 _LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?:[ \t]+.*)?$")
 _TOKEN_RE = re.compile(r"@(?P<name>[A-Za-z][A-Za-z0-9_-]*)\((?P<value>[^)]*)\)")
@@ -40,6 +40,7 @@ class _Line:
 class _LineContext:
     line: _Line
     indent_width: int
+    boundary_indent_width: int
     is_blank: bool
     is_code_block: bool
     line_hash: int
@@ -142,11 +143,12 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
     for line in lines:
         is_blank = line.raw.strip() == ""
         indent_width = 0 if is_blank else _indent_width(line.raw)
-        if not is_blank:
+        if not is_blank and active_fence is None:
             while list_indent_stack and indent_width <= list_indent_stack[-1]:
                 list_indent_stack.pop()
 
-        is_fenced_code = active_fence is not None
+        fence_for_line = active_fence
+        is_fenced_code = fence_for_line is not None
         list_context_active = bool(list_indent_stack)
         fence_marker = _find_fence_marker(
             raw_line=line.raw,
@@ -159,16 +161,21 @@ def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
                 indent_width=fence_marker.indent_width,
                 allow_indented_close=list_context_active,
             )
+            fence_for_line = active_fence
             is_fenced_code = True
         elif active_fence is not None and _is_closing_fence(line.raw, active_fence):
             active_fence = None
 
         is_top_level_indented_code = indent_width >= 4 and not list_indent_stack and not is_fenced_code
         is_code_block = is_fenced_code or is_top_level_indented_code
+        boundary_indent_width = indent_width
+        if is_fenced_code and fence_for_line is not None and fence_for_line.allow_indented_close:
+            boundary_indent_width = max(indent_width, fence_for_line.indent_width)
         contexts.append(
             _LineContext(
                 line=line,
                 indent_width=indent_width,
+                boundary_indent_width=boundary_indent_width,
                 is_blank=is_blank,
                 is_code_block=is_code_block,
                 line_hash=_hash_line(line.raw),
@@ -288,7 +295,7 @@ def _next_nonblank_lte_indent_indexes(line_contexts: list[_LineContext]) -> list
         if context.is_blank:
             continue
 
-        while stack and line_contexts[stack[-1]].indent_width > context.indent_width:
+        while stack and line_contexts[stack[-1]].boundary_indent_width > context.boundary_indent_width:
             stack.pop()
 
         next_indexes[line_index] = stack[-1] if stack else line_count

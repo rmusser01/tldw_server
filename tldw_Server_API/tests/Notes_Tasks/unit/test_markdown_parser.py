@@ -71,6 +71,15 @@ def test_parse_keeps_indented_fence_marker_inside_top_level_fence_as_code() -> N
     assert result.items[0].locator.line_number == 5
 
 
+def test_parse_treats_tab_indented_fence_marker_as_indented_code() -> None:
+    markdown = "\t```\n- [ ] real\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["real"]
+    assert result.items[0].locator.line_number == 2
+
+
 def test_parse_ignores_checklist_markers_inside_nested_backtick_fences() -> None:
     markdown = (
         "\n".join(
@@ -112,6 +121,18 @@ def test_parse_keeps_over_indented_marker_inside_nested_fence_as_code() -> None:
     assert result.items[1].locator.line_number == 6
 
 
+def test_fenced_code_content_changes_parent_block_fingerprint_at_lower_indent() -> None:
+    markdown_a = "- [ ] Parent\n  ```\ncode A\n  ```\n- [ ] Sibling\n"
+    markdown_b = "- [ ] Parent\n  ```\ncode B\n  ```\n- [ ] Sibling\n"
+
+    result_a = parse_note_checklists(note_id="note-1", note_version=1, content=markdown_a)
+    result_b = parse_note_checklists(note_id="note-1", note_version=1, content=markdown_b)
+
+    assert [item.text for item in result_a.items] == ["Parent", "Sibling"]
+    assert [item.text for item in result_b.items] == ["Parent", "Sibling"]
+    assert result_a.items[0].locator.block_fingerprint != result_b.items[0].locator.block_fingerprint
+
+
 def test_parse_ignores_checklist_markers_inside_nested_tilde_fences() -> None:
     markdown = (
         "\n".join(
@@ -151,6 +172,15 @@ def test_parse_keeps_actual_nested_checklist_items_at_code_indent() -> None:
         "Nested task at four spaces",
     ]
     assert result.items[1].locator.line_number == 2
+
+
+def test_parse_does_not_include_ordered_list_checkboxes() -> None:
+    markdown = "1. [ ] Ordered task\n- [ ] Unordered task\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=1, content=markdown)
+
+    assert [item.text for item in result.items] == ["Unordered task"]
+    assert result.items[0].locator.line_number == 2
 
 
 def test_parse_supports_checked_markers_and_bullet_variants() -> None:
