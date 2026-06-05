@@ -310,7 +310,7 @@ class TaskStore:
             elif new_status == "open":
                 completed_at = None
 
-            self._execute(
+            update_cursor = self._execute(
                 transaction_conn,
                 """
                 UPDATE tasks
@@ -334,6 +334,12 @@ class TaskStore:
                     expected_version,
                 ),
             )
+            if getattr(update_cursor, "rowcount", None) == 0:
+                raise ConflictError(
+                    f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
             updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
             if updated is None:
                 raise ConflictError(
@@ -651,12 +657,19 @@ class TaskStore:
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
 
-    def mark_task_activity_read(self, event_id: str, *, user_id: str) -> dict[str, Any]:
+    def mark_task_activity_read(
+        self,
+        event_id: str,
+        *,
+        user_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any]:
         """Mark an activity event read for one user."""
         now = self._db._get_current_utc_timestamp_iso()
-        with self._db.transaction() as conn:
+
+        def _execute_read(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._execute(
-                conn,
+                transaction_conn,
                 """
                 INSERT INTO task_event_read_state (event_id, user_id, read_at, dismissed_at)
                 VALUES (?, ?, ?, NULL)
@@ -665,17 +678,26 @@ class TaskStore:
                 """,
                 (event_id, user_id, now),
             )
-            state = self.get_task_activity_read_state(event_id, user_id=user_id, conn=conn)
+            state = self.get_task_activity_read_state(event_id, user_id=user_id, conn=transaction_conn)
             if state is None:
                 raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
             return state
 
-    def mark_task_activity_dismissed(self, event_id: str, *, user_id: str) -> dict[str, Any]:
+        return self._with_transaction(_execute_read, conn)
+
+    def mark_task_activity_dismissed(
+        self,
+        event_id: str,
+        *,
+        user_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any]:
         """Mark an activity event dismissed for one user."""
         now = self._db._get_current_utc_timestamp_iso()
-        with self._db.transaction() as conn:
+
+        def _execute_dismiss(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._execute(
-                conn,
+                transaction_conn,
                 """
                 INSERT INTO task_event_read_state (event_id, user_id, read_at, dismissed_at)
                 VALUES (?, ?, ?, ?)
@@ -685,10 +707,12 @@ class TaskStore:
                 """,
                 (event_id, user_id, now, now),
             )
-            state = self.get_task_activity_read_state(event_id, user_id=user_id, conn=conn)
+            state = self.get_task_activity_read_state(event_id, user_id=user_id, conn=transaction_conn)
             if state is None:
                 raise CharactersRAGDBError(f"Failed to read task event read state for '{event_id}'.")  # noqa: TRY003
             return state
+
+        return self._with_transaction(_execute_dismiss, conn)
 
     def get_task_activity_read_state(
         self,

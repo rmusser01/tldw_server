@@ -104,6 +104,34 @@ def test_update_status_uses_optimistic_locking(db: CharactersRAGDB) -> None:
         )
 
 
+def test_update_task_record_rejects_zero_rowcount_update(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    original_execute = db.task_store._execute
+
+    class _ZeroRowcount:
+        rowcount = 0
+
+    def _simulate_concurrent_update(conn, query, params=None):
+        if "UPDATE tasks" in query and "version = version + 1" in query:
+            return _ZeroRowcount()
+        return original_execute(conn, query, params)
+
+    monkeypatch.setattr(db.task_store, "_execute", _simulate_concurrent_update)
+
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db.update_task_record(
+            task_id="task-1",
+            expected_version=1,
+            status="done",
+            actor_type="user",
+            actor_id="user-1",
+        )
+
+
 def test_reopen_clears_completed_at_and_records_event_history(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
     _create_task(db, note_id)
@@ -255,6 +283,35 @@ def test_activity_read_and_dismiss_state_is_per_user(db: CharactersRAGDB) -> Non
     assert dismissed["read_at"] == read["read_at"]  # nosec B101
     assert dismissed["dismissed_at"] is not None  # nosec B101
     assert db.get_task_activity_read_state(event["id"], user_id="user-2") is None  # nosec B101
+
+
+def test_activity_read_and_dismiss_helpers_accept_explicit_transaction_connection(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = _create_note(db)
+    _create_task(db, note_id)
+    event = db.record_task_event(
+        task_id="task-1",
+        note_id=note_id,
+        event_type="status_changed",
+        actor_type="agent",
+        actor_id="assistant-1",
+        old_value={"status": "open"},
+        new_value={"status": "done"},
+    )
+
+    with db.transaction() as conn:
+        monkeypatch.setattr(
+            db,
+            "transaction",
+            lambda: pytest.fail("task activity helpers should use the explicit transaction connection"),
+        )
+        read = db.mark_task_activity_read(event["id"], user_id="user-1", conn=conn)
+        dismissed = db.mark_task_activity_dismissed(event["id"], user_id="user-1", conn=conn)
+
+    assert read["read_at"] is not None  # nosec B101
+    assert dismissed["dismissed_at"] is not None  # nosec B101
 
 
 def test_candidate_notes_for_task_discovery_excludes_currently_reconciled_notes(db: CharactersRAGDB) -> None:
