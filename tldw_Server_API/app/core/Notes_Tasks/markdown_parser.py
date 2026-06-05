@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.Notes_Tasks.models import (
 _CHECKLIST_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])[ \t]+\[(?P<marker>[ xX])\](?:[ \t]+(?P<body>.*)|[ \t]*)$"
 )
+_FENCE_RE = re.compile(r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})")
+_LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?:[ \t]+.*)?$")
 _TOKEN_RE = re.compile(r"@(?P<name>[A-Za-z][A-Za-z0-9_-]*)\((?P<value>[^)]*)\)")
 _ESTIMATE_RE = re.compile(r"^\d+[mhd]$")
 _DUE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -38,6 +40,7 @@ class _LineContext:
     line: _Line
     indent_width: int
     is_blank: bool
+    is_code_block: bool
     line_hash: int
 
 
@@ -117,22 +120,71 @@ def _split_lines(content: str) -> list[_Line]:
 
 def _build_line_contexts(lines: list[_Line]) -> list[_LineContext]:
     contexts: list[_LineContext] = []
+    active_fence: tuple[str, int] | None = None
+    list_indent_stack: list[int] = []
+
     for line in lines:
         is_blank = line.raw.strip() == ""
+        indent_width = 0 if is_blank else _indent_width(line.raw)
+        if not is_blank:
+            while list_indent_stack and indent_width <= list_indent_stack[-1]:
+                list_indent_stack.pop()
+
+        is_fenced_code = active_fence is not None
+        fence_marker = _find_fence_marker(line.raw)
+        if active_fence is None and fence_marker is not None:
+            active_fence = fence_marker
+            is_fenced_code = True
+        elif active_fence is not None and _is_closing_fence(line.raw, active_fence):
+            active_fence = None
+
+        is_top_level_indented_code = indent_width >= 4 and not list_indent_stack and not is_fenced_code
+        is_code_block = is_fenced_code or is_top_level_indented_code
         contexts.append(
             _LineContext(
                 line=line,
-                indent_width=0 if is_blank else _indent_width(line.raw),
+                indent_width=indent_width,
                 is_blank=is_blank,
+                is_code_block=is_code_block,
                 line_hash=_hash_line(line.raw),
             )
         )
+
+        if not is_blank and not is_code_block and _is_list_item_line(line.raw):
+            list_indent_stack.append(indent_width)
+
     return contexts
+
+
+def _find_fence_marker(raw_line: str) -> tuple[str, int] | None:
+    match = _FENCE_RE.match(raw_line)
+    if match is None:
+        return None
+
+    fence = match.group("fence")
+    return fence[0], len(fence)
+
+
+def _is_closing_fence(raw_line: str, active_fence: tuple[str, int]) -> bool:
+    fence_char, fence_length = active_fence
+    stripped = raw_line.strip()
+    return (
+        len(stripped) >= fence_length
+        and set(stripped) == {fence_char}
+        and stripped.startswith(fence_char * fence_length)
+    )
+
+
+def _is_list_item_line(raw_line: str) -> bool:
+    return _LIST_ITEM_RE.match(raw_line) is not None
 
 
 def _find_checklist_lines(line_contexts: list[_LineContext]) -> list[_ChecklistLine]:
     checklist_lines: list[_ChecklistLine] = []
     for line_index, context in enumerate(line_contexts):
+        if context.is_code_block:
+            continue
+
         line = context.line
         match = _CHECKLIST_RE.match(line.raw)
         if match is None:
