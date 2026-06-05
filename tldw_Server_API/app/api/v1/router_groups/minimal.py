@@ -13,7 +13,13 @@ from tldw_Server_API.app.api.v1.router_groups.conditional import (
     ImportedRouterSpec,
     append_imported_router_spec,
 )
+from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router_specs
+from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.factories import evaluations_router_factory
+from tldw_Server_API.app.api.v1.router_groups.selection import (
+    RouterSpecOverride,
+    select_router_specs_by_name,
+)
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.testing import (
     audio_imports_enabled_for_runtime,
@@ -23,112 +29,42 @@ from tldw_Server_API.app.core.testing import (
 
 API_V1_PREFIX = "/api/v1"
 REQUIRED_ROUTER_SKIP_EXCEPTIONS: tuple[type[Exception], ...] = ()
+MINIMAL_REQUIRED_ROUTER_NAMES = (
+    "health",
+    "auth",
+    "research",
+    "research_runs",
+    "paper_search",
+    "chat",
+    "chat_loop",
+    "conversations_alias",
+    "characters",
+    "character_memory",
+    "character_chat_sessions",
+    "character_messages",
+    "workspace_migrations",
+    "workspaces",
+)
 
 
 def iter_minimal_test_router_specs() -> Iterable[RouterSpec]:
     """Yield the always-included minimal-test router specs."""
-    specs: list[RouterSpec] = []
-    for definition in (
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.health",
-            log_name="health",
-            prefix=f"{API_V1_PREFIX}",
-            tags=("health",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.auth",
-            log_name="auth",
-            prefix=f"{API_V1_PREFIX}",
-            tags=("authentication",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.research",
-            log_name="research",
-            prefix=f"{API_V1_PREFIX}/research",
-            tags=("research",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.research_runs",
-            log_name="research_runs",
-            prefix=f"{API_V1_PREFIX}",
-            tags=("research-runs",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.paper_search",
-            log_name="paper_search",
-            prefix=f"{API_V1_PREFIX}/paper-search",
-            tags=("paper-search",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
-            log_name="chat",
-            prefix=f"{API_V1_PREFIX}/chat",
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.chat_loop",
-            log_name="chat_loop",
-            prefix=f"{API_V1_PREFIX}",
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
-            log_name="conversations_alias",
-            prefix=f"{API_V1_PREFIX}/chats",
-            tags=("chat",),
-            attr_name="conversations_alias_router",
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.characters_endpoint",
-            log_name="characters",
-            prefix=f"{API_V1_PREFIX}/characters",
-            tags=("characters",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.character_memory",
-            log_name="character_memory",
-            prefix=f"{API_V1_PREFIX}/characters",
-            tags=("character-memory",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
-            log_name="character_chat_sessions",
-            prefix=f"{API_V1_PREFIX}/chats",
-            tags=("character-chat-sessions",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.character_messages",
-            log_name="character_messages",
-            prefix=f"{API_V1_PREFIX}",
-            tags=("character-messages",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
-            log_name="workspace_migrations",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspaces",
-            log_name="workspaces",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
-        ),
-    ):
-        append_imported_router_spec(specs, definition)
-    return specs
+    canonical_specs = (
+        *iter_core_router_specs(),
+        *iter_content_router_specs(),
+    )
+    required_override = RouterSpecOverride(
+        skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+    )
+
+    return select_router_specs_by_name(
+        canonical_specs,
+        MINIMAL_REQUIRED_ROUTER_NAMES,
+        overrides={
+            name: required_override
+            for name in MINIMAL_REQUIRED_ROUTER_NAMES
+        },
+    )
 
 
 def _audio_jobs_imports_enabled_for_runtime() -> bool:
