@@ -96,13 +96,24 @@ export interface CalendarItemUpdateRequest {
   provider_owned?: boolean
 }
 
-export interface CalendarItemMutationContext {
-  source_owner?: CalendarSourceOwner | string
-  provider_owned?: boolean
-  read_only_reason?: string | null
-}
+export type CalendarItemMutationContext =
+  | {
+      source_owner: CalendarSourceOwner | string
+      provider_owned?: boolean
+      read_only_reason?: string | null
+    }
+  | {
+      provider_owned: boolean
+      source_owner?: CalendarSourceOwner | string
+      read_only_reason?: string | null
+    }
+  | {
+      read_only_reason: string
+      source_owner?: CalendarSourceOwner | string
+      provider_owned?: boolean
+    }
 
-export interface CalendarItemDeleteTarget extends CalendarItemMutationContext {
+export type CalendarItemDeleteTarget = CalendarItemMutationContext & {
   id?: string | number | null
   calendar_item_id?: string | number | null
 }
@@ -378,7 +389,14 @@ const assertLocalItemMutation = (payload: CalendarItemUpdateRequest): void => {
 
 const assertDeletableItem = (context?: CalendarItemMutationContext): void => {
   if (!context) {
-    return
+    throw new Error("calendar item mutation context is required")
+  }
+  const hasMutationContext =
+    context.source_owner !== undefined ||
+    context.provider_owned !== undefined ||
+    context.read_only_reason !== undefined
+  if (!hasMutationContext) {
+    throw new Error("calendar item mutation context is required")
   }
   if (context.source_owner === "provider" || context.provider_owned === true) {
     throw new Error("Provider-owned calendar items are read-only")

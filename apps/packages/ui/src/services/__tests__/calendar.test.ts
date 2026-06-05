@@ -97,6 +97,9 @@ describe("calendar service contract", () => {
   })
 
   it("rejects provider-owned and read-only item deletes before sending a request", async () => {
+    await expect(deleteCalendarItem({ id: 41 } as never)).rejects.toThrow(
+      "calendar item mutation context is required"
+    )
     await expect(
       deleteCalendarItem({
         id: 42,
