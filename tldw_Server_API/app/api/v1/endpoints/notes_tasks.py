@@ -228,15 +228,9 @@ async def list_task_activity(
 ) -> TaskActivityListResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.read")
     try:
-        events = db.list_recent_task_activity(actor_type="agent", limit=limit)
-        visible: list[TaskActivityResponse] = []
         user_id = str(current_user.id)
-        for event in events:
-            state_row = db.get_task_activity_read_state(str(event["id"]), user_id=user_id)
-            if state_row is not None and (state_row.get("read_at") or state_row.get("dismissed_at")):
-                continue
-            visible.append(_activity_response(event, state_row))
-        return TaskActivityListResponse(events=visible)
+        events = db.list_recent_unread_task_activity(user_id=user_id, actor_type="agent", limit=limit)
+        return TaskActivityListResponse(events=[_activity_response(event, None) for event in events])
     except Exception as exc:
         _handle_task_error(exc)
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task activity list failed")

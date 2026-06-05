@@ -496,6 +496,40 @@ def test_recent_activity_includes_latest_agent_event_after_many_older_user_event
     assert [event["id"] for event in payload["events"]] == [latest_agent_event["id"]]
 
 
+def test_recent_activity_limit_skips_newer_dismissed_agent_event(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    note = _create_note(client, content="- [ ] Alpha\n")
+    task = _task_by_text(db, note["id"], "Alpha")
+    older_unread_event = db.record_task_event(
+        task_id=task["id"],
+        note_id=note["id"],
+        event_type="updated",
+        actor_type="agent",
+        actor_id="assistant",
+        new_value={"text": "older unread event"},
+    )
+    newer_dismissed_event = db.record_task_event(
+        task_id=task["id"],
+        note_id=note["id"],
+        event_type="updated",
+        actor_type="agent",
+        actor_id="assistant",
+        new_value={"text": "newer dismissed event"},
+    )
+    dismissed = client.patch(
+        f"/api/v1/notes/tasks/activity/{newer_dismissed_event['id']}",
+        json={"read": True, "dismissed": True},
+    )
+    assert dismissed.status_code == 200, dismissed.text
+
+    response = client.get("/api/v1/notes/tasks/activity", params={"limit": 1})
+
+    assert response.status_code == 200, response.text
+    assert [event["id"] for event in response.json()["events"]] == [older_unread_event["id"]]
+
+
 def test_reconcile_note_endpoint_refreshes_state(
     notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
 ) -> None:

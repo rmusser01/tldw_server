@@ -26994,6 +26994,7 @@ for _task_store_method in (
     "record_task_event",
     "list_task_activity",
     "list_recent_task_activity",
+    "list_recent_unread_task_activity",
     "mark_task_activity_read",
     "mark_task_activity_dismissed",
     "get_task_activity_read_state",
