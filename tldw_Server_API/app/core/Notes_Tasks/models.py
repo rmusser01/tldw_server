@@ -7,14 +7,21 @@ from enum import Enum
 from typing import Any
 
 
-class TaskStatus(str, Enum):
+class _ValueTextEnum(str, Enum):
+    """Python 3.10-safe string enum with value-based string conversion."""
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class TaskStatus(_ValueTextEnum):
     """Durable task status values."""
 
     OPEN = "open"
     DONE = "done"
 
 
-class ProjectionStatus(str, Enum):
+class ProjectionStatus(_ValueTextEnum):
     """Markdown projection status values."""
 
     LIVE = "live"
