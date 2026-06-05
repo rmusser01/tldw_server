@@ -273,6 +273,10 @@ class NotesTaskService:
                 metadata=new_metadata,
                 actor_type=actor.actor_type,
                 actor_id=actor.actor_id,
+                tool_name=actor.tool_name,
+                policy_mode=actor.policy_mode,
+                approval_id=actor.approval_id,
+                idempotency_key=actor.idempotency_key,
                 conn=conn,
             )
             updated_parsed_item = self._find_projected_item(
@@ -339,6 +343,10 @@ class NotesTaskService:
                     allow_record_only=True,
                     actor_type=actor.actor_type,
                     actor_id=actor.actor_id,
+                    tool_name=actor.tool_name,
+                    policy_mode=actor.policy_mode,
+                    approval_id=actor.approval_id,
+                    idempotency_key=actor.idempotency_key,
                     conn=conn,
                 )
             if projection_status != "live":
@@ -391,6 +399,10 @@ class NotesTaskService:
                 projection_line_number=int(projection["line_number"]),
                 actor_type=actor.actor_type,
                 actor_id=actor.actor_id,
+                tool_name=actor.tool_name,
+                policy_mode=actor.policy_mode,
+                approval_id=actor.approval_id,
+                idempotency_key=actor.idempotency_key,
                 conn=conn,
             )
             self.reconcile_note(
@@ -630,8 +642,18 @@ class NotesTaskService:
             event_type="updated",
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            tool_name=actor.tool_name,
+            policy_mode=actor.policy_mode,
+            approval_id=actor.approval_id,
             old_value={"metadata": task.get("metadata_json") or {}},
-            new_value={"metadata": updated.get("metadata_json") or {}},
+            new_value=(
+                {
+                    "metadata": updated.get("metadata_json") or {},
+                    "idempotency_key": actor.idempotency_key,
+                }
+                if actor.idempotency_key
+                else {"metadata": updated.get("metadata_json") or {}}
+            ),
             conn=conn,
         )
         return updated

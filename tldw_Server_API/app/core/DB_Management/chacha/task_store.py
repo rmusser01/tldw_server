@@ -78,6 +78,12 @@ class TaskStore:
             raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
 
     @staticmethod
+    def _event_value(value: dict[str, Any], *, idempotency_key: str | None = None) -> dict[str, Any]:
+        if idempotency_key is None:
+            return value
+        return {**value, "idempotency_key": idempotency_key}
+
+    @staticmethod
     def _decode_row(row: Any, json_fields: tuple[str, ...]) -> dict[str, Any] | None:
         if row is None:
             return None
@@ -370,6 +376,10 @@ class TaskStore:
         projection_status: str = "live",
         actor_type: str | None = None,
         actor_id: str | None = None,
+        tool_name: str | None = None,
+        policy_mode: str | None = None,
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any]:
         """Create a task record linked to a note."""
@@ -418,11 +428,17 @@ class TaskStore:
                     event_type="created",
                     actor_type=actor_type,
                     actor_id=actor_id,
-                    new_value={
-                        "text": normalized_text,
-                        "status": normalized_status,
-                        "metadata": metadata or {},
-                    },
+                    tool_name=tool_name,
+                    policy_mode=policy_mode,
+                    approval_id=approval_id,
+                    new_value=self._event_value(
+                        {
+                            "text": normalized_text,
+                            "status": normalized_status,
+                            "metadata": metadata or {},
+                        },
+                        idempotency_key=idempotency_key,
+                    ),
                     conn=transaction_conn,
                 )
             task = self._fetch_task(final_task_id, include_deleted=True, conn=transaction_conn)
@@ -489,6 +505,10 @@ class TaskStore:
         projection_status: str | None = None,
         actor_type: str | None = None,
         actor_id: str | None = None,
+        tool_name: str | None = None,
+        policy_mode: str | None = None,
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any]:
         """Update mutable task fields using optimistic locking."""
@@ -566,8 +586,11 @@ class TaskStore:
                     event_type="status_changed",
                     actor_type=actor_type,
                     actor_id=actor_id,
+                    tool_name=tool_name,
+                    policy_mode=policy_mode,
+                    approval_id=approval_id,
                     old_value={"status": old["status"]},
-                    new_value={"status": updated["status"]},
+                    new_value=self._event_value({"status": updated["status"]}, idempotency_key=idempotency_key),
                     conn=transaction_conn,
                 )
             elif actor_type and (old["text"] != updated["text"] or old["metadata_json"] != updated["metadata_json"]):
@@ -577,8 +600,14 @@ class TaskStore:
                     event_type="updated",
                     actor_type=actor_type,
                     actor_id=actor_id,
+                    tool_name=tool_name,
+                    policy_mode=policy_mode,
+                    approval_id=approval_id,
                     old_value={"text": old["text"], "metadata": old["metadata_json"]},
-                    new_value={"text": updated["text"], "metadata": updated["metadata_json"]},
+                    new_value=self._event_value(
+                        {"text": updated["text"], "metadata": updated["metadata_json"]},
+                        idempotency_key=idempotency_key,
+                    ),
                     conn=transaction_conn,
                 )
             return updated
@@ -702,6 +731,10 @@ class TaskStore:
         expected_version: int,
         actor_type: str | None = None,
         actor_id: str | None = None,
+        tool_name: str | None = None,
+        policy_mode: str | None = None,
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any]:
         """Mark a task's projection as unlinked after reconciliation."""
@@ -784,8 +817,14 @@ class TaskStore:
                     event_type="unlinked",
                     actor_type=actor_type,
                     actor_id=actor_id,
+                    tool_name=tool_name,
+                    policy_mode=policy_mode,
+                    approval_id=approval_id,
                     old_value={"projection_status": old["projection_status"]},
-                    new_value={"projection_status": "unlinked"},
+                    new_value=self._event_value(
+                        {"projection_status": "unlinked"},
+                        idempotency_key=idempotency_key,
+                    ),
                     conn=transaction_conn,
                 )
             if updated is None:
@@ -805,6 +844,10 @@ class TaskStore:
         allow_record_only: bool = False,
         actor_type: str | None = None,
         actor_id: str | None = None,
+        tool_name: str | None = None,
+        policy_mode: str | None = None,
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any]:
         """Soft-delete a task, requiring projection context for live projected rows."""
@@ -927,8 +970,14 @@ class TaskStore:
                     event_type="deleted",
                     actor_type=actor_type,
                     actor_id=actor_id,
+                    tool_name=tool_name,
+                    policy_mode=policy_mode,
+                    approval_id=approval_id,
                     old_value={"deleted": old["deleted"], "projection_status": old["projection_status"]},
-                    new_value={"deleted": True, "projection_status": "deleted"},
+                    new_value=self._event_value(
+                        {"deleted": True, "projection_status": "deleted"},
+                        idempotency_key=idempotency_key,
+                    ),
                     conn=transaction_conn,
                 )
             if updated is None:

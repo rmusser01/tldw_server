@@ -86,6 +86,10 @@ class NotesTaskReconciler:
                         metadata=item.metadata,
                         actor_type=actor.actor_type,
                         actor_id=actor.actor_id,
+                        tool_name=actor.tool_name,
+                        policy_mode=actor.policy_mode,
+                        approval_id=actor.approval_id,
+                        idempotency_key=actor.idempotency_key,
                         conn=conn,
                     )
                     db.set_task_projection(
@@ -119,6 +123,10 @@ class NotesTaskReconciler:
                         metadata=item.metadata,
                         actor_type=actor.actor_type,
                         actor_id=actor.actor_id,
+                        tool_name=actor.tool_name,
+                        policy_mode=actor.policy_mode,
+                        approval_id=actor.approval_id,
+                        idempotency_key=actor.idempotency_key,
                         conn=conn,
                     )
                     updated_count += 1
@@ -147,6 +155,10 @@ class NotesTaskReconciler:
                     expected_version=int(task["version"]),
                     actor_type=actor.actor_type,
                     actor_id=actor.actor_id,
+                    tool_name=actor.tool_name,
+                    policy_mode=actor.policy_mode,
+                    approval_id=actor.approval_id,
+                    idempotency_key=actor.idempotency_key,
                     conn=conn,
                 )
                 unlinked_task_ids.append(unlinked["id"])
