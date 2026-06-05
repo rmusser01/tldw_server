@@ -689,9 +689,27 @@ class TaskStore:
                 UPDATE task_note_projections
                    SET projection_status = ?,
                        updated_at = ?
-                 WHERE task_id = ? AND projection_status = ?
+                 WHERE task_id = ?
+                   AND projection_status = ?
+                   AND note_id = ?
+                   AND note_version = ?
+                   AND line_number = ?
+                   AND normalized_text_hash = ?
+                   AND occurrence_index = ?
+                   AND block_fingerprint = ?
                 """,
-                ("unlinked", now, task_id, projection_state),
+                (
+                    "unlinked",
+                    now,
+                    task_id,
+                    projection_state,
+                    projection["note_id"],
+                    projection["note_version"],
+                    projection["line_number"],
+                    projection["normalized_text_hash"],
+                    projection["occurrence_index"],
+                    projection["block_fingerprint"],
+                ),
             )
             if getattr(projection_update_cursor, "rowcount", None) == 0:
                 raise ConflictError(
@@ -795,16 +813,46 @@ class TaskStore:
                     entity="tasks",
                     entity_id=task_id,
                 )  # noqa: TRY003
-            projection_update_cursor = self._execute(
-                transaction_conn,
-                """
-                UPDATE task_note_projections
-                   SET projection_status = ?,
-                       updated_at = ?
-                 WHERE task_id = ?
-                """,
-                ("deleted", now, task_id),
-            )
+            if projection_status == "live" and not allow_record_only:
+                projection_update_cursor = self._execute(
+                    transaction_conn,
+                    """
+                    UPDATE task_note_projections
+                       SET projection_status = ?,
+                           updated_at = ?
+                     WHERE task_id = ?
+                       AND projection_status = ?
+                       AND note_id = ?
+                       AND note_version = ?
+                       AND line_number = ?
+                       AND normalized_text_hash = ?
+                       AND occurrence_index = ?
+                       AND block_fingerprint = ?
+                    """,
+                    (
+                        "deleted",
+                        now,
+                        task_id,
+                        projection_status,
+                        projection["note_id"],
+                        projection["note_version"],
+                        projection["line_number"],
+                        projection["normalized_text_hash"],
+                        projection["occurrence_index"],
+                        projection["block_fingerprint"],
+                    ),
+                )
+            else:
+                projection_update_cursor = self._execute(
+                    transaction_conn,
+                    """
+                    UPDATE task_note_projections
+                       SET projection_status = ?,
+                           updated_at = ?
+                     WHERE task_id = ?
+                    """,
+                    ("deleted", now, task_id),
+                )
             if projection_status == "live" and not allow_record_only:
                 if getattr(projection_update_cursor, "rowcount", None) == 0:
                     raise ConflictError(
