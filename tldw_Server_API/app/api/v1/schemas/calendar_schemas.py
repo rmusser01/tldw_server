@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarMembershipRow,
     CalendarRecurrenceRow,
     CalendarRow,
+    CalendarSyncEventRow,
     ExternalCalendarAccountRow,
     ExternalCalendarBindingRow,
 )
@@ -428,8 +429,33 @@ class ExternalCalendarAccountCreateRequest(BaseModel):
 
     provider: str = Field(..., min_length=1, max_length=100)
     display_name: str = Field(..., min_length=1, max_length=200)
+    server_url: str | None = Field(default=None, max_length=2048)
+    username: str | None = Field(default=None, max_length=500)
+    password: str | None = Field(default=None, max_length=2000)
+    token: str | None = Field(default=None, max_length=4000)
     secret_ref: str | None = None
     account_metadata: dict[str, Any] | None = None
+
+
+class CalDavAccountVerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    server_url: str | None = Field(default=None, max_length=2048)
+    username: str | None = Field(default=None, max_length=500)
+    password: str | None = Field(default=None, max_length=2000)
+    token: str | None = Field(default=None, max_length=4000)
+
+
+class CalDavAccountVerifyResponse(BaseModel):
+    account_id: int
+    verified: bool
+    status: str | None = None
+    error: str | None = None
+
+
+class CalDavAccountMutationResponse(BaseModel):
+    revoked: bool | None = None
+    deleted: bool | None = None
 
 
 class ExternalCalendarAccountResponse(BaseModel):
@@ -438,7 +464,6 @@ class ExternalCalendarAccountResponse(BaseModel):
     user_id: int
     provider: str
     display_name: str
-    secret_ref: str | None = None
     account_metadata: dict[str, Any] | None = None
     status: str
     revoked_at: str | None = None
@@ -454,7 +479,6 @@ class ExternalCalendarAccountResponse(BaseModel):
             user_id=row.user_id,
             provider=row.provider,
             display_name=row.display_name,
-            secret_ref=row.secret_ref,
             account_metadata=_json_value(row.account_metadata_json, None),
             status=row.status,
             revoked_at=row.revoked_at,
@@ -469,6 +493,16 @@ class ExternalCalendarAccountListResponse(BaseModel):
     total: int = Field(..., ge=0)
 
 
+class ExternalCalendarDiscoveryItem(BaseModel):
+    remote_calendar_id: str
+    remote_display_name: str | None = None
+    provider_capabilities: dict[str, Any] | None = None
+
+
+class ExternalCalendarDiscoveryResponse(BaseModel):
+    items: list[ExternalCalendarDiscoveryItem] = Field(default_factory=list)
+
+
 class ExternalCalendarBindingCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -481,6 +515,22 @@ class ExternalCalendarBindingCreateRequest(BaseModel):
     lookback_days: int = Field(default=90, ge=0, le=3700)
     lookahead_days: int = Field(default=365, ge=0, le=3700)
     provider_capabilities: dict[str, Any] | None = None
+
+
+class ExternalCalendarBindingUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sync_enabled: bool | None = None
+    sync_interval_minutes: int | None = Field(default=None, ge=1)
+    lookback_days: int | None = Field(default=None, ge=0, le=3700)
+    lookahead_days: int | None = Field(default=None, ge=0, le=3700)
+    provider_capabilities: dict[str, Any] | None = None
+
+    def service_updates(self) -> dict[str, Any]:
+        updates = self.model_dump(exclude_unset=True)
+        if "provider_capabilities" in updates:
+            updates["provider_capabilities_json"] = updates.pop("provider_capabilities")
+        return updates
 
 
 class ExternalCalendarBindingResponse(BaseModel):
@@ -529,6 +579,45 @@ class ExternalCalendarBindingResponse(BaseModel):
 
 class ExternalCalendarBindingListResponse(BaseModel):
     items: list[ExternalCalendarBindingResponse] = Field(default_factory=list)
+    total: int = Field(..., ge=0)
+
+
+class CalendarSyncEventResponse(BaseModel):
+    id: int
+    binding_id: int | None = None
+    account_id: int | None = None
+    event_type: str
+    status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    items_seen: int
+    items_upserted: int
+    items_tombstoned: int
+    error_message: str | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: CalendarSyncEventRow) -> "CalendarSyncEventResponse":
+        return cls(
+            id=row.id,
+            binding_id=row.binding_id,
+            account_id=row.account_id,
+            event_type=row.event_type,
+            status=row.status,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            items_seen=row.items_seen,
+            items_upserted=row.items_upserted,
+            items_tombstoned=row.items_tombstoned,
+            error_message=row.error_message,
+            metadata=_json_value(row.metadata_json, None),
+            created_at=row.created_at,
+        )
+
+
+class CalendarSyncEventListResponse(BaseModel):
+    items: list[CalendarSyncEventResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 

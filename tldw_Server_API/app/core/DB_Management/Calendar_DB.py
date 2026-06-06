@@ -284,6 +284,22 @@ class CalendarSecretStore:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 provider=provider,
+        )
+        return str(row["encrypted_payload"])
+
+    def resolve_secret_ref_for_user(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+    ) -> str:
+        with self._database.connection() as conn:
+            row = self._get_secret_row(
+                conn,
+                secret_ref,
+                tenant_id=tenant_id,
+                user_id=user_id,
             )
         return str(row["encrypted_payload"])
 
@@ -364,6 +380,21 @@ class CalendarSecretStore:
             user_id=user_id,
             provider=provider,
         )
+
+    def delete_secret_ref_for_user(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+    ) -> None:
+        with self._database.transaction() as conn:
+            self.delete_secret_ref_in_connection(
+                conn,
+                secret_ref,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
 
     def _get_secret_row(
         self,
@@ -1438,6 +1469,19 @@ class CalendarDatabase:
             provider=provider,
         )
 
+    def resolve_secret_ref_for_user(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+    ) -> str:
+        return self.secret_store.resolve_secret_ref_for_user(
+            secret_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
     def delete_secret_ref(self, secret_ref: str) -> None:
         self.secret_store.delete_secret_ref(secret_ref)
 
@@ -1454,6 +1498,19 @@ class CalendarDatabase:
             tenant_id=tenant_id,
             user_id=user_id,
             provider=provider,
+        )
+
+    def delete_secret_ref_for_user(
+        self,
+        secret_ref: str,
+        *,
+        tenant_id: str,
+        user_id: int,
+    ) -> None:
+        self.secret_store.delete_secret_ref_for_user(
+            secret_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
 
     def create_external_account(

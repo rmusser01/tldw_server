@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import importlib
+import json
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -44,6 +46,26 @@ class _ReminderServiceStub:
         )
 
 
+class _CalDavProviderStub:
+    def __init__(self) -> None:
+        self.verify_requests: list[dict[str, Any]] = []
+        self.discovery_requests: list[dict[str, Any]] = []
+
+    def verify_account(self, **kwargs: Any) -> dict[str, Any]:
+        self.verify_requests.append(kwargs)
+        return {"verified": True, "status": "ok"}
+
+    def discover_calendars(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self.discovery_requests.append(kwargs)
+        return [
+            {
+                "remote_calendar_id": "https://caldav.example.test/calendars/user/work/",
+                "remote_display_name": "Work",
+                "provider_capabilities": {"supports_vevent": True, "sync_strategy": "bounded_polling"},
+            }
+        ]
+
+
 @pytest.fixture()
 def calendar_api_client(
     tmp_path: Path,
@@ -51,6 +73,7 @@ def calendar_api_client(
     db = CalendarDatabase(db_path=tmp_path / "calendar_api.db")
     db.ensure_schema()
     reminder_service = _ReminderServiceStub()
+    caldav_provider = _CalDavProviderStub()
     current_user_id = {"value": 1}
     current_tenant_id: dict[str, str | None] = {"value": None}
 
@@ -74,11 +97,14 @@ def calendar_api_client(
     app.dependency_overrides[get_request_user] = override_user
     app.dependency_overrides[calendar_endpoint.get_calendar_database] = lambda: db
     app.dependency_overrides[calendar_endpoint.get_scheduled_tasks_service] = lambda: reminder_service
+    if hasattr(calendar_endpoint, "get_caldav_provider"):
+        app.dependency_overrides[calendar_endpoint.get_caldav_provider] = lambda: caldav_provider
 
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             client.current_user_id = current_user_id  # type: ignore[attr-defined]
             client.current_tenant_id = current_tenant_id  # type: ignore[attr-defined]
+            client.caldav_provider = caldav_provider  # type: ignore[attr-defined]
             yield client, db, reminder_service
     finally:
         app.dependency_overrides.clear()
@@ -116,6 +142,10 @@ def _create_event(client: TestClient, calendar_id: int, **overrides: Any) -> dic
     response = client.post("/api/v1/calendar/items", json=payload)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _calendar_secret_key() -> str:
+    return base64.b64encode(b"calendar-secret-store-key-32-bytes").decode("ascii")
 
 
 def _create_provider_item(db: CalendarDatabase, *, owner_user_id: int = 1, org_id: int | None = None):
@@ -548,6 +578,148 @@ def test_invalid_raw_rrule_returns_client_error(
     assert response.json()["detail"][0]["type"] == "value_error"
 
 
+def test_create_caldav_account_encrypts_credentials_and_redacts_response(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, db, _reminder_service = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+
+    response = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={
+            "provider": "caldav",
+            "display_name": "Fastmail",
+            "server_url": "https://caldav.example.test/dav/",
+            "username": "reader@example.test",
+            "password": "app-secret",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert "secret_ref" not in body
+    assert "password" not in json.dumps(body)
+    assert body["account_metadata"]["server_url"] == "https://caldav.example.test/dav/"
+    assert body["account_metadata"]["username"] == "reader@example.test"
+
+    account = db.get_external_account(body["id"])
+    assert account.secret_ref is not None
+    encrypted_payload = db.resolve_secret_ref(account.secret_ref)
+    assert "reader@example.test" not in encrypted_payload
+    assert "app-secret" not in encrypted_payload
+
+    from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
+
+    assert CalendarSecretStore(db=db, tenant_id="default").resolve_secret(
+        owner_user_id=1,
+        secret_ref=account.secret_ref,
+    ) == {
+        "server_url": "https://caldav.example.test/dav/",
+        "username": "reader@example.test",
+        "password": "app-secret",
+    }
+
+
+def test_create_caldav_account_requires_encryption_key_for_credentials(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _db, _reminder_service = calendar_api_client
+    monkeypatch.delenv("CALENDAR_SECRET_ENCRYPTION_KEY", raising=False)
+
+    response = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={
+            "provider": "caldav",
+            "display_name": "Fastmail",
+            "server_url": "https://caldav.example.test/dav/",
+            "username": "reader@example.test",
+            "password": "app-secret",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "calendar_validation_error"
+    assert "CALENDAR_SECRET_ENCRYPTION_KEY" in response.json()["detail"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path_suffix", "response_key"),
+    [("post", "/revoke", "revoked"), ("delete", "", "deleted")],
+)
+def test_caldav_account_revoke_and_delete_clear_secret_material(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path_suffix: str,
+    response_key: str,
+) -> None:
+    client, db, _reminder_service = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    account_response = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={
+            "provider": "caldav",
+            "display_name": "Fastmail",
+            "server_url": "https://caldav.example.test/dav/",
+            "username": "reader@example.test",
+            "password": "app-secret",
+        },
+    )
+    assert account_response.status_code == 201, account_response.text
+    account = db.get_external_account(account_response.json()["id"])
+    assert account.secret_ref is not None
+
+    response = getattr(client, method)(
+        f"/api/v1/calendar/external/accounts/{account.id}{path_suffix}",
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()[response_key] is True
+    with pytest.raises(Exception):
+        db.resolve_secret_ref(account.secret_ref)
+
+
+def test_caldav_account_verify_and_discover_use_stored_secret(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _db, _reminder_service = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    account_response = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={
+            "provider": "caldav",
+            "display_name": "Fastmail",
+            "server_url": "https://caldav.example.test/dav/",
+            "username": "reader@example.test",
+            "password": "app-secret",
+        },
+    )
+    assert account_response.status_code == 201, account_response.text
+    account_id = account_response.json()["id"]
+    provider = client.caldav_provider  # type: ignore[attr-defined]
+
+    verify_response = client.post(f"/api/v1/calendar/external/accounts/{account_id}/verify")
+    discover_response = client.post(f"/api/v1/calendar/external/accounts/{account_id}/discover")
+
+    assert verify_response.status_code == 200, verify_response.text
+    assert verify_response.json() == {"account_id": account_id, "verified": True, "status": "ok", "error": None}
+    assert discover_response.status_code == 200, discover_response.text
+    assert discover_response.json()["items"] == [
+        {
+            "remote_calendar_id": "https://caldav.example.test/calendars/user/work/",
+            "remote_display_name": "Work",
+            "provider_capabilities": {"supports_vevent": True, "sync_strategy": "bounded_polling"},
+        }
+    ]
+    assert provider.verify_requests[0]["password"] == "app-secret"
+    assert provider.discovery_requests[0]["password"] == "app-secret"
+    assert "app-secret" not in verify_response.text
+    assert "app-secret" not in discover_response.text
+
+
 def test_external_binding_placeholders_enforce_account_owner_scope(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
 ) -> None:
@@ -628,3 +800,60 @@ def test_external_binding_list_and_sync_placeholders_enforce_owner_scope(
     assert listed.json()["detail"]["code"] == "calendar_permission_denied"
     assert synced.status_code == 403
     assert synced.json()["detail"]["code"] == "calendar_permission_denied"
+
+
+def test_external_binding_management_and_sync_events_are_owner_scoped(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    client, db, _reminder_service = calendar_api_client
+    calendar = _create_calendar(client, name="Personal import target")
+    account = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={"provider": "caldav", "display_name": "Fastmail"},
+    )
+    assert account.status_code == 201, account.text
+    binding = client.post(
+        "/api/v1/calendar/external/bindings",
+        json={
+            "account_id": account.json()["id"],
+            "calendar_id": calendar["id"],
+            "remote_calendar_id": "remote-calendar",
+        },
+    )
+    assert binding.status_code == 201, binding.text
+    binding_id = binding.json()["id"]
+    db.record_sync_event(
+        binding_id=binding_id,
+        event_type="scan",
+        status="success",
+        items_seen=2,
+        items_upserted=1,
+    )
+
+    updated = client.patch(
+        f"/api/v1/calendar/external/bindings/{binding_id}",
+        json={"sync_interval_minutes": 30, "lookahead_days": 120},
+    )
+    disabled = client.post(f"/api/v1/calendar/external/bindings/{binding_id}/disable")
+    enabled = client.post(f"/api/v1/calendar/external/bindings/{binding_id}/enable")
+    status_response = client.get(f"/api/v1/calendar/external/bindings/{binding_id}/sync-status")
+    events = client.get(f"/api/v1/calendar/external/bindings/{binding_id}/sync-events")
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["sync_interval_minutes"] == 30
+    assert updated.json()["lookahead_days"] == 120
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["disabled_at"] is not None
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["sync_enabled"] is True
+    assert enabled.json()["disabled_at"] is None
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["id"] == binding_id
+    assert events.status_code == 200, events.text
+    assert events.json()["items"][0]["event_type"] == "scan"
+    assert events.json()["items"][0]["metadata"] is None
+
+    _set_user(client, 2)
+    forbidden = client.get(f"/api/v1/calendar/external/bindings/{binding_id}/sync-status")
+    assert forbidden.status_code == 403
+    assert forbidden.json()["detail"]["code"] == "calendar_permission_denied"

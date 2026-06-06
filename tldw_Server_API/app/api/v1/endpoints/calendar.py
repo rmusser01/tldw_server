@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+import json
+from dataclasses import asdict, is_dataclass
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -27,17 +31,25 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalendarReminderCreateRequest,
     CalendarReminderProjectionResponse,
     CalendarReminderResponse,
+    CalendarSyncEventListResponse,
+    CalendarSyncEventResponse,
     CalendarResponse,
     CalendarSyncTriggerResponse,
     CalendarViewItemResponse,
     CalendarViewLinkResponse,
     CalendarViewResponse,
+    CalDavAccountMutationResponse,
+    CalDavAccountVerifyRequest,
+    CalDavAccountVerifyResponse,
     ExternalCalendarAccountCreateRequest,
     ExternalCalendarAccountListResponse,
     ExternalCalendarAccountResponse,
     ExternalCalendarBindingCreateRequest,
     ExternalCalendarBindingListResponse,
     ExternalCalendarBindingResponse,
+    ExternalCalendarBindingUpdateRequest,
+    ExternalCalendarDiscoveryItem,
+    ExternalCalendarDiscoveryResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import ReminderTaskCreateRequest
 from tldw_Server_API.app.core.AuthNZ.permissions import (
@@ -53,6 +65,8 @@ from tldw_Server_API.app.core.Calendar.errors import (
     CalendarReadOnlyError,
     CalendarValidationError,
 )
+from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
+from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
 from tldw_Server_API.app.core.Calendar.view_service import (
     CalendarViewFilters,
     CalendarViewResult,
@@ -76,6 +90,10 @@ def get_calendar_database() -> CalendarDatabase:
 
 def get_scheduled_tasks_service() -> ScheduledTasksControlPlaneService:
     return ScheduledTasksControlPlaneService()
+
+
+def get_caldav_provider() -> CalDavProvider:
+    return CalDavProvider()
 
 
 def get_calendar_service(
@@ -155,6 +173,86 @@ def _assert_external_binding_owner(
 ) -> None:
     binding = db.get_external_binding(binding_id)
     _assert_external_account_owner(db, account_id=binding.account_id, current_user=current_user)
+
+
+def _provider_result_dict(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if is_dataclass(result):
+        return asdict(result)
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    return dict(result)
+
+
+def _external_account_metadata(payload: ExternalCalendarAccountCreateRequest) -> dict[str, Any] | None:
+    metadata: dict[str, Any] = {}
+    if payload.account_metadata:
+        metadata.update(sanitize_provider_metadata(payload.account_metadata))
+    if payload.server_url:
+        metadata["server_url"] = payload.server_url
+    if payload.username:
+        metadata["username"] = payload.username
+    return metadata or None
+
+
+def _external_account_secret_payload(payload: ExternalCalendarAccountCreateRequest) -> dict[str, Any] | None:
+    secret_payload = {
+        key: value
+        for key, value in {
+            "server_url": payload.server_url,
+            "username": payload.username,
+            "password": payload.password,
+            "token": payload.token,
+        }.items()
+        if value
+    }
+    if payload.provider.lower() == "caldav" and (payload.password or payload.token):
+        if not payload.server_url or not payload.username:
+            raise CalendarValidationError("CalDAV account credentials require server_url and username")
+    return secret_payload if payload.password or payload.token else None
+
+
+def _resolve_caldav_credentials(
+    *,
+    db: CalendarDatabase,
+    current_user: User,
+    account_id: int,
+    payload: CalDavAccountVerifyRequest | None = None,
+) -> dict[str, str]:
+    account = db.get_external_account(account_id)
+    if account.provider.lower() != "caldav":
+        raise CalendarValidationError("External calendar account is not a CalDAV account")
+    if account.status != "active" or account.revoked_at or account.deleted_at:
+        raise CalendarValidationError("External calendar account is not active")
+
+    metadata = account.account_metadata_json
+    metadata_dict: dict[str, Any] = {}
+    if metadata:
+        try:
+            metadata_dict = json.loads(metadata)
+        except ValueError:
+            metadata_dict = {}
+
+    stored_secret: dict[str, Any] = {}
+    if account.secret_ref:
+        stored_secret = CalendarSecretStore(db=db, tenant_id=_tenant_id(current_user)).resolve_secret(
+            owner_user_id=_user_id(current_user),
+            secret_ref=account.secret_ref,
+        )
+
+    request_data = payload.model_dump(exclude_unset=True) if payload else {}
+    server_url = request_data.get("server_url") or stored_secret.get("server_url") or metadata_dict.get("server_url")
+    username = request_data.get("username") or stored_secret.get("username") or metadata_dict.get("username")
+    password = (
+        request_data.get("password")
+        or request_data.get("token")
+        or stored_secret.get("password")
+        or stored_secret.get("token")
+    )
+    if not server_url or not username or not password:
+        raise CalendarValidationError("CalDAV account verification requires server_url, username, and password/token")
+    return {"server_url": str(server_url), "username": str(username), "password": str(password)}
 
 
 def _upsert_recurrence_if_present(
@@ -601,17 +699,132 @@ async def create_external_calendar_account(
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarAccountResponse:
     try:
+        secret_ref = payload.secret_ref
+        secret_payload = _external_account_secret_payload(payload)
+        if secret_payload is not None:
+            secret_ref = CalendarSecretStore(db=db, tenant_id=_tenant_id(current_user)).create_secret(
+                owner_user_id=_user_id(current_user),
+                provider=payload.provider,
+                payload=secret_payload,
+            )
         row = db.create_external_account(
             tenant_id=_tenant_id(current_user),
             user_id=_user_id(current_user),
             provider=payload.provider,
             display_name=payload.display_name,
-            secret_ref=payload.secret_ref,
-            account_metadata_json=payload.account_metadata,
+            secret_ref=secret_ref,
+            account_metadata_json=_external_account_metadata(payload),
         )
     except CalendarValidationError as exc:
         raise _map_calendar_error(exc) from exc
     return ExternalCalendarAccountResponse.from_row(row)
+
+
+@router.post(
+    "/external/accounts/{account_id}/verify",
+    response_model=CalDavAccountVerifyResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def verify_external_calendar_account(
+    payload: CalDavAccountVerifyRequest | None = Body(default=None),
+    account_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+    provider: CalDavProvider = Depends(get_caldav_provider),
+) -> CalDavAccountVerifyResponse:
+    try:
+        _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
+        credentials = _resolve_caldav_credentials(
+            db=db,
+            current_user=current_user,
+            account_id=account_id,
+            payload=payload,
+        )
+        verification = _provider_result_dict(provider.verify_account(**credentials))
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalDavAccountVerifyResponse(
+        account_id=account_id,
+        verified=bool(verification.get("verified")),
+        status=verification.get("status"),
+        error=verification.get("error"),
+    )
+
+
+@router.post(
+    "/external/accounts/{account_id}/discover",
+    response_model=ExternalCalendarDiscoveryResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def discover_external_calendars(
+    payload: CalDavAccountVerifyRequest | None = Body(default=None),
+    account_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+    provider: CalDavProvider = Depends(get_caldav_provider),
+) -> ExternalCalendarDiscoveryResponse:
+    try:
+        _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
+        credentials = _resolve_caldav_credentials(
+            db=db,
+            current_user=current_user,
+            account_id=account_id,
+            payload=payload,
+        )
+        discovered = provider.discover_calendars(**credentials)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    items = []
+    for item in discovered:
+        item_dict = _provider_result_dict(item)
+        items.append(
+            ExternalCalendarDiscoveryItem(
+                remote_calendar_id=str(item_dict.get("remote_calendar_id")),
+                remote_display_name=item_dict.get("remote_display_name"),
+                provider_capabilities=item_dict.get("provider_capabilities"),
+            )
+        )
+    return ExternalCalendarDiscoveryResponse(items=items)
+
+
+@router.post(
+    "/external/accounts/{account_id}/revoke",
+    response_model=CalDavAccountMutationResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def revoke_external_calendar_account(
+    account_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> CalDavAccountMutationResponse:
+    try:
+        _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
+        db.revoke_external_account(account_id)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalDavAccountMutationResponse(revoked=True)
+
+
+@router.delete(
+    "/external/accounts/{account_id}",
+    response_model=CalDavAccountMutationResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def delete_external_calendar_account(
+    account_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> CalDavAccountMutationResponse:
+    try:
+        _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
+        db.delete_external_account(account_id)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalDavAccountMutationResponse(deleted=True)
 
 
 @router.post(
@@ -662,6 +875,123 @@ async def list_external_calendar_bindings(
         raise _map_calendar_error(exc) from exc
     items = [ExternalCalendarBindingResponse.from_row(row) for row in rows]
     return ExternalCalendarBindingListResponse(items=items, total=len(items))
+
+
+@router.patch(
+    "/external/bindings/{binding_id}",
+    response_model=ExternalCalendarBindingResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def update_external_calendar_binding(
+    payload: ExternalCalendarBindingUpdateRequest,
+    binding_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> ExternalCalendarBindingResponse:
+    try:
+        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        row = db.update_external_binding(binding_id, payload.service_updates())
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return ExternalCalendarBindingResponse.from_row(row)
+
+
+@router.post(
+    "/external/bindings/{binding_id}/enable",
+    response_model=ExternalCalendarBindingResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def enable_external_calendar_binding(
+    binding_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> ExternalCalendarBindingResponse:
+    try:
+        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        row = db.update_external_binding(binding_id, {"sync_enabled": True, "disabled_at": None})
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return ExternalCalendarBindingResponse.from_row(row)
+
+
+@router.post(
+    "/external/bindings/{binding_id}/disable",
+    response_model=ExternalCalendarBindingResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def disable_external_calendar_binding(
+    binding_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> ExternalCalendarBindingResponse:
+    try:
+        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        row = db.disable_external_binding(binding_id)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return ExternalCalendarBindingResponse.from_row(row)
+
+
+@router.delete(
+    "/external/bindings/{binding_id}",
+    response_model=ExternalCalendarBindingResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def delete_external_calendar_binding(
+    binding_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> ExternalCalendarBindingResponse:
+    try:
+        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        row = db.delete_external_binding(binding_id)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return ExternalCalendarBindingResponse.from_row(row)
+
+
+@router.get(
+    "/external/bindings/{binding_id}/sync-status",
+    response_model=ExternalCalendarBindingResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def get_external_calendar_binding_sync_status(
+    binding_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> ExternalCalendarBindingResponse:
+    try:
+        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        row = db.get_external_binding(binding_id)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return ExternalCalendarBindingResponse.from_row(row)
+
+
+@router.get(
+    "/external/bindings/{binding_id}/sync-events",
+    response_model=CalendarSyncEventListResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+)
+async def list_external_calendar_binding_sync_events(
+    binding_id: int = Path(..., ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
+    db: CalendarDatabase = Depends(get_calendar_database),
+) -> CalendarSyncEventListResponse:
+    try:
+        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        rows = db.list_sync_events(binding_id=binding_id, limit=limit)
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    items = [CalendarSyncEventResponse.from_row(row) for row in rows]
+    return CalendarSyncEventListResponse(items=items, total=len(items))
 
 
 @router.post(
