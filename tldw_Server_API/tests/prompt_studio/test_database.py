@@ -106,11 +106,14 @@ class TestDatabaseInitialization:
     def test_database_creation(self, temp_db_path: Path):
         """Test that database is created successfully."""
         db = PromptStudioDatabase(temp_db_path, "test_client")
-        assert temp_db_path.exists()
+        try:
+            assert temp_db_path.exists()
 
-        # Check that connection works
-        conn = db.get_connection()
-        assert conn is not None
+            # Check that connection works
+            conn = db.get_connection()
+            assert conn is not None
+        finally:
+            db.close()
 
     def test_schema_creation(self, test_db: PromptStudioDatabase):
         """Test that all required tables are created."""

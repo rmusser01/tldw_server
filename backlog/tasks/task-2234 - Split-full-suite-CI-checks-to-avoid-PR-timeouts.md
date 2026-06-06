@@ -163,6 +163,7 @@ modified_files:
 - tldw_Server_API/tests/Persona/test_persona_ws.py
 - tldw_Server_API/tests/Watchlists/test_first_class_watchlists_db.py
 - tldw_Server_API/tests/Watchlists/test_include_org_default.py
+- tldw_Server_API/tests/prompt_studio/test_database.py
 - tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py
 - tldw_Server_API/tests/prompt_studio/integration/test_concurrency_multiprocessing.py
 - tldw_Server_API/tests/prompt_studio/integration/test_mcts_observability_and_persistence.py
@@ -296,6 +297,8 @@ After all checks on run 27045516937 reached terminal state, `gh pr checks` repor
 2026-06-06 continued current-head monitoring of run 27067039676 found `Full Suite shard (macos-latest / Python 3.12 / product-workflows)` failing `test_rerank_adapter_sanitizes_backend_errors`. The test cleared only `TEST_MODE`, but the adapter also honors `TLDW_TEST_MODE`, so inherited alternate test-mode flags can keep the rerank adapter on its simulated path and bypass the patched backend failure. The error-path test now patches the rerank module's `is_test_mode()` hook to `False`, matching neighboring content-adapter backend-error tests. Verification: the exact reproduced failure passed locally with both test-mode flags enabled; the full content-adapter test module passed locally with 113 passed; compileall passed for the touched test file; `git diff --check` passed; Bandit on the touched test file reported `results=0 errors=0` with test-assert B101 skipped.
 
 The same run later exposed `Full Suite shard (macos-latest / Python 3.12 / platform-mcp)` failing during teardown of `test_sqlite_outer_failure_log_is_sanitized`. The test monkeypatches `service.os.getenv`, which is the shared stdlib `os.getenv`, and its fake defaulted missing environment variables to an empty string. When AuthNZ teardown reloaded core settings while the patch was active, `CLAIMS_MAX_PER_CHUNK` resolved to `""` instead of `None` and `int("")` raised. The fake now preserves stdlib `os.getenv` default semantics for keys it does not handle. Verification: the exact maintenance test and full maintenance test file passed locally with both test-mode flags enabled; compileall passed for the two touched test files; `git diff --check` passed; Bandit on the touched test files reported `results=0 errors=0` with test-only B101/B108 skipped.
+
+The same run also exposed `Full Suite shard (windows-latest / Python 3.12 / product-prompt-studio)` failing teardown of `TestDatabaseInitialization.test_database_creation` because the test opened `PromptStudioDatabase` directly and left its SQLite connection open. Windows held the temp `.db` file lock until process teardown, so the fixture's `os.unlink()` failed with WinError 32. The test now closes the database in a `finally` block before fixture cleanup. Verification: the exact database-creation test and full Prompt Studio database test file passed locally with both test-mode flags enabled (45 passed, 2 skipped).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
