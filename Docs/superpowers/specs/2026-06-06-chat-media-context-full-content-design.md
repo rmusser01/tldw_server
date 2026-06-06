@@ -12,7 +12,7 @@ The `/chat` Knowledge panel normalizes those search rows into RAG-style results.
 
 ## Goals
 
-- Ensure media search results used as chat context resolve to full media text whenever the result has a media ID.
+- Ensure media-library search results used as chat context resolve to full media text whenever the result has a media ID.
 - Keep `/api/v1/media/search` lightweight for listing/search use.
 - Make Insert, Attach, Ask, Preview Insert, and Pin/Save behavior consistent for media results.
 - Preserve existing RAG chunk behavior: chunks returned by the RAG endpoint should still insert the retrieved chunk, not force whole-document expansion.
@@ -29,8 +29,10 @@ Use the existing full-media resolver as the central boundary for actions that co
 
 To avoid expanding RAG chunks that happen to include `media_id`, normalized media-library search results should carry an explicit origin marker: `metadata.origin = "media-library"`. Only results with that marker are eligible for whole-media expansion. RAG/QA source chunks should remain chunk-scoped even when their metadata includes `media_id`.
 
+Because the current resolver operates on `RagPinnedResult`, the marker must survive conversion from `RagResult` to `RagPinnedResult`. Add a narrow pinned-result field for this, for example `contextOrigin?: "media-library"`, and populate it from `metadata.origin` in `toPinnedResult`. Do not preserve arbitrary search metadata on pinned results.
+
 - Convert a result to `RagPinnedResult`.
-- If it has `mediaId` and the media-library origin marker, fetch `/api/v1/media/{id}` with `include_content=true`, `include_versions=false`, and `include_version_content=false`.
+- If it has `mediaId` and `contextOrigin === "media-library"`, fetch `/api/v1/media/{id}` with `include_content=true`, `include_versions=false`, and `include_version_content=false`.
 - Extract content from the returned detail using the existing media-detail extraction helper.
 - Replace the snippet with full text only when non-empty full text is available.
 - Fall back to the existing snippet on fetch failure or missing content.
@@ -65,11 +67,13 @@ If fetching full media details fails, keep the current fallback behavior and do 
 Add focused frontend tests around the Knowledge helpers/actions:
 
 - A lightweight media search row normalizes with `metadata.media_id` and `metadata.origin = "media-library"`.
+- `toPinnedResult` preserves the media-library marker as a narrow pinned-result origin field.
 - A media result with only `id/title/type/url` resolves full content from `getMediaDetails`.
 - Pin/Save stores full content when detail content is available.
 - Ask formats full content for media results.
 - Preview Ask formats full content for media results.
 - Existing fallback snippet remains when detail fetch fails or content is empty.
+- A pinned result with `mediaId` but no media-library origin does not fetch full media details.
 - RAG chunk insertion remains chunk-scoped and is not expanded to full media content even if the chunk metadata contains `media_id`.
 
 ## Backlog
