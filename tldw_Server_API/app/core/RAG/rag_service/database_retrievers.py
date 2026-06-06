@@ -120,6 +120,9 @@ class RawSqlFallbackDisabledError(RuntimeError):
         )
 
 
+_RESIDUAL_ENCODED_PATH_CONTROL_RE = re.compile(r"%(?:2e|2f|5c)", re.IGNORECASE)
+
+
 def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
     """Return a canonical SQLite in-memory spec, or None when path is file-backed."""
     raw = str(path).strip()
@@ -622,6 +625,9 @@ class BaseRetriever(ABC):
 
         # Check for path traversal sequences BEFORE resolving
         # This catches attempts like "../../../etc/passwd" before they get normalized
+        if _RESIDUAL_ENCODED_PATH_CONTROL_RE.search(path):
+            logger.warning(f"Residual encoded path-control sequence detected in: {path}")
+            raise SuspiciousDatabasePathError()
         if '..' in path:
             logger.warning(f"Path traversal attempt detected in: {path}")
             raise PathTraversalError()

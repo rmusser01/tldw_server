@@ -134,6 +134,11 @@ class TestPathValidationTraversal:
         with pytest.raises(ValueError, match="Path traversal|suspicious pattern|not allowed"):
             retriever_instance._validate_path("file://%252e%252e/etc/passwd")
 
+    def test_residual_encoded_windows_unc_traversal_blocked(self, retriever_instance: MediaDBRetriever):
+        """Residual encoded traversal should be blocked before Windows path resolution."""
+        with pytest.raises(ValueError, match="Path traversal|suspicious pattern|not allowed"):
+            retriever_instance._validate_path(r"\\%2e%2e\etc\passwd")
+
 
 @pytest.mark.unit
 class TestPathValidationRestrictedDirs:
