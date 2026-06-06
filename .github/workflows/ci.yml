@@ -137,7 +137,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:18-bookworm
+        image: mirror.gcr.io/library/postgres:18-bookworm
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
@@ -264,7 +264,7 @@ jobs:
               tldw_Server_API/tests/http_client
     services:
       postgres:
-        image: postgres:18-bookworm
+        image: mirror.gcr.io/library/postgres:18-bookworm
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
@@ -908,7 +908,7 @@ jobs:
               tldw_Server_API/tests/integration
     services:
       postgres:
-        image: postgres:18-bookworm
+        image: mirror.gcr.io/library/postgres:18-bookworm
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
@@ -1671,7 +1671,7 @@ jobs:
               tldw_Server_API/tests/integration
     services:
       postgres:
-        image: postgres:18-bookworm
+        image: mirror.gcr.io/library/postgres:18-bookworm
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
