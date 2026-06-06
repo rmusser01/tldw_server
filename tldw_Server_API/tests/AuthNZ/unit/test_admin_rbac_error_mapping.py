@@ -26,8 +26,35 @@ class _ExplodingDB:
         raise RuntimeError(self.message)
 
 
+class _PostgresMatrixDB:
+    def __init__(self) -> None:
+        self.fetch_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.fetchval_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetchval(self, query: str, *params: Any) -> int:
+        self.fetchval_calls.append((str(query), tuple(params)))
+        return 1
+
+    async def fetch(self, query: str, *params: Any) -> list[dict[str, Any]]:
+        self.fetch_calls.append((str(query), tuple(params)))
+        query_lower = str(query).lower()
+        if "from roles" in query_lower:
+            return [{"id": 1, "name": "admin", "description": "Admin", "is_system": False}]
+        if "from permissions" in query_lower and "description" in query_lower:
+            return [{"id": 10, "name": "media.read", "description": "Read media", "category": "media"}]
+        if "from permissions" in query_lower:
+            return [{"id": 10, "name": "media.read"}]
+        if "from role_permissions" in query_lower:
+            return [{"role_id": 1, "permission_id": 10}]
+        return []
+
+
 async def _fake_is_pg() -> bool:
     return False
+
+
+async def _fake_is_pg_true() -> bool:
+    return True
 
 
 async def _allow_admin_scope(*_args, **_kwargs) -> None:
@@ -56,7 +83,7 @@ async def _assert_admin_rbac_log_sanitized(
 
 
 def _configure_error_mapping_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(admin_rbac, "is_test_mode", lambda: True)
+    monkeypatch.setattr(admin_rbac, "is_test_mode", lambda: True, raising=False)
     monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg)
     monkeypatch.setattr(admin_rbac, "_enforce_admin_user_scope", _allow_admin_scope)
     monkeypatch.setattr(
@@ -65,6 +92,40 @@ def _configure_error_mapping_env(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: SimpleNamespace(AUTH_MODE="multi_user", SINGLE_USER_FIXED_ID=1),
     )
     monkeypatch.setattr(auth_settings, "is_single_user_mode", lambda: False)
+
+
+def _assert_postgres_role_query_uses_boolean_default(db: _PostgresMatrixDB) -> None:
+    role_queries = [query for query, _params in db.fetch_calls if "FROM roles" in query]
+    assert role_queries
+    normalized = " ".join(role_queries[0].split()).replace(" ", "").lower()
+    assert "coalesce(is_system,false)" in normalized
+    assert "coalesce(is_system,0)" not in normalized
+
+
+@pytest.mark.asyncio
+async def test_roles_matrix_postgres_uses_boolean_is_system_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg_true)
+    db = _PostgresMatrixDB()
+
+    response = await admin_rbac.get_roles_matrix(db=db)
+
+    assert response.roles[0].name == "admin"
+    _assert_postgres_role_query_uses_boolean_default(db)
+
+
+@pytest.mark.asyncio
+async def test_roles_boolean_matrix_postgres_uses_boolean_is_system_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg_true)
+    db = _PostgresMatrixDB()
+
+    response = await admin_rbac.get_roles_matrix_boolean(db=db)
+
+    assert response.roles[0].name == "admin"
+    _assert_postgres_role_query_uses_boolean_default(db)
 
 
 @pytest.mark.asyncio
