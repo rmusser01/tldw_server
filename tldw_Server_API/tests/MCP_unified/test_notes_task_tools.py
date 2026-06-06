@@ -20,6 +20,9 @@ class _FakeTaskStore:
         projection = self._db.projections.get(task_id)
         return dict(projection) if projection else None
 
+    def get_task_projection(self, task_id: str) -> dict[str, Any] | None:
+        return self._fetch_projection(task_id)
+
 
 class _FakeTaskDB:
     def __init__(self) -> None:
@@ -68,6 +71,9 @@ class _FakeTaskDB:
         }
         self.task_store = _FakeTaskStore(self)
         self.closed = False
+
+    def get_task_projection(self, task_id: str) -> dict[str, Any] | None:
+        return self.task_store.get_task_projection(task_id)
 
     def _task(
         self,

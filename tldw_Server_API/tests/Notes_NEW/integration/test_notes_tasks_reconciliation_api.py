@@ -65,10 +65,9 @@ def _single_note_by_title(db: CharactersRAGDB, title: str) -> dict:
 
 def test_note_create_returns_saved_note_when_reconciliation_raises(
     notes_tasks_client: tuple[TestClient, CharactersRAGDB],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, db = notes_tasks_client
-    monkeypatch.setattr(notes_endpoint, "_NOTES_TASK_SERVICE", _FailingNotesTaskService())
+    client.app.dependency_overrides[notes_endpoint.get_notes_task_service] = lambda: _FailingNotesTaskService()
 
     create_response = client.post(
         "/api/v1/notes/",
@@ -86,7 +85,6 @@ def test_note_create_returns_saved_note_when_reconciliation_raises(
 
 def test_note_patch_returns_saved_note_when_reconciliation_raises(
     notes_tasks_client: tuple[TestClient, CharactersRAGDB],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, db = notes_tasks_client
 
@@ -98,7 +96,7 @@ def test_note_patch_returns_saved_note_when_reconciliation_raises(
     created = create_response.json()
     original_state = db.get_reconciliation_state(created["id"])
     assert original_state is not None
-    monkeypatch.setattr(notes_endpoint, "_NOTES_TASK_SERVICE", _FailingNotesTaskService())
+    client.app.dependency_overrides[notes_endpoint.get_notes_task_service] = lambda: _FailingNotesTaskService()
 
     patch_response = client.patch(
         f"/api/v1/notes/{created['id']}",

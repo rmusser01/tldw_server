@@ -118,23 +118,18 @@ describe("notes task API helpers", () => {
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(5, {
-      path: "/api/v1/notes/tasks/task%2F1",
-      method: "DELETE",
-      body: {
-        expected_task_version: 5,
-        expected_note_version: 8,
-        record_only: true
-      }
+      path: "/api/v1/notes/tasks/task%2F1?expected_task_version=5&expected_note_version=8&record_only=true",
+      method: "DELETE"
     })
   })
 
   it("builds task activity list and read-state requests", async () => {
-    await listTaskActivity({ limit: 10 })
+    await listTaskActivity({ note_id: "note/1", limit: 10 })
     await markTaskActivityRead("event/1", { read: true })
     await markTaskActivityRead("event/2", { dismissed: true })
 
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(1, {
-      path: "/api/v1/notes/tasks/activity?limit=10",
+      path: "/api/v1/notes/tasks/activity?note_id=note%2F1&limit=10",
       method: "GET"
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(2, {

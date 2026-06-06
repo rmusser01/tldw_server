@@ -26986,7 +26986,9 @@ for _note_store_method in (
 for _task_store_method in (
     "create_task",
     "get_task",
+    "get_task_projection",
     "list_tasks",
+    "update_unlinked_task_metadata_record_only",
     "update_task_record",
     "set_task_projection",
     "mark_task_unlinked",
@@ -27001,6 +27003,7 @@ for _task_store_method in (
     "get_reconciliation_state",
     "set_reconciliation_state",
     "candidate_notes_for_task_discovery",
+    "count_candidate_notes_for_task_discovery",
 ):
     setattr(
         CharactersRAGDB,

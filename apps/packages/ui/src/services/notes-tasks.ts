@@ -202,9 +202,8 @@ export const deleteNoteTask = async (
   body: NoteTaskDeleteRequest
 ): Promise<NoteTask> =>
   bgRequest<NoteTask, AllowedPath, "DELETE">({
-    path: toAllowedPath(`/api/v1/notes/tasks/${encodePathId(taskId)}`),
-    method: "DELETE",
-    body
+    path: pathWithQuery(`/api/v1/notes/tasks/${encodePathId(taskId)}`, body),
+    method: "DELETE"
   })
 
 export const reconcileNoteTasks = async (
@@ -216,6 +215,7 @@ export const reconcileNoteTasks = async (
   })
 
 export const listTaskActivity = async (params: {
+  note_id?: string | number | null
   limit?: number
 } = {}): Promise<NoteTaskActivityListResponse> =>
   bgRequest<NoteTaskActivityListResponse, AllowedPath, "GET">({

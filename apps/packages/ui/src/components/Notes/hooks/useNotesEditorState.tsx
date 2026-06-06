@@ -391,7 +391,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const loadTaskActivityForNote = React.useCallback(async (noteId: string | number) => {
     try {
-      const response = await listTaskActivity({ limit: 50 })
+      const response = await listTaskActivity({ note_id: noteId, limit: 50 })
       const noteIdText = String(noteId)
       const events = Array.isArray(response.events)
         ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
@@ -752,7 +752,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const expectedNoteVersion = selectedVersion ?? task.projection?.note_version ?? null
       if (expectedNoteVersion == null) {
         setTaskConflictNotice(
-          t('option:notesSearch.taskConflictNotice', {
+          t('option:notesSearch_taskConflictNotice', {
             defaultValue: 'Task changed on the server. Reload the note and try again.'
           })
         )
@@ -772,7 +772,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         await loadDetail(selectedId)
       } catch (error: any) {
         setTaskConflictNotice(
-          t('option:notesSearch.taskConflictNotice', {
+          t('option:notesSearch_taskConflictNotice', {
             defaultValue: 'Task changed on the server. Reload the note and try again.'
           })
         )

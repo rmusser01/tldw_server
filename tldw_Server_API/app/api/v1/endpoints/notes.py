@@ -197,7 +197,9 @@ _NOTES_ATTACHMENT_ALLOWED_EXTENSIONS = {
     ".yml",
     ".zip",
 }
-_NOTES_TASK_SERVICE = NotesTaskService()
+def get_notes_task_service() -> NotesTaskService:
+    """Provide the stateless notes task service for note-save reconciliation."""
+    return NotesTaskService()
 
 
 def _resolve_notes_attachment_max_bytes() -> int:
@@ -314,12 +316,13 @@ def _reconcile_note_tasks_after_save(
     db: CharactersRAGDB,
     note_data: dict[str, Any],
     current_user: User,
+    task_service: NotesTaskService,
 ) -> None:
     """Synchronize markdown checklist tasks for a note row that was just saved."""
     note_id = str(note_data["id"])
     note_version = int(note_data["version"])
     try:
-        _NOTES_TASK_SERVICE.reconcile_note(
+        task_service.reconcile_note(
             db=db,
             note_id=note_id,
             note_version=note_version,
@@ -1272,6 +1275,7 @@ async def create_note(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),  # Use the user-specific DB instance
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.create")),
 ):
     try:
@@ -1404,7 +1408,12 @@ async def create_note(
                 f"Failed to retrieve note '{note_id}' immediately after creation for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Note created but could not be retrieved.")
-        _reconcile_note_tasks_after_save(db=db, note_data=created_note_data, current_user=current_user)
+        _reconcile_note_tasks_after_save(
+            db=db,
+            note_data=created_note_data,
+            current_user=current_user,
+            task_service=task_service,
+        )
         # Attach keywords inline
         created_note_data = _attach_keywords_inline(db, created_note_data)
         created_note_data = _attach_folders_inline(db, created_note_data)
@@ -1960,6 +1969,7 @@ async def import_notes(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.bulk_create")),
 ):
     try:
@@ -2063,6 +2073,7 @@ async def import_notes(
                             db=db,
                             note_data=overwritten_note,
                             current_user=current_user,
+                            task_service=task_service,
                         )
                         if parsed_note.get("keywords_provided"):
                             _sync_note_keywords(
@@ -2118,6 +2129,7 @@ async def import_notes(
                         db=db,
                         note_data=created_note,
                         current_user=current_user,
+                        task_service=task_service,
                     )
                     if parsed_note.get("keywords"):
                         _sync_note_keywords(
@@ -2152,6 +2164,7 @@ async def import_notes(
                                 db=db,
                                 note_data=created_note,
                                 current_user=current_user,
+                                task_service=task_service,
                             )
                             if parsed_note.get("keywords"):
                                 _sync_note_keywords(
@@ -2437,6 +2450,7 @@ async def update_keyword_collection_endpoint(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     try:
@@ -3696,6 +3710,7 @@ async def update_note(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     keywords_supplied = _field_supplied(note_in, "keywords")
@@ -3842,7 +3857,12 @@ async def update_note(
         if not updated_note_data:
             logger.error(f"Note '{note_id}' not found after successful update for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
-        _reconcile_note_tasks_after_save(db=db, note_data=updated_note_data, current_user=current_user)
+        _reconcile_note_tasks_after_save(
+            db=db,
+            note_data=updated_note_data,
+            current_user=current_user,
+            task_service=task_service,
+        )
         updated_note_data = _attach_keywords_inline(db, updated_note_data)
         updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
@@ -3881,6 +3901,7 @@ async def patch_note(
         expected_version: Optional[int] = Header(None, description="Optional expected version for optimistic locking"),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     """PATCH variant that allows updates without an explicit expected-version header.
@@ -4008,7 +4029,12 @@ async def patch_note(
         updated_note_data = db.get_note_by_id(note_id=note_id)
         if not updated_note_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
-        _reconcile_note_tasks_after_save(db=db, note_data=updated_note_data, current_user=current_user)
+        _reconcile_note_tasks_after_save(
+            db=db,
+            note_data=updated_note_data,
+            current_user=current_user,
+            task_service=task_service,
+        )
         updated_note_data = _attach_keywords_inline(db, updated_note_data)
         updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
@@ -4254,7 +4280,8 @@ async def bulk_create_notes(
         request: NoteBulkCreateRequest,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
-        current_user: User = Depends(get_request_user)
+        current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
 ):
     results: list[NoteBulkCreateItemResult] = []
     companion_events: list[dict[str, Any]] = []
@@ -4375,7 +4402,7 @@ async def bulk_create_notes(
             nd = db.get_note_by_id(note_id=note_id)
             if not nd:
                 raise CharactersRAGDBError("Created note could not be retrieved.")
-            _reconcile_note_tasks_after_save(db=db, note_data=nd, current_user=current_user)
+            _reconcile_note_tasks_after_save(db=db, note_data=nd, current_user=current_user, task_service=task_service)
             nd = _attach_keywords_inline(db, nd)
             nd = _attach_folders_inline(db, nd)
             companion_events.append(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -20,7 +21,6 @@ from tldw_Server_API.app.api.v1.schemas.notes_tasks_schemas import (
     TaskActivityResponse,
     TaskActivityStateResponse,
     TaskCreateRequest,
-    TaskDeleteRequest,
     TaskListResponse,
     TaskMetadata,
     TaskNoteSummaryResponse,
@@ -42,7 +42,11 @@ from tldw_Server_API.app.core.Notes_Tasks import NotesTaskService, Reconciliatio
 from tldw_Server_API.app.core.Notes_Tasks.service import ReconciliationBatchResult
 
 router = APIRouter()
-_TASK_SERVICE = NotesTaskService()
+
+
+def get_notes_task_service() -> NotesTaskService:
+    """Provide the stateless notes task service for endpoint dependency overrides."""
+    return NotesTaskService()
 
 
 def _actor(current_user: User) -> TaskActor:
@@ -51,9 +55,23 @@ def _actor(current_user: User) -> TaskActor:
 
 async def _check_rate_limit(rate_limiter: RateLimiter, current_user: User, action: str) -> None:
     try:
-        allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), action)
-    except Exception:
-        allowed, meta = True, {}
+        user_id = int(current_user.id)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Invalid user id for notes task rate limit: {}", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded for {action}",
+            headers={"Retry-After": "60"},
+        ) from exc
+    try:
+        allowed, meta = await rate_limiter.check_user_rate_limit(user_id, action)
+    except Exception as exc:
+        logger.warning("Rate limiter failed for notes task action {} and user {}: {}", action, current_user.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded for {action}",
+            headers={"Retry-After": "60"},
+        ) from exc
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -107,7 +125,7 @@ def _note_summary(db: CharactersRAGDB, note_id: str) -> TaskNoteSummaryResponse 
 
 
 def _task_response(db: CharactersRAGDB, task: dict[str, Any], *, include_projection: bool = True) -> TaskResponse:
-    projection = db.task_store._fetch_projection(str(task["id"])) if include_projection else None
+    projection = db.get_task_projection(str(task["id"])) if include_projection else None
     return TaskResponse(
         id=str(task["id"]),
         note_id=str(task["note_id"]),
@@ -158,6 +176,23 @@ def _reconciliation_response(
     return TaskReconciliationSummaryResponse(status="clean")
 
 
+def _stale_reconciliation_response(db: CharactersRAGDB, *, note_id: str | None = None) -> TaskReconciliationSummaryResponse:
+    remaining = db.count_candidate_notes_for_task_discovery(note_id=note_id)
+    if remaining:
+        note = db.get_note_by_id(note_id) if note_id is not None else None
+        return TaskReconciliationSummaryResponse(
+            status="incomplete",
+            note_id=str(note_id) if note_id is not None else None,
+            note_version=int(note["version"]) if note is not None else None,
+            processed_notes=0,
+            remaining_stale_notes=remaining,
+        )
+    if note_id is not None:
+        state_row = db.get_reconciliation_state(note_id)
+        return _reconciliation_response(None, fallback_state=state_row)
+    return TaskReconciliationSummaryResponse(status="clean", processed_notes=0, remaining_stale_notes=0)
+
+
 @router.get("/tasks", response_model=TaskListResponse, tags=["notes"])
 async def list_tasks(
     status_filter: TaskStatusValue | None = Query(None, alias="status"),
@@ -171,11 +206,6 @@ async def list_tasks(
 ) -> TaskListResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.read")
     try:
-        reconciliation = _TASK_SERVICE.reconcile_stale_notes(
-            db=db,
-            limit=reconcile_limit,
-            actor=_actor(current_user),
-        )
         tasks = db.list_tasks(
             status=status_filter,
             projection_status=projection_status,
@@ -183,7 +213,7 @@ async def list_tasks(
         )
         return TaskListResponse(
             tasks=[_task_response(db, task) for task in tasks],
-            reconciliation=_reconciliation_response(reconciliation),
+            reconciliation=_stale_reconciliation_response(db),
         )
     except Exception as exc:
         _handle_task_error(exc)
@@ -196,6 +226,7 @@ async def set_task_status(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
     _: None = Depends(rbac_rate_limit("notes.update")),
 ) -> TaskStatusBatchResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.update")
@@ -204,7 +235,7 @@ async def set_task_status(
         with db.transaction():
             for item in request.updates:
                 tasks.append(
-                    _TASK_SERVICE.update_task(
+                    task_service.update_task(
                         db=db,
                         task_id=item.task_id,
                         expected_task_version=item.expected_task_version,
@@ -223,6 +254,7 @@ async def set_task_status(
 @router.get("/tasks/activity", response_model=TaskActivityListResponse, tags=["notes"])
 async def list_task_activity(
     limit: int = Query(50, ge=1, le=200),
+    note_id: str | None = Query(None, min_length=1),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
@@ -231,7 +263,7 @@ async def list_task_activity(
     await _check_rate_limit(rate_limiter, current_user, "notes.read")
     try:
         user_id = str(current_user.id)
-        events = db.list_recent_unread_task_activity(user_id=user_id, actor_type="agent", limit=limit)
+        events = db.list_recent_unread_task_activity(user_id=user_id, note_id=note_id, actor_type="agent", limit=limit)
         return TaskActivityListResponse(events=[_activity_response(event, None) for event in events])
     except Exception as exc:
         _handle_task_error(exc)
@@ -288,11 +320,12 @@ async def update_task(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
     _: None = Depends(rbac_rate_limit("notes.update")),
 ) -> TaskResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.update")
     try:
-        task = _TASK_SERVICE.update_task(
+        task = task_service.update_task(
             db=db,
             task_id=task_id,
             expected_task_version=request.expected_task_version,
@@ -311,20 +344,23 @@ async def update_task(
 @router.delete("/tasks/{task_id}", response_model=TaskResponse, tags=["notes"])
 async def delete_task(
     task_id: str,
-    request: TaskDeleteRequest,
+    expected_task_version: int = Query(..., ge=1),
+    expected_note_version: int | None = Query(None, ge=1),
+    record_only: bool = Query(False),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
     _: None = Depends(rbac_rate_limit("notes.delete")),
 ) -> TaskResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.delete")
     try:
-        task = _TASK_SERVICE.delete_task(
+        task = task_service.delete_task(
             db=db,
             task_id=task_id,
-            expected_task_version=request.expected_task_version,
-            expected_note_version=request.expected_note_version,
-            record_only=request.record_only,
+            expected_task_version=expected_task_version,
+            expected_note_version=expected_note_version,
+            record_only=record_only,
             actor=_actor(current_user),
         )
         return _task_response(db, task)
@@ -344,12 +380,12 @@ async def list_note_tasks(
 ) -> TaskListResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.read")
     try:
-        result = _TASK_SERVICE.ensure_note_reconciled(db=db, note_id=note_id, actor=_actor(current_user))
+        if db.get_note_by_id(note_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
         tasks = db.list_tasks(note_id=note_id, limit=limit)
-        state_row = db.get_reconciliation_state(note_id)
         return TaskListResponse(
             tasks=[_task_response(db, task) for task in tasks],
-            reconciliation=_reconciliation_response(result, fallback_state=state_row),
+            reconciliation=_stale_reconciliation_response(db, note_id=note_id),
         )
     except Exception as exc:
         _handle_task_error(exc)
@@ -363,11 +399,12 @@ async def create_note_task(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
     _: None = Depends(rbac_rate_limit("notes.update")),
 ) -> TaskResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.update")
     try:
-        task = _TASK_SERVICE.create_task_for_note(
+        task = task_service.create_task_for_note(
             db=db,
             note_id=note_id,
             text=request.text,
@@ -388,11 +425,12 @@ async def reconcile_note_tasks(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
     _: None = Depends(rbac_rate_limit("notes.update")),
 ) -> TaskReconciliationSummaryResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.update")
     try:
-        result = _TASK_SERVICE.reconcile_note_current(db=db, note_id=note_id, actor=_actor(current_user))
+        result = task_service.reconcile_note_current(db=db, note_id=note_id, actor=_actor(current_user))
         return _reconciliation_response(result)
     except Exception as exc:
         _handle_task_error(exc)

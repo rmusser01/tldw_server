@@ -22,6 +22,7 @@ _CHECKLIST_RE = re.compile(
 )
 _METADATA_TOKEN_ORDER = ("due_date", "priority", "estimate")
 _METADATA_TOKEN_NAMES = {"due_date": "due", "priority": "priority", "estimate": "estimate"}
+_TASK_STATUSES = {"open", "done"}
 
 
 @dataclass(frozen=True)
@@ -73,8 +74,7 @@ class NotesTaskService:
         actor: TaskActor,
     ) -> ReconciliationBatchResult:
         work_limit = max(0, int(limit))
-        candidates = db.candidate_notes_for_task_discovery(limit=work_limit + 1 if work_limit else 1)
-        to_process = candidates[:work_limit]
+        to_process = db.candidate_notes_for_task_discovery(limit=work_limit) if work_limit else []
         results: list[ReconciliationResult] = []
         for candidate in to_process:
             note = db.get_note_by_id(str(candidate["id"]))
@@ -89,7 +89,7 @@ class NotesTaskService:
                     actor=actor,
                 )
             )
-        remaining = max(0, len(candidates) - len(to_process))
+        remaining = db.count_candidate_notes_for_task_discovery()
         return ReconciliationBatchResult(
             status="incomplete" if remaining else "clean",
             processed_notes=len(results),
@@ -144,6 +144,7 @@ class NotesTaskService:
         actor: TaskActor,
     ) -> dict[str, Any]:
         self._validate_task_text(text)
+        self._validate_task_status(status)
         self._validate_metadata(metadata)
         marker = "x" if status == "done" else " "
         line = f"- [{marker}] {self._render_body(text=text.strip(), metadata=metadata)}"
@@ -193,6 +194,8 @@ class NotesTaskService:
     ) -> dict[str, Any]:
         if text is not None:
             self._validate_task_text(text)
+        if status is not None:
+            self._validate_task_status(status)
         if metadata is not None:
             self._validate_metadata(metadata)
 
@@ -473,7 +476,7 @@ class NotesTaskService:
 
     @staticmethod
     def _require_projection(db: CharactersRAGDB, *, task_id: str, conn: TaskConnection) -> dict[str, Any]:
-        projection = db.task_store._fetch_projection(task_id, conn=conn)
+        projection = db.get_task_projection(task_id, conn=conn)
         if projection is None:
             raise ConflictError(f"Task projection is missing for task '{task_id}'.", entity="tasks", entity_id=task_id)
         return projection
@@ -495,6 +498,11 @@ class NotesTaskService:
             raise InputError("Task text must be 2000 characters or fewer.")
         if "\n" in text or "\r" in text:
             raise InputError("Task text cannot contain newline characters.")
+
+    @staticmethod
+    def _validate_task_status(status: str) -> None:
+        if status not in _TASK_STATUSES:
+            raise InputError(f"Unsupported task status '{status}'. Expected 'open' or 'done'.")
 
     @staticmethod
     def _validate_metadata(metadata: dict[str, Any]) -> None:
@@ -584,8 +592,12 @@ class NotesTaskService:
         end = int(projection["end_offset"])
         if start < 0 or end < start or end > len(content):
             raise ConflictError("Task projection offsets are invalid.", entity="tasks")
-        if end < len(content) and content[end] == "\n":
+        if end + 1 < len(content) and content[end : end + 2] == "\r\n":
+            end += 2
+        elif end < len(content) and content[end] == "\n":
             end += 1
+        elif start >= 2 and content[start - 2 : start] == "\r\n":
+            start -= 2
         elif start > 0 and content[start - 1] == "\n":
             start -= 1
         return f"{content[:start]}{content[end:]}"
@@ -621,54 +633,15 @@ class NotesTaskService:
         metadata: dict[str, Any],
         actor: TaskActor,
     ) -> dict[str, Any]:
-        task_id = str(task["id"])
-        metadata_json = db.task_store._json_dumps(metadata, "metadata")
-        now = db._get_current_utc_timestamp_iso()
-        cursor = db.task_store._execute(
-            conn,
-            """
-            UPDATE note_tasks
-               SET metadata_json = ?,
-                   updated_at = ?,
-                   version = version + 1
-             WHERE id = ? AND version = ? AND deleted = ? AND projection_status = ?
-            """,
-            (
-                metadata_json,
-                now,
-                task_id,
-                expected_task_version,
-                db.task_store._deleted_value(False),
-                "unlinked",
-            ),
-        )
-        if getattr(cursor, "rowcount", None) == 0:
-            raise ConflictError(
-                f"Task version mismatch for ID '{task_id}'. Expected {expected_task_version}.",
-                entity="tasks",
-                entity_id=task_id,
-            )
-        updated = db.task_store._fetch_task(task_id, include_deleted=True, conn=conn)
-        if updated is None:
-            raise ConflictError(f"Task with ID '{task_id}' not found.", entity="tasks", entity_id=task_id)
-        db.record_task_event(
-            task_id=task_id,
-            note_id=str(updated["note_id"]),
-            event_type="updated",
+        return db.update_unlinked_task_metadata_record_only(
+            task_id=str(task["id"]),
+            expected_version=expected_task_version,
+            metadata=metadata,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
             tool_name=actor.tool_name,
             policy_mode=actor.policy_mode,
             approval_id=actor.approval_id,
-            old_value={"metadata": task.get("metadata_json") or {}},
-            new_value=(
-                {
-                    "metadata": updated.get("metadata_json") or {},
-                    "idempotency_key": actor.idempotency_key,
-                }
-                if actor.idempotency_key
-                else {"metadata": updated.get("metadata_json") or {}}
-            ),
+            idempotency_key=actor.idempotency_key,
             conn=conn,
         )
-        return updated

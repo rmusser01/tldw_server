@@ -204,6 +204,7 @@ export const NotesDockPanel: React.FC = () => {
   const searchTimeoutRef = useRef<number | null>(null)
   const fetchRequestIdRef = useRef(0)
   const taskRequestIdRef = useRef(0)
+  const activeServerNoteIdRef = useRef<string | null>(null)
   const cacheSyncInFlightRef = useRef(0)
   const unsavedModalReturnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -216,6 +217,10 @@ export const NotesDockPanel: React.FC = () => {
     () => notes.find((note) => note.localId === activeNoteId) ?? null,
     [notes, activeNoteId]
   )
+
+  useEffect(() => {
+    activeServerNoteIdRef.current = activeNote?.id != null ? String(activeNote.id) : null
+  }, [activeNote?.id])
 
   const openNoteIds = useMemo(() => {
     return new Set(notes.map((note) => note.id).filter(Boolean))
@@ -374,8 +379,12 @@ export const NotesDockPanel: React.FC = () => {
 
   const refreshTaskStateForNote = useCallback(
     async (noteId: string | number | null | undefined) => {
+      const noteIdText = noteId != null ? String(noteId) : null
+      if (noteIdText && activeServerNoteIdRef.current !== noteIdText) {
+        return
+      }
       const requestId = ++taskRequestIdRef.current
-      if (!noteId || editorDisabled) {
+      if (!noteIdText || editorDisabled) {
         setActiveNoteTasks([])
         setTaskReconciliation(null)
         setTaskActivityEvents([])
@@ -384,19 +393,18 @@ export const NotesDockPanel: React.FC = () => {
 
       try {
         const response = await listNoteTasks(noteId, { limit: 500 })
-        if (requestId !== taskRequestIdRef.current) return
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
         setActiveNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
         setTaskReconciliation(response.reconciliation ?? null)
       } catch {
-        if (requestId !== taskRequestIdRef.current) return
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
         setActiveNoteTasks([])
         setTaskReconciliation(null)
       }
 
       try {
-        const response = await listTaskActivity({ limit: 50 })
-        if (requestId !== taskRequestIdRef.current) return
-        const noteIdText = String(noteId)
+        const response = await listTaskActivity({ note_id: noteId, limit: 50 })
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
         const events = Array.isArray(response.events)
           ? response.events.filter((event) => {
               return (
@@ -408,7 +416,7 @@ export const NotesDockPanel: React.FC = () => {
           : []
         setTaskActivityEvents(events)
       } catch {
-        if (requestId !== taskRequestIdRef.current) return
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
         setTaskActivityEvents([])
       }
     },
@@ -542,7 +550,7 @@ export const NotesDockPanel: React.FC = () => {
       if (expectedNoteVersion == null) {
         message.error(
           t(
-            "option:notesDock.taskConflictNotice",
+            "option:notesSearch_taskConflictNotice",
             "Task changed on the server. Reload the note and try again."
           )
         )
@@ -576,12 +584,12 @@ export const NotesDockPanel: React.FC = () => {
         if (error?.status === 409 || error?.message?.includes("version")) {
           message.error(
             t(
-              "option:notesDock.taskConflictNotice",
+              "option:notesSearch_taskConflictNotice",
               "Task changed on the server. Reload the note and try again."
             )
           )
         } else {
-          message.error(t("option:notesDock.taskUpdateError", "Task update failed"))
+          message.error(t("option:notesSearch_taskUpdateError", "Task update failed"))
         }
       }
     },
@@ -603,7 +611,7 @@ export const NotesDockPanel: React.FC = () => {
         await markTaskActivityRead(eventId, { dismissed: true })
         setTaskActivityEvents((current) => current.filter((event) => event.id !== eventId))
       } catch {
-        message.error(t("option:notesDock.taskActivityDismissError", "Failed to dismiss task activity"))
+        message.error(t("option:notesSearch_taskActivityDismissError", "Failed to dismiss task activity"))
       } finally {
         setDismissingTaskActivityId(null)
       }
@@ -1023,7 +1031,7 @@ export const NotesDockPanel: React.FC = () => {
             {hasIncompleteTaskReconciliation && (
               <div className="mt-2 text-[11px] text-warning" data-testid="notes-dock-task-reconciliation-warning">
                 {t(
-                  "option:notesDock.taskIncompleteReconciliationWarning",
+                  "option:notesSearch_taskIncompleteReconciliationWarning",
                   "Some task updates are still reconciling."
                 )}
               </div>

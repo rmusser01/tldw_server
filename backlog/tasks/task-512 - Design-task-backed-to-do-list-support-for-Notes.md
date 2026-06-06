@@ -16,9 +16,9 @@ Create a PRD/design spec for first-class task-backed to-do list support in Notes
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Spec captures approved product model, architecture, data flow, MCP permissions, error handling, and test strategy.
-- [ ] #2 Spec preserves markdown portability with no hidden IDs while defining durable first-class task records.
-- [ ] #3 Spec is reviewed and committed with the Backlog task linked/updated.
+- [x] #1 Spec captures approved product model, architecture, data flow, MCP permissions, error handling, and test strategy.
+- [x] #2 Spec preserves markdown portability with no hidden IDs while defining durable first-class task records.
+- [x] #3 Spec is reviewed and committed with the Backlog task linked/updated.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -41,10 +41,10 @@ TASK-512 spec refined again after follow-up design review. The PRD now explicitl
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

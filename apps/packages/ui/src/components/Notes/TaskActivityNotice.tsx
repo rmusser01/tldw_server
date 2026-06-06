@@ -43,12 +43,12 @@ const TaskActivityNotice: React.FC<TaskActivityNoticeProps> = ({
 
   const actorLabel = eventActorLabel(firstEvent)
   const toolLabel = eventToolLabel(firstEvent)
-  const affectedLabel = noteTitle?.trim() || t("option:taskActivity.thisNote", {
+  const affectedLabel = noteTitle?.trim() || t("option:notesSearch_taskActivityThisNote", {
     defaultValue: "this note"
   })
   const countLabel = taskCountLabel(events.length)
   const summaryDefault = `${actorLabel} via ${toolLabel} changed ${countLabel} in ${affectedLabel}.`
-  const summary = t("option:taskActivity.summary", {
+  const summary = t("option:notesSearch_taskActivitySummary", {
     defaultValue: summaryDefault,
     actor: actorLabel,
     tool: toolLabel,
@@ -74,12 +74,12 @@ const TaskActivityNotice: React.FC<TaskActivityNoticeProps> = ({
             size="small"
             type="link"
             className="h-auto !px-0 text-[12px]"
-            aria-label={t("option:taskActivity.inspectAria", {
+            aria-label={t("option:notesSearch_taskActivityInspectAria", {
               defaultValue: "Inspect task activity"
             })}
             onClick={onInspect}
           >
-            {t("option:taskActivity.inspect", { defaultValue: "Inspect" })}
+            {t("option:notesSearch_taskActivityInspect", { defaultValue: "Inspect" })}
           </Button>
         ) : null}
         {onDismiss ? (
@@ -88,12 +88,12 @@ const TaskActivityNotice: React.FC<TaskActivityNoticeProps> = ({
             type="link"
             className="h-auto !px-0 text-[12px]"
             loading={dismissingEventId === firstEvent.id}
-            aria-label={t("option:taskActivity.dismissAria", {
+            aria-label={t("option:notesSearch_taskActivityDismissAria", {
               defaultValue: "Dismiss task activity"
             })}
             onClick={() => onDismiss(firstEvent.id)}
           >
-            {t("option:taskActivity.dismiss", { defaultValue: "Dismiss" })}
+            {t("option:notesSearch_taskActivityDismiss", { defaultValue: "Dismiss" })}
           </Button>
         ) : null}
       </div>

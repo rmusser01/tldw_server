@@ -25,6 +25,11 @@ class _NoopRateLimiter:
         return True, {}
 
 
+class _FailingRateLimiter:
+    async def check_user_rate_limit(self, *_args: Any, **_kwargs: Any) -> tuple[bool, dict[str, Any]]:
+        raise RuntimeError("rate limiter unavailable")
+
+
 @pytest.fixture()
 def notes_tasks_api_client(tmp_path: Path) -> Generator[tuple[TestClient, CharactersRAGDB], None, None]:
     db = CharactersRAGDB(str(tmp_path / "notes_tasks_rest_api.db"), client_id="notes_tasks_rest_user")
@@ -38,12 +43,8 @@ def notes_tasks_api_client(tmp_path: Path) -> Generator[tuple[TestClient, Charac
         return db
 
     fastapi_app = FastAPI()
-    try:
-        notes_tasks_endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.notes_tasks")
-    except ModuleNotFoundError:
-        notes_tasks_endpoint = None
-    if notes_tasks_endpoint is not None:
-        fastapi_app.include_router(notes_tasks_endpoint.router, prefix="/api/v1/notes")
+    notes_tasks_endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.notes_tasks")
+    fastapi_app.include_router(notes_tasks_endpoint.router, prefix="/api/v1/notes")
     fastapi_app.include_router(notes_endpoint.router, prefix="/api/v1/notes")
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
@@ -73,7 +74,7 @@ def _task_by_text(db: CharactersRAGDB, note_id: str, text: str) -> dict[str, Any
 def _task_with_projection(db: CharactersRAGDB, task_id: str) -> dict[str, Any]:
     task = db.get_task(task_id)
     assert task is not None
-    projection = db.task_store._fetch_projection(task_id)
+    projection = db.get_task_projection(task_id)
     assert projection is not None
     return {"task": task, "projection": projection}
 
@@ -97,7 +98,9 @@ def _status_update(
     return client.post("/api/v1/notes/tasks/status", json={"updates": [item]})
 
 
-def test_list_tasks_for_note_reconciles_stale_note(notes_tasks_api_client: tuple[TestClient, CharactersRAGDB]) -> None:
+def test_list_tasks_for_note_reports_stale_note_without_reconciling(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
     client, db = notes_tasks_api_client
     note = _create_note(client, content="- [ ] Alpha\n")
     db.update_note(
@@ -110,16 +113,14 @@ def test_list_tasks_for_note_reconciles_stale_note(notes_tasks_api_client: tuple
 
     assert response.status_code == 200, response.text
     payload = response.json()
+    assert payload["reconciliation"]["status"] == "incomplete"
     assert payload["reconciliation"]["note_id"] == note["id"]
     assert payload["reconciliation"]["note_version"] == note["version"] + 1
-    assert payload["reconciliation"]["status"] == "clean"
-    assert {task["text"]: task["status"] for task in payload["tasks"]} == {
-        "Alpha": "done",
-        "Beta": "open",
-    }
+    assert payload["reconciliation"]["remaining_stale_notes"] == 1
+    assert {task["text"]: task["status"] for task in payload["tasks"]} == {"Alpha": "open"}
 
 
-def test_broad_list_reports_incomplete_reconciliation_when_work_limit_reached(
+def test_broad_list_reports_stale_count_without_reconciling_under_read(
     notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
 ) -> None:
     client, db = notes_tasks_api_client
@@ -133,8 +134,23 @@ def test_broad_list_reports_incomplete_reconciliation_when_work_limit_reached(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["reconciliation"]["status"] == "incomplete"
-    assert payload["reconciliation"]["processed_notes"] == 1
-    assert payload["reconciliation"]["remaining_stale_notes"] >= 1
+    assert payload["reconciliation"]["processed_notes"] == 0
+    assert payload["reconciliation"]["remaining_stale_notes"] == 2
+    assert _task_by_text(db, first["id"], "First")["status"] == "open"
+    assert _task_by_text(db, second["id"], "Second")["status"] == "open"
+
+
+def test_task_endpoint_fails_closed_when_rate_limiter_errors(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, _db = notes_tasks_api_client
+    client.app.dependency_overrides[get_rate_limiter_dep] = lambda: _FailingRateLimiter()
+
+    response = client.get("/api/v1/notes/tasks")
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    assert response.json()["detail"] == "Rate limit exceeded for notes.read"
 
 
 def test_get_task_includes_note_and_projection_details(
@@ -309,7 +325,7 @@ def test_update_projected_task_refreshes_sibling_projection(
     assert saved is not None
     beta_after_alpha = db.get_task(beta["id"])
     assert beta_after_alpha is not None
-    beta_projection = db.task_store._fetch_projection(beta["id"])
+    beta_projection = db.get_task_projection(beta["id"])
     assert beta_projection is not None
     assert beta_projection["note_version"] == saved["version"]
 
@@ -340,14 +356,14 @@ def test_delete_projected_task_refreshes_sibling_projection(
     delete_response = client.request(
         "DELETE",
         f"/api/v1/notes/tasks/{alpha['id']}",
-        json={"expected_task_version": alpha["version"], "expected_note_version": note["version"]},
+        params={"expected_task_version": alpha["version"], "expected_note_version": note["version"]},
     )
     assert delete_response.status_code == 200, delete_response.text
     saved = db.get_note_by_id(note["id"])
     assert saved is not None
     beta_after_delete = db.get_task(beta["id"])
     assert beta_after_delete is not None
-    beta_projection = db.task_store._fetch_projection(beta["id"])
+    beta_projection = db.get_task_projection(beta["id"])
     assert beta_projection is not None
     assert beta_projection["note_version"] == saved["version"]
 
@@ -498,7 +514,7 @@ def test_delete_projected_task_removes_line_transactionally(
     response = client.request(
         "DELETE",
         f"/api/v1/notes/tasks/{task['id']}",
-        json={"expected_task_version": task["version"], "expected_note_version": note["version"]},
+        params={"expected_task_version": task["version"], "expected_note_version": note["version"]},
     )
 
     assert response.status_code == 200, response.text
@@ -520,7 +536,7 @@ def test_delete_with_nested_child_content_conflicts(
     response = client.request(
         "DELETE",
         f"/api/v1/notes/tasks/{task['id']}",
-        json={"expected_task_version": task["version"], "expected_note_version": note["version"]},
+        params={"expected_task_version": task["version"], "expected_note_version": note["version"]},
     )
 
     assert response.status_code == 409, response.text
@@ -549,7 +565,7 @@ def test_unlinked_task_record_only_delete_succeeds(
     response = client.request(
         "DELETE",
         f"/api/v1/notes/tasks/{task['id']}",
-        json={"expected_task_version": unlinked["version"], "record_only": True},
+        params={"expected_task_version": unlinked["version"], "record_only": True},
     )
 
     assert response.status_code == 200, response.text
@@ -631,7 +647,7 @@ def test_ambiguous_projected_mutations_conflict(
     delete_response = client.request(
         "DELETE",
         f"/api/v1/notes/tasks/{task['id']}",
-        json={"expected_task_version": ambiguous["version"], "expected_note_version": note["version"]},
+        params={"expected_task_version": ambiguous["version"], "expected_note_version": note["version"]},
     )
     assert delete_response.status_code == 409
 
@@ -751,6 +767,40 @@ def test_recent_activity_limit_skips_newer_dismissed_agent_event(
 
     assert response.status_code == 200, response.text
     assert [event["id"] for event in response.json()["events"]] == [older_unread_event["id"]]
+
+
+def test_recent_activity_can_be_scoped_to_note_before_limit(
+    notes_tasks_api_client: tuple[TestClient, CharactersRAGDB],
+) -> None:
+    client, db = notes_tasks_api_client
+    first_note = _create_note(client, title="First", content="- [ ] Alpha\n")
+    second_note = _create_note(client, title="Second", content="- [ ] Beta\n")
+    first_task = _task_by_text(db, first_note["id"], "Alpha")
+    second_task = _task_by_text(db, second_note["id"], "Beta")
+    scoped_event = db.record_task_event(
+        task_id=first_task["id"],
+        note_id=first_note["id"],
+        event_type="updated",
+        actor_type="agent",
+        actor_id="assistant",
+        new_value={"text": "scoped"},
+    )
+    db.record_task_event(
+        task_id=second_task["id"],
+        note_id=second_note["id"],
+        event_type="updated",
+        actor_type="agent",
+        actor_id="assistant",
+        new_value={"text": "newer unrelated"},
+    )
+
+    response = client.get(
+        "/api/v1/notes/tasks/activity",
+        params={"note_id": first_note["id"], "limit": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [event["id"] for event in response.json()["events"]] == [scoped_event["id"]]
 
 
 def test_reconcile_note_endpoint_refreshes_state(

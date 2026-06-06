@@ -230,6 +230,10 @@ class TaskStore:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def get_task_projection(self, task_id: str, *, conn: TaskConnection | None = None) -> dict[str, Any] | None:
+        """Return the markdown projection row for one task."""
+        return self._fetch_projection(task_id, conn=conn)
+
     def get_note_reconciliation_snapshot(
         self,
         *,
@@ -467,7 +471,6 @@ class TaskStore:
             self._raise_integrity_error(exc, final_task_id)
         except BackendDatabaseError as exc:
             self._raise_backend_error(exc, final_task_id)
-        raise CharactersRAGDBError(f"Failed to create task '{final_task_id}'.")  # noqa: TRY003
 
     def get_task(self, task_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
         """Return one task by ID."""
@@ -522,16 +525,97 @@ class TaskStore:
             params.append(self._deleted_value(False))
             clauses.append("n.deleted = ?")
             params.append(self._deleted_value(False))
-        query = "SELECT t.* FROM note_tasks t"
+        sql_query = "SELECT t.* FROM note_tasks t"
         if not include_deleted:
-            query += " JOIN notes n ON n.id = t.note_id"
+            sql_query += " JOIN notes n ON n.id = t.note_id"
         if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ? OFFSET ?"
+            sql_query += " WHERE " + " AND ".join(clauses)
+        sql_query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ? OFFSET ?"
         params.append(self._clamp_limit(limit))
         params.append(self._normalize_offset(offset))
-        cursor = self._read(query, tuple(params))
+        cursor = self._read(sql_query, tuple(params))
         return [self._decode_task_row(row) for row in cursor.fetchall()]
+
+    def update_unlinked_task_metadata_record_only(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        metadata: dict[str, Any],
+        actor_type: str,
+        actor_id: str | None = None,
+        tool_name: str | None = None,
+        policy_mode: str | None = None,
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any]:
+        """Update metadata for an unlinked task without modifying note content."""
+        metadata_json = self._json_dumps(metadata, "metadata")
+
+        def _execute_metadata_update(transaction_conn: TaskConnection) -> dict[str, Any]:
+            old = self._require_active_task(
+                self._require_expected_version(
+                    self._fetch_task(task_id, include_deleted=True, conn=transaction_conn),
+                    expected_version,
+                    task_id,
+                ),
+                task_id,
+            )
+            if old["projection_status"] != "unlinked":
+                raise ConflictError(
+                    f"Task projection is {old['projection_status']} for task '{task_id}'.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
+            self._require_active_note(old["note_id"], task_id, conn=transaction_conn)
+            now = self._db._get_current_utc_timestamp_iso()
+            cursor = self._execute(
+                transaction_conn,
+                """
+                UPDATE note_tasks
+                   SET metadata_json = ?,
+                       updated_at = ?,
+                       version = version + 1
+                 WHERE id = ? AND version = ? AND deleted = ? AND projection_status = ?
+                """,
+                (
+                    metadata_json,
+                    now,
+                    task_id,
+                    expected_version,
+                    self._deleted_value(False),
+                    "unlinked",
+                ),
+            )
+            if getattr(cursor, "rowcount", None) == 0:
+                raise ConflictError(
+                    f"Task version mismatch for ID '{task_id}'. Expected {expected_version}.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )  # noqa: TRY003
+            updated = self._fetch_task(task_id, include_deleted=True, conn=transaction_conn)
+            if updated is None:
+                raise ConflictError(f"Task with ID '{task_id}' not found.", entity="tasks", entity_id=task_id)  # noqa: TRY003
+            self.record_task_event(
+                task_id=task_id,
+                note_id=str(updated["note_id"]),
+                event_type="updated",
+                actor_type=actor_type,
+                actor_id=actor_id,
+                tool_name=tool_name,
+                policy_mode=policy_mode,
+                approval_id=approval_id,
+                old_value={"metadata": old.get("metadata_json") or {}},
+                new_value=self._event_value(
+                    {"metadata": updated.get("metadata_json") or {}},
+                    idempotency_key=idempotency_key,
+                ),
+                conn=transaction_conn,
+            )
+            return updated
+
+        return self._with_transaction(_execute_metadata_update, conn)
 
     def update_task_record(
         self,
@@ -1095,7 +1179,6 @@ class TaskStore:
                 entity_id=final_event_id,
                 reference="task or note",
             )
-        raise CharactersRAGDBError(f"Failed to record task event '{final_event_id}'.")  # noqa: TRY003
 
     def list_task_activity(
         self,
@@ -1227,7 +1310,6 @@ class TaskStore:
                 entity_id=event_id,
                 reference="event",
             )
-        raise CharactersRAGDBError(f"Failed to mark task event '{event_id}' read.")  # noqa: TRY003
 
     def mark_task_activity_dismissed(
         self,
@@ -1272,7 +1354,6 @@ class TaskStore:
                 entity_id=event_id,
                 reference="event",
             )
-        raise CharactersRAGDBError(f"Failed to mark task event '{event_id}' dismissed.")  # noqa: TRY003
 
     def get_task_activity_read_state(
         self,
@@ -1367,7 +1448,6 @@ class TaskStore:
                 entity_id=note_id,
                 reference="note",
             )
-        raise CharactersRAGDBError(f"Failed to set reconciliation state for note '{note_id}'.")  # noqa: TRY003
 
     def _get_reconciliation_state_in_conn(self, note_id: str, conn: TaskConnection) -> dict[str, Any] | None:
         cursor = self._read(
@@ -1409,6 +1489,38 @@ class TaskStore:
             ),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def count_candidate_notes_for_task_discovery(self, *, note_id: str | None = None) -> int:
+        """Count checklist-bearing notes whose task reconciliation is stale or missing."""
+        params: list[Any] = [
+            self._deleted_value(False),
+            "%- [ ]%",
+            "%- [x]%",
+            "%- [X]%",
+            "clean",
+        ]
+        sql_query = """
+            SELECT COUNT(*) AS stale_count
+              FROM notes n
+              LEFT JOIN note_task_reconciliation_state r ON r.note_id = n.id
+             WHERE n.deleted = ?
+               AND (
+                    n.content LIKE ?
+                 OR n.content LIKE ?
+                 OR n.content LIKE ?
+               )
+               AND (
+                    r.note_id IS NULL
+                 OR r.note_version < n.version
+                 OR r.status != ?
+               )
+        """
+        if note_id is not None:
+            sql_query += " AND n.id = ?"
+            params.append(note_id)
+        cursor = self._read(sql_query, tuple(params))
+        row = cursor.fetchone()
+        return int(row["stale_count"] if row else 0)
 
     def _raise_integrity_error(self, exc: sqlite3.IntegrityError, task_id: str) -> None:
         msg = str(exc).lower()

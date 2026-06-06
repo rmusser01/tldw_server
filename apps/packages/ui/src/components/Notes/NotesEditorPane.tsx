@@ -903,7 +903,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               role="status"
               data-testid="notes-task-reconciliation-warning"
             >
-              {t('option:notesSearch.taskIncompleteReconciliationWarning', {
+              {t('option:notesSearch_taskIncompleteReconciliationWarning', {
                 defaultValue: 'Some task updates are still reconciling.'
               })}
             </div>
@@ -921,7 +921,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               className="block text-[11px] mt-2 text-text-muted"
               data-testid="notes-task-continuity-notice"
             >
-              {t('option:notesSearch.taskContinuityNotice', {
+              {t('option:notesSearch_taskContinuityNotice', {
                 defaultValue: 'Portable markdown with best-effort task continuity'
               })}
             </Typography.Text>
