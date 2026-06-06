@@ -1,6 +1,5 @@
 import React from "react"
 import { Checkbox, Divider, Typography } from "antd"
-import type { CheckboxValueType } from "antd/es/checkbox/Group"
 import type { CalendarResponse } from "@/services/calendar"
 
 export type CalendarSourceFilter = "local" | "org" | "provider" | "linked"
@@ -28,10 +27,10 @@ export const CalendarFilterRail: React.FC<CalendarFilterRailProps> = ({
   <aside aria-label="Calendar filters" className="w-full shrink-0 md:w-60">
     <div className="rounded border border-slate-200 bg-slate-50/50 p-3">
       <Typography.Text strong>Calendars</Typography.Text>
-      <Checkbox.Group
+      <Checkbox.Group<number>
         className="mt-3 flex flex-col gap-2"
         value={selectedCalendarIds}
-        onChange={(values: CheckboxValueType[]) =>
+        onChange={(values) =>
           onCalendarChange(values.map((value) => Number(value)))
         }
       >
@@ -51,12 +50,10 @@ export const CalendarFilterRail: React.FC<CalendarFilterRailProps> = ({
 
       <Divider className="my-3" />
       <Typography.Text strong>Source</Typography.Text>
-      <Checkbox.Group
+      <Checkbox.Group<CalendarSourceFilter>
         className="mt-3 flex flex-col gap-2"
         value={selectedSources}
-        onChange={(values: CheckboxValueType[]) =>
-          onSourceChange(values as CalendarSourceFilter[])
-        }
+        onChange={(values) => onSourceChange(values)}
         options={[
           { label: "Local", value: "local" },
           { label: "Org", value: "org" },
@@ -67,12 +64,10 @@ export const CalendarFilterRail: React.FC<CalendarFilterRailProps> = ({
 
       <Divider className="my-3" />
       <Typography.Text strong>Kind</Typography.Text>
-      <Checkbox.Group
+      <Checkbox.Group<CalendarKindFilter>
         className="mt-3 flex flex-col gap-2"
         value={selectedKinds}
-        onChange={(values: CheckboxValueType[]) =>
-          onKindChange(values as CalendarKindFilter[])
-        }
+        onChange={(values) => onKindChange(values)}
         options={[
           { label: "Events", value: "event" },
           { label: "Todos", value: "todo" }

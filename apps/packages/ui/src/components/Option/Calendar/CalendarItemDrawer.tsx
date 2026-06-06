@@ -4,6 +4,7 @@ import type {
   CalendarItemKind,
   CalendarItemUpdateRequest,
   CalendarResponse,
+  CalendarSourceOwner,
   CalendarViewItemResponse
 } from "@/services/calendar"
 import {
@@ -146,7 +147,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
           end_at: payload.end_at,
           due_at: payload.due_at,
           status: payload.status,
-          source_owner: item.source_owner,
+          source_owner: item.source_owner as CalendarSourceOwner,
           provider_owned: false
         }
         if (shouldSaveTags) {

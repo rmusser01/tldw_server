@@ -18,11 +18,13 @@ import {
   type CalendarSourceFilter
 } from "./CalendarFilterRail"
 import { CalendarItemDrawer } from "./CalendarItemDrawer"
+import { CalendarSyncSettings } from "./CalendarSyncSettings"
 import { CalendarWeekView } from "./CalendarWeekView"
 
 const CALENDAR_SUPPORT_PATH = "/api/v1/calendar/calendars"
 const ALL_SOURCES: CalendarSourceFilter[] = ["local", "org", "provider", "linked"]
 const ALL_KINDS: CalendarKindFilter[] = ["event", "todo"]
+type CalendarViewMode = "agenda" | "week" | "sync"
 
 const startOfDay = (date: Date): Date =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate())
@@ -61,7 +63,7 @@ export const CalendarPage: React.FC = () => {
   const [selectedSources, setSelectedSources] =
     useState<CalendarSourceFilter[]>(ALL_SOURCES)
   const [selectedKinds, setSelectedKinds] = useState<CalendarKindFilter[]>(ALL_KINDS)
-  const [view, setView] = useState<"agenda" | "week">("agenda")
+  const [view, setView] = useState<CalendarViewMode>("agenda")
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [selectedItem, setSelectedItem] = useState<CalendarViewItemResponse | null>(null)
 
@@ -291,10 +293,11 @@ export const CalendarPage: React.FC = () => {
           <Segmented
             aria-label="Calendar view"
             value={view}
-            onChange={(value) => setView(value as "agenda" | "week")}
+            onChange={(value) => setView(value as CalendarViewMode)}
             options={[
               { label: "Agenda", value: "agenda" },
-              { label: "Week", value: "week" }
+              { label: "Week", value: "week" },
+              { label: "Sync", value: "sync" }
             ]}
           />
           <Button type="primary" onClick={openCreateDrawer}>
@@ -357,29 +360,35 @@ export const CalendarPage: React.FC = () => {
       ) : null}
 
       {calendarSupported === false ? null : (
-        <div className="flex flex-col gap-4 md:flex-row md:items-start">
-          <CalendarFilterRail
-            calendars={calendars}
-            selectedCalendarIds={selectedCalendarQueryIds}
-            selectedSources={selectedSources}
-            selectedKinds={selectedKinds}
-            onCalendarChange={setSelectedCalendarIds}
-            onSourceChange={setSelectedSources}
-            onKindChange={setSelectedKinds}
-          />
-          {view === "agenda" ? (
-            <CalendarAgenda
-              calendars={calendars}
-              items={agendaItems}
-              onSelectItem={openItemDrawer}
-            />
+        <div className="flex flex-col gap-4">
+          {view === "sync" ? (
+            <CalendarSyncSettings calendars={calendars} onChanged={refreshViews} />
           ) : (
-            <CalendarWeekView
-              calendars={calendars}
-              items={weekItems}
-              weekStart={weekStart}
-              onSelectItem={openItemDrawer}
-            />
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              <CalendarFilterRail
+                calendars={calendars}
+                selectedCalendarIds={selectedCalendarQueryIds}
+                selectedSources={selectedSources}
+                selectedKinds={selectedKinds}
+                onCalendarChange={setSelectedCalendarIds}
+                onSourceChange={setSelectedSources}
+                onKindChange={setSelectedKinds}
+              />
+              {view === "agenda" ? (
+                <CalendarAgenda
+                  calendars={calendars}
+                  items={agendaItems}
+                  onSelectItem={openItemDrawer}
+                />
+              ) : (
+                <CalendarWeekView
+                  calendars={calendars}
+                  items={weekItems}
+                  weekStart={weekStart}
+                  onSelectItem={openItemDrawer}
+                />
+              )}
+            </div>
           )}
         </div>
       )}

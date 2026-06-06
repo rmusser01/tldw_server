@@ -199,7 +199,7 @@ describe("calendar service contract", () => {
       .mockResolvedValueOnce({ items: [] })
       .mockResolvedValueOnce({ revoked: true })
       .mockResolvedValueOnce({ deleted: true })
-      .mockResolvedValueOnce({ binding_id: 11, queued: false, status: "not_implemented" })
+      .mockResolvedValueOnce({ binding_id: 11, queued: true, status: "queued", job_id: 99 })
       .mockResolvedValueOnce({ id: 99, source_owner: "tldw" })
 
     await createCalDavAccount({
@@ -212,7 +212,10 @@ describe("calendar service contract", () => {
     await discoverExternalCalendars(3, { password: "ignored-secret" } as unknown as never)
     await revokeCalDavAccount(3, { token: "ignored-secret" } as unknown as never)
     await deleteCalDavAccount(3, { token: "ignored-secret" } as unknown as never)
-    await triggerCalendarSync(11, { password: "ignored-secret" } as unknown as never)
+    await triggerCalendarSync(11, {
+      reason: "manual",
+      password: "ignored-secret"
+    } as unknown as never)
     await copyCalendarItemIntoTldw(55, {
       target_calendar_id: 7,
       title: "Local copy",
@@ -239,6 +242,37 @@ describe("calendar service contract", () => {
     for (const call of mocks.bgRequest.mock.calls.slice(2)) {
       expect(JSON.stringify(call[0])).not.toContain("ignored-secret")
     }
+  })
+
+  it("posts sanitized trigger sync payloads to the binding sync endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      binding_id: 11,
+      queued: true,
+      status: "queued",
+      job_id: 99,
+      idempotency_key: "calendar:sync:binding:11:window"
+    })
+
+    const response = await triggerCalendarSync(11, {
+      reason: "manual",
+      window_start: "2026-06-01T00:00:00+00:00",
+      window_end: "2026-06-08T00:00:00+00:00",
+      password: "ignored-secret"
+    } as unknown as never)
+
+    expect(response.job_id).toBe(99)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/v1/calendar/external/bindings/11/sync",
+        body: {
+          reason: "manual",
+          window_start: "2026-06-01T00:00:00+00:00",
+          window_end: "2026-06-08T00:00:00+00:00"
+        }
+      })
+    )
+    expect(JSON.stringify(mocks.bgRequest.mock.calls[0]?.[0])).not.toContain("ignored-secret")
   })
 
   it("recursively strips secret fields from non-create and non-verify payloads", async () => {

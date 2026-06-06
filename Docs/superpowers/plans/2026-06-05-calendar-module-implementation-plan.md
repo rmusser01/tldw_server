@@ -1147,7 +1147,7 @@ Do not create:
 - Modify: `apps/packages/ui/src/services/calendar.ts`
 - Modify: `apps/packages/ui/src/services/__tests__/calendar.test.ts`
 
-- [ ] **Step 1: Write failing sync settings tests**
+- [x] **Step 1: Write failing sync settings tests**
 
   Cover:
 
@@ -1159,7 +1159,7 @@ Do not create:
   - delete account asks for confirmation;
   - provider-owned event drawer shows read-only reason and copy action.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
   Run:
 
@@ -1170,7 +1170,7 @@ Do not create:
 
   Expected: FAIL until UI is implemented.
 
-- [ ] **Step 3: Implement sync settings**
+- [x] **Step 3: Implement sync settings**
 
   Keep the UI practical:
 
@@ -1184,7 +1184,7 @@ Do not create:
   - sync now;
   - revoke/delete.
 
-- [ ] **Step 4: Tighten provider-owned item drawer**
+- [x] **Step 4: Tighten provider-owned item drawer**
 
   Provider-owned records:
 
@@ -1193,7 +1193,7 @@ Do not create:
   - can copy into tldw;
   - show provider/source metadata only after scrubbing.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
   Run:
 

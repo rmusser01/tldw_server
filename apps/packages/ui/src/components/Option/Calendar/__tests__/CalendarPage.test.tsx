@@ -15,7 +15,16 @@ const mocks = vi.hoisted(() => ({
   deleteCalendarItem: vi.fn(),
   createCalendarAnnotation: vi.fn(),
   createCalendarLink: vi.fn(),
-  copyCalendarItemIntoTldw: vi.fn()
+  copyCalendarItemIntoTldw: vi.fn(),
+  listCalDavAccounts: vi.fn(),
+  createCalDavAccount: vi.fn(),
+  verifyCalDavAccount: vi.fn(),
+  discoverExternalCalendars: vi.fn(),
+  createExternalCalendarBinding: vi.fn(),
+  listExternalCalendarBindings: vi.fn(),
+  triggerCalendarSync: vi.fn(),
+  revokeCalDavAccount: vi.fn(),
+  deleteCalDavAccount: vi.fn()
 }))
 
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
@@ -32,7 +41,16 @@ vi.mock("@/services/calendar", () => ({
   deleteCalendarItem: (...args: unknown[]) => mocks.deleteCalendarItem(...args),
   createCalendarAnnotation: (...args: unknown[]) => mocks.createCalendarAnnotation(...args),
   createCalendarLink: (...args: unknown[]) => mocks.createCalendarLink(...args),
-  copyCalendarItemIntoTldw: (...args: unknown[]) => mocks.copyCalendarItemIntoTldw(...args)
+  copyCalendarItemIntoTldw: (...args: unknown[]) => mocks.copyCalendarItemIntoTldw(...args),
+  listCalDavAccounts: (...args: unknown[]) => mocks.listCalDavAccounts(...args),
+  createCalDavAccount: (...args: unknown[]) => mocks.createCalDavAccount(...args),
+  verifyCalDavAccount: (...args: unknown[]) => mocks.verifyCalDavAccount(...args),
+  discoverExternalCalendars: (...args: unknown[]) => mocks.discoverExternalCalendars(...args),
+  createExternalCalendarBinding: (...args: unknown[]) => mocks.createExternalCalendarBinding(...args),
+  listExternalCalendarBindings: (...args: unknown[]) => mocks.listExternalCalendarBindings(...args),
+  triggerCalendarSync: (...args: unknown[]) => mocks.triggerCalendarSync(...args),
+  revokeCalDavAccount: (...args: unknown[]) => mocks.revokeCalDavAccount(...args),
+  deleteCalDavAccount: (...args: unknown[]) => mocks.deleteCalDavAccount(...args)
 }))
 
 import { CalendarPage } from "../CalendarPage"
@@ -182,6 +200,15 @@ describe("CalendarPage", () => {
       end_at: "2026-06-08T00:00:00.000Z",
       items: agendaItems
     })
+    mocks.listCalDavAccounts.mockResolvedValue({ items: [], total: 0 })
+    mocks.listExternalCalendarBindings.mockResolvedValue({ items: [], total: 0 })
+    mocks.createCalDavAccount.mockResolvedValue({ id: 3, provider: "caldav", display_name: "Fastmail" })
+    mocks.verifyCalDavAccount.mockResolvedValue({ account_id: 3, verified: true })
+    mocks.discoverExternalCalendars.mockResolvedValue({ items: [] })
+    mocks.createExternalCalendarBinding.mockResolvedValue({ id: 8 })
+    mocks.triggerCalendarSync.mockResolvedValue({ binding_id: 8, queued: true, status: "queued" })
+    mocks.revokeCalDavAccount.mockResolvedValue({ revoked: true })
+    mocks.deleteCalDavAccount.mockResolvedValue({ deleted: true })
     fetchMock.mockReset()
     fetchMock.mockResolvedValue({
       ok: true,

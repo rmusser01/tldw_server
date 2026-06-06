@@ -350,6 +350,14 @@ export interface CalendarSyncTriggerResponse {
   binding_id: number
   queued: boolean
   status: "not_implemented" | string
+  job_id?: number | null
+  idempotency_key?: string | null
+}
+
+export interface CalendarSyncTriggerRequest {
+  reason?: string
+  window_start?: string | null
+  window_end?: string | null
 }
 
 const CALENDAR_BASE = "/api/v1/calendar"
@@ -368,7 +376,7 @@ const buildCalendarViewQuery = (
   required: string[]
 ): string => {
   for (const key of required) {
-    if (!String((params as Record<string, unknown>)[key] || "").trim()) {
+    if (!String((params as unknown as Record<string, unknown>)[key] || "").trim()) {
       throw new Error(`${required.join(" and ")} are required`)
     }
   }
@@ -638,10 +646,12 @@ export async function listExternalCalendarBindings(
 
 export async function triggerCalendarSync(
   bindingId: string | number,
-  _payload?: Record<string, unknown>
+  payload?: CalendarSyncTriggerRequest & Record<string, unknown>
 ): Promise<CalendarSyncTriggerResponse> {
+  const body = payload ? withoutSecrets(payload) : undefined
   return await bgRequest<CalendarSyncTriggerResponse>({
     path: toAllowedPath(`${CALENDAR_BASE}/external/bindings/${encodePathId(bindingId)}/sync`),
-    method: "POST"
+    method: "POST",
+    ...(body && Object.keys(body).length ? { body } : {})
   })
 }
