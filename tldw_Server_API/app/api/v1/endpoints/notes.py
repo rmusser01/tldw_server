@@ -109,6 +109,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
+from tldw_Server_API.app.core.Notes_Tasks import NotesTaskService, TaskActor
 from tldw_Server_API.app.core.Personalization import (
     build_note_bulk_import_activity,
     record_companion_activity_events_bulk,
@@ -196,6 +197,9 @@ _NOTES_ATTACHMENT_ALLOWED_EXTENSIONS = {
     ".yml",
     ".zip",
 }
+def get_notes_task_service() -> NotesTaskService:
+    """Provide the stateless notes task service for note-save reconciliation."""
+    return NotesTaskService()
 
 
 def _resolve_notes_attachment_max_bytes() -> int:
@@ -305,6 +309,33 @@ def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
 
 def _active_notes_sync_service(current_user: User) -> SyncV2Service | None:
     return get_active_server_origin_sync_service_for_user(str(current_user.id))
+
+
+def _reconcile_note_tasks_after_save(
+    *,
+    db: CharactersRAGDB,
+    note_data: dict[str, Any],
+    current_user: User,
+    task_service: NotesTaskService,
+) -> None:
+    """Synchronize markdown checklist tasks for a note row that was just saved."""
+    note_id = str(note_data["id"])
+    note_version = int(note_data["version"])
+    try:
+        task_service.reconcile_note(
+            db=db,
+            note_id=note_id,
+            note_version=note_version,
+            content=str(note_data.get("content") or ""),
+            actor=TaskActor(actor_type="user", actor_id=str(current_user.id)),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Note task reconciliation failed after saved note {} version {}: {}",
+            note_id,
+            note_version,
+            exc,
+        )
 
 
 def _safe_note_attachment_dirname(note_id: str) -> str:
@@ -1244,6 +1275,7 @@ async def create_note(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),  # Use the user-specific DB instance
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.create")),
 ):
     try:
@@ -1376,6 +1408,12 @@ async def create_note(
                 f"Failed to retrieve note '{note_id}' immediately after creation for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Note created but could not be retrieved.")
+        _reconcile_note_tasks_after_save(
+            db=db,
+            note_data=created_note_data,
+            current_user=current_user,
+            task_service=task_service,
+        )
         # Attach keywords inline
         created_note_data = _attach_keywords_inline(db, created_note_data)
         created_note_data = _attach_folders_inline(db, created_note_data)
@@ -1931,6 +1969,7 @@ async def import_notes(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.bulk_create")),
 ):
     try:
@@ -2027,12 +2066,21 @@ async def import_notes(
                                 update_data=update_patch,
                                 expected_version=expected_version,
                             )
-                            if parsed_note.get("keywords_provided"):
-                                _sync_note_keywords(
-                                    db,
-                                    note_id=str(imported_id),
-                                    keywords=parsed_note.get("keywords", []),
-                                )
+                        overwritten_note = db.get_note_by_id(str(imported_id))
+                        if not overwritten_note:
+                            raise CharactersRAGDBError("Import overwrite note could not be retrieved.")  # noqa: TRY003
+                        _reconcile_note_tasks_after_save(
+                            db=db,
+                            note_data=overwritten_note,
+                            current_user=current_user,
+                            task_service=task_service,
+                        )
+                        if parsed_note.get("keywords_provided"):
+                            _sync_note_keywords(
+                                db,
+                                note_id=str(imported_id),
+                                keywords=parsed_note.get("keywords", []),
+                            )
                         companion_events.append(
                             _build_import_note_companion_event(
                                 db=db,
@@ -2072,14 +2120,23 @@ async def import_notes(
                             content=parsed_note["content"],
                             note_id=create_with_id,
                         )
-                        if not created_note_id:
-                            raise CharactersRAGDBError("Import create returned no note ID.")  # noqa: TRY003
-                        if parsed_note.get("keywords"):
-                            _sync_note_keywords(
-                                db,
-                                note_id=str(created_note_id),
-                                keywords=parsed_note.get("keywords", []),
-                            )
+                    if not created_note_id:
+                        raise CharactersRAGDBError("Import create returned no note ID.")  # noqa: TRY003
+                    created_note = db.get_note_by_id(str(created_note_id))
+                    if not created_note:
+                        raise CharactersRAGDBError("Import created note could not be retrieved.")  # noqa: TRY003
+                    _reconcile_note_tasks_after_save(
+                        db=db,
+                        note_data=created_note,
+                        current_user=current_user,
+                        task_service=task_service,
+                    )
+                    if parsed_note.get("keywords"):
+                        _sync_note_keywords(
+                            db,
+                            note_id=str(created_note_id),
+                            keywords=parsed_note.get("keywords", []),
+                        )
                     companion_events.append(
                         _build_import_note_companion_event(
                             db=db,
@@ -2100,6 +2157,15 @@ async def import_notes(
                             )
                             if not created_note_id:
                                 raise CharactersRAGDBError("Import create-copy returned no note ID.")  # noqa: TRY003
+                            created_note = db.get_note_by_id(str(created_note_id))
+                            if not created_note:
+                                raise CharactersRAGDBError("Import created note could not be retrieved.")  # noqa: TRY003
+                            _reconcile_note_tasks_after_save(
+                                db=db,
+                                note_data=created_note,
+                                current_user=current_user,
+                                task_service=task_service,
+                            )
                             if parsed_note.get("keywords"):
                                 _sync_note_keywords(
                                     db,
@@ -2384,6 +2450,7 @@ async def update_keyword_collection_endpoint(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     try:
@@ -3643,6 +3710,7 @@ async def update_note(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     keywords_supplied = _field_supplied(note_in, "keywords")
@@ -3789,6 +3857,12 @@ async def update_note(
         if not updated_note_data:
             logger.error(f"Note '{note_id}' not found after successful update for user (DB client_id: {db.client_id}).")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
+        _reconcile_note_tasks_after_save(
+            db=db,
+            note_data=updated_note_data,
+            current_user=current_user,
+            task_service=task_service,
+        )
         updated_note_data = _attach_keywords_inline(db, updated_note_data)
         updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
@@ -3827,6 +3901,7 @@ async def patch_note(
         expected_version: Optional[int] = Header(None, description="Optional expected version for optimistic locking"),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     """PATCH variant that allows updates without an explicit expected-version header.
@@ -3954,6 +4029,12 @@ async def patch_note(
         updated_note_data = db.get_note_by_id(note_id=note_id)
         if not updated_note_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found after update.")
+        _reconcile_note_tasks_after_save(
+            db=db,
+            note_data=updated_note_data,
+            current_user=current_user,
+            task_service=task_service,
+        )
         updated_note_data = _attach_keywords_inline(db, updated_note_data)
         updated_note_data = _attach_folders_inline(db, updated_note_data)
         if keyword_sync_summary and keyword_sync_summary.get("failed_count", 0) > 0:
@@ -4199,7 +4280,8 @@ async def bulk_create_notes(
         request: NoteBulkCreateRequest,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
-        current_user: User = Depends(get_request_user)
+        current_user: User = Depends(get_request_user),
+        task_service: NotesTaskService = Depends(get_notes_task_service),
 ):
     results: list[NoteBulkCreateItemResult] = []
     companion_events: list[dict[str, Any]] = []
@@ -4320,6 +4402,7 @@ async def bulk_create_notes(
             nd = db.get_note_by_id(note_id=note_id)
             if not nd:
                 raise CharactersRAGDBError("Created note could not be retrieved.")
+            _reconcile_note_tasks_after_save(db=db, note_data=nd, current_user=current_user, task_service=task_service)
             nd = _attach_keywords_inline(db, nd)
             nd = _attach_folders_inline(db, nd)
             companion_events.append(

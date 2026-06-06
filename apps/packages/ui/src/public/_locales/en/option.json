@@ -1256,6 +1256,45 @@
   "notesSearch_tagsHelp": {
     "message": "Tags help you find this note using the tag filter on the left."
   },
+  "notesSearch_taskCheckboxAria": {
+    "message": "Task checkbox"
+  },
+  "notesSearch_taskConflictNotice": {
+    "message": "Task changed on the server. Reload the note and try again."
+  },
+  "notesSearch_taskUpdateError": {
+    "message": "Task update failed"
+  },
+  "notesSearch_taskAgentActivityNotice": {
+    "message": "Agent updated this note's tasks."
+  },
+  "notesSearch_taskActivityThisNote": {
+    "message": "this note"
+  },
+  "notesSearch_taskActivitySummary": {
+    "message": "{{actor}} via {{tool}} changed {{count}} in {{note}}."
+  },
+  "notesSearch_taskActivityInspect": {
+    "message": "Inspect"
+  },
+  "notesSearch_taskActivityInspectAria": {
+    "message": "Inspect task activity"
+  },
+  "notesSearch_taskActivityDismiss": {
+    "message": "Dismiss"
+  },
+  "notesSearch_taskActivityDismissAria": {
+    "message": "Dismiss task activity"
+  },
+  "notesSearch_taskActivityDismissError": {
+    "message": "Failed to dismiss task activity"
+  },
+  "notesSearch_taskIncompleteReconciliationWarning": {
+    "message": "Some task updates are still reconciling."
+  },
+  "notesSearch_taskContinuityNotice": {
+    "message": "Portable markdown with best-effort task continuity"
+  },
   "notesSearch_notesStudioAction": {
     "message": "Notes Studio"
   },
