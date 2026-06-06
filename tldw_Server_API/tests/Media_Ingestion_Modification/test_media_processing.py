@@ -335,8 +335,26 @@ def check_media_item_result(result, expected_status, check_db_fields=False): # D
         f"Expected None or empty error for Success status, got '{result['error']}'"
 
 
-def skip_if_valid_video_url_unreachable(response) -> None:
-    """Skip tests when the external YouTube fixture is temporarily unavailable."""
+def _is_fixture_download_failure(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "download failed",
+            "download/preparation failed",
+            "downloaderror",
+            "url blocked by security policy",
+            "host could not be resolved",
+            "name or service not known",
+            "host not in allowlist",
+            "timed out",
+            "too many requests",
+        )
+    )
+
+
+def skip_if_external_fixture_url_unreachable(response, fixture_url: str, fixture_label: str) -> None:
+    """Skip tests when an external media fixture is temporarily unavailable."""
     if response.status_code != 207:
         return
 
@@ -344,28 +362,61 @@ def skip_if_valid_video_url_unreachable(response) -> None:
     if data.get("errors_count", 0) <= 0:
         return
 
-    def _is_download_failure(message: str) -> bool:
-        return (
-            "Download failed" in message
-            or "DownloadError" in message
-            or "URL blocked by security policy" in message
-        )
-
     result_errors = [
         result
         for result in data.get("results", [])
         if isinstance(result, dict) and result.get("status") == "Error"
     ]
     for result in result_errors:
-        if result.get("input_ref") == VALID_VIDEO_URL and _is_download_failure(str(result.get("error", ""))):
-            pytest.skip("YouTube video download failed - likely due to bot protection or transient network access")
+        if (
+            result.get("input_ref") == fixture_url
+            and _is_fixture_download_failure(str(result.get("error", "")))
+        ):
+            pytest.skip(f"{fixture_label} download failed - likely due to transient network access")
 
     combined_errors = " ".join(
         [str(data.get("errors", []))]
         + [str(result.get("error", "")) for result in result_errors]
     )
-    if len(result_errors) == 1 and _is_download_failure(combined_errors):
-        pytest.skip("YouTube video download failed - likely due to bot protection or transient network access")
+    if len(result_errors) == 1 and _is_fixture_download_failure(combined_errors):
+        pytest.skip(f"{fixture_label} download failed - likely due to transient network access")
+
+
+def skip_if_valid_video_url_unreachable(response) -> None:
+    """Skip tests when the external YouTube fixture is temporarily unavailable."""
+    skip_if_external_fixture_url_unreachable(response, VALID_VIDEO_URL, "YouTube video")
+
+
+class _FakeBatchResponse:
+    def __init__(self, payload: Dict, status_code: int = 207) -> None:
+        self._payload = payload
+        self.status_code = status_code
+
+    def json(self) -> Dict:
+        return self._payload
+
+
+def test_skip_if_external_fixture_url_unreachable_skips_pdf_download_failure() -> None:
+    response = _FakeBatchResponse(
+        {
+            "results": [
+                {
+                    "status": "Error",
+                    "input_ref": VALID_PDF_URL,
+                    "error": "Download/preparation failed",
+                }
+            ],
+            "errors": ["Download/preparation failed"],
+            "errors_count": 1,
+        }
+    )
+
+    with pytest.raises(pytest.skip.Exception, match="PDF fixture download failed"):
+        skip_if_external_fixture_url_unreachable(
+            response,
+            VALID_PDF_URL,
+            "PDF fixture",
+        )
 
 
 # --- Test Classes ---
@@ -819,6 +870,7 @@ class TestProcessPdfs:
         # Use pymupdf4llm parser by default
         form_data = {"urls": [VALID_PDF_URL], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
+        skip_if_external_fixture_url_unreachable(response, VALID_PDF_URL, "PDF fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success", check_db_fields=True)

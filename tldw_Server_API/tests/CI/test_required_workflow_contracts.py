@@ -1,3 +1,4 @@
+import ast
 import fnmatch
 import re
 from pathlib import Path
@@ -13,6 +14,16 @@ def _get_step(steps: list[dict], name: str) -> dict:
     matching = [step for step in steps if step.get("name") == name]
     assert matching, f"{name} step missing"
     return matching[0]
+
+
+def _python_test_function_names(path: str) -> set[str]:
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+        and node.name.startswith("test")
+    }
 
 
 def _assert_ffmpeg_portaudio_setup(path: str, job_name: str) -> None:
@@ -261,8 +272,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "admin-e-l" not in shard_names
         assert "admin-m-r" not in shard_names
         assert "admin-s-z" not in shard_names
+        assert "admin-e2e" not in shard_names
         assert "ai-chromadb-chunking" not in shard_names
         assert "ai-embeddings" not in shard_names
+        assert "ai-embeddings-policy-v5" not in shard_names
         assert "chat-character-legacy" not in shard_names
         assert "chat-character-integration" not in shard_names
         assert "product-claims" not in shard_names
@@ -277,7 +290,11 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "admin-byok-core",
             "admin-byok-validation",
             "admin-c-d",
-            "admin-e2e",
+            "admin-e2e-access",
+            "admin-e2e-reset-backups",
+            "admin-e2e-seed",
+            "admin-e2e-session-dsr",
+            "admin-e2e-single-user",
             "admin-g-i",
             "admin-incidents",
             "admin-llm-providers",
@@ -303,9 +320,13 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "ai-chunking-templates",
             "ai-embeddings-core",
             "ai-embeddings-dlq-config",
+            "ai-embeddings-hyde-ledger",
             "ai-embeddings-jobs-runtime",
+            "ai-embeddings-media-validation",
             "ai-embeddings-observability",
-            "ai-embeddings-policy-v5",
+            "ai-embeddings-policy",
+            "ai-embeddings-v5-core",
+            "ai-embeddings-v5-integration",
             "vector-stores",
             "paper-search",
             "rag-legacy",
@@ -372,7 +393,11 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "admin-byok-core",
             "admin-byok-validation",
             "admin-c-d",
-            "admin-e2e",
+            "admin-e2e-access",
+            "admin-e2e-reset-backups",
+            "admin-e2e-seed",
+            "admin-e2e-session-dsr",
+            "admin-e2e-single-user",
             "admin-g-i",
             "admin-incidents",
             "admin-llm-providers",
@@ -394,24 +419,52 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             str(path)
             for path in Path("tldw_Server_API/tests/Admin").glob("test*.py")
         }
+        admin_test_functions_by_file = {
+            filename: _python_test_function_names(filename)
+            for filename in admin_files
+        }
         covered_admin_files: dict[str, str] = {}
+        covered_admin_nodeids: set[str] = set()
+        covered_admin_nodeids_by_file: dict[str, set[str]] = {}
         for shard_name in admin_shards:
             for pattern in shard_path_sets[shard_name]:
-                assert pattern.startswith("tldw_Server_API/tests/Admin/")
+                file_pattern = pattern.split("::", 1)[0]
+                assert file_pattern.startswith("tldw_Server_API/tests/Admin/")
                 matches = {
                     filename
                     for filename in admin_files
-                    if fnmatch.fnmatch(filename, pattern)
+                    if fnmatch.fnmatch(filename, file_pattern)
                 }
                 assert matches, f"{shard_name} pattern matched no files: {pattern}"
-                for filename in matches:
-                    assert filename not in covered_admin_files, (
-                        f"{filename} matched both "
-                        f"{covered_admin_files[filename]} and {shard_name}"
+                if "::" in pattern:
+                    assert len(matches) == 1, (
+                        f"{shard_name} node id must target one file: {pattern}"
                     )
+                    test_name = pattern.rsplit("::", 1)[1]
+                    filename = next(iter(matches))
+                    assert test_name in admin_test_functions_by_file[filename], (
+                        f"{shard_name} references missing test node id: {pattern}"
+                    )
+                    assert pattern not in covered_admin_nodeids, (
+                        f"{pattern} is listed by multiple admin e2e shards"
+                    )
+                    covered_admin_nodeids.add(pattern)
+                    covered_admin_nodeids_by_file.setdefault(filename, set()).add(
+                        test_name
+                    )
+                for filename in matches:
+                    if filename in covered_admin_files and "::" not in pattern:
+                        raise AssertionError(
+                            f"{filename} matched both "
+                            f"{covered_admin_files[filename]} and {shard_name}"
+                        )
                     covered_admin_files[filename] = shard_name
 
         assert set(covered_admin_files) == admin_files
+        for filename, covered_nodeids in covered_admin_nodeids_by_file.items():
+            assert covered_nodeids == admin_test_functions_by_file[filename], (
+                f"{filename} admin node-id shard coverage mismatch"
+            )
 
         chunking_shards = {
             "ai-chunking-code-json-xml",
@@ -445,9 +498,13 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         embedding_shards = {
             "ai-embeddings-core",
             "ai-embeddings-dlq-config",
+            "ai-embeddings-hyde-ledger",
             "ai-embeddings-jobs-runtime",
+            "ai-embeddings-media-validation",
             "ai-embeddings-observability",
-            "ai-embeddings-policy-v5",
+            "ai-embeddings-policy",
+            "ai-embeddings-v5-core",
+            "ai-embeddings-v5-integration",
         }
         embedding_files = {
             str(path)

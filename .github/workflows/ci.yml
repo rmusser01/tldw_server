@@ -479,9 +479,31 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e2e
+          - name: admin-e2e-access
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_e*.py
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_are_unavailable_without_flag
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_require_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_reject_wrong_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_fail_closed_without_configured_support_key
+          - name: admin-e2e-seed
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_stable_fixture_ids
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_debug_role_principals
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_requires_explicit_fixture_passwords
+          - name: admin-e2e-single-user
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_single_user_login_key
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_single_user_api_key_can_read_users_me
+          - name: admin-e2e-session-dsr
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_rejects_unsafe_backup_paths
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_bootstrap_jwt_session_returns_cookie_payload
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_dsr_seed_supports_real_preview
+          - name: admin-e2e-reset-backups
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -633,13 +655,24 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
               tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
-          - name: ai-embeddings-policy-v5
+          - name: ai-embeddings-policy
             paths: >-
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
-              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
-              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+          - name: ai-embeddings-v5-core
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_property.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py
+          - name: ai-embeddings-v5-integration
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_integration.py
+          - name: ai-embeddings-hyde-ledger
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+          - name: ai-embeddings-media-validation
+            paths: >-
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -1120,7 +1153,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1129,7 +1162,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1242,9 +1275,31 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e2e
+          - name: admin-e2e-access
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_e*.py
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_are_unavailable_without_flag
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_require_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_reject_wrong_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_fail_closed_without_configured_support_key
+          - name: admin-e2e-seed
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_stable_fixture_ids
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_debug_role_principals
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_requires_explicit_fixture_passwords
+          - name: admin-e2e-single-user
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_single_user_login_key
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_single_user_api_key_can_read_users_me
+          - name: admin-e2e-session-dsr
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_rejects_unsafe_backup_paths
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_bootstrap_jwt_session_returns_cookie_payload
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_dsr_seed_supports_real_preview
+          - name: admin-e2e-reset-backups
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -1396,13 +1451,24 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
               tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
-          - name: ai-embeddings-policy-v5
+          - name: ai-embeddings-policy
             paths: >-
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
-              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
-              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+          - name: ai-embeddings-v5-core
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_property.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py
+          - name: ai-embeddings-v5-integration
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_integration.py
+          - name: ai-embeddings-hyde-ledger
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+          - name: ai-embeddings-media-validation
+            paths: >-
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -1827,7 +1893,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1836,7 +1902,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1950,9 +2016,31 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e2e
+          - name: admin-e2e-access
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_e*.py
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_are_unavailable_without_flag
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_require_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_reject_wrong_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_fail_closed_without_configured_support_key
+          - name: admin-e2e-seed
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_stable_fixture_ids
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_debug_role_principals
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_requires_explicit_fixture_passwords
+          - name: admin-e2e-single-user
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_single_user_login_key
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_single_user_api_key_can_read_users_me
+          - name: admin-e2e-session-dsr
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_rejects_unsafe_backup_paths
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_bootstrap_jwt_session_returns_cookie_payload
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_dsr_seed_supports_real_preview
+          - name: admin-e2e-reset-backups
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -2104,13 +2192,24 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
               tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
-          - name: ai-embeddings-policy-v5
+          - name: ai-embeddings-policy
             paths: >-
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
-              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
-              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+          - name: ai-embeddings-v5-core
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_property.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py
+          - name: ai-embeddings-v5-integration
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_integration.py
+          - name: ai-embeddings-hyde-ledger
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+          - name: ai-embeddings-media-validation
+            paths: >-
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -2461,7 +2560,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -2470,7 +2569,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2583,9 +2682,31 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e2e
+          - name: admin-e2e-access
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_e*.py
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_are_unavailable_without_flag
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_require_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_reject_wrong_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_fail_closed_without_configured_support_key
+          - name: admin-e2e-seed
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_stable_fixture_ids
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_debug_role_principals
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_requires_explicit_fixture_passwords
+          - name: admin-e2e-single-user
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_single_user_login_key
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_single_user_api_key_can_read_users_me
+          - name: admin-e2e-session-dsr
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_rejects_unsafe_backup_paths
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_bootstrap_jwt_session_returns_cookie_payload
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_dsr_seed_supports_real_preview
+          - name: admin-e2e-reset-backups
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -2737,13 +2858,24 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
               tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
-          - name: ai-embeddings-policy-v5
+          - name: ai-embeddings-policy
             paths: >-
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
-              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
-              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+          - name: ai-embeddings-v5-core
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_property.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py
+          - name: ai-embeddings-v5-integration
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_integration.py
+          - name: ai-embeddings-hyde-ledger
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+          - name: ai-embeddings-media-validation
+            paths: >-
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -3094,7 +3226,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -3103,7 +3235,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -3218,9 +3350,31 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e2e
+          - name: admin-e2e-access
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_e*.py
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_are_unavailable_without_flag
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_require_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_reject_wrong_support_header
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_routes_fail_closed_without_configured_support_key
+          - name: admin-e2e-seed
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_stable_fixture_ids
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_debug_role_principals
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_requires_explicit_fixture_passwords
+          - name: admin-e2e-single-user
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_seed_returns_single_user_login_key
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_single_user_api_key_can_read_users_me
+          - name: admin-e2e-session-dsr
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_rejects_unsafe_backup_paths
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_bootstrap_jwt_session_returns_cookie_payload
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_dsr_seed_supports_real_preview
+          - name: admin-e2e-reset-backups
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -3372,13 +3526,24 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
               tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
               tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
-          - name: ai-embeddings-policy-v5
+          - name: ai-embeddings-policy
             paths: >-
               tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
-              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
-              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+          - name: ai-embeddings-v5-core
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_property.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py
+          - name: ai-embeddings-v5-integration
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5_integration.py
+          - name: ai-embeddings-hyde-ledger
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+          - name: ai-embeddings-media-validation
+            paths: >-
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -3729,7 +3894,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -3738,7 +3903,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
