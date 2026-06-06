@@ -168,8 +168,8 @@ def db_session_proc(db_instance_session_proc):
 @pytest.fixture
 def dummy_headers():
     """Provides headers required by endpoint signature, even if logic is mocked."""
-    # The actual value doesn't matter because get_request_user is mocked
-    return {"token": "dummy_test_token_for_header"}
+    # The actual value does not matter because get_request_user is mocked.
+    return {"token": str(uuid.uuid4())}
 
 @pytest.fixture()
 def client(client_user_only):
