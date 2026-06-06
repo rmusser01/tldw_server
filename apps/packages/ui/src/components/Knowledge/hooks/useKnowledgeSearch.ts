@@ -180,6 +180,7 @@ export const normalizeMediaSearchResults = (payload: unknown): RagResult[] => {
       type,
       source: title,
       url: itemUrl,
+      origin: "media-library",
       created_at: getFirstString(rawItem, ["created_at", "date", "added_at"]) || undefined
     }
     if (mediaId !== null) {
@@ -253,6 +254,10 @@ export const toPinnedResult = (item: RagResult): RagPinnedResult => {
   const snippet = text.slice(0, 800)
   const title = getResultTitle(item)
   const url = getResultUrl(item)
+  const contextOrigin =
+    getMetadataValue(item.metadata, "origin") === "media-library"
+      ? "media-library"
+      : undefined
   return {
     id: buildPinnedResultId(item, text),
     title: title || undefined,
@@ -260,7 +265,8 @@ export const toPinnedResult = (item: RagResult): RagPinnedResult => {
     url: url || undefined,
     snippet,
     type: getResultType(item) || undefined,
-    mediaId: extractMediaId(item) ?? undefined
+    mediaId: extractMediaId(item) ?? undefined,
+    contextOrigin
   }
 }
 
@@ -345,7 +351,7 @@ const fetchFullMediaTextById = async (mediaId: number): Promise<string | null> =
 export const withFullMediaTextIfAvailable = async (
   pinned: RagPinnedResult
 ): Promise<RagPinnedResult> => {
-  if (!pinned.mediaId) return pinned
+  if (!pinned.mediaId || pinned.contextOrigin !== "media-library") return pinned
   const fullText = await fetchFullMediaTextById(pinned.mediaId)
   if (!fullText) return pinned
   return {
