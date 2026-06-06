@@ -1,6 +1,4 @@
-import os
 from importlib import import_module, reload
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,8 +14,8 @@ def client_with_user(monkeypatch, tmp_path):
     async def override_user():
         return User(id=777, username="ytuser", email=None, is_active=True)
 
-    # Route user DB base dir into project Databases to avoid permission issues
-    base_dir = Path.cwd() / "Databases" / "test_user_dbs"
+    # Isolate the per-user database so earlier tests cannot create duplicate sources.
+    base_dir = tmp_path / "test_user_dbs"
     base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.setenv("TEST_MODE", "1")

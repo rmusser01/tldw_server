@@ -10560,11 +10560,6 @@ async def persona_stream(
                             summary_text=assistant_text,
                             surface=activity_surface,
                         )
-                        await _emit_assistant_delta(
-                            session_id=session_id,
-                            step_idx=step.idx,
-                            text_delta=assistant_text,
-                        )
                         await _record_turn(
                             session_id=session_id,
                             role="assistant",
@@ -10576,6 +10571,11 @@ async def persona_stream(
                             runtime_mode_override=runtime_mode,
                             scope_snapshot_id_override=runtime_scope_snapshot_id,
                             memory_kind="summary",
+                        )
+                        await _emit_assistant_delta(
+                            session_id=session_id,
+                            step_idx=step.idx,
+                            text_delta=assistant_text,
                         )
                         await _emit_persona_live_tts_for_assistant_text(
                             session_id=session_id,

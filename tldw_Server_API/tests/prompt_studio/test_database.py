@@ -4,7 +4,7 @@
 import pytest
 import sqlite3
 import tempfile
-import os
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List
@@ -16,6 +16,21 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
 ########################################################################################################################
 # Test Fixtures
 
+def _unlink_sqlite_temp_db(path: str | Path) -> None:
+    """Remove a SQLite temp DB and sidecar files, retrying transient Windows locks."""
+    db_path = Path(path)
+    for target in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        for attempt in range(5):
+            try:
+                target.unlink()
+                break
+            except FileNotFoundError:
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05)
+
 @pytest.fixture
 def temp_db_path():
     """Create a temporary database path."""
@@ -23,8 +38,7 @@ def temp_db_path():
         path = Path(tmp.name)
     yield path
     # Cleanup
-    if path.exists():
-        os.unlink(path)
+    _unlink_sqlite_temp_db(path)
 
 @pytest.fixture
 def test_db(temp_db_path):
@@ -92,10 +106,7 @@ def multi_user_prompt_dbs():
             except Exception:
                 _ = None
         for path in temp_paths:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                _ = None
+            _unlink_sqlite_temp_db(path)
 
 ########################################################################################################################
 # Database Initialization Tests

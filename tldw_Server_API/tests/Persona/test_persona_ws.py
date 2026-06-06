@@ -5360,6 +5360,78 @@ def test_persona_state_context_message_override_can_enable_when_profile_default_
     assert memory_payload.get("persona_state_applied_count", 0) >= 1
 
 
+def test_persona_summary_memory_persisted_before_assistant_delta(tmp_path, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
+
+    event_order: list[str] = []
+    persisted = threading.Event()
+    original_send_json = persona_ep.WebSocketStream.send_json
+
+    async def _recording_send_json(self, payload):
+        if dict(payload or {}).get("event") == "assistant_delta":
+            event_order.append("assistant_delta")
+        await original_send_json(self, payload)
+
+    def _fake_persist_persona_turn(**kwargs):
+        if kwargs.get("role") == "assistant" and kwargs.get("store_as_memory") is True:
+            event_order.append("persist_summary")
+            persisted.set()
+        return True
+
+    monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _recording_send_json)
+    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_summary_order",
+        mode="persistent_scoped",
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": "sess_summary_order",
+                        "text": "https://example.com",
+                        "use_memory_context": False,
+                    }
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            approved_steps = [int(step["idx"]) for step in plan.get("steps", [])]
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "confirm_plan",
+                        "session_id": "sess_summary_order",
+                        "plan_id": plan["plan_id"],
+                        "approved_steps": approved_steps,
+                    }
+                )
+            )
+            _ = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            _ = _recv_until(ws, lambda d: d.get("event") == "assistant_delta")
+            persisted.wait(timeout=1.0)
+
+    assert "persist_summary" in event_order
+    assert event_order.index("persist_summary") < event_order.index("assistant_delta")
+
+
 @pytest.mark.parametrize(
     ("mode", "session_id", "expected_summary_memory"),
     [
