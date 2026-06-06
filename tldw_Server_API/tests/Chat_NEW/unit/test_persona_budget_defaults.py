@@ -59,7 +59,7 @@ def test_persona_effective_budget_auto_adjusts_on_sustained_alert_window(monkeyp
 
     with chat_endpoint_module._persona_alert_guard:
         chat_endpoint_module._persona_ioo_windows.clear()
-        window = chat_endpoint_module._persona_ioo_windows["u1:42"]
+        window = chat_endpoint_module._get_persona_ioo_window_locked("u1:42")
         for _ in range(int(chat_endpoint_module._PERSONA_IOO_SUSTAIN_WINDOW)):
             window.append(1)
 
@@ -82,7 +82,7 @@ def test_persona_effective_budget_override_bypasses_auto_adjust(monkeypatch):
 
     with chat_endpoint_module._persona_alert_guard:
         chat_endpoint_module._persona_ioo_windows.clear()
-        window = chat_endpoint_module._persona_ioo_windows["u2:7"]
+        window = chat_endpoint_module._get_persona_ioo_window_locked("u2:7")
         for _ in range(int(chat_endpoint_module._PERSONA_IOO_SUSTAIN_WINDOW)):
             window.append(1)
 

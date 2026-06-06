@@ -41,8 +41,9 @@ def test_update_config_type_validation_boolean(mocker):
         'get_status_snapshot',
         return_value={'enabled': True, 'needs_setup': True},
     )
-    # enable_first_time_setup should be boolean-like; provide invalid string
-    payload = {'updates': {'Setup': {'enable_first_time_setup': 'not_boolean'}}}
+    # allow_remote_setup_access should be boolean-like; provide invalid string.
+    # Lifecycle setup flags are rejected by the endpoint before config type validation.
+    payload = {'updates': {'Setup': {'allow_remote_setup_access': 'not_boolean'}}}
     with _make_client() as client:
         resp = client.post('/api/v1/setup/config', json=payload)
     assert resp.status_code == 400

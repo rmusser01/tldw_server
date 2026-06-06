@@ -219,15 +219,49 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "product-modules" not in shard_names
         assert "chat-character-unit" not in shard_names
         assert "rag-research" not in shard_names
+        assert "admin-a-b" not in shard_names
+        assert "admin-e-l" not in shard_names
+        assert "admin-m-r" not in shard_names
+        assert "admin-s-z" not in shard_names
+        assert "ai-chromadb-chunking" not in shard_names
+        assert "chat-character-legacy" not in shard_names
+        assert "chat-character-integration" not in shard_names
+        assert "product-claims" not in shard_names
+        assert "product-evaluations" not in shard_names
+        assert "product-prompts-workflows" not in shard_names
         assert {
-            "admin-a-b",
+            "admin-a-api",
+            "admin-backup-api",
+            "admin-backup-core",
+            "admin-budgets",
+            "admin-bundle",
+            "admin-byok-core",
+            "admin-byok-validation",
             "admin-c-d",
-            "admin-e-l",
-            "admin-m-r",
-            "admin-s-z",
+            "admin-e2e",
+            "admin-g-i",
+            "admin-incidents",
+            "admin-llm-providers",
+            "admin-llm-usage",
+            "admin-maintenance-misc",
+            "admin-monitoring",
+            "admin-ops-dependencies",
+            "admin-ops-endpoints",
+            "admin-ops-webhooks-orgs",
+            "admin-pricing-retention-roles-router",
+            "admin-profiles-rate-registration",
+            "admin-s-sessions-settings",
+            "admin-split-storage-tools",
+            "admin-system-usage",
+            "admin-users",
+            "admin-watchlists-webhooks",
         }.issubset(shard_names)
         assert {
-            "ai-chromadb-chunking",
+            "ai-chromadb",
+            "ai-chunking-code-json-xml",
+            "ai-chunking-core",
+            "ai-chunking-semantic-security",
+            "ai-chunking-templates",
             "ai-embeddings",
             "vector-stores",
             "paper-search",
@@ -236,45 +270,82 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "research-websearch",
         }.issubset(shard_names)
         assert {
-            "chat-character-legacy",
+            "chat-character-legacy-core",
+            "chat-character-legacy-files",
+            "chat-character-legacy-worldbook",
             "chat-character-db",
             "chat-character-unit-core",
             "chat-character-unit-chat",
             "chat-character-unit-persona",
             "chat-character-unit-prd",
             "chat-character-property",
-            "chat-character-integration",
+            "chat-character-integration-api",
+            "chat-character-integration-chat",
+            "chat-character-integration-context",
             "chat-core",
             "llm-providers",
         }.issubset(shard_names)
         assert {
-            "product-claims",
+            "product-claims-core",
+            "product-claims-engine",
+            "product-claims-monitoring",
+            "product-claims-service",
             "product-collections",
-            "product-evaluations",
+            "product-evaluations-abtest",
+            "product-evaluations-core",
+            "product-evaluations-integration",
+            "product-evaluations-recipes-persona",
+            "product-evaluations-unit",
+            "product-flashcards",
             "product-notes-persona",
-            "product-prompts-workflows",
+            "product-prompt-studio",
+            "product-prompts-legacy",
+            "product-prompts-new",
+            "product-watchlists",
+            "product-workflows",
         }.issubset(shard_names)
         shard_paths = {shard["name"]: shard["paths"] for shard in shards}
         shard_path_sets = {
             name: set(str(paths).split()) for name, paths in shard_paths.items()
         }
         assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings"]
+        assert shard_path_sets["ai-chromadb"] == {"tldw_Server_API/tests/ChromaDB"}
         assert "tldw_Server_API/tests/Admin" not in shard_path_sets["core-smoke"]
         assert "tldw_Server_API/tests/RAG_NEW" not in shard_path_sets["rag-legacy"]
         assert "tldw_Server_API/tests/RAG" not in shard_path_sets["rag-new"]
         assert "tldw_Server_API/tests/PaperSearch" not in shard_path_sets["research-websearch"]
         assert "tldw_Server_API/tests/WebSearch" not in shard_path_sets["paper-search"]
-        assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-legacy"]
+        assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-legacy-core"]
         assert "tldw_Server_API/tests/Character_Chat_NEW/unit" not in shard_path_sets["chat-character-property"]
         assert "tldw_Server_API/tests/Claims" not in shard_path_sets["product-collections"]
-        assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims"]
+        assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims-core"]
 
         admin_shards = {
-            "admin-a-b",
+            "admin-a-api",
+            "admin-backup-api",
+            "admin-backup-core",
+            "admin-budgets",
+            "admin-bundle",
+            "admin-byok-core",
+            "admin-byok-validation",
             "admin-c-d",
-            "admin-e-l",
-            "admin-m-r",
-            "admin-s-z",
+            "admin-e2e",
+            "admin-g-i",
+            "admin-incidents",
+            "admin-llm-providers",
+            "admin-llm-usage",
+            "admin-maintenance-misc",
+            "admin-monitoring",
+            "admin-ops-dependencies",
+            "admin-ops-endpoints",
+            "admin-ops-webhooks-orgs",
+            "admin-pricing-retention-roles-router",
+            "admin-profiles-rate-registration",
+            "admin-s-sessions-settings",
+            "admin-split-storage-tools",
+            "admin-system-usage",
+            "admin-users",
+            "admin-watchlists-webhooks",
         }
         admin_files = {
             str(path)
@@ -298,3 +369,160 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
                     covered_admin_files[filename] = shard_name
 
         assert set(covered_admin_files) == admin_files
+
+        chunking_shards = {
+            "ai-chunking-code-json-xml",
+            "ai-chunking-core",
+            "ai-chunking-semantic-security",
+            "ai-chunking-templates",
+        }
+        chunking_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Chunking").glob("**/test*.py")
+        }
+        covered_chunking_files: dict[str, str] = {}
+        for shard_name in chunking_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Chunking/")
+                matches = {
+                    filename
+                    for filename in chunking_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_chunking_files, (
+                        f"{filename} matched both "
+                        f"{covered_chunking_files[filename]} and {shard_name}"
+                    )
+                    covered_chunking_files[filename] = shard_name
+
+        assert set(covered_chunking_files) == chunking_files
+
+        legacy_character_shards = {
+            "chat-character-legacy-core",
+            "chat-character-legacy-files",
+            "chat-character-legacy-worldbook",
+        }
+        legacy_character_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Character_Chat").glob("**/test*.py")
+        }
+        covered_legacy_character_files: dict[str, str] = {}
+        for shard_name in legacy_character_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Character_Chat/")
+                matches = {
+                    filename
+                    for filename in legacy_character_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_legacy_character_files, (
+                        f"{filename} matched both "
+                        f"{covered_legacy_character_files[filename]} and {shard_name}"
+                    )
+                    covered_legacy_character_files[filename] = shard_name
+
+        assert set(covered_legacy_character_files) == legacy_character_files
+
+        new_character_integration_shards = {
+            "chat-character-integration-api",
+            "chat-character-integration-chat",
+            "chat-character-integration-context",
+        }
+        new_character_integration_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Character_Chat_NEW/integration").glob("test*.py")
+        }
+        covered_new_character_integration_files: dict[str, str] = {}
+        for shard_name in new_character_integration_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Character_Chat_NEW/integration/")
+                matches = {
+                    filename
+                    for filename in new_character_integration_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_new_character_integration_files, (
+                        f"{filename} matched both "
+                        f"{covered_new_character_integration_files[filename]} and {shard_name}"
+                    )
+                    covered_new_character_integration_files[filename] = shard_name
+
+        assert set(covered_new_character_integration_files) == new_character_integration_files
+
+        claims_shards = {
+            "product-claims-core",
+            "product-claims-engine",
+            "product-claims-monitoring",
+            "product-claims-service",
+        }
+        claims_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Claims").glob("test*.py")
+        }
+        covered_claims_files: dict[str, str] = {}
+        for shard_name in claims_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Claims/")
+                matches = {
+                    filename
+                    for filename in claims_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_claims_files, (
+                        f"{filename} matched both "
+                        f"{covered_claims_files[filename]} and {shard_name}"
+                    )
+                    covered_claims_files[filename] = shard_name
+
+        assert set(covered_claims_files) == claims_files
+
+        evaluation_shards = {
+            "product-evaluations-abtest",
+            "product-evaluations-core",
+            "product-evaluations-integration",
+            "product-evaluations-recipes-persona",
+            "product-evaluations-unit",
+        }
+        evaluation_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Evaluations").glob("**/test*.py")
+        }
+        covered_evaluation_files: dict[str, str] = {}
+        for shard_name in evaluation_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Evaluations/")
+                matches = {
+                    filename
+                    for filename in evaluation_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_evaluation_files, (
+                        f"{filename} matched both "
+                        f"{covered_evaluation_files[filename]} and {shard_name}"
+                    )
+                    covered_evaluation_files[filename] = shard_name
+
+        assert set(covered_evaluation_files) == evaluation_files
+
+        flashcard_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Flashcards").glob("test*.py")
+        }
+        covered_flashcard_files = {
+            filename
+            for pattern in shard_path_sets["product-flashcards"]
+            for filename in flashcard_files
+            if fnmatch.fnmatch(filename, pattern)
+        }
+
+        assert covered_flashcard_files == flashcard_files

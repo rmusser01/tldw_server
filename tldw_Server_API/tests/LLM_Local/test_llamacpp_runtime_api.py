@@ -372,7 +372,8 @@ def test_v1_use_in_chat_uses_supervisor_default_runtime(monkeypatch: pytest.Monk
     supervisor.runtimes[DEFAULT_PROFILE_ID] = LlamaCppRuntime(
         profile_id=DEFAULT_PROFILE_ID,
         state=LlamaCppRuntimeState.RUNNING,
-        host="0.0.0.0",
+        # Verify wildcard binds are converted to loopback for chat use.
+        host="0.0.0.0",  # nosec B104
         port=8181,
     )
     app = _make_app_with_manager(_ManagerStub(supervisor))
@@ -420,7 +421,8 @@ def test_profile_scoped_use_in_chat_uses_selected_runtime(monkeypatch: pytest.Mo
     supervisor.runtimes["one"] = LlamaCppRuntime(
         profile_id="one",
         state=LlamaCppRuntimeState.RUNNING,
-        host="0.0.0.0",
+        # Verify wildcard binds are converted to loopback for chat use.
+        host="0.0.0.0",  # nosec B104
         port=8181,
     )
     app = _make_app_with_manager(_ManagerStub(supervisor))
@@ -466,6 +468,8 @@ def test_v1_start_server_uses_supervisor_default_when_legacy_handler_exists():
     supervisor = _SupervisorStub()
     handler = _LegacyHandlerStub()
     app = _make_app_with_manager(_ManagerStub(supervisor, handler=handler))
+    expected_model_path = Path("/models/tiny.gguf")
+    expected_model = str(expected_model_path)
 
     with TestClient(app) as client:
         started = client.post(
@@ -478,12 +482,12 @@ def test_v1_start_server_uses_supervisor_default_when_legacy_handler_exists():
     assert started.status_code == 200, started.text
     assert started.json()["status"] == "running"
     assert started.json()["backend"] == "llamacpp"
-    assert started.json()["model"] == "/models/tiny.gguf"
-    assert supervisor.started_paths == [Path("/models/tiny.gguf")]
+    assert started.json()["model"] == expected_model
+    assert supervisor.started_paths == [expected_model_path]
     assert supervisor.started_profile_ids == [DEFAULT_PROFILE_ID]
     assert handler.start_calls == []
     assert status.json()["status"] == "running"
-    assert status.json()["model"] == "/models/tiny.gguf"
+    assert status.json()["model"] == expected_model
     assert stopped.json()["status"] == "stopped"
     assert handler.stop_calls == 0
 

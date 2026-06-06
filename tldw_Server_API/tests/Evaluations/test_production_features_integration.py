@@ -13,8 +13,6 @@ import pytest
 import pytest_asyncio
 pytestmark = pytest.mark.integration
 import sqlite3
-import tempfile
-import shutil
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
 import sys
@@ -48,10 +46,9 @@ class TestDatabaseMigration:
     """Test database migration to unified schema."""
 
     @pytest.fixture
-    def temp_db(self):
+    def temp_db(self, tmp_path):
         """Create a temporary database for testing."""
-        temp_dir = tempfile.mkdtemp()
-        db_path = Path(temp_dir) / "test_evaluations.db"
+        db_path = tmp_path / "test_evaluations.db"
 
         # Create old schema tables
         with sqlite3.connect(db_path) as conn:
@@ -110,9 +107,6 @@ class TestDatabaseMigration:
             conn.commit()
 
         yield str(db_path)
-
-        # Cleanup
-        shutil.rmtree(temp_dir)
 
     def test_migration_success(self, temp_db):
 
@@ -186,16 +180,12 @@ class TestUserRateLimiter:
 
     import pytest_asyncio
     @pytest_asyncio.fixture
-    async def rate_limiter(self):
+    async def rate_limiter(self, tmp_path):
         """Create rate limiter with temp database."""
-        temp_dir = tempfile.mkdtemp()
-        db_path = Path(temp_dir) / "test_rate_limits.db"
+        db_path = tmp_path / "test_rate_limits.db"
 
         limiter = UserRateLimiter(str(db_path))
         yield limiter
-
-        # Cleanup
-        shutil.rmtree(temp_dir)
 
     @pytest.mark.asyncio
     async def test_default_tier_assignment(self, rate_limiter):
@@ -742,77 +732,72 @@ class TestIntegration:
     """Integration tests combining all features."""
 
     @pytest.mark.asyncio
-    async def test_full_evaluation_flow_with_features(self):
+    async def test_full_evaluation_flow_with_features(self, tmp_path):
         """Test complete evaluation flow with all new features."""
         # Setup temporary environment
-        temp_dir = tempfile.mkdtemp()
-        db_path = Path(temp_dir) / "integration_test.db"
+        db_path = tmp_path / "integration_test.db"
 
-        try:
-            # Initialize components
-            rate_limiter = UserRateLimiter(str(db_path))
-            webhook_manager = WebhookManager(str(db_path))
-            from tldw_Server_API.app.core.Evaluations.metrics_advanced import get_advanced_metrics
-            metrics = get_advanced_metrics(use_separate_registry=True)
+        # Initialize components
+        rate_limiter = UserRateLimiter(str(db_path))
+        webhook_manager = WebhookManager(str(db_path))
+        from tldw_Server_API.app.core.Evaluations.metrics_advanced import get_advanced_metrics
+        metrics = get_advanced_metrics(use_separate_registry=True)
 
-            user_id = "integration_user"
+        user_id = "integration_user"
 
-            # 1. Check rate limit
-            allowed, rate_metadata = await rate_limiter.check_rate_limit(
-                user_id,
-                "/api/v1/evaluations",
-                tokens_requested=1000,
-                estimated_cost=0.10
-            )
-            assert allowed is True
+        # 1. Check rate limit
+        allowed, rate_metadata = await rate_limiter.check_rate_limit(
+            user_id,
+            "/api/v1/evaluations",
+            tokens_requested=1000,
+            estimated_cost=0.10
+        )
+        assert allowed is True
 
-            # 2. Register webhook
-            webhook_result = await webhook_manager.register_webhook(
-                user_id,
-                "https://example.com/webhook",
-                [WebhookEvent.EVALUATION_COMPLETED]
-            )
-            assert webhook_result["active"] is True
+        # 2. Register webhook
+        webhook_result = await webhook_manager.register_webhook(
+            user_id,
+            "https://example.com/webhook",
+            [WebhookEvent.EVALUATION_COMPLETED]
+        )
+        assert webhook_result["active"] is True
 
-            # 3. Track metrics
-            if metrics.enabled:
-                with metrics.track_sli_request("/api/v1/evaluations"):
-                    # Simulate evaluation
-                    metrics.track_evaluation_cost(
-                        user_tier="free",
-                        provider="openai",
-                        model="gpt-3.5-turbo",
-                        evaluation_type="geval",
-                        cost=0.10
-                    )
-
-            # 4. Send webhook notification (mocked)
-            class _DummyResp:
-                def __init__(self, status_code: int, text: str = "ok"):
-                    self.status_code = status_code
-                    self.text = text
-                async def aclose(self):
-                    return None
-
-            with patch(
-                "tldw_Server_API.app.core.Evaluations.webhook_manager.afetch",
-                new=AsyncMock(return_value=_DummyResp(200)),
-            ):
-                await webhook_manager.send_webhook(
-                    user_id,
-                    WebhookEvent.EVALUATION_COMPLETED,
-                    "eval_integration_001",
-                    {"score": 0.85}
+        # 3. Track metrics
+        if metrics.enabled:
+            with metrics.track_sli_request("/api/v1/evaluations"):
+                # Simulate evaluation
+                metrics.track_evaluation_cost(
+                    user_tier="free",
+                    provider="openai",
+                    model="gpt-3.5-turbo",
+                    evaluation_type="geval",
+                    cost=0.10
                 )
 
-            # 5. Check usage
-            usage = await rate_limiter.get_usage_summary(user_id)
-            assert usage["usage"]["today"]["evaluations"] == 1
-            assert usage["usage"]["today"]["cost"] == pytest.approx(0.10)
+        # 4. Send webhook notification (mocked)
+        class _DummyResp:
+            def __init__(self, status_code: int, text: str = "ok"):
+                self.status_code = status_code
+                self.text = text
 
-        finally:
-            # Cleanup
-            shutil.rmtree(temp_dir)
+            async def aclose(self):
+                return None
+
+        with patch(
+            "tldw_Server_API.app.core.Evaluations.webhook_manager.afetch",
+            new=AsyncMock(return_value=_DummyResp(200)),
+        ):
+            await webhook_manager.send_webhook(
+                user_id,
+                WebhookEvent.EVALUATION_COMPLETED,
+                "eval_integration_001",
+                {"score": 0.85}
+            )
+
+        # 5. Check usage
+        usage = await rate_limiter.get_usage_summary(user_id)
+        assert usage["usage"]["today"]["evaluations"] == 1
+        assert usage["usage"]["today"]["cost"] == pytest.approx(0.10)
 
 
 # Run tests with pytest

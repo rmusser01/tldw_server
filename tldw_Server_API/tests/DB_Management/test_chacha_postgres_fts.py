@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from unittest.mock import MagicMock, call
 
@@ -8,6 +9,8 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
+from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordStore
 
 
 class _CursorStub:
@@ -24,9 +27,13 @@ class _CursorStub:
 def _make_postgres_db() -> CharactersRAGDB:
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.backend_type = BackendType.POSTGRESQL
-    db.backend = MagicMock()
+    db._local = SimpleNamespace(backend_ref=None)
+    db._uses_shared_content_backend = False
+    db._backend = MagicMock()
+    db._backend.backend_type = BackendType.POSTGRESQL
     db._CHARACTER_CARD_JSON_FIELDS = []
+    db.character_store = CharacterStore(db)
+    db.keyword_store = KeywordStore(db)
 
     class _TxConn:
         _connection = None
@@ -76,7 +83,10 @@ def test_rebuild_full_text_indexes_postgres_calls_backend():
 def test_rebuild_full_text_indexes_sqlite_executes_rebuild():
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.backend_type = BackendType.SQLITE
+    db._local = SimpleNamespace(backend_ref=None)
+    db._uses_shared_content_backend = False
+    db._backend = MagicMock()
+    db._backend.backend_type = BackendType.SQLITE
     db._FTS_CONFIG = [
         ("keywords_fts", "keywords", []),
         ("notes_fts", "notes", []),

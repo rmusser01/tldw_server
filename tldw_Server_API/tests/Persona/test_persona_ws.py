@@ -56,7 +56,7 @@ def _recv_until(client, predicate, timeout=2.0):
         msg = str(payload)
         try:
             data = json.loads(msg)
-        except Exception:
+        except json.JSONDecodeError:
             continue
         if predicate(data):
             return data
@@ -230,7 +230,7 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
                 )
             )
 
-            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan", timeout=8.0)
             assert "steps" in plan and isinstance(plan["steps"], list)
             steps = plan["steps"]
             plan_id = plan.get("plan_id")

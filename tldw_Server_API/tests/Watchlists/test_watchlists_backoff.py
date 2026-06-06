@@ -1,9 +1,9 @@
 import json
-from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Watchlists import pipeline as wl_pipeline
 
@@ -12,19 +12,22 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _env(monkeypatch):
-     # Isolate per-user DBs for this test file
-    base_dir = Path.cwd() / "Databases" / "test_user_dbs_backoff"
+def _env(monkeypatch, tmp_path):
+    # Isolate per-user DBs for this test file
+    base_dir = tmp_path / "test_user_dbs_backoff"
     base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     # Force real pipeline fetch path even if other suites enabled TEST_MODE
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     # Lower the threshold to speed up the test and keep defaults small
     monkeypatch.setenv("WATCHLISTS_304_BACKOFF_THRESHOLD", "2")
     monkeypatch.setenv("WATCHLISTS_304_BACKOFF_BASE_SEC", "60")
     monkeypatch.setenv("WATCHLISTS_304_BACKOFF_MAX_SEC", "300")
     monkeypatch.setenv("WATCHLISTS_304_BACKOFF_JITTER_PCT", "0.0")
     yield
+    for db_path in base_dir.glob("*/Media_DB_v2.db"):
+        reset_managed_sqlite_backends(sqlite_targets=[str(db_path), str(db_path.resolve())])
 
 
 @pytest.mark.asyncio
@@ -33,6 +36,7 @@ async def test_backoff_defer_until_after_consecutive_304s(monkeypatch):
     # Ensure a clean slate DB for this user
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     p = DatabasePaths.get_media_db_path(user_id)
+    reset_managed_sqlite_backends(sqlite_targets=[str(p), str(p.resolve())])
     try:
         if p.exists():
             p.unlink()

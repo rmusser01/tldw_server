@@ -27,6 +27,10 @@ def _import_startup_auth() -> ModuleType:
     return importlib.import_module("tldw_Server_API.app.services.startup_auth")
 
 
+def _noop_reset_llm_provider_overrides_cache(_overrides: object = None) -> None:
+    return None
+
+
 def test_startup_auth_exception_guards_match_lifespan_contract() -> None:
     startup_auth = _import_startup_auth()
 
@@ -82,6 +86,7 @@ async def test_init_auth_services_runs_sqlite_startup_chain(monkeypatch: pytest.
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
         refresh_llm_provider_overrides=_fake_refresh,
+        set_llm_provider_overrides_cache_for_tests=_noop_reset_llm_provider_overrides_cache,
     )
 
     startup_auth = _import_startup_auth()
@@ -135,6 +140,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
         refresh_llm_provider_overrides=_fake_refresh,
+        set_llm_provider_overrides_cache_for_tests=_noop_reset_llm_provider_overrides_cache,
     )
     _install_module(
         monkeypatch,
@@ -262,6 +268,7 @@ async def test_init_auth_services_warns_when_schema_ensure_is_skipped(
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
         refresh_llm_provider_overrides=_fake_refresh,
+        set_llm_provider_overrides_cache_for_tests=_noop_reset_llm_provider_overrides_cache,
     )
 
     startup_auth = _import_startup_auth()
@@ -306,6 +313,7 @@ async def test_init_auth_services_skips_provider_override_runtime_failures(
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
         refresh_llm_provider_overrides=_failing_refresh,
+        set_llm_provider_overrides_cache_for_tests=_noop_reset_llm_provider_overrides_cache,
     )
 
     startup_auth = _import_startup_auth()

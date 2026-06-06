@@ -400,9 +400,13 @@ class TestProcessVideos:
             "start_time": TEST_VIDEO_START_TIME,
             "end_time": TEST_VIDEO_END_TIME,
         }
-        with open(SAMPLE_VIDEO_PATH, "rb") as f:
-            files = {"files": (SAMPLE_VIDEO_PATH.name, f, "video/mp4")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+        with patch(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.perform_transcription",
+            return_value=("Mocked video transcript.", []),
+        ):
+            with open(SAMPLE_VIDEO_PATH, "rb") as f:
+                files = {"files": (SAMPLE_VIDEO_PATH.name, f, "video/mp4")}
+                response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (video upload).")

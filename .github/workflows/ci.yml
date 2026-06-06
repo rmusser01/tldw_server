@@ -434,45 +434,103 @@ jobs:
               tldw_Server_API/tests/sanity_tests
               tldw_Server_API/tests/schemas
               tldw_Server_API/tests/unit
-          - name: admin-a-b
+          - name: admin-a-api
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_a*.py
-              tldw_Server_API/tests/Admin/test_admin_b*.py
-              tldw_Server_API/tests/Admin/test_backup_*.py
+          - name: admin-budgets
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_budgets_*.py
+          - name: admin-bundle
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_bundle_service_sanitizers.py
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+          - name: admin-byok-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
+          - name: admin-byok-validation
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_validation_*.py
               tldw_Server_API/tests/Admin/test_byok_*.py
+          - name: admin-backup-api
+            paths: >-
+              tldw_Server_API/tests/Admin/test_backup_schedules_api.py
+          - name: admin-backup-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-c-d
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e-l
+          - name: admin-e2e
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_e*.py
+          - name: admin-g-i
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
               tldw_Server_API/tests/Admin/test_admin_i*.py
-              tldw_Server_API/tests/Admin/test_admin_l*.py
-              tldw_Server_API/tests/Admin/test_incidents_*.py
-              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
-          - name: admin-m-r
+          - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_m*.py
-              tldw_Server_API/tests/Admin/test_admin_o*.py
-              tldw_Server_API/tests/Admin/test_admin_p*.py
-              tldw_Server_API/tests/Admin/test_admin_r*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+          - name: admin-incidents
+            paths: >-
+              tldw_Server_API/tests/Admin/test_incidents_*.py
+          - name: admin-llm-usage
+            paths: >-
+              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+          - name: admin-maintenance-misc
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
+              tldw_Server_API/tests/Admin/test_admin_misc_endpoints.py
               tldw_Server_API/tests/Admin/test_maintenance_*.py
+          - name: admin-monitoring
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_monitoring_*.py
               tldw_Server_API/tests/Admin/test_monitoring_*.py
+          - name: admin-ops-dependencies
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_dependencies.py
+          - name: admin-ops-endpoints
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
+          - name: admin-ops-webhooks-orgs
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
+              tldw_Server_API/tests/Admin/test_admin_orgs_*.py
+          - name: admin-profiles-rate-registration
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_profiles_*.py
+              tldw_Server_API/tests/Admin/test_admin_rate_limits_*.py
+              tldw_Server_API/tests/Admin/test_admin_registration_*.py
+          - name: admin-pricing-retention-roles-router
+            paths: >-
               tldw_Server_API/tests/Admin/test_pricing_reload_endpoint.py
               tldw_Server_API/tests/Admin/test_retention_policy_preview_api.py
               tldw_Server_API/tests/Admin/test_role_*.py
               tldw_Server_API/tests/Admin/test_router_analytics_*.py
-          - name: admin-s-z
+          - name: admin-s-sessions-settings
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_s*.py
+              tldw_Server_API/tests/Admin/test_admin_scope_service_enterprise_mode.py
+              tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py
+              tldw_Server_API/tests/Admin/test_admin_sessions_*.py
+              tldw_Server_API/tests/Admin/test_admin_settings_service.py
+              tldw_Server_API/tests/Admin/test_admin_smoke.py
+          - name: admin-split-storage-tools
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_split_*.py
+              tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+          - name: admin-users
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
+          - name: admin-watchlists-webhooks
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-system-usage
+            paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-db
@@ -487,10 +545,44 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-chromadb-chunking
+          - name: ai-chromadb
             paths: >-
               tldw_Server_API/tests/ChromaDB
-              tldw_Server_API/tests/Chunking
+          - name: ai-chunking-core
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_async_*.py
+              tldw_Server_API/tests/Chunking/test_auto_*.py
+              tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
+              tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
+              tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
+              tldw_Server_API/tests/Chunking/test_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
+          - name: ai-chunking-templates
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-code-json-xml
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_json_*.py
+              tldw_Server_API/tests/Chunking/test_xml_*.py
+          - name: ai-chunking-semantic-security
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_offsets_additional.py
+              tldw_Server_API/tests/Chunking/test_option_aliases.py
+              tldw_Server_API/tests/Chunking/test_overlap_clamp.py
+              tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
+              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_security*.py
+              tldw_Server_API/tests/Chunking/test_semantic_*.py
+              tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
+              tldw_Server_API/tests/Chunking/test_streaming_overlap.py
+              tldw_Server_API/tests/Chunking/test_thai_tables_spans.py
+              tldw_Server_API/tests/Chunking/test_thread_safety.py
+              tldw_Server_API/tests/Chunking/test_tokens_offsets.py
+              tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
           - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/Embeddings
@@ -521,9 +613,32 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-character-legacy
+          - name: chat-character-legacy-core
             paths: >-
-              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_completions_tool_messages_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
+              tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+          - name: chat-character-legacy-files
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
+              tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+          - name: chat-character-legacy-worldbook
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
+              tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
           - name: chat-character-db
             paths: >-
               tldw_Server_API/tests/Characters
@@ -564,9 +679,19 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
-          - name: chat-character-integration
+          - name: chat-character-integration-api
             paths: >-
-              tldw_Server_API/tests/Character_Chat_NEW/integration
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+          - name: chat-character-integration-chat
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
+          - name: chat-character-integration-context
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
           - name: chat-core
             paths: >-
               tldw_Server_API/tests/Chat
@@ -580,28 +705,116 @@ jobs:
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-          - name: product-claims
+          - name: product-claims-core
             paths: >-
-              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
+              tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
+              tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
+              tldw_Server_API/tests/Claims/test_claims_alerts_*.py
+              tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
+              tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
+              tldw_Server_API/tests/Claims/test_claims_budget_guard.py
+              tldw_Server_API/tests/Claims/test_claims_cluster*.py
+              tldw_Server_API/tests/Claims/test_claims_compat_types.py
+          - name: product-claims-engine
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
+              tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
+              tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
+              tldw_Server_API/tests/Claims/test_claims_engine_*.py
+              tldw_Server_API/tests/Claims/test_claims_extractor*.py
+              tldw_Server_API/tests/Claims/test_claims_items_api.py
+          - name: product-claims-monitoring
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
+              tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
+              tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
+              tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
+              tldw_Server_API/tests/Claims/test_claims_review_*.py
+          - name: product-claims-service
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_runtime_config.py
+              tldw_Server_API/tests/Claims/test_claims_service_*.py
+              tldw_Server_API/tests/Claims/test_claims_settings_*.py
+              tldw_Server_API/tests/Claims/test_claims_span_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_status_and_envelope_api.py
+              tldw_Server_API/tests/Claims/test_claims_utils_persistence.py
+              tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py
+              tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
+              tldw_Server_API/tests/Claims/test_ingestion_*.py
           - name: product-collections
             paths: >-
               tldw_Server_API/tests/Collections
-          - name: product-evaluations
+          - name: product-evaluations-abtest
             paths: >-
-              tldw_Server_API/tests/Evaluations
-              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Evaluations/embeddings_abtest/test*.py
+              tldw_Server_API/tests/Evaluations/test_abtest_*.py
+              tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
+          - name: product-evaluations-core
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_benchmark_*.py
+              tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
+              tldw_Server_API/tests/Evaluations/test_connection_pool.py
+              tldw_Server_API/tests/Evaluations/test_db_adapter.py
+              tldw_Server_API/tests/Evaluations/test_error_scenarios.py
+              tldw_Server_API/tests/Evaluations/test_eval_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluation_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_migration_cli.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_rag_pipeline_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_stage*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_unified.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_webhooks_*.py
+              tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
+              tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
+              tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_production_features_integration.py
+              tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
+              tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_security.py
+              tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
+              tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
+          - name: product-evaluations-integration
+            paths: >-
+              tldw_Server_API/tests/Evaluations/integration/test*.py
+              tldw_Server_API/tests/Evaluations/property/test*.py
+          - name: product-evaluations-recipes-persona
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_persona_*.py
+              tldw_Server_API/tests/Evaluations/test_recipe_*.py
+          - name: product-evaluations-unit
+            paths: >-
+              tldw_Server_API/tests/Evaluations/unit/test_*.py
+          - name: product-flashcards
+            paths: >-
+              tldw_Server_API/tests/Flashcards/test*.py
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
               tldw_Server_API/tests/Notes_NEW
               tldw_Server_API/tests/Persona
               tldw_Server_API/tests/Personalization
-          - name: product-prompts-workflows
+          - name: product-prompts-legacy
             paths: >-
               tldw_Server_API/tests/Prompt_Management
+          - name: product-prompts-new
+            paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
+          - name: product-watchlists
+            paths: >-
               tldw_Server_API/tests/Watchlists
+          - name: product-workflows
+            paths: >-
               tldw_Server_API/tests/Workflows
+          - name: product-prompt-studio
+            paths: >-
               tldw_Server_API/tests/prompt_studio
           - name: platform-mcp
             paths: >-
@@ -835,7 +1048,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -844,7 +1057,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -927,45 +1140,103 @@ jobs:
               tldw_Server_API/tests/sanity_tests
               tldw_Server_API/tests/schemas
               tldw_Server_API/tests/unit
-          - name: admin-a-b
+          - name: admin-a-api
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_a*.py
-              tldw_Server_API/tests/Admin/test_admin_b*.py
-              tldw_Server_API/tests/Admin/test_backup_*.py
+          - name: admin-budgets
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_budgets_*.py
+          - name: admin-bundle
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_bundle_service_sanitizers.py
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+          - name: admin-byok-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
+          - name: admin-byok-validation
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_validation_*.py
               tldw_Server_API/tests/Admin/test_byok_*.py
+          - name: admin-backup-api
+            paths: >-
+              tldw_Server_API/tests/Admin/test_backup_schedules_api.py
+          - name: admin-backup-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-c-d
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e-l
+          - name: admin-e2e
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_e*.py
+          - name: admin-g-i
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
               tldw_Server_API/tests/Admin/test_admin_i*.py
-              tldw_Server_API/tests/Admin/test_admin_l*.py
-              tldw_Server_API/tests/Admin/test_incidents_*.py
-              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
-          - name: admin-m-r
+          - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_m*.py
-              tldw_Server_API/tests/Admin/test_admin_o*.py
-              tldw_Server_API/tests/Admin/test_admin_p*.py
-              tldw_Server_API/tests/Admin/test_admin_r*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+          - name: admin-incidents
+            paths: >-
+              tldw_Server_API/tests/Admin/test_incidents_*.py
+          - name: admin-llm-usage
+            paths: >-
+              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+          - name: admin-maintenance-misc
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
+              tldw_Server_API/tests/Admin/test_admin_misc_endpoints.py
               tldw_Server_API/tests/Admin/test_maintenance_*.py
+          - name: admin-monitoring
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_monitoring_*.py
               tldw_Server_API/tests/Admin/test_monitoring_*.py
+          - name: admin-ops-dependencies
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_dependencies.py
+          - name: admin-ops-endpoints
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
+          - name: admin-ops-webhooks-orgs
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
+              tldw_Server_API/tests/Admin/test_admin_orgs_*.py
+          - name: admin-profiles-rate-registration
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_profiles_*.py
+              tldw_Server_API/tests/Admin/test_admin_rate_limits_*.py
+              tldw_Server_API/tests/Admin/test_admin_registration_*.py
+          - name: admin-pricing-retention-roles-router
+            paths: >-
               tldw_Server_API/tests/Admin/test_pricing_reload_endpoint.py
               tldw_Server_API/tests/Admin/test_retention_policy_preview_api.py
               tldw_Server_API/tests/Admin/test_role_*.py
               tldw_Server_API/tests/Admin/test_router_analytics_*.py
-          - name: admin-s-z
+          - name: admin-s-sessions-settings
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_s*.py
+              tldw_Server_API/tests/Admin/test_admin_scope_service_enterprise_mode.py
+              tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py
+              tldw_Server_API/tests/Admin/test_admin_sessions_*.py
+              tldw_Server_API/tests/Admin/test_admin_settings_service.py
+              tldw_Server_API/tests/Admin/test_admin_smoke.py
+          - name: admin-split-storage-tools
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_split_*.py
+              tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+          - name: admin-users
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
+          - name: admin-watchlists-webhooks
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-system-usage
+            paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-db
@@ -980,10 +1251,44 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-chromadb-chunking
+          - name: ai-chromadb
             paths: >-
               tldw_Server_API/tests/ChromaDB
-              tldw_Server_API/tests/Chunking
+          - name: ai-chunking-core
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_async_*.py
+              tldw_Server_API/tests/Chunking/test_auto_*.py
+              tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
+              tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
+              tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
+              tldw_Server_API/tests/Chunking/test_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
+          - name: ai-chunking-templates
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-code-json-xml
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_json_*.py
+              tldw_Server_API/tests/Chunking/test_xml_*.py
+          - name: ai-chunking-semantic-security
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_offsets_additional.py
+              tldw_Server_API/tests/Chunking/test_option_aliases.py
+              tldw_Server_API/tests/Chunking/test_overlap_clamp.py
+              tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
+              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_security*.py
+              tldw_Server_API/tests/Chunking/test_semantic_*.py
+              tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
+              tldw_Server_API/tests/Chunking/test_streaming_overlap.py
+              tldw_Server_API/tests/Chunking/test_thai_tables_spans.py
+              tldw_Server_API/tests/Chunking/test_thread_safety.py
+              tldw_Server_API/tests/Chunking/test_tokens_offsets.py
+              tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
           - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/Embeddings
@@ -1014,9 +1319,32 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-character-legacy
+          - name: chat-character-legacy-core
             paths: >-
-              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_completions_tool_messages_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
+              tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+          - name: chat-character-legacy-files
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
+              tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+          - name: chat-character-legacy-worldbook
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
+              tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
           - name: chat-character-db
             paths: >-
               tldw_Server_API/tests/Characters
@@ -1057,9 +1385,19 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
-          - name: chat-character-integration
+          - name: chat-character-integration-api
             paths: >-
-              tldw_Server_API/tests/Character_Chat_NEW/integration
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+          - name: chat-character-integration-chat
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
+          - name: chat-character-integration-context
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
           - name: chat-core
             paths: >-
               tldw_Server_API/tests/Chat
@@ -1073,28 +1411,116 @@ jobs:
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-          - name: product-claims
+          - name: product-claims-core
             paths: >-
-              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
+              tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
+              tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
+              tldw_Server_API/tests/Claims/test_claims_alerts_*.py
+              tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
+              tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
+              tldw_Server_API/tests/Claims/test_claims_budget_guard.py
+              tldw_Server_API/tests/Claims/test_claims_cluster*.py
+              tldw_Server_API/tests/Claims/test_claims_compat_types.py
+          - name: product-claims-engine
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
+              tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
+              tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
+              tldw_Server_API/tests/Claims/test_claims_engine_*.py
+              tldw_Server_API/tests/Claims/test_claims_extractor*.py
+              tldw_Server_API/tests/Claims/test_claims_items_api.py
+          - name: product-claims-monitoring
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
+              tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
+              tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
+              tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
+              tldw_Server_API/tests/Claims/test_claims_review_*.py
+          - name: product-claims-service
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_runtime_config.py
+              tldw_Server_API/tests/Claims/test_claims_service_*.py
+              tldw_Server_API/tests/Claims/test_claims_settings_*.py
+              tldw_Server_API/tests/Claims/test_claims_span_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_status_and_envelope_api.py
+              tldw_Server_API/tests/Claims/test_claims_utils_persistence.py
+              tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py
+              tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
+              tldw_Server_API/tests/Claims/test_ingestion_*.py
           - name: product-collections
             paths: >-
               tldw_Server_API/tests/Collections
-          - name: product-evaluations
+          - name: product-evaluations-abtest
             paths: >-
-              tldw_Server_API/tests/Evaluations
-              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Evaluations/embeddings_abtest/test*.py
+              tldw_Server_API/tests/Evaluations/test_abtest_*.py
+              tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
+          - name: product-evaluations-core
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_benchmark_*.py
+              tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
+              tldw_Server_API/tests/Evaluations/test_connection_pool.py
+              tldw_Server_API/tests/Evaluations/test_db_adapter.py
+              tldw_Server_API/tests/Evaluations/test_error_scenarios.py
+              tldw_Server_API/tests/Evaluations/test_eval_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluation_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_migration_cli.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_rag_pipeline_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_stage*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_unified.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_webhooks_*.py
+              tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
+              tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
+              tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_production_features_integration.py
+              tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
+              tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_security.py
+              tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
+              tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
+          - name: product-evaluations-integration
+            paths: >-
+              tldw_Server_API/tests/Evaluations/integration/test*.py
+              tldw_Server_API/tests/Evaluations/property/test*.py
+          - name: product-evaluations-recipes-persona
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_persona_*.py
+              tldw_Server_API/tests/Evaluations/test_recipe_*.py
+          - name: product-evaluations-unit
+            paths: >-
+              tldw_Server_API/tests/Evaluations/unit/test_*.py
+          - name: product-flashcards
+            paths: >-
+              tldw_Server_API/tests/Flashcards/test*.py
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
               tldw_Server_API/tests/Notes_NEW
               tldw_Server_API/tests/Persona
               tldw_Server_API/tests/Personalization
-          - name: product-prompts-workflows
+          - name: product-prompts-legacy
             paths: >-
               tldw_Server_API/tests/Prompt_Management
+          - name: product-prompts-new
+            paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
+          - name: product-watchlists
+            paths: >-
               tldw_Server_API/tests/Watchlists
+          - name: product-workflows
+            paths: >-
               tldw_Server_API/tests/Workflows
+          - name: product-prompt-studio
+            paths: >-
               tldw_Server_API/tests/prompt_studio
           - name: platform-mcp
             paths: >-
@@ -1272,7 +1698,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1281,7 +1707,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1365,45 +1791,103 @@ jobs:
               tldw_Server_API/tests/sanity_tests
               tldw_Server_API/tests/schemas
               tldw_Server_API/tests/unit
-          - name: admin-a-b
+          - name: admin-a-api
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_a*.py
-              tldw_Server_API/tests/Admin/test_admin_b*.py
-              tldw_Server_API/tests/Admin/test_backup_*.py
+          - name: admin-budgets
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_budgets_*.py
+          - name: admin-bundle
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_bundle_service_sanitizers.py
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+          - name: admin-byok-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
+          - name: admin-byok-validation
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_validation_*.py
               tldw_Server_API/tests/Admin/test_byok_*.py
+          - name: admin-backup-api
+            paths: >-
+              tldw_Server_API/tests/Admin/test_backup_schedules_api.py
+          - name: admin-backup-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-c-d
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e-l
+          - name: admin-e2e
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_e*.py
+          - name: admin-g-i
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
               tldw_Server_API/tests/Admin/test_admin_i*.py
-              tldw_Server_API/tests/Admin/test_admin_l*.py
-              tldw_Server_API/tests/Admin/test_incidents_*.py
-              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
-          - name: admin-m-r
+          - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_m*.py
-              tldw_Server_API/tests/Admin/test_admin_o*.py
-              tldw_Server_API/tests/Admin/test_admin_p*.py
-              tldw_Server_API/tests/Admin/test_admin_r*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+          - name: admin-incidents
+            paths: >-
+              tldw_Server_API/tests/Admin/test_incidents_*.py
+          - name: admin-llm-usage
+            paths: >-
+              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+          - name: admin-maintenance-misc
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
+              tldw_Server_API/tests/Admin/test_admin_misc_endpoints.py
               tldw_Server_API/tests/Admin/test_maintenance_*.py
+          - name: admin-monitoring
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_monitoring_*.py
               tldw_Server_API/tests/Admin/test_monitoring_*.py
+          - name: admin-ops-dependencies
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_dependencies.py
+          - name: admin-ops-endpoints
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
+          - name: admin-ops-webhooks-orgs
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
+              tldw_Server_API/tests/Admin/test_admin_orgs_*.py
+          - name: admin-profiles-rate-registration
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_profiles_*.py
+              tldw_Server_API/tests/Admin/test_admin_rate_limits_*.py
+              tldw_Server_API/tests/Admin/test_admin_registration_*.py
+          - name: admin-pricing-retention-roles-router
+            paths: >-
               tldw_Server_API/tests/Admin/test_pricing_reload_endpoint.py
               tldw_Server_API/tests/Admin/test_retention_policy_preview_api.py
               tldw_Server_API/tests/Admin/test_role_*.py
               tldw_Server_API/tests/Admin/test_router_analytics_*.py
-          - name: admin-s-z
+          - name: admin-s-sessions-settings
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_s*.py
+              tldw_Server_API/tests/Admin/test_admin_scope_service_enterprise_mode.py
+              tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py
+              tldw_Server_API/tests/Admin/test_admin_sessions_*.py
+              tldw_Server_API/tests/Admin/test_admin_settings_service.py
+              tldw_Server_API/tests/Admin/test_admin_smoke.py
+          - name: admin-split-storage-tools
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_split_*.py
+              tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+          - name: admin-users
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
+          - name: admin-watchlists-webhooks
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-system-usage
+            paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-db
@@ -1418,10 +1902,44 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-chromadb-chunking
+          - name: ai-chromadb
             paths: >-
               tldw_Server_API/tests/ChromaDB
-              tldw_Server_API/tests/Chunking
+          - name: ai-chunking-core
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_async_*.py
+              tldw_Server_API/tests/Chunking/test_auto_*.py
+              tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
+              tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
+              tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
+              tldw_Server_API/tests/Chunking/test_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
+          - name: ai-chunking-templates
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-code-json-xml
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_json_*.py
+              tldw_Server_API/tests/Chunking/test_xml_*.py
+          - name: ai-chunking-semantic-security
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_offsets_additional.py
+              tldw_Server_API/tests/Chunking/test_option_aliases.py
+              tldw_Server_API/tests/Chunking/test_overlap_clamp.py
+              tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
+              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_security*.py
+              tldw_Server_API/tests/Chunking/test_semantic_*.py
+              tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
+              tldw_Server_API/tests/Chunking/test_streaming_overlap.py
+              tldw_Server_API/tests/Chunking/test_thai_tables_spans.py
+              tldw_Server_API/tests/Chunking/test_thread_safety.py
+              tldw_Server_API/tests/Chunking/test_tokens_offsets.py
+              tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
           - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/Embeddings
@@ -1452,9 +1970,32 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-character-legacy
+          - name: chat-character-legacy-core
             paths: >-
-              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_completions_tool_messages_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
+              tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+          - name: chat-character-legacy-files
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
+              tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+          - name: chat-character-legacy-worldbook
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
+              tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
           - name: chat-character-db
             paths: >-
               tldw_Server_API/tests/Characters
@@ -1495,9 +2036,19 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
-          - name: chat-character-integration
+          - name: chat-character-integration-api
             paths: >-
-              tldw_Server_API/tests/Character_Chat_NEW/integration
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+          - name: chat-character-integration-chat
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
+          - name: chat-character-integration-context
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
           - name: chat-core
             paths: >-
               tldw_Server_API/tests/Chat
@@ -1511,28 +2062,116 @@ jobs:
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-          - name: product-claims
+          - name: product-claims-core
             paths: >-
-              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
+              tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
+              tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
+              tldw_Server_API/tests/Claims/test_claims_alerts_*.py
+              tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
+              tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
+              tldw_Server_API/tests/Claims/test_claims_budget_guard.py
+              tldw_Server_API/tests/Claims/test_claims_cluster*.py
+              tldw_Server_API/tests/Claims/test_claims_compat_types.py
+          - name: product-claims-engine
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
+              tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
+              tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
+              tldw_Server_API/tests/Claims/test_claims_engine_*.py
+              tldw_Server_API/tests/Claims/test_claims_extractor*.py
+              tldw_Server_API/tests/Claims/test_claims_items_api.py
+          - name: product-claims-monitoring
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
+              tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
+              tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
+              tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
+              tldw_Server_API/tests/Claims/test_claims_review_*.py
+          - name: product-claims-service
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_runtime_config.py
+              tldw_Server_API/tests/Claims/test_claims_service_*.py
+              tldw_Server_API/tests/Claims/test_claims_settings_*.py
+              tldw_Server_API/tests/Claims/test_claims_span_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_status_and_envelope_api.py
+              tldw_Server_API/tests/Claims/test_claims_utils_persistence.py
+              tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py
+              tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
+              tldw_Server_API/tests/Claims/test_ingestion_*.py
           - name: product-collections
             paths: >-
               tldw_Server_API/tests/Collections
-          - name: product-evaluations
+          - name: product-evaluations-abtest
             paths: >-
-              tldw_Server_API/tests/Evaluations
-              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Evaluations/embeddings_abtest/test*.py
+              tldw_Server_API/tests/Evaluations/test_abtest_*.py
+              tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
+          - name: product-evaluations-core
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_benchmark_*.py
+              tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
+              tldw_Server_API/tests/Evaluations/test_connection_pool.py
+              tldw_Server_API/tests/Evaluations/test_db_adapter.py
+              tldw_Server_API/tests/Evaluations/test_error_scenarios.py
+              tldw_Server_API/tests/Evaluations/test_eval_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluation_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_migration_cli.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_rag_pipeline_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_stage*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_unified.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_webhooks_*.py
+              tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
+              tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
+              tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_production_features_integration.py
+              tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
+              tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_security.py
+              tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
+              tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
+          - name: product-evaluations-integration
+            paths: >-
+              tldw_Server_API/tests/Evaluations/integration/test*.py
+              tldw_Server_API/tests/Evaluations/property/test*.py
+          - name: product-evaluations-recipes-persona
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_persona_*.py
+              tldw_Server_API/tests/Evaluations/test_recipe_*.py
+          - name: product-evaluations-unit
+            paths: >-
+              tldw_Server_API/tests/Evaluations/unit/test_*.py
+          - name: product-flashcards
+            paths: >-
+              tldw_Server_API/tests/Flashcards/test*.py
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
               tldw_Server_API/tests/Notes_NEW
               tldw_Server_API/tests/Persona
               tldw_Server_API/tests/Personalization
-          - name: product-prompts-workflows
+          - name: product-prompts-legacy
             paths: >-
               tldw_Server_API/tests/Prompt_Management
+          - name: product-prompts-new
+            paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
+          - name: product-watchlists
+            paths: >-
               tldw_Server_API/tests/Watchlists
+          - name: product-workflows
+            paths: >-
               tldw_Server_API/tests/Workflows
+          - name: product-prompt-studio
+            paths: >-
               tldw_Server_API/tests/prompt_studio
           - name: platform-mcp
             paths: >-
@@ -1636,7 +2275,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1645,7 +2284,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1728,45 +2367,103 @@ jobs:
               tldw_Server_API/tests/sanity_tests
               tldw_Server_API/tests/schemas
               tldw_Server_API/tests/unit
-          - name: admin-a-b
+          - name: admin-a-api
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_a*.py
-              tldw_Server_API/tests/Admin/test_admin_b*.py
-              tldw_Server_API/tests/Admin/test_backup_*.py
+          - name: admin-budgets
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_budgets_*.py
+          - name: admin-bundle
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_bundle_service_sanitizers.py
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+          - name: admin-byok-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
+          - name: admin-byok-validation
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_validation_*.py
               tldw_Server_API/tests/Admin/test_byok_*.py
+          - name: admin-backup-api
+            paths: >-
+              tldw_Server_API/tests/Admin/test_backup_schedules_api.py
+          - name: admin-backup-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-c-d
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e-l
+          - name: admin-e2e
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_e*.py
+          - name: admin-g-i
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
               tldw_Server_API/tests/Admin/test_admin_i*.py
-              tldw_Server_API/tests/Admin/test_admin_l*.py
-              tldw_Server_API/tests/Admin/test_incidents_*.py
-              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
-          - name: admin-m-r
+          - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_m*.py
-              tldw_Server_API/tests/Admin/test_admin_o*.py
-              tldw_Server_API/tests/Admin/test_admin_p*.py
-              tldw_Server_API/tests/Admin/test_admin_r*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+          - name: admin-incidents
+            paths: >-
+              tldw_Server_API/tests/Admin/test_incidents_*.py
+          - name: admin-llm-usage
+            paths: >-
+              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+          - name: admin-maintenance-misc
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
+              tldw_Server_API/tests/Admin/test_admin_misc_endpoints.py
               tldw_Server_API/tests/Admin/test_maintenance_*.py
+          - name: admin-monitoring
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_monitoring_*.py
               tldw_Server_API/tests/Admin/test_monitoring_*.py
+          - name: admin-ops-dependencies
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_dependencies.py
+          - name: admin-ops-endpoints
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
+          - name: admin-ops-webhooks-orgs
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
+              tldw_Server_API/tests/Admin/test_admin_orgs_*.py
+          - name: admin-profiles-rate-registration
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_profiles_*.py
+              tldw_Server_API/tests/Admin/test_admin_rate_limits_*.py
+              tldw_Server_API/tests/Admin/test_admin_registration_*.py
+          - name: admin-pricing-retention-roles-router
+            paths: >-
               tldw_Server_API/tests/Admin/test_pricing_reload_endpoint.py
               tldw_Server_API/tests/Admin/test_retention_policy_preview_api.py
               tldw_Server_API/tests/Admin/test_role_*.py
               tldw_Server_API/tests/Admin/test_router_analytics_*.py
-          - name: admin-s-z
+          - name: admin-s-sessions-settings
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_s*.py
+              tldw_Server_API/tests/Admin/test_admin_scope_service_enterprise_mode.py
+              tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py
+              tldw_Server_API/tests/Admin/test_admin_sessions_*.py
+              tldw_Server_API/tests/Admin/test_admin_settings_service.py
+              tldw_Server_API/tests/Admin/test_admin_smoke.py
+          - name: admin-split-storage-tools
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_split_*.py
+              tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+          - name: admin-users
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
+          - name: admin-watchlists-webhooks
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-system-usage
+            paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-db
@@ -1781,10 +2478,44 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-chromadb-chunking
+          - name: ai-chromadb
             paths: >-
               tldw_Server_API/tests/ChromaDB
-              tldw_Server_API/tests/Chunking
+          - name: ai-chunking-core
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_async_*.py
+              tldw_Server_API/tests/Chunking/test_auto_*.py
+              tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
+              tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
+              tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
+              tldw_Server_API/tests/Chunking/test_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
+          - name: ai-chunking-templates
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-code-json-xml
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_json_*.py
+              tldw_Server_API/tests/Chunking/test_xml_*.py
+          - name: ai-chunking-semantic-security
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_offsets_additional.py
+              tldw_Server_API/tests/Chunking/test_option_aliases.py
+              tldw_Server_API/tests/Chunking/test_overlap_clamp.py
+              tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
+              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_security*.py
+              tldw_Server_API/tests/Chunking/test_semantic_*.py
+              tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
+              tldw_Server_API/tests/Chunking/test_streaming_overlap.py
+              tldw_Server_API/tests/Chunking/test_thai_tables_spans.py
+              tldw_Server_API/tests/Chunking/test_thread_safety.py
+              tldw_Server_API/tests/Chunking/test_tokens_offsets.py
+              tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
           - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/Embeddings
@@ -1815,9 +2546,32 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-character-legacy
+          - name: chat-character-legacy-core
             paths: >-
-              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_completions_tool_messages_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
+              tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+          - name: chat-character-legacy-files
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
+              tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+          - name: chat-character-legacy-worldbook
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
+              tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
           - name: chat-character-db
             paths: >-
               tldw_Server_API/tests/Characters
@@ -1858,9 +2612,19 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
-          - name: chat-character-integration
+          - name: chat-character-integration-api
             paths: >-
-              tldw_Server_API/tests/Character_Chat_NEW/integration
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+          - name: chat-character-integration-chat
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
+          - name: chat-character-integration-context
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
           - name: chat-core
             paths: >-
               tldw_Server_API/tests/Chat
@@ -1874,28 +2638,116 @@ jobs:
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-          - name: product-claims
+          - name: product-claims-core
             paths: >-
-              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
+              tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
+              tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
+              tldw_Server_API/tests/Claims/test_claims_alerts_*.py
+              tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
+              tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
+              tldw_Server_API/tests/Claims/test_claims_budget_guard.py
+              tldw_Server_API/tests/Claims/test_claims_cluster*.py
+              tldw_Server_API/tests/Claims/test_claims_compat_types.py
+          - name: product-claims-engine
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
+              tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
+              tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
+              tldw_Server_API/tests/Claims/test_claims_engine_*.py
+              tldw_Server_API/tests/Claims/test_claims_extractor*.py
+              tldw_Server_API/tests/Claims/test_claims_items_api.py
+          - name: product-claims-monitoring
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
+              tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
+              tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
+              tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
+              tldw_Server_API/tests/Claims/test_claims_review_*.py
+          - name: product-claims-service
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_runtime_config.py
+              tldw_Server_API/tests/Claims/test_claims_service_*.py
+              tldw_Server_API/tests/Claims/test_claims_settings_*.py
+              tldw_Server_API/tests/Claims/test_claims_span_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_status_and_envelope_api.py
+              tldw_Server_API/tests/Claims/test_claims_utils_persistence.py
+              tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py
+              tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
+              tldw_Server_API/tests/Claims/test_ingestion_*.py
           - name: product-collections
             paths: >-
               tldw_Server_API/tests/Collections
-          - name: product-evaluations
+          - name: product-evaluations-abtest
             paths: >-
-              tldw_Server_API/tests/Evaluations
-              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Evaluations/embeddings_abtest/test*.py
+              tldw_Server_API/tests/Evaluations/test_abtest_*.py
+              tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
+          - name: product-evaluations-core
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_benchmark_*.py
+              tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
+              tldw_Server_API/tests/Evaluations/test_connection_pool.py
+              tldw_Server_API/tests/Evaluations/test_db_adapter.py
+              tldw_Server_API/tests/Evaluations/test_error_scenarios.py
+              tldw_Server_API/tests/Evaluations/test_eval_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluation_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_migration_cli.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_rag_pipeline_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_stage*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_unified.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_webhooks_*.py
+              tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
+              tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
+              tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_production_features_integration.py
+              tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
+              tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_security.py
+              tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
+              tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
+          - name: product-evaluations-integration
+            paths: >-
+              tldw_Server_API/tests/Evaluations/integration/test*.py
+              tldw_Server_API/tests/Evaluations/property/test*.py
+          - name: product-evaluations-recipes-persona
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_persona_*.py
+              tldw_Server_API/tests/Evaluations/test_recipe_*.py
+          - name: product-evaluations-unit
+            paths: >-
+              tldw_Server_API/tests/Evaluations/unit/test_*.py
+          - name: product-flashcards
+            paths: >-
+              tldw_Server_API/tests/Flashcards/test*.py
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
               tldw_Server_API/tests/Notes_NEW
               tldw_Server_API/tests/Persona
               tldw_Server_API/tests/Personalization
-          - name: product-prompts-workflows
+          - name: product-prompts-legacy
             paths: >-
               tldw_Server_API/tests/Prompt_Management
+          - name: product-prompts-new
+            paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
+          - name: product-watchlists
+            paths: >-
               tldw_Server_API/tests/Watchlists
+          - name: product-workflows
+            paths: >-
               tldw_Server_API/tests/Workflows
+          - name: product-prompt-studio
+            paths: >-
               tldw_Server_API/tests/prompt_studio
           - name: platform-mcp
             paths: >-
@@ -1999,7 +2851,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -2008,7 +2860,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2093,45 +2945,103 @@ jobs:
               tldw_Server_API/tests/sanity_tests
               tldw_Server_API/tests/schemas
               tldw_Server_API/tests/unit
-          - name: admin-a-b
+          - name: admin-a-api
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_a*.py
-              tldw_Server_API/tests/Admin/test_admin_b*.py
-              tldw_Server_API/tests/Admin/test_backup_*.py
+          - name: admin-budgets
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_budgets_*.py
+          - name: admin-bundle
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_bundle_service_sanitizers.py
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+          - name: admin-byok-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
+          - name: admin-byok-validation
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_byok_validation_*.py
               tldw_Server_API/tests/Admin/test_byok_*.py
+          - name: admin-backup-api
+            paths: >-
+              tldw_Server_API/tests/Admin/test_backup_schedules_api.py
+          - name: admin-backup-core
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-c-d
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
               tldw_Server_API/tests/Admin/test_admin_d*.py
               tldw_Server_API/tests/Admin/test_data_*.py
               tldw_Server_API/tests/Admin/test_dsr_*.py
-          - name: admin-e-l
+          - name: admin-e2e
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_e*.py
+          - name: admin-g-i
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
               tldw_Server_API/tests/Admin/test_admin_i*.py
-              tldw_Server_API/tests/Admin/test_admin_l*.py
-              tldw_Server_API/tests/Admin/test_incidents_*.py
-              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
-          - name: admin-m-r
+          - name: admin-llm-providers
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_m*.py
-              tldw_Server_API/tests/Admin/test_admin_o*.py
-              tldw_Server_API/tests/Admin/test_admin_p*.py
-              tldw_Server_API/tests/Admin/test_admin_r*.py
+              tldw_Server_API/tests/Admin/test_admin_llm_providers_*.py
+          - name: admin-incidents
+            paths: >-
+              tldw_Server_API/tests/Admin/test_incidents_*.py
+          - name: admin-llm-usage
+            paths: >-
+              tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+          - name: admin-maintenance-misc
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
+              tldw_Server_API/tests/Admin/test_admin_misc_endpoints.py
               tldw_Server_API/tests/Admin/test_maintenance_*.py
+          - name: admin-monitoring
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_monitoring_*.py
               tldw_Server_API/tests/Admin/test_monitoring_*.py
+          - name: admin-ops-dependencies
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_dependencies.py
+          - name: admin-ops-endpoints
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
+          - name: admin-ops-webhooks-orgs
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
+              tldw_Server_API/tests/Admin/test_admin_orgs_*.py
+          - name: admin-profiles-rate-registration
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_profiles_*.py
+              tldw_Server_API/tests/Admin/test_admin_rate_limits_*.py
+              tldw_Server_API/tests/Admin/test_admin_registration_*.py
+          - name: admin-pricing-retention-roles-router
+            paths: >-
               tldw_Server_API/tests/Admin/test_pricing_reload_endpoint.py
               tldw_Server_API/tests/Admin/test_retention_policy_preview_api.py
               tldw_Server_API/tests/Admin/test_role_*.py
               tldw_Server_API/tests/Admin/test_router_analytics_*.py
-          - name: admin-s-z
+          - name: admin-s-sessions-settings
             paths: >-
-              tldw_Server_API/tests/Admin/test_admin_s*.py
+              tldw_Server_API/tests/Admin/test_admin_scope_service_enterprise_mode.py
+              tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py
+              tldw_Server_API/tests/Admin/test_admin_sessions_*.py
+              tldw_Server_API/tests/Admin/test_admin_settings_service.py
+              tldw_Server_API/tests/Admin/test_admin_smoke.py
+          - name: admin-split-storage-tools
+            paths: >-
+              tldw_Server_API/tests/Admin/test_admin_split_*.py
+              tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+          - name: admin-users
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
+          - name: admin-watchlists-webhooks
+            paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-system-usage
+            paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-db
@@ -2146,10 +3056,44 @@ jobs:
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/PrivilegeCatalog
               tldw_Server_API/tests/Privileges
-          - name: ai-chromadb-chunking
+          - name: ai-chromadb
             paths: >-
               tldw_Server_API/tests/ChromaDB
-              tldw_Server_API/tests/Chunking
+          - name: ai-chunking-core
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_async_*.py
+              tldw_Server_API/tests/Chunking/test_auto_*.py
+              tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
+              tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
+              tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
+              tldw_Server_API/tests/Chunking/test_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
+          - name: ai-chunking-templates
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-code-json-xml
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
+              tldw_Server_API/tests/Chunking/test_json_*.py
+              tldw_Server_API/tests/Chunking/test_xml_*.py
+          - name: ai-chunking-semantic-security
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_offsets_additional.py
+              tldw_Server_API/tests/Chunking/test_option_aliases.py
+              tldw_Server_API/tests/Chunking/test_overlap_clamp.py
+              tldw_Server_API/tests/Chunking/test_phase3_3_sanitizers.py
+              tldw_Server_API/tests/Chunking/test_propositions_strategy.py
+              tldw_Server_API/tests/Chunking/test_security*.py
+              tldw_Server_API/tests/Chunking/test_semantic_*.py
+              tldw_Server_API/tests/Chunking/test_sentence_spans_properties.py
+              tldw_Server_API/tests/Chunking/test_streaming_overlap.py
+              tldw_Server_API/tests/Chunking/test_thai_tables_spans.py
+              tldw_Server_API/tests/Chunking/test_thread_safety.py
+              tldw_Server_API/tests/Chunking/test_tokens_offsets.py
+              tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
           - name: ai-embeddings
             paths: >-
               tldw_Server_API/tests/Embeddings
@@ -2180,9 +3124,32 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: chat-character-legacy
+          - name: chat-character-legacy-core
             paths: >-
-              tldw_Server_API/tests/Character_Chat
+              tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
+              tldw_Server_API/tests/Character_Chat/test_completions_tool_messages_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
+              tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
+              tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+          - name: chat-character-legacy-files
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
+              tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+          - name: chat-character-legacy-worldbook
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
+              tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
+              tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
           - name: chat-character-db
             paths: >-
               tldw_Server_API/tests/Characters
@@ -2223,9 +3190,19 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
-          - name: chat-character-integration
+          - name: chat-character-integration-api
             paths: >-
-              tldw_Server_API/tests/Character_Chat_NEW/integration
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+          - name: chat-character-integration-chat
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
+          - name: chat-character-integration-context
+            paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
           - name: chat-core
             paths: >-
               tldw_Server_API/tests/Chat
@@ -2239,28 +3216,116 @@ jobs:
               tldw_Server_API/tests/LLM_Local
               tldw_Server_API/tests/LLamaCpp
               tldw_Server_API/tests/Local_LLM
-          - name: product-claims
+          - name: product-claims-core
             paths: >-
-              tldw_Server_API/tests/Claims
+              tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
+              tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
+              tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
+              tldw_Server_API/tests/Claims/test_claims_alerts_*.py
+              tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
+              tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
+              tldw_Server_API/tests/Claims/test_claims_budget_guard.py
+              tldw_Server_API/tests/Claims/test_claims_cluster*.py
+              tldw_Server_API/tests/Claims/test_claims_compat_types.py
+          - name: product-claims-engine
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
+              tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
+              tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
+              tldw_Server_API/tests/Claims/test_claims_engine_*.py
+              tldw_Server_API/tests/Claims/test_claims_extractor*.py
+              tldw_Server_API/tests/Claims/test_claims_items_api.py
+          - name: product-claims-monitoring
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
+              tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
+              tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
+              tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
+              tldw_Server_API/tests/Claims/test_claims_review_*.py
+          - name: product-claims-service
+            paths: >-
+              tldw_Server_API/tests/Claims/test_claims_runtime_config.py
+              tldw_Server_API/tests/Claims/test_claims_service_*.py
+              tldw_Server_API/tests/Claims/test_claims_settings_*.py
+              tldw_Server_API/tests/Claims/test_claims_span_alignment.py
+              tldw_Server_API/tests/Claims/test_claims_status_and_envelope_api.py
+              tldw_Server_API/tests/Claims/test_claims_utils_persistence.py
+              tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py
+              tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
+              tldw_Server_API/tests/Claims/test_ingestion_*.py
           - name: product-collections
             paths: >-
               tldw_Server_API/tests/Collections
-          - name: product-evaluations
+          - name: product-evaluations-abtest
             paths: >-
-              tldw_Server_API/tests/Evaluations
-              tldw_Server_API/tests/Flashcards
+              tldw_Server_API/tests/Evaluations/embeddings_abtest/test*.py
+              tldw_Server_API/tests/Evaluations/test_abtest_*.py
+              tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
+          - name: product-evaluations-core
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_benchmark_*.py
+              tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
+              tldw_Server_API/tests/Evaluations/test_connection_pool.py
+              tldw_Server_API/tests/Evaluations/test_db_adapter.py
+              tldw_Server_API/tests/Evaluations/test_error_scenarios.py
+              tldw_Server_API/tests/Evaluations/test_eval_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluation_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_migration_cli.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_rag_pipeline_*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_stage*.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_unified.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_webhooks_*.py
+              tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
+              tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
+              tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_production_features_integration.py
+              tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
+              tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_security.py
+              tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
+              tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
+          - name: product-evaluations-integration
+            paths: >-
+              tldw_Server_API/tests/Evaluations/integration/test*.py
+              tldw_Server_API/tests/Evaluations/property/test*.py
+          - name: product-evaluations-recipes-persona
+            paths: >-
+              tldw_Server_API/tests/Evaluations/test_persona_*.py
+              tldw_Server_API/tests/Evaluations/test_recipe_*.py
+          - name: product-evaluations-unit
+            paths: >-
+              tldw_Server_API/tests/Evaluations/unit/test_*.py
+          - name: product-flashcards
+            paths: >-
+              tldw_Server_API/tests/Flashcards/test*.py
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
               tldw_Server_API/tests/Notes_NEW
               tldw_Server_API/tests/Persona
               tldw_Server_API/tests/Personalization
-          - name: product-prompts-workflows
+          - name: product-prompts-legacy
             paths: >-
               tldw_Server_API/tests/Prompt_Management
+          - name: product-prompts-new
+            paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
+          - name: product-watchlists
+            paths: >-
               tldw_Server_API/tests/Watchlists
+          - name: product-workflows
+            paths: >-
               tldw_Server_API/tests/Workflows
+          - name: product-prompt-studio
+            paths: >-
               tldw_Server_API/tests/prompt_studio
           - name: platform-mcp
             paths: >-
@@ -2364,7 +3429,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -2373,7 +3438,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb-chunking' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
