@@ -151,6 +151,23 @@ def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
     return None
 
 
+def _extract_file_uri_path(raw: str) -> str:
+    """Extract the filesystem path from a file URI without query parameters."""
+    parsed = _urlparse.urlparse(raw)
+    extracted_path = _urlparse.unquote(parsed.path or "")
+    netloc = _urlparse.unquote(parsed.netloc or "")
+    if netloc:
+        if re.match(r"^[A-Za-z]:", netloc):
+            extracted_path = f"{netloc}{extracted_path}"
+        elif extracted_path:
+            extracted_path = f"//{netloc}{extracted_path}"
+        else:
+            extracted_path = netloc
+    if re.match(r"^/[A-Za-z]:[/\\]", extracted_path):
+        extracted_path = extracted_path[1:]
+    return extracted_path
+
+
 def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
     if query is None:
         return None
@@ -581,9 +598,8 @@ class BaseRetriever(ABC):
         # Handle URI schemes - only allow file:// and validate the path component
         if '://' in path:
             if path.startswith('file://'):
-                parsed = _urlparse.urlparse(path)
                 # Extract and decode the path component
-                extracted_path = _urlparse.unquote(parsed.path)
+                extracted_path = _extract_file_uri_path(path)
                 extracted_parts = [part.lower() for part in extracted_path.split("/") if part]
                 if (
                     extracted_path.startswith("/")

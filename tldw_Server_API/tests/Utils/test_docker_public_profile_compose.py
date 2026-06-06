@@ -477,8 +477,8 @@ def test_entrypoint_process_env_does_not_copy_host_environment(tmp_path: Path, m
     env = _entrypoint_process_env(env_file, marker_dir)
 
     assert "ENTRYPOINT_TEST_HOST_SECRET" not in env
-    assert env["TLDW_ENV_FILE"] == str(env_file)
-    assert env["TLDW_AUTH_MARKER_DIR"] == str(marker_dir)
+    assert env["TLDW_ENV_FILE"] == _shell_path(env_file)
+    assert env["TLDW_AUTH_MARKER_DIR"] == _shell_path(marker_dir)
 
 
 def _compose_process_env(env_file: Path, marker_dir: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
