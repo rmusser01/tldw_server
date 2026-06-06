@@ -224,6 +224,7 @@ class TestEvaluationsAdapter:
     async def test_evaluations_adapter_sanitizes_backend_errors(self, monkeypatch):
         """Test evaluations adapter hides raw backend exception details."""
         monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
         import importlib
         import sys
@@ -233,6 +234,7 @@ class TestEvaluationsAdapter:
         evaluation_adapter_module = importlib.import_module(
             "tldw_Server_API.app.core.Workflows.adapters.evaluation.eval"
         )
+        monkeypatch.setattr(evaluation_adapter_module, "is_test_mode", lambda: False)
 
         class BrokenEvaluationService:
             def __init__(self, **_kwargs):

@@ -3615,7 +3615,14 @@ async def control_run(
         # Delegate to retry behavior
         failed_step = db.get_last_failed_step_id(run_id)
         if failed_step:
-            asyncio.create_task(engine.continue_run(run_id, after_step_id=failed_step, last_outputs=None))
+            asyncio.create_task(
+                engine.continue_run(
+                    run_id,
+                    after_step_id=failed_step,
+                    last_outputs=None,
+                    retry_resume=True,
+                )
+            )
         else:
             engine.submit(run_id, RunMode.ASYNC)
     else:
@@ -4323,7 +4330,14 @@ async def retry_run(
     # Resume from last failed step if present
     failed_step = db.get_last_failed_step_id(run_id)
     if failed_step:
-        asyncio.create_task(engine.continue_run(run_id, after_step_id=failed_step, last_outputs=None))
+        asyncio.create_task(
+            engine.continue_run(
+                run_id,
+                after_step_id=failed_step,
+                last_outputs=None,
+                retry_resume=True,
+            )
+        )
     else:
         engine.submit(run_id, RunMode.ASYNC)
     return {"ok": True}

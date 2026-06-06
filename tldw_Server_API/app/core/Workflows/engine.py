@@ -155,6 +155,22 @@ def _resolve_config_templates(cfg: Any, context: dict[str, Any]) -> Any:
     return cfg
 
 
+def _resolve_step_config_templates(step_type: str, cfg: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    """Resolve step config templates while preserving delayed map child context."""
+    if step_type == "map":
+        resolved: dict[str, Any] = {}
+        for key, value in cfg.items():
+            if key == "step":
+                resolved[key] = value
+            else:
+                resolved[key] = _resolve_config_templates(value, context)
+        return resolved
+    resolved_cfg = _resolve_config_templates(dict(cfg), context)
+    if isinstance(resolved_cfg, dict):
+        return resolved_cfg
+    return dict(cfg)
+
+
 class RunMode(str, Enum):
     ASYNC = "async"
     SYNC = "sync"
@@ -406,6 +422,7 @@ class WorkflowEngine:
         tokens_output: int | None = None,
         cost_usd: float | None = None,
         on_reject: str = "fail_run",
+        allow_retry_resume: bool = False,
     ) -> bool:
         """Update run status while enforcing the lifecycle transition contract."""
         current_status: str | None = None
@@ -415,21 +432,28 @@ class WorkflowEngine:
                 current_status = str(run.status)
 
         if current_status and status != current_status and not _is_allowed_transition(current_status, status):
-            self._append_event(
-                run_id,
-                "transition_rejected",
-                {"from": current_status, "to": status, "on_reject": on_reject},
-            )
-            if on_reject == "fail_run":
-                self.db.update_run_status(
+            if allow_retry_resume and current_status == "failed" and status == "running":
+                self._append_event(
                     run_id,
-                    status="failed",
-                    status_reason="invariant_violation",
-                    ended_at=ended_at or self._now_iso(),
-                    error="invariant_violation",
+                    "transition_retry_resume",
+                    {"from": current_status, "to": status},
                 )
-                self._append_event(run_id, "run_failed", {"error": "invariant_violation"})
-            return False
+            else:
+                self._append_event(
+                    run_id,
+                    "transition_rejected",
+                    {"from": current_status, "to": status, "on_reject": on_reject},
+                )
+                if on_reject == "fail_run":
+                    self.db.update_run_status(
+                        run_id,
+                        status="failed",
+                        status_reason="invariant_violation",
+                        ended_at=ended_at or self._now_iso(),
+                        error="invariant_violation",
+                    )
+                    self._append_event(run_id, "run_failed", {"error": "invariant_violation"})
+                return False
 
         self.db.update_run_status(
             run_id,
@@ -719,9 +743,7 @@ class WorkflowEngine:
                         await self._wait_if_paused(run_id, step_run_id)
                         try:
                             # Resolve template expressions in config before passing to adapter
-                            step_cfg_eff = _resolve_config_templates(dict(step_cfg), context)
-                            if not isinstance(step_cfg_eff, dict):
-                                step_cfg_eff = dict(step_cfg)
+                            step_cfg_eff = _resolve_step_config_templates(step_type, dict(step_cfg), context)
                             step_cfg_eff.setdefault("timeout_seconds", step_timeout)
                             # Test-friendly forced error for prompt steps
                             if step_type == "prompt":
@@ -1064,6 +1086,7 @@ class WorkflowEngine:
         after_step_id: str,
         last_outputs: dict | None = None,
         next_step_id: str | None = None,
+        retry_resume: bool = False,
     ) -> None:
         """Resume a run after the given step id, optionally jumping to next_step_id."""
         run = self.db.get_run(run_id)
@@ -1159,7 +1182,12 @@ class WorkflowEngine:
         if last_outputs:
             context["last"] = last_outputs
         # Mark running
-        if not self._update_run_status_guarded(run_id, status="running", status_reason=None):
+        if not self._update_run_status_guarded(
+            run_id,
+            status="running",
+            status_reason=None,
+            allow_retry_resume=retry_resume,
+        ):
             _finalize(False)
             finalized = True
             return

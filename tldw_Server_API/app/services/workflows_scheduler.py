@@ -127,6 +127,7 @@ class _WFRecurringScheduler:
                 return
             # Rebuild DB handles on each cold start to pick up env/path changes.
             self._db_cache.clear()
+            self._db = WorkflowsSchedulerDB()
             # Start or reuse the global core job scheduler (workers)
             self._core_scheduler = await get_global_scheduler()
             # Start APScheduler for cron
@@ -538,15 +539,13 @@ class _WFRecurringScheduler:
             db = self._get_db(int(user_id))
             s = db.get_schedule(schedule_id)
         else:
-            s = self._db.get_schedule(schedule_id)
-            if s is not None:
-                try:
-                    db = self._get_db(int(s.user_id))
-                except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
-                    db = self._db
-            else:
+            s = self.get(schedule_id)
+            if s is None:
+                return
+            try:
+                db = self._get_db(int(s.user_id))
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
                 db = self._db
-                s = db.get_schedule(schedule_id)
         if not s or not s.enabled:
             return
         try:

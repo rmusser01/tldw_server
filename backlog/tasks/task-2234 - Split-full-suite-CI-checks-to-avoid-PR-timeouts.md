@@ -153,7 +153,28 @@ modified_files:
 - tldw_Server_API/tests/Web_Scraping/test_enhanced_web_scraping_guards.py
 - tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
 - tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
+- tldw_Server_API/tests/Workflows/adapters/test_evaluation_adapters.py
 - tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
+- tldw_Server_API/tests/Workflows/adapters/test_control_adapters.py
+- tldw_Server_API/tests/Workflows/adapters/test_integration_adapters.py
+- tldw_Server_API/app/api/v1/endpoints/workflows.py
+- tldw_Server_API/app/core/Workflows/engine.py
+- tldw_Server_API/app/services/workflows_scheduler.py
+- tldw_Server_API/tests/Workflows/test_artifact_download_range.py
+- tldw_Server_API/tests/Workflows/test_engine_hardening.py
+- tldw_Server_API/tests/Workflows/test_engine_scheduler.py
+- tldw_Server_API/tests/Workflows/test_events_cursor_pagination.py
+- tldw_Server_API/tests/Workflows/test_mcp_tool_allowlist_integration.py
+- tldw_Server_API/tests/Workflows/test_media_ingest_db_integration.py
+- tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+- tldw_Server_API/tests/Workflows/test_stage3_chunkers_rag.py
+- tldw_Server_API/tests/Workflows/test_tts_workflow_normalization.py
+- tldw_Server_API/tests/Workflows/test_versions_idempotency.py
+- tldw_Server_API/tests/Workflows/test_webhook_deliveries_history.py
+- tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+- tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
+- tldw_Server_API/tests/Workflows/test_workflows_extras.py
+- tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
 - tldw_Server_API/tests/integration/test_setup_audio_packs.py
@@ -419,6 +440,26 @@ Continued post-push monitoring of run 27070532817 found three more actionable CI
 Verification for the continued run 27070532817 fixes: the new PDF helper regression failed locally before the helper existed and passed after the fix, the workflow contract failed before the embedding split and passed after the workflow update, `test_process_pdf_url_success` exited cleanly with an environment skip under blocked local egress, the full workflow contract passed locally (20 passed), contextual chunking passed locally (9 passed), collect-only over the split embedding shard globs collected 136 tests, compileall passed for touched Python tests, `git diff --check` passed, and Bandit on touched Python tests reported zero findings/errors. A fresh PR check poll still showed no new failure/cancel buckets beyond the already-audited five failures and five cancellations while 136 rows remained pending on the old pushed SHA.
 
 Further polling of run 27070532817 found a new Ubuntu/Python 3.12 `auth-db` failure in `test_rotate_backups_sanitizes_filesystem_failures`: the test monkeypatched `pathlib.Path.exists` globally, and CI teardown/config cleanup still saw the patched method before the monkeypatch fixture was undone. The test now scopes that patch with `monkeypatch.context()` so it is reverted before test teardown. Verification: the exact backup sanitizer test passed locally, the full sanitizer file passed locally (3 passed), compileall passed for the touched test, `git diff --check` passed, and Bandit on the touched test reported zero findings/errors.
+
+Later polling found macOS/Python 3.12 `media-audio` failing the same `test_process_pdf_url_success` external W3C PDF download/preparation path already fixed locally by the guarded PDF fixture skip helper; no additional code change was needed for that row.
+
+Further polling found Windows/Python 3.12 `product-workflows` failing `TestEvaluationsAdapter.test_evaluations_adapter_sanitizes_backend_errors`: the full Workflows collection imports `test_engine_scheduler.py`, which sets `TLDW_TEST_MODE=true` at module import time. The sanitizer test only deleted `TEST_MODE`, so the evaluations adapter stayed in its simulated test-mode branch and returned a fake G-Eval success instead of exercising the backend-error sanitizer. The test now deletes both test-mode flags and patches the adapter module's imported `is_test_mode` helper to `False`, matching nearby backend-error sanitizer tests that explicitly bypass simulation.
+
+After that fix, the local CI-like Workflows shard progressed to `test_webhook_adapter_http_request` and hit the same `TLDW_TEST_MODE` collection-leak pattern: the test expected the real HTTP request path but only removed `TEST_MODE`, so the webhook adapter returned the simulated `{"dispatched": False, "test_mode": True}` response. The webhook test now clears `TLDW_TEST_MODE` and patches the webhook adapter's imported `is_test_mode` helper to `False` while using the mocked HTTP client.
+
+The next local CI-like Workflows rerun reached `test_notify_adapter_blocked_egress` and hit the same issue. That test also exercises the real non-test-mode path, so it now clears `TLDW_TEST_MODE` and patches the webhook module's imported `is_test_mode` helper to `False` before asserting the blocked-egress result.
+
+One more local CI-like rerun showed the same `TLDW_TEST_MODE` collection leak affecting `test_collections_adapter_sanitizes_backend_errors`. The underlying source was `test_engine_scheduler.py` setting `TLDW_TEST_MODE=true` at module import time. That import-time environment mutation has now been removed; the suite-wide `TEST_MODE=true` from CI/conftest already provides deterministic scheduler behavior without leaking the secondary test-mode flag into tests that deliberately disable test mode.
+
+With the test-mode leak removed, the local CI-like Workflows shard progressed past 1,000 tests and reached `test_artifact_download_with_range`. The test was getting HTTP 403 from the route-level `RequirePermission(WORKFLOWS_RUNS_READ)` guard before the handler-specific `get_request_user` override was used. The fixture now overrides `get_auth_principal` with an admin principal carrying the workflows-runs-read permission while still overriding `get_request_user` for owner/tenant checks, keeping the test focused on range download behavior.
+
+The next CI-like Workflows rerun reached `test_cancel_during_long_prompt` with the same route-level principal-guard issue on `POST /api/v1/workflows/runs/{run_id}/cancel`. The hardening fixture now overrides `get_auth_principal` with an admin principal carrying both `WORKFLOWS_RUNS_READ` and `WORKFLOWS_RUNS_CONTROL`, and its `get_request_user` override carries the matching tenant/role/permission claims so the test exercises cancellation instead of failing before the handler.
+
+After the principal fix, the shard reached `test_completion_webhook_disable_and_enable` and exposed order-sensitive shared state. Earlier control-adapter tests replaced `sys.modules["tldw_Server_API.app.core.Workflows.engine"]` with a mock and then deleted it, so later imports could see a fresh engine module while the workflows endpoint still held its original `WorkflowEngine` alias. Those tests now use `monkeypatch.setitem` so the original modules are restored, and the webhook hardening test patches the endpoint's `WorkflowEngine` alias directly. The test also waits briefly for the stubbed completion hook after terminal success because the engine records `succeeded` before awaiting webhook dispatch.
+
+The next shard rerun progressed into `test_engine_scheduler.py` and stopped in `test_run_saved_sync_waits_for_completion` because `run_saved(..., mode="sync")` can return after the run status is `succeeded` while the engine thread is still executing its `finally` cleanup and has not yet called `WorkflowScheduler.notify_finished`. The test now polls the scheduler stats until queue depth and active counts reach zero before asserting slot release.
+
+Continuation on 2026-06-06 addressed the remaining local product-workflows shard failures after the prior pass. Workflows API fixtures that still only overrode `get_request_user` now also provide `AuthPrincipal` permissions for route-level workflow guards; retry endpoints now explicitly permit the intentional retry-resume `failed -> running` state transition without weakening the normal lifecycle transition contract; map child step templates are preserved until the map adapter injects `item`; fuzz artifact tests wait for terminal run state before direct SQLite artifact writes; TTS normalization patches the adapter's imported service factory; ACP extras use unique fake session IDs; and the recurring scheduler refreshes/tolerates scheduler DB handles after backend resets. Verification: exact failures passed as fixed, the scheduler/token/truthiness tail passed locally (22 passed), and the full `tldw_Server_API/tests/Workflows` shard passed locally with 1417 passed, 15 skipped, 7 warnings in 528.91s. Final local gates passed: compileall over touched Python files, `git diff --check`, production Bandit with zero findings/errors, and test-scope Bandit with assert/dummy-secret skips and zero findings/errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

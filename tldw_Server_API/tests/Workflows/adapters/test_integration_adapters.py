@@ -118,6 +118,7 @@ async def test_webhook_adapter_get_method(monkeypatch):
 async def test_webhook_adapter_http_request(monkeypatch):
     """Test webhook adapter makes HTTP request when not in test mode."""
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_webhook_adapter
 
@@ -133,14 +134,15 @@ async def test_webhook_adapter_http_request(monkeypatch):
     mock_client.__exit__ = MagicMock(return_value=False)
     mock_client.request.return_value = mock_response
 
-    with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook._wf_create_client", return_value=mock_client):
-        with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_url_allowed", return_value=True):
-            with patch("tldw_Server_API.app.core.Security.egress.is_webhook_url_allowed_for_tenant", return_value=True):
-                config = {"url": "https://example.com/hook", "method": "POST", "body": {"test": "data"}}
-                context = {"user_id": "test_user_123", "tenant_id": "default"}
+    with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_test_mode", return_value=False):
+        with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook._wf_create_client", return_value=mock_client):
+            with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_url_allowed", return_value=True):
+                with patch("tldw_Server_API.app.core.Security.egress.is_webhook_url_allowed_for_tenant", return_value=True):
+                    config = {"url": "https://example.com/hook", "method": "POST", "body": {"test": "data"}}
+                    context = {"user_id": "test_user_123", "tenant_id": "default"}
 
-                result = await run_webhook_adapter(config, context)
-                assert result.get("dispatched") is True or result.get("error") is not None
+                    result = await run_webhook_adapter(config, context)
+                    assert result.get("dispatched") is True or result.get("error") is not None
 
 
 # ==============================================================================
@@ -231,16 +233,18 @@ async def test_notify_adapter_with_headers(monkeypatch):
 async def test_notify_adapter_blocked_egress(monkeypatch):
     """Test notify adapter respects egress blocking."""
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_notify_adapter
 
-    with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_url_allowed_for_tenant", return_value=False):
-        with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_url_allowed", return_value=False):
-            config = {"url": "https://blocked.example.com/hook", "message": "Test"}
-            context = {}
+    with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_test_mode", return_value=False):
+        with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_url_allowed_for_tenant", return_value=False):
+            with patch("tldw_Server_API.app.core.Workflows.adapters.integration.webhook.is_url_allowed", return_value=False):
+                config = {"url": "https://blocked.example.com/hook", "message": "Test"}
+                context = {}
 
-            result = await run_notify_adapter(config, context)
-            assert result.get("error") == "blocked_egress"
+                result = await run_notify_adapter(config, context)
+                assert result.get("error") == "blocked_egress"
 
 
 # ==============================================================================

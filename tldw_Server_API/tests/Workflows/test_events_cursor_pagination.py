@@ -6,6 +6,9 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_RUNS_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -17,13 +20,33 @@ def client_with_wf(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf_events_cursor.db"))
 
     async def override_user():
-        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            tenant_id="default",
+            roles=["admin"],
+            permissions=[WORKFLOWS_RUNS_READ],
+        )
+
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="tester",
+            email="t@e.com",
+            roles=["admin"],
+            permissions=[WORKFLOWS_RUNS_READ],
+        )
 
     def override_db():
 
         return db
 
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as client:
@@ -35,11 +58,15 @@ def client_with_wf(tmp_path, auth_headers):
 def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 5.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        data = response.json()
         if data["status"] in ("succeeded", "failed", "cancelled"):
             return data
         time.sleep(0.02)
-    return client.get(f"/api/v1/workflows/runs/{run_id}").json()
+    response = client.get(f"/api/v1/workflows/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_events_pagination_with_next_cursor_header(client_with_wf: TestClient):

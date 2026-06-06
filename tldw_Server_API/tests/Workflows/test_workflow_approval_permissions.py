@@ -11,6 +11,12 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    WORKFLOWS_RUNS_CONTROL,
+    WORKFLOWS_RUNS_READ,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -30,17 +36,55 @@ def client_with_user_switch(
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base))
     monkeypatch.setenv("TEST_MODE", "1")
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    permissions = [WORKFLOWS_RUNS_READ, WORKFLOWS_RUNS_CONTROL]
     state = {
-        "user": User(id=1, username="owner", email="owner@example.com", is_active=True, is_admin=False),
+        "user": User(
+            id=1,
+            username="owner",
+            email="owner@example.com",
+            is_active=True,
+            is_admin=False,
+            tenant_id="default",
+            roles=[],
+            permissions=permissions,
+        ),
     }
 
+    def current_user() -> User:
+        user = state["user"]
+        return User(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            role=user.role,
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            is_superuser=user.is_superuser,
+            is_admin=user.is_admin,
+            tenant_id="default",
+            roles=getattr(user, "roles", None) or (["admin"] if user.is_admin else []),
+            permissions=permissions,
+        )
+
     async def override_user():
-        return state["user"]
+        return current_user()
+
+    async def override_principal():
+        user = current_user()
+        return AuthPrincipal(
+            kind="user",
+            user_id=user.id,
+            username=user.username,
+            email=user.email,
+            roles=getattr(user, "roles", None) or (["admin"] if getattr(user, "is_admin", False) else []),
+            permissions=permissions,
+        )
 
     def override_db():
         return db
 
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as client:

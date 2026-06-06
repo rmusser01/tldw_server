@@ -1,7 +1,6 @@
 import os
 
 os.environ.setdefault("LOGURU_LEVEL", "ERROR")
-os.environ.setdefault("TLDW_TEST_MODE", "true")
 os.environ.setdefault("SINGLE_USER_API_KEY", "test-key")
 
 from loguru import logger
@@ -54,6 +53,21 @@ def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 3.0) -
             return run.status
         time.sleep(0.05)
     raise AssertionError("Run did not reach a terminal or waiting state within the timeout")
+
+
+def _wait_for_scheduler_idle(scheduler: WorkflowScheduler, timeout: float = 3.0) -> dict[str, int]:
+    deadline = time.time() + timeout
+    last_stats = scheduler.stats()
+    while time.time() < deadline:
+        last_stats = scheduler.stats()
+        if (
+            last_stats["queue_depth"] == 0
+            and last_stats["active_tenants"] == 0
+            and last_stats["active_workflows"] == 0
+        ):
+            return last_stats
+        time.sleep(0.02)
+    return last_stats
 
 
 def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase):
@@ -272,6 +286,6 @@ def test_run_saved_sync_waits_for_completion(workflows_db: WorkflowsDatabase, mo
         )
     )
     assert response.status == "succeeded"
-    stats = WorkflowScheduler.instance().stats()
+    stats = _wait_for_scheduler_idle(WorkflowScheduler.instance())
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0

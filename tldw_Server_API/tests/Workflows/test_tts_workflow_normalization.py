@@ -25,6 +25,9 @@ async def test_run_tts_adapter_post_process_normalization(monkeypatch, tmp_path)
         return _FakeTTSService()
 
     monkeypatch.setattr(tts_mod, "get_tts_service_v2", _fake_get_tts_service_v2, raising=True)
+    import tldw_Server_API.app.core.Workflows.adapters.audio.tts as tts_adapter_mod
+
+    monkeypatch.setattr(tts_adapter_mod, "get_tts_service_v2", _fake_get_tts_service_v2, raising=True)
 
     # Stub ffmpeg detection and subprocess execution inside the workflows module
     import tldw_Server_API.app.core.Workflows.adapters as wf_adapters

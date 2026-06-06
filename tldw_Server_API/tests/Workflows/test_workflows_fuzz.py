@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import time
 import tempfile
 from typing import List
 
@@ -13,6 +14,9 @@ import string
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_RUNS_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -24,13 +28,24 @@ def client_with_db(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_admin():
-        return User(id=1, username="admin", email="a@x", is_active=True, is_admin=True)
+        return User(id=1, username="admin", email="a@x", is_active=True, is_admin=True, tenant_id="default")
+
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="admin",
+            email="a@x",
+            roles=["admin"],
+            permissions=[WORKFLOWS_RUNS_READ],
+        )
 
     def override_db():
 
         return db
 
     app.dependency_overrides[get_request_user] = override_admin
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as client:
@@ -41,6 +56,20 @@ def client_with_db(tmp_path, auth_headers):
 
 def _step_ids(n: int) -> List[str]:
     return [f"s{i+1}" for i in range(n)]
+
+
+def _wait_for_terminal(client: TestClient, run_id: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    last_status = None
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        last_status = data.get("status")
+        if last_status in {"succeeded", "failed", "cancelled", "canceled"}:
+            return data
+        time.sleep(0.05)
+    pytest.fail(f"workflow run {run_id} did not finish before timeout; last status={last_status}")
 
 
 @settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
@@ -73,6 +102,7 @@ def test_definition_fuzz_linear_or_branch(client_with_db: TestClient, n_steps: i
     wid = r.json()["id"]
     rr = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}})
     assert rr.status_code == 200
+    _wait_for_terminal(client, rr.json()["run_id"])
 
 
 _SAFE_CHARS = string.ascii_letters + string.digits + "_-"
@@ -92,7 +122,10 @@ def test_artifact_path_fuzz_strict_vs_non_strict(monkeypatch, client_with_db: Te
         # Skip this example if definition was rejected (e.g., duplicate name/version)
         return
     wid = _resp.json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    run_response = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}})
+    assert run_response.status_code == 200, run_response.text
+    run_id = run_response.json()["run_id"]
+    _wait_for_terminal(client, run_id)
 
     # Temp file (outside CWD workdir scope most of the time)
     fd, path = tempfile.mkstemp(prefix=f"wf_fuzz_{suffix}_")
