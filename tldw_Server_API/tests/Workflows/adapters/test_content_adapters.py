@@ -1636,6 +1636,9 @@ class TestContentAdaptersErrorHandling:
         from tldw_Server_API.app.core.Workflows.adapters.content import run_citations_adapter
 
         with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.citations.is_test_mode",
+            return_value=False,
+        ), patch(
             "tldw_Server_API.app.core.RAG.rag_service.citations.CitationGenerator.generate_citations",
             new_callable=AsyncMock,
             side_effect=RuntimeError("citations backend exploded at /private/content-cache"),

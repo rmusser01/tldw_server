@@ -28,6 +28,8 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+
 from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
 from .agentic_execution import (

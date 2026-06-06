@@ -270,6 +270,9 @@ if [ -n "$incoming_jobs_db_url_override" ]; then
 fi
 
 AUTH_MODE="${AUTH_MODE:-single_user}"
+if [ "$AUTH_MODE" = "multi_user" ]; then
+  process_env_multi_user=1
+fi
 database_url_derived=0
 jobs_db_url_derived=0
 if [ "$AUTH_MODE" = "multi_user" ]; then

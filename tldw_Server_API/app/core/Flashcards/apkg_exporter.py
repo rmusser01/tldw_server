@@ -1,6 +1,7 @@
 # apkg_exporter.py
 #
 # Imports
+import contextlib
 import io
 import json
 import mimetypes
@@ -479,6 +480,8 @@ def export_apkg_from_rows(
             content_bytes = bytes(content)
             media_total_bytes[0] += len(content_bytes)
             if max_total_media_bytes is not None and media_total_bytes[0] > max_total_media_bytes:
+                with contextlib.suppress(Exception):
+                    conn.close()
                 raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
 
             filename = f"managed_{asset_uuid.replace('-', '')[:12]}.{_guess_extension(mime_type, original_filename)}"

@@ -37,6 +37,12 @@ def _entrypoint_command(*args: str) -> list[str]:
     return [shell, "Dockerfiles/entrypoints/tldw-app-first-run.sh", *args]
 
 
+def _shell_path(path: Path) -> str:
+    if os.name == "nt":
+        return path.as_posix()
+    return str(path)
+
+
 def test_single_user_compose_has_no_postgres_service_or_dependency() -> None:
     compose = _compose("Dockerfiles/docker-compose.single-user.yml")
     _require("postgres" not in compose["services"], "single-user compose should not define postgres")
@@ -457,8 +463,8 @@ def _entrypoint_process_env(env_file: Path, marker_dir: Path) -> dict[str, str]:
         value = os.environ.get(key)
         if value:
             env[key] = value
-    env["TLDW_ENV_FILE"] = str(env_file)
-    env["TLDW_AUTH_MARKER_DIR"] = str(marker_dir)
+    env["TLDW_ENV_FILE"] = _shell_path(env_file)
+    env["TLDW_AUTH_MARKER_DIR"] = _shell_path(marker_dir)
     return env
 
 

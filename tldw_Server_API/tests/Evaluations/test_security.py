@@ -12,7 +12,6 @@ Tests for:
 """
 
 import pytest
-import tempfile
 import sqlite3
 import os
 import sys
@@ -346,52 +345,51 @@ class TestConnectionPoolThreadSafety:
             counts = [r[1] for r in worker_results]
             assert counts == list(range(1, 11))
 
-    def test_connection_pool_exhaustion(self):
+    def test_connection_pool_exhaustion(self, tmp_path: Path):
 
         """Test that pool exhaustion is handled correctly"""
         import time
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            # Create a small pool
-            pool = ConnectionPool(
-                db_path=tmp.name,
-                pool_size=2,
-                max_overflow=1,
-                pool_timeout=1.0  # Short timeout for testing
-            )
+        db_path = tmp_path / "connection_pool_exhaustion.db"
+        # Create a small pool
+        pool = ConnectionPool(
+            db_path=str(db_path),
+            pool_size=2,
+            max_overflow=1,
+            pool_timeout=1.0  # Short timeout for testing
+        )
 
-            connections = []
-            contexts = []
+        connections = []
+        contexts = []
+        try:
+            # Get all available connections using context managers properly
+            for i in range(3):
+                ctx = pool.get_connection()
+                conn = ctx.__enter__()
+                connections.append(conn)
+                contexts.append(ctx)
+
+            # Try to get one more - should timeout or raise appropriate exception
+            # The pool should either raise TimeoutError or queue.Empty
+            start = time.time()
             try:
-                # Get all available connections using context managers properly
-                for i in range(3):
-                    ctx = pool.get_connection()
-                    conn = ctx.__enter__()
-                    connections.append(conn)
-                    contexts.append(ctx)
+                with pool.get_connection() as conn:
+                    # If we get here, the pool didn't enforce its limits properly
+                    assert False, "Pool should have been exhausted"
+            except (TimeoutError, queue.Empty, RuntimeError) as e:
+                # Expected - pool is exhausted
+                elapsed = time.time() - start
+                # Should timeout quickly (within 2 seconds)
+                assert elapsed <= 2.0, f"Timeout took too long: {elapsed:.2f}s"
 
-                # Try to get one more - should timeout or raise appropriate exception
-                # The pool should either raise TimeoutError or queue.Empty
-                start = time.time()
+        finally:
+            # Properly exit all context managers
+            for ctx in reversed(contexts):
                 try:
-                    with pool.get_connection() as conn:
-                        # If we get here, the pool didn't enforce its limits properly
-                        assert False, "Pool should have been exhausted"
-                except (TimeoutError, queue.Empty, RuntimeError) as e:
-                    # Expected - pool is exhausted
-                    elapsed = time.time() - start
-                    # Should timeout quickly (within 2 seconds)
-                    assert elapsed <= 2.0, f"Timeout took too long: {elapsed:.2f}s"
+                    ctx.__exit__(None, None, None)
+                except:
+                    _ = None
 
-            finally:
-                # Properly exit all context managers
-                for ctx in reversed(contexts):
-                    try:
-                        ctx.__exit__(None, None, None)
-                    except:
-                        _ = None
-
-                pool.shutdown()
-                os.unlink(tmp.name)
+            pool.shutdown()
 
 
 class TestInputValidation:

@@ -584,6 +584,13 @@ class BaseRetriever(ABC):
                 parsed = _urlparse.urlparse(path)
                 # Extract and decode the path component
                 extracted_path = _urlparse.unquote(parsed.path)
+                extracted_parts = [part.lower() for part in extracted_path.split("/") if part]
+                if (
+                    extracted_path.startswith("/")
+                    and extracted_parts
+                    and extracted_parts[0] in {"etc", "proc", "sys", "dev", "boot", "root"}
+                ):
+                    raise RestrictedDatabasePathError()
                 # Recursively validate the extracted path (this will catch traversal, etc.)
                 validated = self._validate_path(extracted_path)
                 if validated is None:

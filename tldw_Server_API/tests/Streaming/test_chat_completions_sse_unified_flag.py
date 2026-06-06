@@ -46,6 +46,32 @@ def _fake_provider_stream_with_duplicate_done() -> Iterator[str]:
     yield "data: [DONE]\n\n"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_chat_rate_limiter(monkeypatch):
+    for key in (
+        "TEST_CHAT_RATE_LIMIT_RPM",
+        "TEST_CHAT_PER_USER_RPM",
+        "TEST_CHAT_PER_CONVERSATION_RPM",
+        "TEST_CHAT_TOKENS_PER_MINUTE",
+        "TEST_CHAT_BURST_MULTIPLIER",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    from tldw_Server_API.app.core.Chat.rate_limiter import RateLimitConfig, initialize_rate_limiter
+
+    initialize_rate_limiter(
+        RateLimitConfig(
+            global_rpm=1000,
+            per_user_rpm=1000,
+            per_conversation_rpm=1000,
+            per_user_tokens_per_minute=1_000_000,
+            burst_multiplier=1.0,
+        )
+    )
+    yield
+    initialize_rate_limiter(RateLimitConfig())
+
+
 @pytest.mark.asyncio
 async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_chat_simple_")

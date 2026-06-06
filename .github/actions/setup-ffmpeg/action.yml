@@ -24,7 +24,17 @@ runs:
       run: |
         brew install ffmpeg || true
         if [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          brew install portaudio || true
+          for attempt in 1 2 3; do
+            if brew install portaudio; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              brew install --build-from-source portaudio
+            else
+              sleep $((attempt * 10))
+            fi
+          done
+          test -f "$(brew --prefix portaudio)/include/portaudio.h"
         fi
     - name: Install FFmpeg (Windows)
       if: runner.os == 'Windows'

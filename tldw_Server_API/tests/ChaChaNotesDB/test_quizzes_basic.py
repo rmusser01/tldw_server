@@ -1,8 +1,11 @@
+import contextlib
 import os
 import sqlite3
 import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -15,6 +18,11 @@ def _temp_chacha_db(client_id: str = "test"):
             yield db
         finally:
             db.close_all_connections()
+            with contextlib.suppress(Exception):
+                reset_managed_sqlite_backends(
+                    sqlite_targets=[db_path, str(Path(db_path).resolve())],
+                    mode="hard",
+                )
 
 
 def test_quizzes_basic_flow():
