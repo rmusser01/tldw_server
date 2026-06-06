@@ -14,6 +14,8 @@ TEST_MODE and mocks to avoid heavy operations.
 from __future__ import annotations
 
 import builtins
+import sys
+import types
 
 import pytest
 
@@ -1267,11 +1269,11 @@ class TestDocumentTableExtractAdapter:
             def convert(self, path):
                 return MockResult()
 
-        monkeypatch.setattr(
-            "docling.document_converter.DocumentConverter",
-            MockConverter,
-            raising=False
-        )
+        docling_module = types.ModuleType("docling")
+        document_converter_module = types.ModuleType("docling.document_converter")
+        document_converter_module.DocumentConverter = MockConverter
+        monkeypatch.setitem(sys.modules, "docling", docling_module)
+        monkeypatch.setitem(sys.modules, "docling.document_converter", document_converter_module)
 
         config = {
             "file_path": str(pdf_file),

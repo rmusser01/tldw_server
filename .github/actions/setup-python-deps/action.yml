@@ -14,6 +14,10 @@ inputs:
     description: "Use uv for installs (faster)"
     required: false
     default: 'true'
+  enable-pip-cache:
+    description: "Enable actions/setup-python pip cache"
+    required: false
+    default: 'true'
   requirements-files:
     description: "Optional newline-separated requirements files to install"
     required: false
@@ -52,12 +56,19 @@ runs:
           echo 'EOF'
         } >> "$GITHUB_OUTPUT"
 
-    - name: Setup Python
+    - name: Setup Python with pip cache
+      if: inputs.enable-pip-cache == 'true'
       uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
         cache: pip
         cache-dependency-path: ${{ steps.resolve-cache-paths.outputs.paths }}
+
+    - name: Setup Python without pip cache
+      if: inputs.enable-pip-cache != 'true'
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
 
     - name: Ensure pip cache directory exists
       shell: bash

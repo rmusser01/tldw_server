@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 import pytest
@@ -19,15 +20,29 @@ from httpx import AsyncClient, ASGITransport
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
+IN_CI = os.getenv("CI", "").lower() == "true"
+RUN_REAL_HF_EMBEDDING_TESTS = (
+    os.getenv("RUN_REAL_HF_EMBEDDING_TESTS", "").lower() in {"1", "true", "yes", "on"}
+    or not IN_CI
+)
+
 # Disable rate limiting for all tests
 @pytest.fixture(autouse=True)
 def disable_rate_limiting():
     """Disable rate limiting for all tests in this module"""
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
     os.environ["TESTING"] = "true"
-    yield
-    # Clean up after tests
-    if "TESTING" in os.environ:
-        del os.environ["TESTING"]
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
+    try:
+        yield
+    finally:
+        # Clean up after tests
+        if "TESTING" in os.environ:
+            del os.environ["TESTING"]
+        if previous_auto_download is None:
+            os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+        else:
+            os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 # Mock metrics for tests to avoid registry conflicts
 @pytest.fixture(autouse=True)
@@ -69,7 +84,7 @@ def setup():
         data = SetupData()
         data.client = client
         # Set CSRF token in both cookie and header for double-submit pattern
-        csrf_token = "test-csrf-token-12345"
+        csrf_token = f"test-csrf-{uuid.uuid4().hex}"
         client.cookies.set("csrf_token", csrf_token)
         data.DEFAULT_API_KEY = "test-api-key"
         data.auth_headers = {
@@ -759,6 +774,10 @@ class TestEndToEnd:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    IN_CI and not RUN_REAL_HF_EMBEDDING_TESTS,
+    reason="Real HuggingFace embedding tests require RUN_REAL_HF_EMBEDDING_TESTS=true in CI",
+)
 class TestIntegration:
     """True integration tests without mocking - requires actual services"""
 

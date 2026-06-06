@@ -3,8 +3,10 @@
 # Unit tests with mocks
 
 import os
+import uuid
 # Set TESTING environment variable BEFORE importing anything else
 os.environ["TESTING"] = "true"
+os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
 
 import asyncio
 import time
@@ -24,10 +26,19 @@ from starlette.requests import Request
 @pytest.fixture(autouse=True, scope="module")
 def cleanup_testing_env():
     """Cleanup TESTING environment variable after module tests"""
+    previous_testing = os.environ.get("TESTING")
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
+    os.environ["TESTING"] = "true"
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
     yield
-    # Clean up after all tests in module
-    if "TESTING" in os.environ:
-        del os.environ["TESTING"]
+    if previous_testing is None:
+        os.environ.pop("TESTING", None)
+    else:
+        os.environ["TESTING"] = previous_testing
+    if previous_auto_download is None:
+        os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+    else:
+        os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 # Mock metrics for tests to avoid registry conflicts
 @pytest.fixture(autouse=True)
@@ -64,11 +75,12 @@ def setup():
     class SetupData:
         pass
 
-    with TestClient(app) as client:
+    client = TestClient(app)
+    try:
         data = SetupData()
         data.client = client
         # Set CSRF token in both cookie and header for double-submit pattern
-        csrf_token = "test-csrf-token-12345"  # nosec B105
+        csrf_token = f"test-csrf-{uuid.uuid4().hex}"
         client.cookies.set("csrf_token", csrf_token)
         data.auth_headers = {
             "Authorization": "Bearer test-api-key",
@@ -91,10 +103,10 @@ def setup():
             is_admin=True
         )
 
-        try:
-            yield data
-        finally:
-            app.dependency_overrides.clear()
+        yield data
+    finally:
+        app.dependency_overrides.clear()
+        client.close()
 
 
 class TestCriticalSecurity:
@@ -199,17 +211,19 @@ class TestTTLCache:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_cache_ttl_expiration(self):
+    async def test_cache_ttl_expiration(self, monkeypatch):
         """Test that cache entries expire after TTL"""
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import TTLCache
+        from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as embeddings_module
 
-        cache = TTLCache(max_size=10, ttl_seconds=1)
+        current_time = 1000.0
+        monkeypatch.setattr(embeddings_module.time, "time", lambda: current_time)
+        cache = embeddings_module.TTLCache(max_size=10, ttl_seconds=1)
 
         await cache.set("test_key", [1.0, 2.0, 3.0])
         value = await cache.get("test_key")
         assert value == [1.0, 2.0, 3.0]
 
-        await asyncio.sleep(1.5)
+        current_time += 1.5
 
         value = await cache.get("test_key")
         assert value is None

@@ -1,7 +1,9 @@
 import contextlib
 import os
+import shutil
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -9,20 +11,74 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import reset_manage
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+def _rmtree_retrying_transient_locks(path: str | Path) -> None:
+    for attempt in range(10):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.1)
+
+
+@contextmanager
+def _temporary_directory():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        yield tmpdir
+    finally:
+        _rmtree_retrying_transient_locks(tmpdir)
+
+
+def _close_temp_chacha_db(db: CharactersRAGDB, db_path: str) -> None:
+    db.close_all_connections()
+    with contextlib.suppress(Exception):
+        reset_managed_sqlite_backends(
+            sqlite_targets=[db_path, str(Path(db_path).resolve())],
+            mode="hard",
+        )
+
+
 @contextmanager
 def _temp_chacha_db(client_id: str = "test"):
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with _temporary_directory() as tmpdir:
         db_path = os.path.join(tmpdir, "ChaChaNotes.db")
         db = CharactersRAGDB(db_path, client_id=client_id)
         try:
             yield db
         finally:
-            db.close_all_connections()
-            with contextlib.suppress(Exception):
-                reset_managed_sqlite_backends(
-                    sqlite_targets=[db_path, str(Path(db_path).resolve())],
-                    mode="hard",
-                )
+            _close_temp_chacha_db(db, db_path)
+
+
+def test_temporary_directory_retries_transient_cleanup_locks(monkeypatch):
+    real_mkdtemp = tempfile.mkdtemp
+    real_rmtree = shutil.rmtree
+    cleanup_attempts: list[Path] = []
+    cleanup_sleeps: list[float] = []
+
+    def fake_mkdtemp():
+        return real_mkdtemp()
+
+    def flaky_rmtree(path):
+        cleanup_attempts.append(Path(path))
+        if len(cleanup_attempts) == 1:
+            raise PermissionError("temporary SQLite file is still locked")
+        real_rmtree(path)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
+    monkeypatch.setattr(time, "sleep", cleanup_sleeps.append)
+
+    with _temporary_directory() as tmpdir:
+        temp_path = Path(tmpdir)
+        (temp_path / "ChaChaNotes.db").write_text("locked once", encoding="utf-8")
+
+    assert cleanup_attempts == [temp_path, temp_path]
+    assert cleanup_sleeps == [0.1]
+    assert not temp_path.exists()
 
 
 def test_quizzes_basic_flow():
@@ -343,7 +399,7 @@ def test_matching_grades_key_value_pairs_case_insensitively():
 
 
 def test_quiz_schema_migration_v23_to_v24_supports_matching():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with _temporary_directory() as tmpdir:
         db_path = os.path.join(tmpdir, "ChaChaNotes.db")
         seed_db = CharactersRAGDB(db_path, client_id="seed")
         seed_quiz_id = seed_db.create_quiz(name="Seed quiz")
@@ -356,7 +412,7 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
             points=1,
             order_index=0,
         )
-        seed_db.close_connection()
+        _close_temp_chacha_db(seed_db, db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.executescript(
@@ -400,44 +456,45 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
             conn.commit()
 
         migrated_db = CharactersRAGDB(db_path, client_id="migration-check")
-        conn = migrated_db.get_connection()
-        version_row = conn.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()
-        assert version_row is not None
-        assert int(version_row["version"]) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        try:
+            conn = migrated_db.get_connection()
+            version_row = conn.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = ?",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).fetchone()
+            assert version_row is not None
+            assert int(version_row["version"]) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-        table_sql_row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'quiz_questions'"
-        ).fetchone()
-        assert table_sql_row is not None
-        table_sql = str(table_sql_row["sql"])
-        assert "'matching'" in table_sql
+            table_sql_row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'quiz_questions'"
+            ).fetchone()
+            assert table_sql_row is not None
+            table_sql = str(table_sql_row["sql"])
+            assert "'matching'" in table_sql
 
-        quiz_id = migrated_db.create_quiz(name="Migrated matching quiz")
-        question_id = migrated_db.create_question(
-            quiz_id=quiz_id,
-            question_type="matching",
-            question_text="Match terms",
-            options=["CPU", "RAM"],
-            correct_answer={"CPU": "Processor", "RAM": "Memory"},
-            points=2,
-            order_index=0,
-        )
-        attempt = migrated_db.start_attempt(quiz_id)
-        result = migrated_db.submit_attempt(
-            attempt["id"],
-            [{"question_id": question_id, "user_answer": {"cpu": "processor", "ram": "memory"}}],
-        )
-        assert result["score"] == 2
-        assert result["answers"][0]["is_correct"] is True
-
-        migrated_db.close_connection()
+            quiz_id = migrated_db.create_quiz(name="Migrated matching quiz")
+            question_id = migrated_db.create_question(
+                quiz_id=quiz_id,
+                question_type="matching",
+                question_text="Match terms",
+                options=["CPU", "RAM"],
+                correct_answer={"CPU": "Processor", "RAM": "Memory"},
+                points=2,
+                order_index=0,
+            )
+            attempt = migrated_db.start_attempt(quiz_id)
+            result = migrated_db.submit_attempt(
+                attempt["id"],
+                [{"question_id": question_id, "user_answer": {"cpu": "processor", "ram": "memory"}}],
+            )
+            assert result["score"] == 2
+            assert result["answers"][0]["is_correct"] is True
+        finally:
+            _close_temp_chacha_db(migrated_db, db_path)
 
 
 def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with _temporary_directory() as tmpdir:
         db_path = os.path.join(tmpdir, "ChaChaNotes.db")
         seed_db = CharactersRAGDB(db_path, client_id="seed")
         seed_quiz_id = seed_db.create_quiz(name="Seed quiz")
@@ -450,7 +507,7 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
             points=1,
             order_index=0,
         )
-        seed_db.close_connection()
+        _close_temp_chacha_db(seed_db, db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.executescript(
@@ -525,40 +582,41 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
             conn.commit()
 
         migrated_db = CharactersRAGDB(db_path, client_id="migration-check")
-        conn = migrated_db.get_connection()
-        version_row = conn.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()
-        assert version_row is not None
-        assert int(version_row["version"]) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        try:
+            conn = migrated_db.get_connection()
+            version_row = conn.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = ?",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).fetchone()
+            assert version_row is not None
+            assert int(version_row["version"]) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-        columns = {
-            row["name"] if isinstance(row, sqlite3.Row) else row[1]
-            for row in conn.execute("PRAGMA table_info('quiz_questions')").fetchall()
-        }
-        assert "hint" in columns
-        assert "hint_penalty_points" in columns
+            columns = {
+                row["name"] if isinstance(row, sqlite3.Row) else row[1]
+                for row in conn.execute("PRAGMA table_info('quiz_questions')").fetchall()
+            }
+            assert "hint" in columns
+            assert "hint_penalty_points" in columns
 
-        quiz_id = migrated_db.create_quiz(name="Migrated hint quiz")
-        question_id = migrated_db.create_question(
-            quiz_id=quiz_id,
-            question_type="multiple_choice",
-            question_text="Capital of France?",
-            options=["Berlin", "Paris", "Rome"],
-            correct_answer=1,
-            hint="Think Eiffel Tower.",
-            hint_penalty_points=2,
-            points=4,
-            order_index=0,
-        )
-        attempt = migrated_db.start_attempt(quiz_id)
-        result = migrated_db.submit_attempt(
-            attempt["id"],
-            [{"question_id": question_id, "user_answer": 1, "hint_used": True}],
-        )
-        assert result["score"] == 2
-        assert result["answers"][0]["hint_used"] is True
-        assert result["answers"][0]["hint_penalty_points"] == 2
-
-        migrated_db.close_connection()
+            quiz_id = migrated_db.create_quiz(name="Migrated hint quiz")
+            question_id = migrated_db.create_question(
+                quiz_id=quiz_id,
+                question_type="multiple_choice",
+                question_text="Capital of France?",
+                options=["Berlin", "Paris", "Rome"],
+                correct_answer=1,
+                hint="Think Eiffel Tower.",
+                hint_penalty_points=2,
+                points=4,
+                order_index=0,
+            )
+            attempt = migrated_db.start_attempt(quiz_id)
+            result = migrated_db.submit_attempt(
+                attempt["id"],
+                [{"question_id": question_id, "user_answer": 1, "hint_used": True}],
+            )
+            assert result["score"] == 2
+            assert result["answers"][0]["hint_used"] is True
+            assert result["answers"][0]["hint_penalty_points"] == 2
+        finally:
+            _close_temp_chacha_db(migrated_db, db_path)

@@ -8,11 +8,19 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
-        c.cookies.set("csrf_token", "x")
-        c.headers["X-CSRF-Token"] = "x"
-        c.headers["Authorization"] = "Bearer key"
-        yield c
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
+    try:
+        with TestClient(app) as c:
+            c.cookies.set("csrf_token", "x")
+            c.headers["X-CSRF-Token"] = "x"
+            c.headers["Authorization"] = "Bearer key"
+            yield c
+    finally:
+        if previous_auto_download is None:
+            os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+        else:
+            os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 
 def _override_user(admin=False):

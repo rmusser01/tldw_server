@@ -1,6 +1,7 @@
 # test_database.py
 # Database tests for Prompt Studio
 
+import gc
 import pytest
 import sqlite3
 import tempfile
@@ -20,16 +21,18 @@ def _unlink_sqlite_temp_db(path: str | Path) -> None:
     """Remove a SQLite temp DB and sidecar files, retrying transient Windows locks."""
     db_path = Path(path)
     for target in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
-        for attempt in range(5):
+        max_attempts = 40
+        for attempt in range(max_attempts):
             try:
                 target.unlink()
                 break
             except FileNotFoundError:
                 break
             except PermissionError:
-                if attempt == 4:
+                if attempt == max_attempts - 1:
                     raise
-                time.sleep(0.05)
+                gc.collect()
+                time.sleep(0.1)
 
 @pytest.fixture
 def temp_db_path():
@@ -107,6 +110,31 @@ def multi_user_prompt_dbs():
                 _ = None
         for path in temp_paths:
             _unlink_sqlite_temp_db(path)
+
+
+def test_unlink_sqlite_temp_db_retries_extended_transient_permission_error(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Windows can hold SQLite handles after close longer than one short retry loop."""
+    db_path = tmp_path / "locked.db"
+    db_path.write_text("", encoding="utf-8")
+    attempts = 0
+    original_unlink = Path.unlink
+
+    def _flaky_unlink(self: Path, *args: Any, **kwargs: Any) -> None:
+        nonlocal attempts
+        if self == db_path and attempts < 6:
+            attempts += 1
+            raise PermissionError("transient Windows SQLite lock")
+        original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+
+    _unlink_sqlite_temp_db(db_path)
+
+    assert attempts == 6
+    assert not db_path.exists()
 
 ########################################################################################################################
 # Database Initialization Tests

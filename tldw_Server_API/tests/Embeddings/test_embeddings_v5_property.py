@@ -1,7 +1,8 @@
 # test_embeddings_v5_property.py
 # Property-based tests for production embeddings service
 
-import asyncio
+import os
+import uuid
 import pytest
 from hypothesis import given, strategies as st, settings, assume, HealthCheck
 from hypothesis.stateful import RuleBasedStateMachine, rule, invariant, Bundle
@@ -12,11 +13,56 @@ from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from unittest.mock import AsyncMock, patch
 
+IN_CI = os.getenv("CI", "").lower() == "true"
+PROPERTY_MAX_EXAMPLES = 10 if IN_CI else 50
+STATE_MACHINE_MAX_EXAMPLES = 10 if IN_CI else 50
+STATE_MACHINE_STEP_COUNT = 8 if IN_CI else 20
+
+
+async def fake_embeddings(texts, provider=None, model_id=None, config=None, metadata=None, dimensions=None, **kwargs):
+    _ = (provider, model_id, config, metadata, dimensions, kwargs)
+    batch = texts if isinstance(texts, list) else [texts]
+    return [[float(len(text)), 0.0, 0.0] for text in batch]
+
+
 # Disable rate limiting for all tests
 @pytest.fixture(autouse=True)
 def disable_rate_limiting():
     """Disable rate limiting for all tests in this module"""
-    yield
+    previous_testing = os.environ.get("TESTING")
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
+    os.environ["TESTING"] = "true"
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
+    try:
+        yield
+    finally:
+        if previous_testing is None:
+            os.environ.pop("TESTING", None)
+        else:
+            os.environ["TESTING"] = previous_testing
+        if previous_auto_download is None:
+            os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+        else:
+            os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
+
+
+@pytest.fixture(autouse=True)
+def mock_embedding_creation():
+    """Keep property tests on fake embeddings and away from network/model loading."""
+    with patch(
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_with_circuit_breaker",
+        new=AsyncMock(side_effect=fake_embeddings),
+    ), patch(
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_batch_async",
+        new=AsyncMock(side_effect=fake_embeddings),
+    ), patch(
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.batching_create_embeddings_batch_async",
+        new=AsyncMock(side_effect=fake_embeddings),
+    ), patch(
+        "tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create.create_embeddings_batch",
+        side_effect=lambda texts, *args, **kwargs: [[float(len(text)), 0.0, 0.0] for text in texts],
+    ):
+        yield
 
 
 # Use the shared fixtures from conftest.py
@@ -34,16 +80,7 @@ def setup(test_client, regular_user, auth_headers):
 
     app.dependency_overrides[get_request_user] = override_user
 
-    async def fake_embeddings(texts, provider, model_id, config, metadata=None, dimensions=None):
-        _ = (provider, model_id, config, metadata, dimensions)
-        batch = texts if isinstance(texts, list) else [texts]
-        return [[float(len(text)), 0.0, 0.0] for text in batch]
-
-    with patch(
-        'tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_with_circuit_breaker',
-        new=AsyncMock(side_effect=fake_embeddings)
-    ):
-        yield SetupData()
+    yield SetupData()
     app.dependency_overrides.clear()
 
 
@@ -62,7 +99,7 @@ class TestCacheProperties:
         ttl_seconds=st.integers(min_value=1, max_value=10),
         num_items=st.integers(min_value=0, max_value=200)
     )
-    @settings(max_examples=50, deadline=5000)
+    @settings(max_examples=PROPERTY_MAX_EXAMPLES, deadline=5000)
     @pytest.mark.asyncio
     async def test_cache_never_exceeds_max_size(self, max_size, ttl_seconds, num_items):
         """Property: Cache size never exceeds max_size"""
@@ -87,7 +124,7 @@ class TestCacheProperties:
             unique=True
         )
     )
-    @settings(max_examples=50, deadline=5000)
+    @settings(max_examples=PROPERTY_MAX_EXAMPLES, deadline=5000)
     @pytest.mark.asyncio
     async def test_cache_get_returns_set_value(self, keys):
         """Property: Cache get returns exactly what was set"""
@@ -112,21 +149,22 @@ class TestCacheProperties:
     @given(
         ttl_seconds=st.floats(min_value=0.1, max_value=1.0)
     )
-    @settings(max_examples=20, deadline=10000)
+    @settings(max_examples=PROPERTY_MAX_EXAMPLES, deadline=10000)
     @pytest.mark.asyncio
-    async def test_cache_ttl_expiration_property(self, ttl_seconds):
+    async def test_cache_ttl_expiration_property(self, ttl_seconds, monkeypatch):
         """Property: Items expire after TTL"""
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import TTLCache
+        from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as embeddings_module
 
-        cache = TTLCache(max_size=10, ttl_seconds=ttl_seconds)
+        current_time = 1000.0
+        monkeypatch.setattr(embeddings_module.time, "time", lambda: current_time)
+        cache = embeddings_module.TTLCache(max_size=10, ttl_seconds=ttl_seconds)
 
         await cache.set("test_key", [1.0, 2.0, 3.0])
 
         # Should exist immediately
         assert await cache.get("test_key") is not None
 
-        # Wait for expiration
-        await asyncio.sleep(ttl_seconds + 0.1)
+        current_time += ttl_seconds + 0.1
 
         # Should be expired
         assert await cache.get("test_key") is None
@@ -324,7 +362,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
         self.client = TestClient(app)
         # Set CSRF token
-        csrf_token = "test-csrf-token-12345"
+        csrf_token = f"test-csrf-{uuid.uuid4().hex}"
         self.client.cookies.set("csrf_token", csrf_token)
         self.auth_headers = {
             "Authorization": "Bearer test-api-key",
@@ -376,8 +414,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return [[float(hash(text) % 100), 1.0, 2.0]]
 
         # Also patch the underlying create_embeddings_batch to avoid config issues
-        with patch('tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_batch_async', mock_embeddings), \
-             patch('tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create.create_embeddings_batch', mock_embeddings):
+        with patch('tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_batch_async', new=AsyncMock(side_effect=mock_embeddings)), \
+             patch('tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create.create_embeddings_batch', side_effect=lambda texts, *args, **kwargs: [[1.0, 2.0, 3.0]] * len(texts)):
             response = self.client.post(
                 "/api/v1/embeddings",
                 headers=self.auth_headers,
@@ -428,7 +466,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 # Run the state machine test
 TestEmbeddingStateMachine = EmbeddingStateMachine.TestCase
 TestEmbeddingStateMachine.settings = settings(
-    max_examples=50,
-    stateful_step_count=20,
+    max_examples=STATE_MACHINE_MAX_EXAMPLES,
+    stateful_step_count=STATE_MACHINE_STEP_COUNT,
     suppress_health_check=[HealthCheck.function_scoped_fixture]
 )

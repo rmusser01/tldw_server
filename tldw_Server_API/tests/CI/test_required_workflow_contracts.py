@@ -263,15 +263,34 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
     for job_name in matrix_jobs:
         shards = workflow["jobs"][job_name]["strategy"]["matrix"]["shard"]
         shard_names = {shard["name"] for shard in shards}
+        rag_new_shards = {
+            "rag-new-integration-agentic",
+            "rag-new-integration-batch",
+            "rag-new-integration-core",
+            "rag-new-integration-research",
+            "rag-new-property-core",
+            "rag-new-unit-agentic",
+            "rag-new-unit-cache-vector",
+            "rag-new-unit-core-misc",
+            "rag-new-unit-guardrails-source",
+            "rag-new-unit-media-ingest",
+            "rag-new-unit-pipeline",
+            "rag-new-unit-rag-contracts",
+            "rag-new-unit-unified-pipeline",
+        }
         assert "ai-retrieval" not in shard_names
         assert "chat-llm" not in shard_names
         assert "product-modules" not in shard_names
         assert "chat-character-unit" not in shard_names
         assert "rag-research" not in shard_names
+        assert "rag-new" not in shard_names
+        assert "core-smoke" not in shard_names
         assert "admin-a-b" not in shard_names
+        assert "admin-c-d" not in shard_names
         assert "admin-e-l" not in shard_names
         assert "admin-m-r" not in shard_names
         assert "admin-s-z" not in shard_names
+        assert "admin-bundle" not in shard_names
         assert "admin-e2e" not in shard_names
         assert "ai-chromadb-chunking" not in shard_names
         assert "ai-embeddings" not in shard_names
@@ -281,15 +300,27 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "product-claims" not in shard_names
         assert "product-evaluations" not in shard_names
         assert "product-prompts-workflows" not in shard_names
+        assert "platform-mcp" not in shard_names
+        assert {
+            "core-audit-security",
+            "core-config",
+            "core-server-smoke",
+            "core-setup-usage",
+            "core-utils-tooling",
+        }.issubset(shard_names)
         assert {
             "admin-a-api",
             "admin-backup-api",
             "admin-backup-core",
             "admin-budgets",
-            "admin-bundle",
+            "admin-bundle-ops",
+            "admin-bundle-sanitizers",
             "admin-byok-core",
             "admin-byok-validation",
-            "admin-c-d",
+            "admin-conflicts-data-admin",
+            "admin-data-ops",
+            "admin-data-subject-api",
+            "admin-data-subject-repo-dsr",
             "admin-e2e-access",
             "admin-e2e-reset-backups",
             "admin-e2e-seed",
@@ -330,9 +361,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "vector-stores",
             "paper-search",
             "rag-legacy",
-            "rag-new",
             "research-websearch",
         }.issubset(shard_names)
+        assert rag_new_shards.issubset(shard_names)
         assert {
             "chat-character-legacy-core",
             "chat-character-legacy-files",
@@ -368,15 +399,29 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "product-watchlists",
             "product-workflows",
         }.issubset(shard_names)
+        platform_shards = {
+            "platform-infrastructure-metrics",
+            "platform-mcp-core",
+            "platform-resource-governance",
+            "platform-sandbox-admin-artifacts",
+            "platform-sandbox-runtimes",
+            "platform-sandbox-state-store",
+            "platform-sandbox-ws-streams",
+            "platform-services-core",
+            "platform-services-shutdown-lifespan",
+            "platform-services-startup",
+        }
+        assert platform_shards.issubset(shard_names)
         shard_paths = {shard["name"]: shard["paths"] for shard in shards}
         shard_path_sets = {
             name: set(str(paths).split()) for name, paths in shard_paths.items()
         }
         assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings-core"]
         assert shard_path_sets["ai-chromadb"] == {"tldw_Server_API/tests/ChromaDB"}
-        assert "tldw_Server_API/tests/Admin" not in shard_path_sets["core-smoke"]
+        assert "tldw_Server_API/tests/Admin" not in shard_path_sets["core-server-smoke"]
         assert "tldw_Server_API/tests/RAG_NEW" not in shard_path_sets["rag-legacy"]
-        assert "tldw_Server_API/tests/RAG" not in shard_path_sets["rag-new"]
+        for shard_name in rag_new_shards:
+            assert "tldw_Server_API/tests/RAG" not in shard_path_sets[shard_name]
         assert "tldw_Server_API/tests/PaperSearch" not in shard_path_sets["research-websearch"]
         assert "tldw_Server_API/tests/WebSearch" not in shard_path_sets["paper-search"]
         assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-legacy-core"]
@@ -384,15 +429,79 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "tldw_Server_API/tests/Claims" not in shard_path_sets["product-collections"]
         assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims-core"]
 
+        core_shards = {
+            "core-audit-security",
+            "core-config",
+            "core-server-smoke",
+            "core-setup-usage",
+            "core-utils-tooling",
+        }
+        core_dirs = (
+            "Audit",
+            "Config",
+            "Health",
+            "Helper_Scripts",
+            "Logging",
+            "Security",
+            "Setup",
+            "Usage",
+            "Utils",
+            "helpers",
+            "http_client",
+            "lint",
+            "sanity_tests",
+            "schemas",
+            "unit",
+        )
+        core_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests").glob("test*.py")
+        }
+        for dirname in core_dirs:
+            core_files.update(
+                str(path)
+                for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
+            )
+
+        covered_core_files: dict[str, str] = {}
+        for shard_name in core_shards:
+            for pattern in shard_path_sets[shard_name]:
+                if Path(pattern).is_dir():
+                    prefix = f"{pattern.rstrip('/')}/"
+                    matches = {
+                        filename
+                        for filename in core_files
+                        if filename.startswith(prefix)
+                    }
+                else:
+                    matches = {
+                        filename
+                        for filename in core_files
+                        if fnmatch.fnmatch(filename, pattern)
+                    }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_core_files, (
+                        f"{filename} matched both "
+                        f"{covered_core_files[filename]} and {shard_name}"
+                    )
+                    covered_core_files[filename] = shard_name
+
+        assert set(covered_core_files) == core_files
+
         admin_shards = {
             "admin-a-api",
             "admin-backup-api",
             "admin-backup-core",
             "admin-budgets",
-            "admin-bundle",
+            "admin-bundle-ops",
+            "admin-bundle-sanitizers",
             "admin-byok-core",
             "admin-byok-validation",
-            "admin-c-d",
+            "admin-conflicts-data-admin",
+            "admin-data-ops",
+            "admin-data-subject-api",
+            "admin-data-subject-repo-dsr",
             "admin-e2e-access",
             "admin-e2e-reset-backups",
             "admin-e2e-seed",
@@ -528,6 +637,78 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
                     covered_embedding_files[filename] = shard_name
 
         assert set(covered_embedding_files) == embedding_files
+
+        rag_new_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/RAG_NEW").glob("**/test*.py")
+        }
+        covered_rag_new_files: dict[str, str] = {}
+        for shard_name in rag_new_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/RAG_NEW/")
+                matches = {
+                    filename
+                    for filename in rag_new_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_rag_new_files, (
+                        f"{filename} matched both "
+                        f"{covered_rag_new_files[filename]} and {shard_name}"
+                    )
+                    covered_rag_new_files[filename] = shard_name
+
+        assert set(covered_rag_new_files) == rag_new_files
+
+        platform_dirs = (
+            "Infrastructure",
+            "MCP",
+            "MCP_unified",
+            "Metrics",
+            "Monitoring",
+            "Resource_Governance",
+            "Services",
+            "sandbox",
+        )
+        platform_roots = {
+            f"tldw_Server_API/tests/{dirname}/"
+            for dirname in platform_dirs
+        }
+        platform_files = {
+            str(path)
+            for dirname in platform_dirs
+            for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
+        }
+        covered_platform_files: dict[str, str] = {}
+        for shard_name in platform_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert any(
+                    pattern == root.rstrip("/") or pattern.startswith(root)
+                    for root in platform_roots
+                )
+                if Path(pattern).is_dir():
+                    prefix = f"{pattern.rstrip('/')}/"
+                    matches = {
+                        filename
+                        for filename in platform_files
+                        if filename.startswith(prefix)
+                    }
+                else:
+                    matches = {
+                        filename
+                        for filename in platform_files
+                        if fnmatch.fnmatch(filename, pattern)
+                    }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_platform_files, (
+                        f"{filename} matched both "
+                        f"{covered_platform_files[filename]} and {shard_name}"
+                    )
+                    covered_platform_files[filename] = shard_name
+
+        assert set(covered_platform_files) == platform_files
 
         legacy_character_shards = {
             "chat-character-legacy-core",

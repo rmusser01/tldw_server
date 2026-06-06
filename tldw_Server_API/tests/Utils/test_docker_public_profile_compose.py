@@ -553,7 +553,7 @@ def _run_entrypoint_with_env(env_file: Path, marker_dir: Path) -> subprocess.Com
         check=False,
         capture_output=True,
         text=True,
-        env=_entrypoint_process_env(env_file, marker_dir),
+        env=_compose_process_env(env_file, marker_dir),
     )
 
 

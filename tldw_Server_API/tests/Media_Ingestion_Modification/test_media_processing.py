@@ -353,7 +353,13 @@ def _is_fixture_download_failure(message: str) -> bool:
     )
 
 
-def skip_if_external_fixture_url_unreachable(response, fixture_url: str, fixture_label: str) -> None:
+def skip_if_external_fixture_url_unreachable(
+    response,
+    fixture_url: str,
+    fixture_label: str,
+    *,
+    allow_single_error_fallback: bool = True,
+) -> None:
     """Skip tests when an external media fixture is temporarily unavailable."""
     if response.status_code != 207:
         return
@@ -378,7 +384,11 @@ def skip_if_external_fixture_url_unreachable(response, fixture_url: str, fixture
         [str(data.get("errors", []))]
         + [str(result.get("error", "")) for result in result_errors]
     )
-    if len(result_errors) == 1 and _is_fixture_download_failure(combined_errors):
+    if (
+        allow_single_error_fallback
+        and len(result_errors) == 1
+        and _is_fixture_download_failure(combined_errors)
+    ):
         pytest.skip(f"{fixture_label} download failed - likely due to transient network access")
 
 
@@ -417,6 +427,29 @@ def test_skip_if_external_fixture_url_unreachable_skips_pdf_download_failure() -
             VALID_PDF_URL,
             "PDF fixture",
         )
+
+
+def test_skip_if_external_fixture_url_unreachable_preserves_unrelated_download_error() -> None:
+    response = _FakeBatchResponse(
+        {
+            "results": [
+                {
+                    "status": "Error",
+                    "input_ref": INVALID_URL,
+                    "error": "Download/preparation failed",
+                }
+            ],
+            "errors": ["Download/preparation failed"],
+            "errors_count": 1,
+        }
+    )
+
+    skip_if_external_fixture_url_unreachable(
+        response,
+        VALID_EPUB_URL,
+        "EPUB fixture",
+        allow_single_error_fallback=False,
+    )
 
 
 # --- Test Classes ---
@@ -1054,6 +1087,7 @@ class TestProcessEbooks:
             "extraction_method": "basic" # Test another extraction method
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
+        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1090,6 +1124,7 @@ class TestProcessEbooks:
             files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
+        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         results = data["results"]
         assert len(results) == 2
@@ -1121,6 +1156,7 @@ class TestProcessEbooks:
             "perform_analysis": "false"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
+        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1135,6 +1171,12 @@ class TestProcessEbooks:
         """Test processing one valid URL and one invalid URL -> 207."""
         form_data = {"urls": [VALID_EPUB_URL, INVALID_URL], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
+        skip_if_external_fixture_url_unreachable(
+            response,
+            VALID_EPUB_URL,
+            "EPUB fixture",
+            allow_single_error_fallback=False,
+        )
 
         # Give potentially slow download/timeout a moment
         time.sleep(5)
@@ -1206,6 +1248,7 @@ class TestProcessEbooks:
             "perform_analysis": "false"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
+        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1228,6 +1271,7 @@ class TestProcessEbooks:
             "api_key": "mock_key"       # Depending on process_epub implementation checks
         }
         response = client.post(self.ENDPOINT, data=form_data)
+        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")

@@ -34,19 +34,14 @@ def test_runtimes_include_capability_flags_and_store_mode(monkeypatch) -> None:
 def test_egress_allowlist_supported_when_enforced(monkeypatch) -> None:
 
 
-     # Ensure app is in test mode and config cache is fresh
+    # Ensure app is in test mode and config cache is fresh
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
     clear_config_cache()
-    # Flip enforcement on the live service instance to avoid re-importing app
-    import tldw_Server_API.app.api.v1.endpoints.sandbox as sandbox_ep
-    # Temporarily enforce egress via monkeypatch so state is restored after test
-    monkeypatch.setattr(
-        sandbox_ep._service.policy.cfg,  # type: ignore[attr-defined]
-        "egress_enforcement",
-        True,
-        raising=False,
-    )
+
     with TestClient(app) as client:
         r = client.get("/api/v1/sandbox/runtimes")
         assert r.status_code == 200
@@ -62,6 +57,7 @@ def test_runtimes_notes_reflect_granular_allowlist(monkeypatch) -> None:
 
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
     monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
     clear_config_cache()
@@ -74,29 +70,25 @@ def test_runtimes_notes_reflect_granular_allowlist(monkeypatch) -> None:
         assert isinstance(docker.get("notes"), str) and "Granular egress allowlist" in docker["notes"]
 
 
-def test_firecracker_egress_supported_only_when_enforced(monkeypatch) -> None:
+def test_firecracker_egress_allowlist_not_advertised_while_scaffolded(monkeypatch) -> None:
 
 
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
-    # Ensure enforcement not set: expect False
-    monkeypatch.delenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_FIRECRACKER_AVAILABLE", "1")
+    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT", "true")
     clear_config_cache()
+
     with TestClient(app) as client:
         r = client.get("/api/v1/sandbox/runtimes")
+        assert r.status_code == 200
         data = r.json()
         fc = next((rt for rt in data.get("runtimes", []) if rt.get("name") == "firecracker"), None)
         assert fc is not None
         assert fc.get("egress_allowlist_supported") is False
-    # Now flip enforcement on
-    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "true")
-    clear_config_cache()
-    with TestClient(app) as client:
-        r2 = client.get("/api/v1/sandbox/runtimes")
-        d2 = r2.json()
-        fc2 = next((rt for rt in d2.get("runtimes", []) if rt.get("name") == "firecracker"), None)
-        assert fc2 is not None
-        assert fc2.get("egress_allowlist_supported") is True
+        assert fc.get("strict_allowlist_supported") is False
+        assert "scaffold/planned" in str(fc.get("notes"))
 
 
 def test_firecracker_not_available_when_real_disabled(monkeypatch) -> None:
