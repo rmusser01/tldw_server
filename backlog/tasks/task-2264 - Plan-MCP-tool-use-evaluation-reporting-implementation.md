@@ -25,7 +25,7 @@ Create the implementation plan for metadata-only MCP tool-use event capture, sto
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Implementation plan is saved under `Docs/superpowers/plans` with exact files, TDD steps, verification commands, and execution handoff notes.
-- [x] #2 Plan incorporates a local design review pass and resolves the outstanding context-key and CLI-output decisions.
+- [x] #2 Plan incorporates local design review passes and resolves the outstanding context-key, CLI-output, early-capture, compatibility, bridge-name, immutability, and bounded-report decisions.
 - [x] #3 Backlog task records verification, known skips, and final summary.
 <!-- AC:END -->
 
@@ -35,12 +35,13 @@ Create the implementation plan for metadata-only MCP tool-use event capture, sto
 - Created implementation plan at `Docs/superpowers/plans/2026-06-06-mcp-tool-use-eval-reporting-implementation-plan.md`.
 - Local review pass tightened two issues before finalizing: package root must not re-export `SQLiteToolUseEventStore`, and standalone CLI report/export/cleanup require a persistent store instead of in-memory state.
 - Subagent plan review was skipped because the current thread has not explicitly authorized subagent use for this planning step.
+- Follow-up review pass incorporated five additional implementation hardening items: early `process_request()` tool-call failures, duck-typed dependency fallback to `NoopToolUseRecorder`, `profile.tools.call` effective-name side-channel, immutable `ToolUseEvent` tests, and bounded-report disclosure fields.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Saved the MCP tool-use evaluation reporting implementation plan with seven TDD stages covering event models, recorder contracts, store/report service, protocol capture, gateway runtime wrapping, CLI surfaces, docs, and verification. The plan incorporates the review pass decisions around lazy optional imports, persistent CLI reporting, UTC epoch ordering, metadata-only capture, recorder failure handling, idempotency replay capture, and double-counting guards.
+Saved the MCP tool-use evaluation reporting implementation plan with seven TDD stages covering event models, recorder contracts, store/report service, protocol capture, gateway runtime wrapping, CLI surfaces, docs, and verification. The plan incorporates review-pass decisions around lazy optional imports, persistent CLI reporting, UTC epoch ordering, metadata-only capture, recorder failure handling, idempotency replay capture, double-counting guards, early process_request capture, dependency compatibility, bridge effective-name reporting, event immutability, and bounded-report disclosure.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

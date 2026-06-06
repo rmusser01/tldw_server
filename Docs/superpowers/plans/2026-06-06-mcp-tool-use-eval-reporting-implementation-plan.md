@@ -32,6 +32,11 @@ This plan incorporates the review pass before implementation:
 10. Keep all event fields metadata-only. Tests must prove raw args, outputs, paths, and exception messages do not persist.
 11. Add package-boundary tests so importing the no-op recorder and gateway config does not eagerly import optional storage dependencies.
 12. Require a persistent reporting store for standalone CLI `tool-events report/export/cleanup`; explicit in-memory reporting is only for injected tests or same-process embedders.
+13. Record protocol `tools/call` failures that return before handler dispatch, including early rate-limit, tool-name validation, and authorization failures.
+14. Resolve the recorder defensively with `getattr(..., "tool_use_recorder", NoopToolUseRecorder())` so existing custom dependency bundles and tests that use `SimpleNamespace` do not break.
+15. Add a gateway bridge metadata side-channel for `profile.tools.call` because the wrapper cannot reliably infer `effective_tool_name` from the raw `tool_id` argument.
+16. Make `ToolUseEvent` immutable/frozen and test mutation rejection.
+17. Include bounded-report disclosure fields such as `events_scanned`, `event_limit`, and `truncated` so operators know when aggregates are partial.
 
 ## File Structure
 
@@ -58,10 +63,12 @@ Modify:
 - `tldw_Server_API/app/core/MCP_unified/protocol.py`: record metadata-only tool-use events for `tools/call`.
 - `mcp_unified/gateway/config.py`: add `GatewayToolUseReportingConfig`, parse config, build event store/recorder, and wrap runtime during bootstrap.
 - `mcp_unified/gateway/bootstrap.py`: accept optional gateway runtime wrapper/recorder only if needed after config integration review.
+- `mcp_unified/gateway/profile_runtime.py`: attach safe bridge-resolution metadata for `profile.tools.call` so the outer wrapper can report requested and effective tool names without inspecting raw delegated arguments.
 - `mcp_unified/gateway/cli.py`: add `tool-events report`, `tool-events export`, and `tool-events cleanup` commands; include config validation payload.
 - `mcp_unified/README.md`: document the reporting feature at package overview level.
 - `mcp_unified/USER_GUIDE.md`: add operator guide for enabling capture, CLI reports, export, cleanup, and privacy constraints.
 - `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py`: add CLI parse/handler coverage.
+- `tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py`: preserve compatibility for dependency bundles without `tool_use_recorder`.
 - `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`: assert no eager SQLAlchemy import from lightweight reporting imports.
 
 ## Implementation Tasks
@@ -78,6 +85,8 @@ Modify:
 
 ```python
 from datetime import datetime, timezone, timedelta
+
+import pytest
 
 from mcp_unified.tool_use_reporting.models import ToolUseEvent
 
@@ -107,6 +116,17 @@ def test_tool_use_event_rejects_or_omits_sensitive_payload_fields():
     dumped = event.model_dump(mode="json")
     assert "raw_arguments" not in dumped
     assert "/Users/example" not in str(dumped)
+
+
+def test_tool_use_event_is_immutable():
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="git.status",
+        status="success",
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        event.status = "error"
 ```
 
 Run: `source .venv/bin/activate` then `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py -q`
@@ -120,6 +140,7 @@ Implementation requirements:
 - Use Pydantic `BaseModel`.
 - Accept `created_at` input as an alias or internal field, normalize to `created_at_utc`.
 - Generate `event_id` with `uuid4().hex`.
+- Configure the model as immutable/frozen. Use the Pydantic v2 `ConfigDict(frozen=True)` path when available and a v1-compatible fallback if needed.
 - Bound string fields to a small constant, for example 128 chars for ids/names and 64 chars for status/reason categories.
 - Use literal aliases for:
   - `runtime_surface`: `protocol`, `gateway`
@@ -166,6 +187,7 @@ git commit -m "feat: add MCP tool-use reporting event models"
 - Modify: `mcp_unified/tool_use_reporting/__init__.py`
 - Modify: `mcp_unified/interfaces/runtime.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py`
+- Test: `tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 
 - [ ] **Step 1: Write failing tests for status mapping and default dependency compatibility**
@@ -174,6 +196,7 @@ git commit -m "feat: add MCP tool-use reporting event models"
 from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
 from mcp_unified.tool_use_reporting.builders import classify_tool_use_exception
 from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
 
 
 class FakeGovernanceDenied(PermissionError):
@@ -189,9 +212,19 @@ def test_classify_tool_use_exception_uses_safe_reason_codes():
 def test_runtime_dependencies_default_to_noop_tool_use_recorder(runtime_dependency_kwargs):
     deps = MCPRuntimeDependencies(**runtime_dependency_kwargs)
     assert isinstance(deps.tool_use_recorder, NoopToolUseRecorder)
+
+
+def test_protocol_accepts_dependency_bundle_without_tool_use_recorder(runtime_dependency_namespace):
+    if hasattr(runtime_dependency_namespace, "tool_use_recorder"):
+        delattr(runtime_dependency_namespace, "tool_use_recorder")
+
+    protocol = MCPProtocol(dependencies=runtime_dependency_namespace)
+
+    assert isinstance(protocol._tool_use_recorder, NoopToolUseRecorder)
 ```
 
 If no reusable `runtime_dependency_kwargs` fixture exists, add a local fixture with the same fake dependencies used by existing runtime boundary tests.
+If no namespace fixture exists, add the compatibility test beside `_fake_runtime_dependencies()` in `test_extraction_contracts.py`, which already constructs `SimpleNamespace` dependency bundles.
 
 - [ ] **Step 2: Implement builder and recorder contracts**
 
@@ -209,6 +242,7 @@ Implementation requirements:
   - model: `model_id`, `mcp_model_id`
   - correlation: only `correlation_id`, `request_id` when `metadata["mcp_tool_use_safe_correlation_id"] is True`
 - Add `MCPRuntimeDependencies.tool_use_recorder` as the final dataclass field with `field(default_factory=NoopToolUseRecorder)`.
+- In `MCPProtocol.__init__`, resolve the recorder with `getattr(self.dependencies, "tool_use_recorder", NoopToolUseRecorder())` rather than direct attribute access, because host tests and embedders may pass duck-typed dependency bundles.
 
 - [ ] **Step 3: Add import boundary test**
 
@@ -236,6 +270,7 @@ Run:
 ```bash
 python -m pytest \
   tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py \
   -q
 ```
@@ -245,7 +280,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mcp_unified/tool_use_reporting mcp_unified/interfaces/runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+git add mcp_unified/tool_use_reporting mcp_unified/interfaces/runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 git commit -m "feat: add MCP tool-use reporting recorder contract"
 ```
 
@@ -354,6 +389,24 @@ async def test_report_groups_by_tool_prompt_with_tool_call_rates():
     assert row.call_count == 2
     assert row.tool_call_success_rate == 0.5
     assert row.top_reason_codes[0]["reason_code"] == "permission_denied"
+
+
+async def test_report_discloses_when_event_limit_truncates_aggregates():
+    store = InMemoryToolUseEventStore()
+    for index in range(5):
+        await store.append_event(ToolUseEvent(
+            runtime_surface="protocol",
+            requested_tool_name=f"tool.{index}",
+            status="success",
+        ))
+
+    report = await ToolUseReportService(store).build_report(
+        ToolUseReportQuery(group_by="tool", event_limit=2)
+    )
+
+    assert report.events_scanned == 2
+    assert report.event_limit == 2
+    assert report.truncated is True
 ```
 
 - [ ] **Step 5: Implement report service**
@@ -364,6 +417,7 @@ Implementation requirements:
 - Use names from the spec, for example `tool_call_success_rate`, never `task_success_rate`.
 - Bound group count and top reason-code count.
 - Calculate p50 and p95 duration from bounded rows in memory for first slice.
+- Include `events_scanned`, `event_limit`, and `truncated` on the report payload. Set `truncated=true` whenever the query hit the event limit before exhausting the filtered window.
 - Return JSON-serializable Pydantic models.
 
 - [ ] **Step 6: Run focused tests**
@@ -431,6 +485,27 @@ async def test_protocol_records_prepare_denial_without_raw_error(protocol_with_r
     assert event.status == "denied"
     assert event.reason_code == "permission_denied"
     assert "/Users/me" not in event.model_dump_json()
+
+
+async def test_protocol_records_early_process_request_tool_name_error(protocol_with_recorder):
+    protocol, recorder = protocol_with_recorder
+
+    response = await protocol.process_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "tools/call",
+            "params": {"name": "../secret", "arguments": {}},
+        },
+        _request_context(),
+    )
+
+    assert response.error.code == ErrorCode.INTERNAL_ERROR
+    event = recorder.events[-1]
+    assert event.runtime_surface == "protocol"
+    assert event.requested_tool_name == "unknown"
+    assert event.status == "invalid_params"
+    assert event.execution_origin == "failed_before_execution"
 ```
 
 - [ ] **Step 2: Add recorder helper methods to `MCPProtocol`**
@@ -440,9 +515,23 @@ Implementation requirements:
 - Add `_tool_use_recorder` from `self.dependencies.tool_use_recorder` or equivalent existing dependency access.
 - Add `_should_record_tool_use(context)` that returns false when `context.metadata.get("mcp_tool_use_observed") is True`.
 - Add `_record_tool_use_event(event)` with bounded timeout via the recorder helper.
+- Add `_record_process_request_tool_use_failure(...)` or an equivalent helper for `process_request()` paths that return JSON-RPC errors before `_handle_tools_call()` is invoked.
 - Do not change existing audit events, metrics, or tool response shape.
 
-- [ ] **Step 3: Instrument `_handle_tools_call()` for preparation failures**
+- [ ] **Step 3: Instrument `process_request()` for early `tools/call` failures**
+
+Implementation requirements:
+
+- Detect `request.method == "tools/call"` after request parsing but before each early return.
+- Record bounded metadata-only events for:
+  - top-level rate-limit failures when the requested tool name is available
+  - missing/non-string/regex-invalid tool names
+  - authorization failures before handler dispatch
+- Preserve the existing JSON-RPC error codes and return payloads. Some legacy paths intentionally map invalid regex names to `INTERNAL_ERROR`; the event status should still be normalized to `invalid_params`.
+- Do not record non-`tools/call` method failures in this slice.
+- Reuse the same safe context extraction and recorder timeout helper.
+
+- [ ] **Step 4: Instrument `_handle_tools_call()` for preparation failures**
 
 Implementation requirements:
 
@@ -456,7 +545,7 @@ Implementation requirements:
   - duration
 - Await recorder, then re-raise the original exception.
 
-- [ ] **Step 4: Instrument `execute_prepared_tool_call()` for success, execution errors, and idempotency**
+- [ ] **Step 5: Instrument `execute_prepared_tool_call()` for success, execution errors, and idempotency**
 
 Implementation requirements:
 
@@ -468,7 +557,7 @@ Implementation requirements:
 - If `bind_arguments()` or argument fingerprint checks fail, record an invalid params event and re-raise.
 - Preserve existing metrics for idempotency hit/miss.
 
-- [ ] **Step 5: Add tests for recorder failure and idempotency replay**
+- [ ] **Step 6: Add tests for recorder failure and idempotency replay**
 
 ```python
 async def test_protocol_recorder_failure_does_not_change_tool_response(protocol_with_failing_recorder):
@@ -494,7 +583,7 @@ async def test_protocol_records_idempotency_replay(protocol_with_recorder):
     assert recorder.events[-1].idempotency_replay is True
 ```
 
-- [ ] **Step 6: Run focused protocol tests**
+- [ ] **Step 7: Run focused protocol tests**
 
 Run:
 
@@ -508,7 +597,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
@@ -521,6 +610,7 @@ git commit -m "feat: record MCP protocol tool-use events"
 - Create: `mcp_unified/gateway/tool_use_reporting.py`
 - Modify: `mcp_unified/gateway/config.py`
 - Modify: `mcp_unified/gateway/bootstrap.py` if needed after config integration
+- Modify: `mcp_unified/gateway/profile_runtime.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`
 
@@ -559,6 +649,26 @@ async def test_gateway_wrapper_records_policy_denial():
     event = runtime.recorder.events[-1]
     assert event.status == "denied"
     assert event.reason_code == "profile_tool_denied"
+
+
+async def test_gateway_bridge_call_records_effective_tool_name_when_tool_id_differs():
+    runtime = await profile_runtime_with_deferred_tool(
+        tool_id="git-status",
+        tool_name="git.status",
+    )
+    recorder = MemoryToolUseRecorder()
+    wrapped = ToolUseReportingGatewayRuntime(runtime, recorder=recorder)
+
+    await wrapped.call_tool(
+        "profile.tools.call",
+        {"tool_id": "git-status", "arguments": {}},
+        GatewayRequestContext(request_id="req-1"),
+    )
+
+    event = recorder.events[-1]
+    assert event.requested_tool_name == "profile.tools.call"
+    assert event.effective_tool_name == "git.status"
+    assert event.source_kind == "bridge"
 ```
 
 - [ ] **Step 2: Implement `ToolUseReportingGatewayRuntime`**
@@ -571,12 +681,25 @@ Implementation requirements:
   - `mcp_tool_use_observed=True`
   - `mcp_tool_use_outer_surface="gateway"`
 - Record success, `GatewayPolicyDenied`, and sanitized generic exceptions.
-- Detect bridge delegation result metadata when available:
+- Detect bridge delegation metadata from safe context/result keys:
   - requested `profile.tools.call`
-  - effective target from arguments such as `tool_name` or result eval metadata.
+  - effective target from `mcp_tool_use_effective_tool_name` or result eval metadata.
+  - requested bridge id from `mcp_tool_use_requested_tool_id` when present.
 - Do not persist raw bridge arguments.
 
-- [ ] **Step 3: Add bootstrap config tests**
+- [ ] **Step 3: Add a safe bridge-resolution side-channel in `profile_runtime.py`**
+
+Implementation requirements:
+
+- When `ProfileAwareGatewayRuntime` handles `profile.tools.call`, it currently resolves `arguments["tool_id"]` to `resolved_name` before delegating. Add a helper that copies the `GatewayRequestContext` and attaches bounded metadata keys before `_call_backend_tool_through_policy()` delegates:
+  - `mcp_tool_use_bridge_tool_name="profile.tools.call"`
+  - `mcp_tool_use_requested_tool_id=<safe tool_id>`
+  - `mcp_tool_use_effective_tool_name=<resolved backend tool name>`
+  - `mcp_tool_use_source_kind="bridge"`
+- The side-channel must not include delegated arguments.
+- The gateway wrapper should prefer these metadata keys when building the event. This is required because `tool_id` is not always the backend tool name.
+
+- [ ] **Step 4: Add bootstrap config tests**
 
 ```python
 def test_gateway_config_parses_tool_use_reporting_defaults():
@@ -597,7 +720,7 @@ async def test_bootstrap_wraps_runtime_when_tool_use_reporting_enabled(tmp_path)
     assert isinstance(bootstrap.runtime, ToolUseReportingGatewayRuntime)
 ```
 
-- [ ] **Step 4: Implement `GatewayToolUseReportingConfig` and store factory**
+- [ ] **Step 5: Implement `GatewayToolUseReportingConfig` and store factory**
 
 Implementation requirements:
 
@@ -616,7 +739,7 @@ Implementation requirements:
 - Wrap `ProfileAwareGatewayRuntime` after profile runtime construction so all profile policy decisions are visible.
 - Keep external runtime manager construction unchanged.
 
-- [ ] **Step 5: Run focused gateway tests**
+- [ ] **Step 6: Run focused gateway tests**
 
 Run:
 
@@ -629,10 +752,10 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add mcp_unified/gateway/tool_use_reporting.py mcp_unified/gateway/config.py mcp_unified/gateway/bootstrap.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+git add mcp_unified/gateway/tool_use_reporting.py mcp_unified/gateway/config.py mcp_unified/gateway/bootstrap.py mcp_unified/gateway/profile_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
 git commit -m "feat: add gateway tool-use reporting runtime wrapper"
 ```
 
@@ -814,9 +937,12 @@ git commit -m "docs: document MCP tool-use reporting"
 ## Final Verification Checklist
 
 - [ ] New event model tests pass.
+- [ ] Event model immutability test passes.
 - [ ] New store/report tests pass.
-- [ ] Protocol success, denial, invalid params, not found, recorder failure, and idempotency replay tests pass.
-- [ ] Gateway direct call, bridge call, policy denial, and double-counting guard tests pass.
+- [ ] Report payload exposes `events_scanned`, `event_limit`, and `truncated`.
+- [ ] Protocol success, denial, invalid params, not found, early `process_request()` failure, recorder failure, and idempotency replay tests pass.
+- [ ] Protocol dependency compatibility test passes for a bundle without `tool_use_recorder`.
+- [ ] Gateway direct call, bridge call with `tool_id != tool_name`, policy denial, and double-counting guard tests pass.
 - [ ] CLI report/export/cleanup tests pass.
 - [ ] Package boundary test proves no eager SQLAlchemy import from lightweight reporting modules.
 - [ ] Bandit run is recorded for touched Python scopes.
