@@ -37,9 +37,20 @@ def _entrypoint_command(*args: str) -> list[str]:
     return [shell, "Dockerfiles/entrypoints/tldw-app-first-run.sh", *args]
 
 
+def _windows_shell_path(path: os.PathLike[str] | str) -> str:
+    path_text = os.fspath(path).replace("\\", "/")
+    if len(path_text) >= 2 and path_text[1] == ":":
+        drive = path_text[0].lower()
+        tail = path_text[2:]
+        if not tail.startswith("/"):
+            tail = f"/{tail}"
+        return f"/{drive}{tail}"
+    return path_text
+
+
 def _shell_path(path: Path) -> str:
     if os.name == "nt":
-        return path.as_posix()
+        return _windows_shell_path(path)
     return str(path)
 
 
@@ -479,6 +490,19 @@ def test_entrypoint_process_env_does_not_copy_host_environment(tmp_path: Path, m
     assert "ENTRYPOINT_TEST_HOST_SECRET" not in env
     assert env["TLDW_ENV_FILE"] == _shell_path(env_file)
     assert env["TLDW_AUTH_MARKER_DIR"] == _shell_path(marker_dir)
+
+
+def test_windows_shell_path_converts_drive_paths_for_git_bash() -> None:
+    _require_equal(
+        _windows_shell_path(r"C:\Users\runneradmin\AppData\Local\Temp\tldw\.env"),
+        "/c/Users/runneradmin/AppData/Local/Temp/tldw/.env",
+        "Windows drive paths should be visible to Git Bash subprocesses",
+    )
+    _require_equal(
+        _windows_shell_path("D:/a/tldw_server/tldw_server"),
+        "/d/a/tldw_server/tldw_server",
+        "Windows forward-slash drive paths should be visible to Git Bash subprocesses",
+    )
 
 
 def _compose_process_env(env_file: Path, marker_dir: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
