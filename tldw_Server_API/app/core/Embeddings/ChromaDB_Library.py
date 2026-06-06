@@ -5,6 +5,7 @@
 import os
 import re
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import islice
@@ -40,6 +41,12 @@ _CHROMA_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     ChromaError,
 )
+
+
+def _is_transient_chroma_segment_error(error: BaseException) -> bool:
+    """Return True for Chroma's transient HNSW segment-reader race."""
+    message = str(error).lower()
+    return "hnsw segment reader" in message and "nothing found on disk" in message
 
 #
 # Local Imports:
@@ -1687,6 +1694,28 @@ class ChromaDBManager:
                 )
             # Use the more specific ChromaError imports if they work for your version
             except ChromaError as ce:
+                if collection_name and _is_transient_chroma_segment_error(ce):
+                    logger.warning(
+                        f"User '{self.user_id}': Retrying ChromaDB query for collection "
+                        f"'{target_collection.name}' after transient segment-reader error: {ce}"
+                    )
+                    time.sleep(0.05)
+                    try:
+                        target_collection = self.client.get_or_create_collection(name=collection_name)
+                        return target_collection.query(
+                            query_embeddings=query_embeddings,
+                            n_results=n_results,
+                            where=self._clean_metadata(where_clause) if where_clause else None,
+                            include=effective_include_fields
+                        )
+                    except ChromaError as retry_error:
+                        logger.error(
+                            f"User '{self.user_id}': ChromaDB retry querying collection "
+                            f"'{target_collection.name}' failed: {retry_error}",
+                            exc_info=True)
+                        raise RuntimeError(
+                            f"ChromaDB query with precomputed embeddings failed: {retry_error}"
+                        ) from retry_error
                 logger.error(
                     f"User '{self.user_id}': ChromaDB error querying collection '{target_collection.name}': {ce}",
                     exc_info=True)

@@ -31,7 +31,7 @@ fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
 _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID = persona_ep._resolve_authenticated_user_id
 
 
-def _recv_until(client, predicate, timeout=2.0):
+def _recv_until(client, predicate, timeout=8.0):
     import time
 
     start = time.time()

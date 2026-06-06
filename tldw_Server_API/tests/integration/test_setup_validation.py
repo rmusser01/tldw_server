@@ -63,7 +63,7 @@ def test_update_config_masks_internal_errors(mocker):
     )
 
     with _make_client() as client:
-        resp = client.post('/api/v1/setup/config', json={'updates': {'Setup': {'setup_completed': 'true'}}})
+        resp = client.post('/api/v1/setup/config', json={'updates': {'Setup': {'allow_remote_setup_access': 'true'}}})
 
     assert resp.status_code == 500
     assert resp.json() == {'detail': 'Failed to persist setup configuration.'}

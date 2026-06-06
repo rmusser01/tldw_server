@@ -1,6 +1,11 @@
 # test_api_endpoints.py
 # Integration tests for Prompt Studio API endpoints
 
+import gc
+import os
+from pathlib import Path
+import time
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
@@ -8,7 +13,6 @@ import tempfile
 from unittest.mock import patch
 
 # Disable CSRF for testing
-import os
 os.environ["AUTH_MODE"] = "single_user"
 os.environ["CSRF_ENABLED"] = "false"
 
@@ -21,6 +25,21 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_st
 
 ########################################################################################################################
 # Test Client Setup
+
+
+def _unlink_sqlite_file_with_retry(db_path: str) -> None:
+    """Best-effort cleanup for SQLite files after TestClient thread teardown."""
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(f"{db_path}{suffix}")
+        for attempt in range(50):
+            try:
+                path.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                if attempt == 49:
+                    raise
+                gc.collect()
+                time.sleep(0.1)
 
 
 def _make_structured_prompt_definition_payload() -> dict:
@@ -201,7 +220,7 @@ def test_db():
         db.close()
     except Exception:
         _ = None
-    os.unlink(db_path)
+    _unlink_sqlite_file_with_retry(db_path)
 
 @pytest.fixture
 def auth_headers():

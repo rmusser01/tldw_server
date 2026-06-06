@@ -29,8 +29,8 @@ def test_rag_pipeline_schema_normalization():
 
 
 @pytest.mark.asyncio
-async def test_rag_pipeline_runner_basic(monkeypatch):
-    runner = EvaluationRunner(db_path=":memory:")
+async def test_rag_pipeline_runner_basic(monkeypatch, tmp_path):
+    runner = EvaluationRunner(db_path=str(tmp_path / "runner-evals.db"))
 
     # Stub DB methods to avoid sqlite writes
     class _StubDB:

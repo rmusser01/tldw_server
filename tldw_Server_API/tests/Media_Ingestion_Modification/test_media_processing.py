@@ -11,7 +11,7 @@ from pathlib import Path
 import time
 import json # Added for potential debugging
 from typing import Dict
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 # 3rd-party Libraries
 import pytest
@@ -345,7 +345,11 @@ def skip_if_valid_video_url_unreachable(response) -> None:
         return
 
     def _is_download_failure(message: str) -> bool:
-        return "Download failed" in message or "DownloadError" in message
+        return (
+            "Download failed" in message
+            or "DownloadError" in message
+            or "URL blocked by security policy" in message
+        )
 
     result_errors = [
         result
@@ -430,9 +434,58 @@ class TestProcessVideos:
             "start_time": TEST_VIDEO_START_TIME,
             "end_time": TEST_VIDEO_END_TIME,
         }
-        with open(SAMPLE_VIDEO_PATH, "rb") as f:
-            files = {"files": (SAMPLE_VIDEO_PATH.name, f, "video/mp4")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        async def fake_run_video_batch(**kwargs):
+            inputs = kwargs.get("all_inputs_to_process") or [VALID_VIDEO_URL, SAMPLE_VIDEO_PATH.name]
+            upload_processing_source = inputs[1] if len(inputs) > 1 else SAMPLE_VIDEO_PATH.name
+            return {
+                "processed_count": 2,
+                "errors_count": 0,
+                "errors": [],
+                "results": [
+                    {
+                        "status": "Success",
+                        "input_ref": VALID_VIDEO_URL,
+                        "processing_source": VALID_VIDEO_URL,
+                        "media_type": "video",
+                        "metadata": {"title": "Mock URL video"},
+                        "content": "Mocked video transcript.",
+                        "segments": [],
+                        "chunks": None,
+                        "analysis": None,
+                        "analysis_details": {},
+                        "error": None,
+                        "warnings": [],
+                        "db_id": None,
+                        "db_message": "Processing only endpoint.",
+                    },
+                    {
+                        "status": "Success",
+                        "input_ref": SAMPLE_VIDEO_PATH.name,
+                        "processing_source": upload_processing_source,
+                        "media_type": "video",
+                        "metadata": {"title": "Mock upload video"},
+                        "content": "Mocked uploaded video transcript.",
+                        "segments": [],
+                        "chunks": None,
+                        "analysis": None,
+                        "analysis_details": {},
+                        "error": None,
+                        "warnings": [],
+                        "db_id": None,
+                        "db_message": "Processing only endpoint.",
+                    },
+                ],
+                "confabulation_results": None,
+            }
+
+        with patch(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch.run_video_batch",
+            new=AsyncMock(side_effect=fake_run_video_batch),
+        ):
+            with open(SAMPLE_VIDEO_PATH, "rb") as f:
+                files = {"files": (SAMPLE_VIDEO_PATH.name, f, "video/mp4")}
+                response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (video multi).")

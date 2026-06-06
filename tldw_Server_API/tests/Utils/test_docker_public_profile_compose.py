@@ -28,6 +28,15 @@ def _literal(*parts: str) -> str:
     return "".join(parts)
 
 
+def _entrypoint_command(*args: str) -> list[str]:
+    shell = "/bin/sh"
+    if os.name == "nt":
+        shell = shutil.which("sh") or shutil.which("bash") or ""
+        if not shell:
+            pytest.skip("POSIX shell is required to execute the container entrypoint script")
+    return [shell, "Dockerfiles/entrypoints/tldw-app-first-run.sh", *args]
+
+
 def test_single_user_compose_has_no_postgres_service_or_dependency() -> None:
     compose = _compose("Dockerfiles/docker-compose.single-user.yml")
     _require("postgres" not in compose["services"], "single-user compose should not define postgres")
@@ -389,7 +398,7 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
     )
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -425,7 +434,7 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
     )
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "/usr/bin/env"],
+        _entrypoint_command("/usr/bin/env"),
         check=False,
         capture_output=True,
         text=True,
@@ -507,7 +516,7 @@ def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None
 
 def _run_entrypoint_with_env(env_file: Path, marker_dir: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -521,7 +530,7 @@ def test_entrypoint_honors_compose_process_env_when_env_file_missing(tmp_path: P
     marker_dir.mkdir()
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -542,7 +551,7 @@ def test_entrypoint_rejects_process_env_stale_database_url_without_env_file(tmp_
     marker_dir.mkdir()
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -565,7 +574,7 @@ def test_entrypoint_rejects_process_env_stale_jobs_database_url_without_env_file
     marker_dir.mkdir()
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -597,7 +606,7 @@ def test_entrypoint_rejects_existing_env_file_stale_database_urls_with_compose_p
     )
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -617,7 +626,7 @@ def test_entrypoint_missing_compose_postgres_env_errors_without_single_user_file
     env.pop("POSTGRES_PASSWORD")
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -731,7 +740,7 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
     env["PATH"] = f"{wrapper_dir}{os.pathsep}{env['PATH']}"
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "uvicorn"],
+        _entrypoint_command("uvicorn"),
         check=False,
         capture_output=True,
         text=True,

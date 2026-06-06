@@ -1,16 +1,24 @@
 import os
 import sqlite3
 import tempfile
+from contextlib import contextmanager
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
-def test_quizzes_basic_flow():
-
-
+@contextmanager
+def _temp_chacha_db(client_id: str = "test"):
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+        db = CharactersRAGDB(db_path, client_id=client_id)
+        try:
+            yield db
+        finally:
+            db.close_all_connections()
+
+
+def test_quizzes_basic_flow():
+    with _temp_chacha_db() as db:
 
         quiz_id = db.create_quiz(name="Quiz One", description="desc", media_id=None)
         assert isinstance(quiz_id, int)
@@ -58,9 +66,7 @@ def test_quizzes_basic_flow():
 
 
 def test_quiz_workspace_id_persists_and_can_move_between_scopes():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         db.upsert_workspace("ws-1", "Workspace One")
 
         quiz_id = db.create_quiz(
@@ -114,9 +120,7 @@ def test_quiz_workspace_id_persists_and_can_move_between_scopes():
 
 
 def test_fill_blank_accepts_delimited_alternates():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Fill blank alternates")
         question_id = db.create_question(
             quiz_id=quiz_id,
@@ -137,9 +141,7 @@ def test_fill_blank_accepts_delimited_alternates():
 
 
 def test_hint_penalty_applies_only_when_hint_used_on_correct_answer():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Hint penalty quiz")
         question_id = db.create_question(
             quiz_id=quiz_id,
@@ -184,9 +186,7 @@ def test_hint_penalty_applies_only_when_hint_used_on_correct_answer():
 
 
 def test_source_citations_roundtrip_through_attempt_snapshot_and_results():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Citation integrity quiz", media_id=501)
         citations = [
             {
@@ -229,9 +229,7 @@ def test_source_citations_roundtrip_through_attempt_snapshot_and_results():
 
 
 def test_fill_blank_supports_fuzzy_threshold_tokens():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Fill blank fuzzy token")
         question_id = db.create_question(
             quiz_id=quiz_id,
@@ -252,9 +250,7 @@ def test_fill_blank_supports_fuzzy_threshold_tokens():
 
 
 def test_fill_blank_supports_json_rule_config():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Fill blank JSON config")
         question_id = db.create_question(
             quiz_id=quiz_id,
@@ -275,9 +271,7 @@ def test_fill_blank_supports_json_rule_config():
 
 
 def test_multi_select_grades_set_equality():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Multi select quiz")
         question_id = db.create_question(
             quiz_id=quiz_id,
@@ -307,9 +301,7 @@ def test_multi_select_grades_set_equality():
 
 
 def test_matching_grades_key_value_pairs_case_insensitively():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
+    with _temp_chacha_db() as db:
         quiz_id = db.create_quiz(name="Matching quiz")
         question_id = db.create_question(
             quiz_id=quiz_id,

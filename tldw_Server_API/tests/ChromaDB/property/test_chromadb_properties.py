@@ -13,7 +13,6 @@ from typing import List, Dict, Any, Optional
 import tempfile
 import shutil
 from pathlib import Path
-import uuid
 import threading
 
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager, validate_user_id
@@ -475,8 +474,8 @@ class ChromaDBStateMachine(RuleBasedStateMachine):
         super().__init__()
         # Use a single shared manager across all examples to avoid too many open files
         self.manager = _get_shared_state_manager()
-        # Namespace prefix per test run to isolate collections
-        self._ns = f"sm_{uuid.uuid4().hex[:8]}_"
+        # Keep the namespace deterministic so Hypothesis can replay failures.
+        self._ns = "sm_stateful_"
         # Track state local to this run
         self.collections = {}  # collection_name -> set of ids
         self.documents = {}     # (collection, id) -> document

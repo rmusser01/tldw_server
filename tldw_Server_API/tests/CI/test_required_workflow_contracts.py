@@ -201,6 +201,44 @@ def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     assert checked >= len(step_names)
 
 
+def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    job = workflow["jobs"]["full-suite-linux-311-smoke"]
+    assert job["name"] == "Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})"
+
+    shards = job["strategy"]["matrix"]["shard"]
+    shard_paths = {shard["name"]: set(str(shard["paths"]).split()) for shard in shards}
+    assert set(shard_paths) == {"authnz-unit", "config", "core", "utils-http"}
+    assert shard_paths["authnz-unit"] == {"tldw_Server_API/tests/AuthNZ_Unit"}
+    assert shard_paths["config"] == {"tldw_Server_API/tests/Config"}
+    assert shard_paths["utils-http"] == {
+        "tldw_Server_API/tests/Utils",
+        "tldw_Server_API/tests/http_client",
+    }
+    assert {
+        "tldw_Server_API/tests/test_*.py",
+        "tldw_Server_API/tests/Health",
+        "tldw_Server_API/tests/sanity_tests",
+        "tldw_Server_API/tests/schemas",
+        "tldw_Server_API/tests/unit",
+    } == shard_paths["core"]
+
+    steps = job["steps"]
+    for step_name in [
+        "Smoke start server (single-user)",
+        "Smoke health check",
+        "Print smoke server log on failure",
+        "Smoke stop server",
+    ]:
+        step = _get_step(steps, step_name)
+        assert "matrix.shard.name == 'core'" in step["if"]
+
+    run_step = _get_step(steps, "Run Python 3.11 compatibility smoke tests")
+    run_script = run_step["run"]
+    assert "${{ matrix.shard.paths }}" in run_script
+    assert "test-results-linux-3.11-smoke" not in run_script
+
+
 def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [

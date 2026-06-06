@@ -71,7 +71,7 @@ def test_db(test_db_path):
 
     yield db
 
-    # Cleanup - don't call close() as it might not exist
+    db.close_all_connections()
     if os.path.exists(test_db_path):
         os.unlink(test_db_path)
 

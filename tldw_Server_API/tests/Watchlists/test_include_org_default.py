@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -7,7 +8,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 from tldw_Server_API.app.core.DB_Management.scope_context import set_scope, reset_scope
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
 
@@ -23,7 +24,8 @@ def _test_env(monkeypatch, tmp_path):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
 
     # Isolate AuthNZ DB as well
-    auth_db_path = Path.cwd() / "Databases" / "authnz_org_default.db"
+    asyncio.run(reset_db_pool())
+    auth_db_path = tmp_path / "authnz_org_default.db"
     # Ensure a fresh DB per run to avoid leftover rows across test sessions
     try:
         auth_db_path.unlink(missing_ok=True)  # type: ignore[arg-type]
@@ -35,12 +37,12 @@ def _test_env(monkeypatch, tmp_path):
             # File already absent; acceptable for cleanup
             pass
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{auth_db_path}")
+    asyncio.run(reset_db_pool())
 
     # Ensure AuthNZ tables exist
     ensure_authnz_tables(auth_db_path)
     # Remove any pre-existing test org slug to avoid UNIQUE violations across runs
     try:
-        import asyncio
         loop = asyncio.get_event_loop()
         async def _cleanup():
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get
@@ -56,7 +58,10 @@ def _test_env(monkeypatch, tmp_path):
             loop.run_until_complete(_cleanup())
     except Exception:
         _ = None
-    yield
+    try:
+        yield
+    finally:
+        asyncio.run(reset_db_pool())
 
 
 @pytest.mark.asyncio

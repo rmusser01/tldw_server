@@ -87,6 +87,8 @@ class AnalyticsDatabase:
     ensure all large-scale deployments avoid SQLite.
     """
 
+    _bootstrapped_backend_targets: set[str] = set()
+
     _SCHEMA_SQLITE = """
     CREATE TABLE IF NOT EXISTS search_analytics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -370,7 +372,6 @@ class AnalyticsDatabase:
             config=self._config_parser,
         )
         self._uses_shared_content_backend = backend is None and self._is_shared_content_backend(self._backend)
-        self._bootstrapped_backend_targets: set[str] = set()
         self._db_identifier = self._describe_backend(self._backend)
 
         if self._backend.backend_type == BackendType.SQLITE:
@@ -463,10 +464,10 @@ class AnalyticsDatabase:
     def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
         target = self._describe_backend(backend)
         with self._lock:
-            if target in self._bootstrapped_backend_targets:
+            if target in type(self)._bootstrapped_backend_targets:
                 return
             self._bootstrap_backend_schema(backend, target)
-            self._bootstrapped_backend_targets.add(target)
+            type(self)._bootstrapped_backend_targets.add(target)
 
     def _initialize_database(self) -> None:
         backend = self.backend

@@ -622,6 +622,7 @@ async def import_chatbook(
     import_media: bool | None = Form(None),
     import_embeddings: bool | None = Form(None),
     async_mode: bool | None = Form(None),
+    async_mode_query: bool | None = Query(None, alias="async_mode"),
     content_selections: str | None = Form(None),
     selected_openwebui_user_id: str | None = Form(None),
     service: ChatbookService = Depends(get_chatbook_service),
@@ -657,8 +658,9 @@ async def import_chatbook(
             import_request.import_media = import_media
         if import_embeddings is not None:
             import_request.import_embeddings = import_embeddings
-        if async_mode is not None:
-            import_request.async_mode = async_mode
+        resolved_async_mode = async_mode if async_mode is not None else async_mode_query
+        if resolved_async_mode is not None:
+            import_request.async_mode = resolved_async_mode
         if selected_openwebui_user_id is not None:
             import_request.selected_openwebui_user_id = selected_openwebui_user_id
         parsed_content_selections = _parse_import_content_selections_field(content_selections)
@@ -822,6 +824,7 @@ async def import_chatbook(
                     message=message,
                     source_format=import_request.source_format,
                     job_id=result,
+                    warnings=[],
                 )
             else:
                 # Sync mode - return the structured import result from the service wrapper.

@@ -237,10 +237,31 @@ jobs:
 
 
   full-suite-linux-311-smoke:
-    name: Full Suite (Ubuntu / Python 3.11)
+    name: Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [lint, syntax-check]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: core
+            paths: >-
+              tldw_Server_API/tests/test_*.py
+              tldw_Server_API/tests/Health
+              tldw_Server_API/tests/sanity_tests
+              tldw_Server_API/tests/schemas
+              tldw_Server_API/tests/unit
+          - name: authnz-unit
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit
+          - name: config
+            paths: >-
+              tldw_Server_API/tests/Config
+          - name: utils-http
+            paths: >-
+              tldw_Server_API/tests/Utils
+              tldw_Server_API/tests/http_client
     services:
       postgres:
         image: postgres:18-bookworm
@@ -271,6 +292,7 @@ jobs:
       TEST_DB_NAME: tldw_test
       TLDW_TEST_POSTGRES_REQUIRED: '1'
       WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
+      RESULTS_DIR: test-results-linux-3.11-${{ matrix.shard.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -329,6 +351,7 @@ jobs:
           pip install "psycopg[binary]>=3.1" pytest pytest-asyncio
 
       - name: Smoke start server (single-user)
+        if: matrix.shard.name == 'core'
         env:
           SERVER_LABEL: smoke
           AUTH_MODE: single_user
@@ -348,7 +371,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py start
 
       - name: Smoke health check
-        if: always()
+        if: always() && matrix.shard.name == 'core'
         env:
           SERVER_LABEL: smoke
           E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
@@ -358,7 +381,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
 
       - name: Print smoke server log on failure
-        if: failure()
+        if: failure() && matrix.shard.name == 'core'
         env:
           SERVER_LABEL: smoke
         shell: bash
@@ -373,7 +396,7 @@ jobs:
           PY
 
       - name: Smoke stop server
-        if: always()
+        if: always() && matrix.shard.name == 'core'
         env:
           SERVER_LABEL: smoke
         shell: bash
@@ -383,29 +406,21 @@ jobs:
       - name: Run Python 3.11 compatibility smoke tests
         shell: bash
         run: |
-          mkdir -p test-results-linux-3.11-smoke
+          mkdir -p "${RESULTS_DIR}"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
-            tldw_Server_API/tests/test_*.py \
-            tldw_Server_API/tests/AuthNZ_Unit \
-            tldw_Server_API/tests/Config \
-            tldw_Server_API/tests/Health \
-            tldw_Server_API/tests/Utils \
-            tldw_Server_API/tests/http_client \
-            tldw_Server_API/tests/sanity_tests \
-            tldw_Server_API/tests/schemas \
-            tldw_Server_API/tests/unit \
+            ${{ matrix.shard.paths }} \
             --durations=50 \
-            --junit-xml="test-results-linux-3.11-smoke/smoke.xml"
+            --junit-xml="${RESULTS_DIR}/smoke.xml"
 
       - name: Upload test results (Linux 3.11 smoke)
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: full-suite-ubuntu-py3.11-smoke
-          path: test-results-linux-3.11-smoke
+          name: full-suite-ubuntu-py3.11-${{ matrix.shard.name }}
+          path: ${{ env.RESULTS_DIR }}
 
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})

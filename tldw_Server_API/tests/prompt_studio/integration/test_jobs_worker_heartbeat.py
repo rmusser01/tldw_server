@@ -59,8 +59,10 @@ async def test_prompt_studio_heartbeat_renew_and_reclaim(tmp_path, monkeypatch):
 
     before = jm.get_job(job_id).get("leased_until")
     task = asyncio.create_task(sdk._auto_renew(acq))
-    await _orig_sleep(0)
-    await _orig_sleep(0)
+    for _ in range(20):
+        if renew_calls:
+            break
+        await _orig_sleep(0)
     sdk.stop()
     try:
         await asyncio.wait_for(task, timeout=1)
@@ -81,8 +83,8 @@ async def test_prompt_studio_heartbeat_renew_and_reclaim(tmp_path, monkeypatch):
     conn = jm._connect()
     try:
         conn.execute(
-            "UPDATE jobs SET leased_until = DATETIME('now', '-2 seconds') WHERE id = ?",
-            (job_id,),
+            "UPDATE jobs SET leased_until = ? WHERE id = ?",
+            ("2000-01-01 00:00:00", job_id),
         )
         conn.commit()
     finally:
@@ -118,8 +120,8 @@ async def test_prompt_studio_heartbeat_high_latency_renewal(tmp_path, monkeypatc
         conn = jm._connect()
         try:
             conn.execute(
-                "UPDATE jobs SET leased_until = DATETIME('now', '-1 seconds') WHERE id = ?",
-                (job_id,),
+                "UPDATE jobs SET leased_until = ? WHERE id = ?",
+                ("2000-01-01 00:00:00", job_id),
             )
             conn.commit()
         finally:
@@ -130,9 +132,6 @@ async def test_prompt_studio_heartbeat_high_latency_renewal(tmp_path, monkeypatc
     sdk._sleep = delayed_sleep
 
     task = asyncio.create_task(sdk._auto_renew(acq))
-    await _orig_sleep(0)
-    await _orig_sleep(0)
-    sdk.stop()
     try:
         await asyncio.wait_for(task, timeout=1)
     except asyncio.TimeoutError:
