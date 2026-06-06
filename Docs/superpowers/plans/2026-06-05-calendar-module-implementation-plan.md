@@ -808,7 +808,7 @@ Do not create:
 - Create: `apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarPage.test.tsx`
 - Create: `apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
   Test:
 
@@ -819,7 +819,7 @@ Do not create:
   - linked projection opens source/manage URL and does not show local edit controls;
   - local event/todo create form submits through service.
 
-- [ ] **Step 2: Run UI tests and verify failure**
+- [x] **Step 2: Run UI tests and verify failure**
 
   Run:
 
@@ -830,7 +830,7 @@ Do not create:
 
   Expected: FAIL because UI components do not exist.
 
-- [ ] **Step 3: Implement `CalendarPage` shell**
+- [x] **Step 3: Implement `CalendarPage` shell**
 
   Mirror the scheduled tasks page pattern:
 
@@ -840,7 +840,7 @@ Do not create:
   - show `RecoveryCallout` for unsupported, load errors, and partial sync states;
   - avoid landing-page copy; show the actual agenda/week workspace immediately.
 
-- [ ] **Step 4: Implement agenda and week views**
+- [x] **Step 4: Implement agenda and week views**
 
   Agenda:
 
@@ -855,7 +855,7 @@ Do not create:
   - no drag/drop in this slice;
   - provider-owned and linked projections visually distinct but not loud.
 
-- [ ] **Step 5: Implement drawer and filters**
+- [x] **Step 5: Implement drawer and filters**
 
   Drawer:
 
@@ -872,7 +872,7 @@ Do not create:
   - local/org/provider/linked filters;
   - item kind filters.
 
-- [ ] **Step 6: Run UI tests and commit**
+- [x] **Step 6: Run UI tests and commit**
 
   Run:
 
@@ -889,6 +889,17 @@ Do not create:
   git add apps/packages/ui/src/components/Option/Calendar
   git commit -m "feat(calendar): add practical agenda and week UI"
   ```
+
+  Review gate:
+
+  - Initial spec/production reviews found missing degraded state, provider local-context handling, view `kind`, local tag preservation, and empty filter semantics.
+  - Fix commits `622000fd41` and `dd3ff19f4d` added the view/API contract, provider-local context endpoint/readback, explicit empty-calendar filtering, degraded state UI, and regression coverage.
+  - Focused re-reviews cleared Critical/Important issues.
+  - Final verification passed:
+    - `bunx vitest run apps/packages/ui/src/services/__tests__/calendar.test.ts apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarPage.test.tsx apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx`
+    - `bunx vitest run src/services/__tests__/calendar.test.ts src/components/Option/Calendar/__tests__/CalendarPage.test.tsx src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx` from `apps/packages/ui`
+    - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/unit/test_calendar_service.py tldw_Server_API/tests/Calendar/integration/test_calendar_api.py -v`
+    - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/calendar.py tldw_Server_API/app/api/v1/schemas/calendar_schemas.py tldw_Server_API/app/core/Calendar/view_service.py -f json -o /tmp/bandit_calendar_task6_review_fix.json`
 
 ---
 

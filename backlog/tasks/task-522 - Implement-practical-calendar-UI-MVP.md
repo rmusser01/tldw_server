@@ -1,7 +1,7 @@
 ---
 id: TASK-522
 title: Implement practical calendar UI MVP
-status: In Progress
+status: Done
 labels:
 - implementation
 - calendar
