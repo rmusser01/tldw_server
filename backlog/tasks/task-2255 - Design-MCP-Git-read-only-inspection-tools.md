@@ -1,7 +1,7 @@
 ---
 id: TASK-2255
 title: Design MCP Git read-only inspection tools
-status: In Progress
+status: Done
 labels:
 - mcp
 - design
@@ -44,15 +44,15 @@ Verification: `git diff --check` passed for the branch diff; ASCII punctuation c
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Closed the MCP Git read-only inspection tools design task after verifying the approved design spec, implementation plan, implementation task, shared observability follow-up, Git module, profile grants, tests, and documentation had all landed on dev. This cleanup records the completed design outcome and leaves the implementation details in TASK-2258 and MCP-wide observability adoption in TASK-2256.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
