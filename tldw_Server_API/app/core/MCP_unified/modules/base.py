@@ -16,6 +16,8 @@ from typing import Any, Optional, TypeVar
 
 from loguru import logger
 
+from ..tool_observability import ensure_tool_definition_eval_metadata
+
 T = TypeVar("T")
 
 
@@ -718,7 +720,7 @@ def create_tool_definition(
     if metadata:
         tool_def["metadata"] = metadata
 
-    return tool_def
+    return ensure_tool_definition_eval_metadata(tool_def)
 
 
 def create_resource_definition(

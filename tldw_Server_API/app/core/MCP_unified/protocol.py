@@ -39,6 +39,12 @@ from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
 from .interfaces.runtime import MCPRuntimeDependencies, TelemetryProvider
 from .modules.base import BaseModule
+from .tool_observability import (
+    attach_execution_eval_metadata,
+    ensure_tool_definition_eval_metadata,
+    execution_eval_metadata_from_tool_definition,
+    sanitize_eval_profile_id,
+)
 
 try:  # pragma: no cover - optional dependency
     from redis.exceptions import RedisError
@@ -1821,8 +1827,18 @@ class MCPProtocol:
 
                 for tool in module_tools:
                     tool_copy = tool.copy()
-                    tool_copy["module"] = module_id
                     name = tool_copy.get("name")
+                    if isinstance(name, str) and name.strip():
+                        try:
+                            tool_copy = ensure_tool_definition_eval_metadata(tool_copy)
+                        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+                            context.logger.opt(exception=exc).debug(
+                                "Failed to attach eval metadata to listed tool",
+                                module_id=module_id,
+                                tool_name=name,
+                                error_type=exc.__class__.__name__,
+                            )
+                    tool_copy["module"] = module_id
                     # Scoped tool permissions: when scopes are present, list only matching tools
                     if self._mcp_scopes(context) and isinstance(name, str):
                         if not self._scope_allows_tool_name(context, name):
@@ -1870,6 +1886,18 @@ class MCPProtocol:
                 pass
             cleaned = [part.strip() for part in allowed.split(",") if part.strip()]
             return cleaned or None
+        return None
+
+    def _extract_eval_profile_id(self, context: RequestContext) -> str | None:
+        """Extract a non-sensitive profile identifier for execution eval metadata."""
+        metadata = getattr(context, "metadata", {})
+        if not isinstance(metadata, dict):
+            return None
+        for key in ("profile_id", "mcp_profile_id", "gateway_profile_id"):
+            value = metadata.get(key)
+            clean_value = sanitize_eval_profile_id(value)
+            if clean_value is not None:
+                return clean_value
         return None
 
     def _extract_tool_command(self, tool_args: Any) -> str | None:
@@ -2313,6 +2341,16 @@ class MCPProtocol:
 
         # Look up tool definition early for scope gating and validation
         tool_def = await self._resolve_tool_definition(module, tool_name)
+        if isinstance(tool_def, dict):
+            try:
+                tool_def = ensure_tool_definition_eval_metadata(tool_def)
+            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+                context.logger.opt(exception=exc).debug(
+                    "Failed to attach eval metadata to resolved tool definition",
+                    module_id=module_id,
+                    tool_name=tool_name,
+                    error_type=exc.__class__.__name__,
+                )
         tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
 
         # Determine write-capable status from sanitized arguments.
@@ -2587,6 +2625,21 @@ class MCPProtocol:
                         span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - t0) * 1000.0))
 
                 # Format result
+                duration_ms = max(0.0, (time.time() - t0) * 1000.0)
+                profile_id = self._extract_eval_profile_id(context)
+                result = attach_execution_eval_metadata(
+                    result,
+                    tool_name=tool_name,
+                    tool_def=tool_def,
+                    profile_id=profile_id,
+                    duration_ms=duration_ms,
+                )
+                execution_eval = execution_eval_metadata_from_tool_definition(
+                    tool_name=tool_name,
+                    tool_def=tool_def,
+                    profile_id=profile_id,
+                    duration_ms=duration_ms,
+                )
                 if isinstance(result, str):
                     content = [{"type": "text", "text": result}]
                 elif isinstance(result, list):
@@ -2612,7 +2665,12 @@ class MCPProtocol:
                     duration_ms=max(0.0, (time.time() - t0) * 1000.0),
                     arguments_hash=args_hash,
                 )
-                response_payload = {"content": content, "module": module_name, "tool": tool_name}
+                response_payload = {
+                    "content": content,
+                    "module": module_name,
+                    "tool": tool_name,
+                    "eval": execution_eval,
+                }
                 return response_payload
 
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
