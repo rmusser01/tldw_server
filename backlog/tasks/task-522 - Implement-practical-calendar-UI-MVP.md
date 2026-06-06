@@ -1,7 +1,7 @@
 ---
 id: TASK-522
 title: Implement practical calendar UI MVP
-status: Done
+status: In Progress
 labels:
 - implementation
 - calendar
@@ -20,6 +20,12 @@ modified_files:
 - apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarPage.test.tsx
 - apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx
 - apps/packages/ui/src/components/Option/Calendar/__tests__/root-dom-setup.ts
+- apps/packages/ui/src/services/calendar.ts
+- apps/packages/ui/src/services/__tests__/calendar.test.ts
+- tldw_Server_API/app/api/v1/endpoints/calendar.py
+- tldw_Server_API/app/api/v1/schemas/calendar_schemas.py
+- tldw_Server_API/app/core/Calendar/view_service.py
+- tldw_Server_API/tests/Calendar/integration/test_calendar_api.py
 - vitest.config.ts
 ---
 

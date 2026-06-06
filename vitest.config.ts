@@ -9,6 +9,7 @@ export default {
   test: {
     environment: "node",
     setupFiles: ["./apps/packages/ui/src/components/Option/Calendar/__tests__/root-dom-setup.ts"],
+    // Root bunx Vitest is intentionally scoped to Calendar tests for this PRD slice.
     include: [
       "apps/packages/ui/src/services/__tests__/calendar.test.ts",
       "apps/packages/ui/src/components/Option/Calendar/__tests__/**/*.test.tsx"

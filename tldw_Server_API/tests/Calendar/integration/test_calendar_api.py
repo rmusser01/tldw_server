@@ -342,6 +342,40 @@ def test_agenda_returns_items_in_bounded_range(
     assert [view_item["calendar_item_id"] for view_item in payload["items"]] == [item["id"]]
 
 
+def test_agenda_view_items_include_kind_and_local_tags(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    client, _db, _reminder_service = calendar_api_client
+    calendar = _create_calendar(client)
+    todo_response = client.post(
+        "/api/v1/calendar/items",
+        json={
+            "calendar_id": calendar["id"],
+            "kind": "todo",
+            "title": "Tag figures",
+            "due_at": "2026-06-05T17:00:00Z",
+            "local_tags": ["draft", "review"],
+        },
+    )
+    assert todo_response.status_code == 201, todo_response.text
+
+    response = client.get(
+        "/api/v1/calendar/views/agenda",
+        params={
+            "start_at": "2026-06-05T00:00:00Z",
+            "end_at": "2026-06-06T00:00:00Z",
+            "include_scheduled_tasks": "false",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    [view_item] = response.json()["items"]
+    assert view_item["kind"] == "todo"
+    assert view_item["start_at"] == "2026-06-05T17:00:00Z"
+    assert view_item["due_at"] == "2026-06-05T17:00:00Z"
+    assert view_item["local_tags"] == ["draft", "review"]
+
+
 def test_create_annotation(calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub]) -> None:
     client, _db, _reminder_service = calendar_api_client
     calendar = _create_calendar(client)
@@ -356,6 +390,24 @@ def test_create_annotation(calendar_api_client: tuple[TestClient, CalendarDataba
     payload = response.json()
     assert payload["body"] == "Bring notes"
     assert payload["tags"] == ["meeting"]
+
+
+def test_update_provider_owned_item_local_tags(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    client, db, _reminder_service = calendar_api_client
+    _calendar, provider_item = _create_provider_item(db)
+
+    response = client.put(
+        f"/api/v1/calendar/items/{provider_item.id}/local-tags",
+        json={"tags": ["remote", "follow-up"]},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["body"] == ""
+    assert payload["tags"] == ["remote", "follow-up"]
+    assert db.get_item(provider_item.id).local_tags_json is None
 
 
 def test_create_link(calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub]) -> None:

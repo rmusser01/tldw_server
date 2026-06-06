@@ -77,6 +77,7 @@ const agendaItems = [
     id: "item-1",
     calendar_item_id: 1,
     calendar_id: 1,
+    kind: "event",
     title: "Paper review",
     source_owner: "tldw",
     start_at: "2026-06-05T09:00:00Z",
@@ -84,25 +85,29 @@ const agendaItems = [
     due_at: null,
     all_day: false,
     status: "confirmed",
+    local_tags: [],
     metadata: {}
   },
   {
     id: "item-2",
     calendar_item_id: 2,
     calendar_id: 1,
+    kind: "todo",
     title: "Tag figures",
     source_owner: "tldw",
-    start_at: null,
+    start_at: "2026-06-05T17:00:00Z",
     end_at: null,
     due_at: "2026-06-05T17:00:00Z",
     all_day: false,
     status: "needs_action",
-    metadata: { kind: "todo" }
+    local_tags: ["figures"],
+    metadata: {}
   },
   {
     id: "item-3",
     calendar_item_id: 3,
     calendar_id: 2,
+    kind: "event",
     title: "Provider planning sync",
     source_owner: "provider",
     start_at: "2026-06-06T16:00:00Z",
@@ -111,12 +116,14 @@ const agendaItems = [
     all_day: false,
     status: "confirmed",
     read_only_reason: "Managed by CalDAV",
+    local_tags: [],
     metadata: { provider: "caldav" }
   },
   {
     id: "watchlist-job:17",
     calendar_item_id: null,
     calendar_id: null,
+    kind: "event",
     title: "Daily source digest",
     source_owner: "linked_projection",
     start_at: "2026-06-07T14:00:00Z",
@@ -125,6 +132,7 @@ const agendaItems = [
     all_day: false,
     status: "scheduled",
     read_only_reason: "Managed by Watchlists",
+    local_tags: [],
     link: {
       target_type: "watchlist_job",
       target_id: "17",
@@ -233,6 +241,50 @@ describe("CalendarPage", () => {
     expectPresent(within(agenda).getByText("Provider"))
     expectPresent(within(agenda).getByText("Linked"))
     expectPresent(within(agenda).getByText("Manage in Watchlists"))
+  })
+
+  it("uses backend item kind for todo filtering when due-only todos are normalized into start_at", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    expectPresent(await screen.findByText("Tag figures"))
+    await user.click(screen.getByLabelText("Events"))
+
+    expect(screen.queryByText("Paper review")).toBeNull()
+    expectPresent(screen.getByText("Tag figures"))
+  })
+
+  it("allows clearing every calendar filter without falling back to all calendars", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    expectPresent(await screen.findByText("Paper review"))
+    await user.click(screen.getByLabelText("Research"))
+    await user.click(screen.getByLabelText("Lab"))
+
+    expect(screen.queryByText("Paper review")).toBeNull()
+    expect(screen.queryByText("Provider planning sync")).toBeNull()
+  })
+
+  it("shows a degraded RecoveryCallout for partial calendar data", async () => {
+    mocks.getCalendarAgenda.mockResolvedValueOnce({
+      start_at: "2026-06-05T00:00:00.000Z",
+      end_at: "2026-06-12T00:00:00.000Z",
+      items: agendaItems,
+      partial: true,
+      warnings: ["CalDAV binding 7 fell back to bounded polling"]
+    })
+
+    renderPage()
+
+    expectPresent(
+      await screen.findByRole("heading", {
+        name: "Calendar data is partially available"
+      })
+    )
+    expect(screen.getByLabelText("Diagnostics").textContent).toContain(
+      "CalDAV binding 7 fell back to bounded polling"
+    )
   })
 
   it("creates a local event through the drawer form", async () => {

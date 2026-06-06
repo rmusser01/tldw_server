@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   deleteCalendarItem: vi.fn(),
   createCalendarAnnotation: vi.fn(),
   createCalendarLink: vi.fn(),
+  updateCalendarLocalTags: vi.fn(),
   copyCalendarItemIntoTldw: vi.fn()
 }))
 
@@ -18,6 +19,7 @@ vi.mock("@/services/calendar", () => ({
   deleteCalendarItem: (...args: unknown[]) => mocks.deleteCalendarItem(...args),
   createCalendarAnnotation: (...args: unknown[]) => mocks.createCalendarAnnotation(...args),
   createCalendarLink: (...args: unknown[]) => mocks.createCalendarLink(...args),
+  updateCalendarLocalTags: (...args: unknown[]) => mocks.updateCalendarLocalTags(...args),
   copyCalendarItemIntoTldw: (...args: unknown[]) => mocks.copyCalendarItemIntoTldw(...args)
 }))
 
@@ -47,6 +49,7 @@ const providerItem = {
   id: "provider-42",
   calendar_item_id: 42,
   calendar_id: 1,
+  kind: "event",
   title: "External sync review",
   source_owner: "provider",
   start_at: "2026-06-05T16:00:00Z",
@@ -55,6 +58,7 @@ const providerItem = {
   all_day: false,
   status: "confirmed",
   read_only_reason: "Managed by CalDAV",
+  local_tags: ["remote"],
   link: null,
   metadata: { provider: "caldav" }
 }
@@ -63,6 +67,7 @@ const linkedProjection = {
   id: "watchlist-job:17",
   calendar_item_id: null,
   calendar_id: null,
+  kind: "event",
   title: "Daily source digest",
   source_owner: "linked_projection",
   start_at: "2026-06-07T14:00:00Z",
@@ -71,6 +76,7 @@ const linkedProjection = {
   all_day: false,
   status: "scheduled",
   read_only_reason: "Managed by Watchlists",
+  local_tags: [],
   link: {
     target_type: "watchlist_job",
     target_id: "17",
@@ -85,6 +91,7 @@ const localItem = {
   id: "local-7",
   calendar_item_id: 7,
   calendar_id: 1,
+  kind: "event",
   title: "Draft notes",
   source_owner: "tldw",
   start_at: "2026-06-05T09:00:00Z",
@@ -92,6 +99,7 @@ const localItem = {
   due_at: null,
   all_day: false,
   status: "confirmed",
+  local_tags: ["draft"],
   link: {
     target_type: "media",
     target_id: "abc",
@@ -99,7 +107,7 @@ const localItem = {
     url: "/media/abc",
     metadata: {}
   },
-  metadata: { local_tags: ["draft"] }
+  metadata: {}
 }
 
 const renderDrawer = (
@@ -154,6 +162,68 @@ describe("CalendarItemDrawer", () => {
       expect(mocks.copyCalendarItemIntoTldw).toHaveBeenCalledWith(42, {
         target_calendar_id: 1
       })
+    })
+  })
+
+  it("lets provider-owned items save tldw-local tags, annotations, and links without editing provider fields", async () => {
+    const user = userEvent.setup()
+    mocks.updateCalendarLocalTags.mockResolvedValue({
+      id: 3,
+      calendar_item_id: 42,
+      author_user_id: 1,
+      body: "",
+      tags: ["remote", "follow-up"],
+      created_at: "2026-06-05T00:00:00Z",
+      updated_at: "2026-06-05T00:00:00Z"
+    })
+    mocks.createCalendarAnnotation.mockResolvedValue({
+      id: 4,
+      calendar_item_id: 42,
+      author_user_id: 1,
+      body: "Ask vendor",
+      tags: [],
+      created_at: "2026-06-05T00:00:00Z",
+      updated_at: "2026-06-05T00:00:00Z"
+    })
+    mocks.createCalendarLink.mockResolvedValue({
+      id: 5,
+      calendar_item_id: 42,
+      target_type: "note",
+      target_id: "/notes/vendor",
+      label: "Vendor note",
+      url: "/notes/vendor",
+      metadata: {},
+      created_at: "2026-06-05T00:00:00Z",
+      updated_at: "2026-06-05T00:00:00Z"
+    })
+
+    renderDrawer(providerItem)
+
+    expect(await screen.findByDisplayValue("External sync review")).toHaveProperty("disabled", true)
+    const tags = screen.getByRole("textbox", { name: "Tags" })
+    expect(tags).toHaveProperty("disabled", false)
+    await user.type(tags, ", follow-up")
+    await user.type(screen.getByRole("textbox", { name: "Annotation" }), "Ask vendor")
+    await user.type(screen.getByRole("textbox", { name: "Link label" }), "Vendor note")
+    await user.type(screen.getByRole("textbox", { name: "Link URL" }), "/notes/vendor")
+    await user.click(screen.getByRole("button", { name: "Save context" }))
+
+    await waitFor(() => {
+      expect(mocks.updateCalendarItem).not.toHaveBeenCalled()
+      expect(mocks.updateCalendarLocalTags).toHaveBeenCalledWith(42, {
+        tags: ["remote", "follow-up"]
+      })
+      expect(mocks.createCalendarAnnotation).toHaveBeenCalledWith(42, {
+        body: "Ask vendor",
+        tags: []
+      })
+      expect(mocks.createCalendarLink).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          label: "Vendor note",
+          url: "/notes/vendor"
+        })
+      )
     })
   })
 
@@ -236,6 +306,40 @@ describe("CalendarItemDrawer", () => {
         expect.objectContaining({
           label: "Research note",
           url: "/notes/note-9"
+        })
+      )
+    })
+  })
+
+  it("does not clear local tags when an older view response omitted tag details", async () => {
+    const user = userEvent.setup()
+    mocks.updateCalendarItem.mockResolvedValue({
+      id: 7,
+      calendar_id: 1,
+      kind: "event",
+      source_owner: "tldw",
+      provider_owned: false,
+      title: "Draft notes updated",
+      all_day: false,
+      status: "confirmed",
+      local_tags: ["unchanged"],
+      metadata: {},
+      created_at: "2026-06-05T00:00:00Z",
+      updated_at: "2026-06-05T00:00:00Z"
+    })
+
+    renderDrawer({ ...localItem, local_tags: undefined, metadata: {} } as never)
+
+    const title = await screen.findByRole("textbox", { name: "Title" })
+    await user.clear(title)
+    await user.type(title, "Draft notes updated")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => {
+      expect(mocks.updateCalendarItem).toHaveBeenCalledWith(
+        7,
+        expect.not.objectContaining({
+          local_tags: expect.anything()
         })
       )
     })

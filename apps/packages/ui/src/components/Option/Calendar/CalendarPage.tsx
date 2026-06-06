@@ -40,7 +40,7 @@ const startOfWeek = (date: Date): Date => {
 }
 
 const inferItemKind = (item: CalendarViewItemResponse): CalendarKindFilter =>
-  item.metadata?.kind === "todo" || (item.due_at && !item.start_at) ? "todo" : "event"
+  item.kind === "todo" ? "todo" : "event"
 
 const sourceFilterForItem = (
   item: CalendarViewItemResponse,
@@ -57,7 +57,7 @@ export const CalendarPage: React.FC = () => {
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
   const [calendarSupported, setCalendarSupported] = useState<boolean | null>(null)
-  const [selectedCalendarIds, setSelectedCalendarIds] = useState<number[]>([])
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<number[] | null>(null)
   const [selectedSources, setSelectedSources] =
     useState<CalendarSourceFilter[]>(ALL_SOURCES)
   const [selectedKinds, setSelectedKinds] = useState<CalendarKindFilter[]>(ALL_KINDS)
@@ -119,13 +119,12 @@ export const CalendarPage: React.FC = () => {
   const calendars = calendarsQuery.data?.items ?? []
 
   React.useEffect(() => {
-    if (selectedCalendarIds.length || calendars.length === 0) return
+    if (selectedCalendarIds !== null || calendars.length === 0) return
     setSelectedCalendarIds(calendars.map((calendar) => calendar.id))
-  }, [calendars, selectedCalendarIds.length])
+  }, [calendars, selectedCalendarIds])
 
-  const selectedCalendarQueryIds = selectedCalendarIds.length
-    ? selectedCalendarIds
-    : calendars.map((calendar) => calendar.id)
+  const selectedCalendarQueryIds =
+    selectedCalendarIds ?? calendars.map((calendar) => calendar.id)
 
   const agendaQuery = useQuery({
     queryKey: [
@@ -232,6 +231,28 @@ export const CalendarPage: React.FC = () => {
       })
     : null
 
+  const partialWarnings = [
+    ...(agendaQuery.data?.partial && !agendaQuery.data?.warnings?.length
+      ? ["Agenda returned partial calendar data"]
+      : agendaQuery.data?.warnings ?? []),
+    ...(weekQuery.data?.partial && !weekQuery.data?.warnings?.length
+      ? ["Week view returned partial calendar data"]
+      : weekQuery.data?.warnings ?? [])
+  ]
+  const partialState = partialWarnings.length
+    ? buildCapabilityState({
+        featureName: "Calendar",
+        capabilityName: "calendar workspace",
+        endpoint: CALENDAR_SUPPORT_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        reason: "partial",
+        partialErrors: partialWarnings,
+        title: "Calendar data is partially available",
+        message: "Some calendar data loaded, but one or more calendar sources reported partial results."
+      })
+    : null
+
   const loading =
     connectionConfigLoading ||
     calendarSupported === null ||
@@ -301,6 +322,21 @@ export const CalendarPage: React.FC = () => {
               onClick: () => navigate("/settings/health")
             }
           ]}
+        />
+      ) : null}
+
+      {partialState ? (
+        <RecoveryCallout
+          state={partialState.state}
+          title={partialState.title}
+          message={partialState.message}
+          diagnostics={partialState.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => {
+              void refreshViews()
+            }
+          }}
         />
       ) : null}
 

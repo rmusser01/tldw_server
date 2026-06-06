@@ -295,6 +295,12 @@ class CalendarAnnotationCreateRequest(BaseModel):
     tags: list[str] | None = None
 
 
+class CalendarLocalTagsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tags: list[str] = Field(default_factory=list)
+
+
 class CalendarAnnotationResponse(BaseModel):
     id: int
     calendar_item_id: int
@@ -373,6 +379,7 @@ class CalendarViewLinkResponse(BaseModel):
 class CalendarViewItemResponse(BaseModel):
     id: str
     title: str
+    kind: CalendarItemKind | str
     source_owner: str
     start_at: str | None = None
     end_at: str | None = None
@@ -383,6 +390,7 @@ class CalendarViewItemResponse(BaseModel):
     location: str | None = None
     all_day: bool = False
     status: str | None = None
+    local_tags: list[str] = Field(default_factory=list)
     read_only_reason: str | None = None
     recurrence_id: int | None = None
     occurrence_index: int | None = None
@@ -394,6 +402,8 @@ class CalendarViewResponse(BaseModel):
     start_at: str
     end_at: str
     items: list[CalendarViewItemResponse] = Field(default_factory=list)
+    partial: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CalendarReminderCreateRequest(ReminderTaskCreateRequest):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Protocol
@@ -73,6 +74,7 @@ class CalendarViewItem:
 
     id: str
     title: str
+    kind: str
     source_owner: str
     start_at: str | None
     end_at: str | None = None
@@ -83,6 +85,7 @@ class CalendarViewItem:
     location: str | None = None
     all_day: bool = False
     status: str | None = None
+    local_tags: list[str] = field(default_factory=list)
     read_only_reason: str | None = None
     recurrence_id: int | None = None
     occurrence_index: int | None = None
@@ -97,6 +100,8 @@ class CalendarViewResult:
     start_at: str
     end_at: str
     items: list[CalendarViewItem]
+    partial: bool = False
+    warnings: list[str] = field(default_factory=list)
 
 
 class CalendarViewService:
@@ -240,6 +245,7 @@ class CalendarViewService:
                 CalendarViewItem(
                     id=f"projection:scheduled_task:{task.id}",
                     title=task.title,
+                    kind="event",
                     description=task.description,
                     source_owner=CALENDAR_SOURCE_OWNER_LINKED_PROJECTION,
                     start_at=next_run_at.isoformat(),
@@ -334,6 +340,7 @@ def _view_item_from_row(item: CalendarItemRow) -> CalendarViewItem:
         id=f"calendar_item:{item.id}",
         calendar_id=item.calendar_id,
         calendar_item_id=item.id,
+        kind=item.kind,
         title=item.title,
         description=item.description,
         location=item.location,
@@ -343,6 +350,7 @@ def _view_item_from_row(item: CalendarItemRow) -> CalendarViewItem:
         due_at=item.due_at,
         all_day=item.all_day,
         status=item.status,
+        local_tags=_json_list(item.local_tags_json),
         read_only_reason="provider" if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER else None,
     )
 
@@ -359,6 +367,7 @@ def _view_item_from_occurrence(
         id=f"calendar_item:{item.id}:occurrence:{occurrence.occurrence_index}:{start_at}",
         calendar_id=item.calendar_id,
         calendar_item_id=item.id,
+        kind=item.kind,
         title=item.title,
         description=item.description,
         location=item.location,
@@ -368,9 +377,22 @@ def _view_item_from_occurrence(
         due_at=start_at if item.kind == "todo" and item.due_at else None,
         all_day=item.all_day,
         status=item.status,
+        local_tags=_json_list(item.local_tags_json),
         recurrence_id=recurrence.id,
         occurrence_index=occurrence.occurrence_index,
     )
+
+
+def _json_list(raw: str | None) -> list[str]:
+    if raw is None:
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
 
 
 def _item_overlaps_window(item: CalendarItemRow, window_start: datetime, window_end: datetime) -> bool:

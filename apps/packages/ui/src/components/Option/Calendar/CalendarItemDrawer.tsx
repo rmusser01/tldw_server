@@ -2,6 +2,7 @@ import React from "react"
 import { Button, Divider, Drawer, Input, Select, Space, Typography, message } from "antd"
 import type {
   CalendarItemKind,
+  CalendarItemUpdateRequest,
   CalendarResponse,
   CalendarViewItemResponse
 } from "@/services/calendar"
@@ -11,7 +12,8 @@ import {
   createCalendarItem,
   createCalendarLink,
   deleteCalendarItem,
-  updateCalendarItem
+  updateCalendarItem,
+  updateCalendarLocalTags
 } from "@/services/calendar"
 import { CalendarOwnershipBadge } from "./CalendarOwnershipBadge"
 
@@ -26,12 +28,24 @@ const parseTags = (value: string): string[] =>
 
 const inferKind = (item: CalendarViewItemResponse | null): CalendarItemKind => {
   if (!item) return "event"
-  if (item.metadata?.kind === "todo" || (item.due_at && !item.start_at)) return "todo"
+  if (item.kind === "todo") return "todo"
   return "event"
 }
 
 const itemId = (item: CalendarViewItemResponse): string | number =>
   item.calendar_item_id ?? item.id
+
+const itemLocalTags = (item: CalendarViewItemResponse | null): string[] | null => {
+  if (!item) return []
+  if (Array.isArray(item.local_tags)) return item.local_tags
+  const metadataTags = item.metadata?.local_tags ?? item.metadata?.tags
+  return Array.isArray(metadataTags) ? metadataTags.map(String) : null
+}
+
+const sameTags = (left: string[] | null, right: string[]): boolean =>
+  Array.isArray(left) &&
+  left.length === right.length &&
+  left.every((tag, index) => tag === right[index])
 
 export interface CalendarItemDrawerProps {
   open: boolean
@@ -60,6 +74,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const [annotation, setAnnotation] = React.useState("")
   const [linkLabel, setLinkLabel] = React.useState("")
   const [linkUrl, setLinkUrl] = React.useState("")
+  const [initialTags, setInitialTags] = React.useState<string[] | null>([])
+  const [tagsDirty, setTagsDirty] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
 
   const selectedCalendar =
@@ -67,7 +83,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const isCreate = !item
   const isProviderOwned = item?.source_owner === "provider"
   const isLinkedProjection = item?.source_owner === "linked_projection"
-  const isReadOnly = Boolean(isProviderOwned || isLinkedProjection || item?.read_only_reason)
+  const canEditItemFields = Boolean(isCreate || (!isProviderOwned && !isLinkedProjection && !item?.read_only_reason))
+  const canEditLocalContext = Boolean(item?.calendar_item_id && !isLinkedProjection)
 
   React.useEffect(() => {
     if (!open) return
@@ -80,8 +97,10 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     setStartAt(toInputDateTime(item?.start_at))
     setEndAt(toInputDateTime(item?.end_at))
     setDueAt(toInputDateTime(item?.due_at))
-    const metadataTags = item?.metadata?.local_tags ?? item?.metadata?.tags
-    setTags(Array.isArray(metadataTags) ? metadataTags.join(", ") : "")
+    const nextTags = itemLocalTags(item)
+    setInitialTags(nextTags)
+    setTags(Array.isArray(nextTags) ? nextTags.join(", ") : "")
+    setTagsDirty(false)
     setAnnotation("")
     setLinkLabel("")
     setLinkUrl("")
@@ -93,9 +112,18 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   }
 
   const handleSave = async () => {
-    if (!calendarId || !title.trim()) return
+    if (!calendarId || (!title.trim() && canEditItemFields)) return
     setSaving(true)
     try {
+      const currentTags = parseTags(tags)
+      const shouldSaveTags = tagsDirty || (initialTags !== null && !sameTags(initialTags, currentTags))
+
+      if (item && !canEditItemFields) {
+        await saveLocalContext(currentTags, shouldSaveTags)
+        await refreshAndClose()
+        return
+      }
+
       const payload = {
         calendar_id: calendarId,
         kind,
@@ -105,12 +133,11 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
         start_at: kind === "event" ? startAt || null : null,
         end_at: kind === "event" ? endAt || null : null,
         due_at: kind === "todo" ? dueAt || null : null,
-        status: kind === "todo" ? "needs_action" : "confirmed",
-        local_tags: parseTags(tags)
+        status: kind === "todo" ? "needs_action" : "confirmed"
       }
 
       if (item) {
-        await updateCalendarItem(itemId(item), {
+        const updates: CalendarItemUpdateRequest = {
           kind: payload.kind,
           title: payload.title,
           description: payload.description,
@@ -119,36 +146,49 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
           end_at: payload.end_at,
           due_at: payload.due_at,
           status: payload.status,
-          local_tags: payload.local_tags,
           source_owner: item.source_owner,
           provider_owned: false
-        })
+        }
+        if (shouldSaveTags) {
+          updates.local_tags = currentTags
+        }
+        await updateCalendarItem(itemId(item), updates)
       } else {
-        await createCalendarItem(payload)
+        await createCalendarItem({ ...payload, local_tags: currentTags })
       }
 
-      if (item?.calendar_item_id && annotation.trim()) {
-        await createCalendarAnnotation(item.calendar_item_id, {
-          body: annotation.trim(),
-          tags: []
-        })
-      }
-
-      if (item?.calendar_item_id && (linkLabel.trim() || linkUrl.trim())) {
-        await createCalendarLink(item.calendar_item_id, {
-          target_type: "note",
-          target_id: linkUrl.trim() || linkLabel.trim(),
-          label: linkLabel.trim() || null,
-          url: linkUrl.trim() || null,
-          metadata: {}
-        })
-      }
+      await saveLocalContext(currentTags, false)
 
       await refreshAndClose()
     } catch (error: any) {
       message.error(error?.message || "Unable to save calendar item")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const saveLocalContext = async (currentTags: string[], shouldSaveTags: boolean) => {
+    if (!item?.calendar_item_id) return
+
+    if (shouldSaveTags) {
+      await updateCalendarLocalTags(item.calendar_item_id, { tags: currentTags })
+    }
+
+    if (annotation.trim()) {
+      await createCalendarAnnotation(item.calendar_item_id, {
+        body: annotation.trim(),
+        tags: []
+      })
+    }
+
+    if (linkLabel.trim() || linkUrl.trim()) {
+      await createCalendarLink(item.calendar_item_id, {
+        target_type: "note",
+        target_id: linkUrl.trim() || linkLabel.trim(),
+        label: linkLabel.trim() || null,
+        url: linkUrl.trim() || null,
+        metadata: {}
+      })
     }
   }
 
@@ -228,7 +268,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             <Select
               aria-label="Calendar"
               value={calendarId ?? undefined}
-              disabled={isReadOnly}
+              disabled={!canEditItemFields}
               onChange={(value) => setCalendarId(Number(value))}
               options={calendars.map((calendar) => ({
                 value: calendar.id,
@@ -244,7 +284,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 type="radio"
                 name="calendar-kind"
                 checked={kind === "event"}
-                disabled={isReadOnly}
+                disabled={!canEditItemFields}
                 onChange={() => setKind("event")}
               />
               Event
@@ -254,7 +294,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 type="radio"
                 name="calendar-kind"
                 checked={kind === "todo"}
-                disabled={isReadOnly}
+                disabled={!canEditItemFields}
                 onChange={() => setKind("todo")}
               />
               Todo
@@ -266,7 +306,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             <Input
               aria-label="Title"
               value={title}
-              disabled={isReadOnly}
+              disabled={!canEditItemFields}
               onChange={(event) => setTitle(event.target.value)}
             />
           </label>
@@ -276,7 +316,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             <Input.TextArea
               aria-label="Description"
               value={description}
-              disabled={isReadOnly}
+              disabled={!canEditItemFields}
               autoSize={{ minRows: 2, maxRows: 4 }}
               onChange={(event) => setDescription(event.target.value)}
             />
@@ -287,7 +327,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             <Input
               aria-label="Location"
               value={location}
-              disabled={isReadOnly}
+              disabled={!canEditItemFields}
               onChange={(event) => setLocation(event.target.value)}
             />
           </label>
@@ -299,7 +339,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 <Input
                   aria-label="Start"
                   value={startAt}
-                  disabled={isReadOnly}
+                  disabled={!canEditItemFields}
                   placeholder="2026-06-05T09:00"
                   onChange={(event) => setStartAt(event.target.value)}
                 />
@@ -309,7 +349,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 <Input
                   aria-label="End"
                   value={endAt}
-                  disabled={isReadOnly}
+                  disabled={!canEditItemFields}
                   placeholder="2026-06-05T10:00"
                   onChange={(event) => setEndAt(event.target.value)}
                 />
@@ -321,7 +361,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
               <Input
                 aria-label="Due"
                 value={dueAt}
-                disabled={isReadOnly}
+                disabled={!canEditItemFields}
                 placeholder="2026-06-05T17:00"
                 onChange={(event) => setDueAt(event.target.value)}
               />
@@ -333,12 +373,15 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             <Input
               aria-label="Tags"
               value={tags}
-              disabled={isReadOnly}
-              onChange={(event) => setTags(event.target.value)}
+              disabled={!isCreate && !canEditLocalContext}
+              onChange={(event) => {
+                setTags(event.target.value)
+                setTagsDirty(true)
+              }}
             />
           </label>
 
-          {!isReadOnly && item?.calendar_item_id ? (
+          {canEditLocalContext ? (
             <>
               <Divider className="my-1" />
               <label className="flex flex-col gap-1">
@@ -380,12 +423,17 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 Copy into tldw
               </Button>
             ) : null}
-            {!isReadOnly ? (
+            {canEditItemFields ? (
               <Button type="primary" loading={saving} onClick={handleSave}>
                 Save item
               </Button>
             ) : null}
-            {!isReadOnly && item ? (
+            {!canEditItemFields && canEditLocalContext ? (
+              <Button type="primary" loading={saving} onClick={handleSave}>
+                Save context
+              </Button>
+            ) : null}
+            {canEditItemFields && item ? (
               <Button danger loading={saving} onClick={handleDelete}>
                 Delete item
               </Button>

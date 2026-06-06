@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalendarItemUpdateRequest,
     CalendarLinkCreateRequest,
     CalendarLinkResponse,
+    CalendarLocalTagsUpdateRequest,
     CalendarListResponse,
     CalendarMembershipCreateRequest,
     CalendarMembershipDeleteResponse,
@@ -190,6 +191,7 @@ def _view_response(result: CalendarViewResult) -> CalendarViewResponse:
             CalendarViewItemResponse(
                 id=item.id,
                 title=item.title,
+                kind=item.kind,
                 source_owner=item.source_owner,
                 start_at=item.start_at,
                 end_at=item.end_at,
@@ -200,6 +202,7 @@ def _view_response(result: CalendarViewResult) -> CalendarViewResponse:
                 location=item.location,
                 all_day=item.all_day,
                 status=item.status,
+                local_tags=item.local_tags,
                 read_only_reason=item.read_only_reason,
                 recurrence_id=item.recurrence_id,
                 occurrence_index=item.occurrence_index,
@@ -207,7 +210,13 @@ def _view_response(result: CalendarViewResult) -> CalendarViewResponse:
                 metadata=item.metadata,
             )
         )
-    return CalendarViewResponse(start_at=result.start_at, end_at=result.end_at, items=items)
+    return CalendarViewResponse(
+        start_at=result.start_at,
+        end_at=result.end_at,
+        items=items,
+        partial=getattr(result, "partial", False),
+        warnings=getattr(result, "warnings", []),
+    )
 
 
 @router.post(
@@ -444,6 +453,29 @@ async def create_calendar_annotation(
             actor_user_id=_user_id(current_user),
             item_id=item_id,
             body=payload.body,
+            tags=payload.tags,
+        )
+    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalendarAnnotationResponse.from_row(row)
+
+
+@router.put(
+    "/items/{item_id}/local-tags",
+    response_model=CalendarAnnotationResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+)
+async def update_calendar_local_tags(
+    payload: CalendarLocalTagsUpdateRequest,
+    item_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
+    service: CalendarService = Depends(get_calendar_service),
+) -> CalendarAnnotationResponse:
+    try:
+        row = service.update_local_tags(
+            actor_user_id=_user_id(current_user),
+            item_id=item_id,
             tags=payload.tags,
         )
     except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:

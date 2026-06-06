@@ -12,6 +12,7 @@ import {
   copyCalendarItemIntoTldw,
   createCalDavAccount,
   createCalendarItem,
+  updateCalendarLocalTags,
   createExternalCalendarBinding,
   deleteCalendarItem,
   deleteCalDavAccount,
@@ -130,6 +131,31 @@ describe("calendar service contract", () => {
       expect.objectContaining({
         method: "DELETE",
         path: "/api/v1/calendar/items/42"
+      })
+    )
+  })
+
+  it("updates local calendar tags through the dedicated local metadata endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      id: 6,
+      calendar_item_id: 42,
+      author_user_id: 1,
+      body: "",
+      tags: ["planning", "review"],
+      created_at: "2026-06-05T09:00:00+00:00",
+      updated_at: "2026-06-05T09:00:00+00:00"
+    })
+
+    const response = await updateCalendarLocalTags(42, {
+      tags: ["planning", "review"]
+    })
+
+    expect(response.tags).toEqual(["planning", "review"])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "PUT",
+        path: "/api/v1/calendar/items/42/local-tags",
+        body: { tags: ["planning", "review"] }
       })
     )
   })

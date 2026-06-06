@@ -96,6 +96,10 @@ export interface CalendarItemUpdateRequest {
   provider_owned?: boolean
 }
 
+export interface CalendarLocalTagsUpdateRequest {
+  tags: string[]
+}
+
 export type CalendarItemMutationContext =
   | {
       source_owner: CalendarSourceOwner | string
@@ -179,6 +183,7 @@ export interface CalendarViewLinkResponse {
 export interface CalendarViewItemResponse {
   id: string
   title: string
+  kind: CalendarItemKind | string
   source_owner: string
   start_at?: string | null
   end_at?: string | null
@@ -189,6 +194,7 @@ export interface CalendarViewItemResponse {
   location?: string | null
   all_day: boolean
   status?: string | null
+  local_tags: string[]
   read_only_reason?: string | null
   recurrence_id?: number | null
   occurrence_index?: number | null
@@ -200,6 +206,8 @@ export interface CalendarViewResponse {
   start_at: string
   end_at: string
   items: CalendarViewItemResponse[]
+  partial?: boolean
+  warnings?: string[]
 }
 
 export interface CalendarAnnotationCreateRequest {
@@ -511,6 +519,17 @@ export async function createCalendarAnnotation(
   return await bgRequest<CalendarAnnotationResponse>({
     path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/annotations`),
     method: "POST",
+    body: payload
+  })
+}
+
+export async function updateCalendarLocalTags(
+  itemId: string | number,
+  payload: CalendarLocalTagsUpdateRequest
+): Promise<CalendarAnnotationResponse> {
+  return await bgRequest<CalendarAnnotationResponse>({
+    path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/local-tags`),
+    method: "PUT",
     body: payload
   })
 }
