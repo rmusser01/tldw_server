@@ -176,9 +176,9 @@ Do not create:
 - Remote tombstone retention default: 90 days unless local annotations/links exist.
 - Calendar Jobs domain: `calendar`.
 - Calendar sync job type: `calendar_sync`.
-- Calendar sync idempotency key: `calendar_sync:{binding_id}:{window_start}:{window_end}:{reason}`.
-- Calendar sync queue env var: `CALENDAR_SYNC_JOBS_QUEUE`, default `default`.
-- Startup flags: `CALENDAR_SYNC_SCHEDULER_ENABLED=false` and `CALENDAR_SYNC_WORKER_ENABLED=false` by default.
+- Calendar sync idempotency key: `calendar:sync:binding:{binding_id}:{window_start}:{window_end}:{reason}`.
+- Calendar sync queue: `default`.
+- Startup flags: `CALENDAR_SYNC_SCHEDULER_ENABLED=false` and `CALENDAR_SYNC_JOBS_WORKER_ENABLED=false` by default.
 
 ---
 
@@ -1224,8 +1224,9 @@ Do not create:
 - Modify: `Docs/superpowers/specs/2026-06-05-calendar-module-prd-design.md` only if implementation discovers a necessary spec correction.
 - Modify: `Docs/superpowers/plans/2026-06-05-calendar-module-implementation-plan.md` task statuses during execution.
 - Modify: `backlog/tasks/task-516 - Plan-first-class-calendar-module-implementation.md`
+- Modify: `backlog/tasks/task-526 - Document-Calendar-module-rollout-and-run-final-verification.md`
 
-- [ ] **Step 1: Write docs**
+- [x] **Step 1: Write docs**
 
   `Calendar_Module.md` should cover:
 
@@ -1249,7 +1250,7 @@ Do not create:
   - verify VTODO is ignored;
   - verify account revoke.
 
-- [ ] **Step 2: Run backend calendar tests**
+- [x] **Step 2: Run backend calendar tests**
 
   Run:
 
@@ -1260,7 +1261,9 @@ Do not create:
 
   Expected: PASS.
 
-- [ ] **Step 3: Run frontend calendar tests**
+  Result: PASS on 2026-06-05: 99 passed, 7 warnings.
+
+- [x] **Step 3: Run frontend calendar tests**
 
   Run:
 
@@ -1273,7 +1276,9 @@ Do not create:
 
   Expected: PASS.
 
-- [ ] **Step 4: Run route/openapi focused checks**
+  Result: PASS on 2026-06-05: 4 files passed, 25 tests passed.
+
+- [x] **Step 4: Run route/openapi focused checks**
 
   Run:
 
@@ -1285,7 +1290,12 @@ Do not create:
 
   Expected: PASS or update the route parity test only if it intentionally tracks all option routes.
 
-- [ ] **Step 5: Run Bandit on touched backend scope**
+  Result:
+
+  - PASS on 2026-06-05: `test_openapi_config_jobs.py` passed 4 tests.
+  - Route parity guard blocked: root Vitest config excluded the file, and rerunning with `apps/tldw-frontend/vitest.config.ts` reported missing `jsdom` then left the Vitest process open until terminated.
+
+- [x] **Step 5: Run Bandit on touched backend scope**
 
   Run:
 
@@ -1302,7 +1312,9 @@ Do not create:
 
   Expected: no new high/medium findings in touched Calendar code. Fix new findings before finalizing.
 
-- [ ] **Step 6: Optional browser verification**
+  Result: PASS on 2026-06-05. JSON written to `/tmp/bandit_calendar_module.json`; totals were 0 high, 0 medium, and 0 low findings.
+
+- [x] **Step 6: Optional browser verification**
 
   If a dev server is already available or can be started:
 
@@ -1317,7 +1329,9 @@ Do not create:
   - provider-owned fixture item is visibly read-only;
   - sync settings states do not overlap on mobile/desktop.
 
-- [ ] **Step 7: Update Backlog and commit docs**
+  Result: attempted on 2026-06-05 with `bun run dev -- -p 3007`. The dev server started, but `/calendar` remained compiling under Next/Turbopack and both browser navigation attempts timed out before the route rendered. Full provider/Fastmail smoke remains manual because it requires a real provider account and app password.
+
+- [x] **Step 7: Update Backlog and commit docs**
 
   Update `TASK-516` final summary with:
 
@@ -1332,7 +1346,8 @@ Do not create:
   git add Docs/Design/Calendar_Module.md \
           Docs/Development/Calendar_CalDAV_Smoke_Test.md \
           Docs/superpowers/plans/2026-06-05-calendar-module-implementation-plan.md \
-          "backlog/tasks/task-516 - Plan-first-class-calendar-module-implementation.md"
+          "backlog/tasks/task-516 - Plan-first-class-calendar-module-implementation.md" \
+          "backlog/tasks/task-526 - Document-Calendar-module-rollout-and-run-final-verification.md"
   git commit -m "docs(calendar): document calendar module rollout"
   ```
 
