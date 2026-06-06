@@ -39,9 +39,9 @@ def test_rotate_backups_sanitizes_filesystem_failures(monkeypatch, tmp_path):
     def fail_exists(_path):
         raise OSError("cannot stat /private/backups")
 
-    monkeypatch.setattr(Path, "exists", fail_exists)
-
-    message = legacy_backup.rotate_backups(tmp_path)
+    with monkeypatch.context() as scoped_patch:
+        scoped_patch.setattr(Path, "exists", fail_exists)
+        message = legacy_backup.rotate_backups(tmp_path)
 
     assert message == "Failed to rotate backups."
     assert "cannot stat" not in message
