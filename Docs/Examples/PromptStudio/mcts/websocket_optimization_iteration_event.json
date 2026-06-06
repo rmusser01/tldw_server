@@ -1,32 +1,36 @@
 {
-  "event": "optimization_iteration",
-  "optimization_id": "opt_123456",
-  "iteration": 8,
-  "max_iterations": 30,
-  "current_metric": 0.74,
-  "best_metric": 0.81,
-  "progress": 0.27,
-  "strategy": "mcts",
-  "sim_index": 41,
-  "depth": 3,
-  "reward": 0.77,
-  "best_reward": 0.81,
-  "token_spend_so_far": 38420,
-  "trace_summary": {
-    "best_path": [
-      "root",
-      "rewrite_system_instruction",
-      "tighten_examples"
-    ],
-    "top_candidates": [
-      {
-        "node_id": "n7",
-        "score": 0.81
-      },
-      {
-        "node_id": "n9",
-        "score": 0.79
-      }
-    ]
+  "type": "optimization_iteration",
+  "data": {
+    "optimization_id": "opt_123456",
+    "iteration": 41,
+    "max_iterations": 64,
+    "current_metric": 0.74,
+    "best_metric": 0.81,
+    "progress": 0.64,
+    "strategy": "mcts",
+    "sim_index": 41,
+    "depth": 3,
+    "reward": 0.77,
+    "best_reward": 0.81,
+    "token_spend_so_far": 38420,
+    "trace_summary": {
+      "prompt_id": 12,
+      "system_hash": "sha256:docs-example-system",
+      "best_path": [
+        "root",
+        "rewrite_system_instruction",
+        "tighten_examples"
+      ],
+      "top_candidates": [
+        {
+          "node_id": "n7",
+          "score": 0.81
+        },
+        {
+          "node_id": "n9",
+          "score": 0.79
+        }
+      ]
+    }
   }
 }

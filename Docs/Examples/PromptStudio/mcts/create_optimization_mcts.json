@@ -1,11 +1,22 @@
 {
-  "project_id": "proj_docs_example",
-  "prompt_id": "prompt_baseline",
-  "strategy": "mcts",
-  "max_iterations": 30,
-  "token_budget": 120000,
-  "mcts_simulations": 64,
-  "mcts_max_depth": 4,
-  "prompt_candidates_per_node": 3,
-  "ws_throttle_every": 2
+  "project_id": 1,
+  "initial_prompt_id": 12,
+  "test_case_ids": [1, 2, 3],
+  "optimization_config": {
+    "optimizer_type": "mcts",
+    "max_iterations": 30,
+    "target_metric": "accuracy",
+    "strategy_params": {
+      "mcts_simulations": 64,
+      "mcts_max_depth": 4,
+      "mcts_exploration_c": 1.4,
+      "prompt_candidates_per_node": 3,
+      "score_dedup_bin": 0.1,
+      "token_budget": 120000,
+      "early_stop_no_improve": 5,
+      "ws_throttle_every": 2,
+      "trace_top_k": 3
+    }
+  },
+  "name": "MCTS Sequence Optimization"
 }

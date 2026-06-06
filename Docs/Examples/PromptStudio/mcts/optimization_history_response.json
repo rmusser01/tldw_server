@@ -1,37 +1,58 @@
 {
-  "optimization_id": "opt_123456",
-  "status": "completed",
-  "strategy": "mcts",
-  "created_at": "2026-02-28T18:00:00Z",
-  "updated_at": "2026-02-28T18:07:30Z",
-  "final_metrics": {
-    "best_metric": 0.81,
-    "tree_nodes": 146,
-    "avg_branching": 2.4,
-    "tokens_spent": 118330,
-    "duration_ms": 450122,
-    "best_reward": 0.81,
-    "errors": 0,
-    "applied_params": {
-      "mcts_simulations": 64,
-      "mcts_max_depth": 4
-    },
-    "trace": {
-      "best_path": [
-        "root",
-        "rewrite_system_instruction",
-        "tighten_examples"
-      ],
-      "top_candidates": [
-        {
-          "node_id": "n7",
-          "score": 0.81
+  "success": true,
+  "data": {
+    "optimization": {
+      "optimization_id": "opt_123456",
+      "status": "completed",
+      "strategy": "mcts",
+      "created_at": "2026-02-28T18:00:00Z",
+      "updated_at": "2026-02-28T18:07:30Z",
+      "final_metrics": {
+        "best_metric": 0.81,
+        "tree_nodes": 146,
+        "avg_branching": 2.4,
+        "tokens_spent": 118330,
+        "duration_ms": 450122,
+        "best_reward": 0.81,
+        "errors": 0,
+        "applied_params": {
+          "mcts_simulations": 64,
+          "mcts_max_depth": 4
         },
-        {
-          "node_id": "n9",
-          "score": 0.79
+        "trace": {
+          "best_path": [
+            "root",
+            "rewrite_system_instruction",
+            "tighten_examples"
+          ],
+          "top_candidates": [
+            {
+              "node_id": "n7",
+              "score": 0.81
+            },
+            {
+              "node_id": "n9",
+              "score": 0.79
+            }
+          ]
         }
-      ]
-    }
+      }
+    },
+    "job": {
+      "job_id": "job_789",
+      "status": "completed"
+    },
+    "progress": {
+      "iterations_completed": 64,
+      "max_iterations": 64,
+      "status": "completed"
+    },
+    "timeline": [
+      {
+        "iteration": 41,
+        "metric": 0.81,
+        "event": "optimization_iteration"
+      }
+    ]
   }
 }
