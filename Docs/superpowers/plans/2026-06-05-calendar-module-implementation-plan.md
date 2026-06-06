@@ -685,7 +685,7 @@ Do not create:
 - Modify: `apps/packages/ui/src/public/_locales/en/option.json`
 - Modify: `apps/packages/ui/src/services/tldw/client-ownership.ts` if required by ownership guard tests.
 
-- [ ] **Step 1: Write failing frontend service tests**
+- [x] **Step 1: Write failing frontend service tests**
 
   Mock `bgRequest` like `scheduled-tasks-control-plane.test.ts`. Cover:
 
@@ -695,7 +695,7 @@ Do not create:
   - `getCalendarAgenda()` URL-encodes query params and requires `start_at`/`end_at`;
   - external account functions never send secret values except to create/verify endpoints.
 
-- [ ] **Step 2: Run service tests and verify failure**
+- [x] **Step 2: Run service tests and verify failure**
 
   Run:
 
@@ -705,7 +705,7 @@ Do not create:
 
   Expected: FAIL because service file does not exist.
 
-- [ ] **Step 3: Implement typed frontend service**
+- [x] **Step 3: Implement typed frontend service**
 
   `calendar.ts` should export TypeScript types matching backend schema names and functions:
 
@@ -731,7 +731,7 @@ Do not create:
 
   Use `bgRequest` and `toAllowedPath` consistently.
 
-- [ ] **Step 4: Add route wrappers**
+- [x] **Step 4: Add route wrappers**
 
   Create `option-calendar.tsx` matching scheduled tasks:
 
@@ -759,7 +759,7 @@ Do not create:
   export default dynamic(() => import("@/routes/option-calendar"), { ssr: false })
   ```
 
-- [ ] **Step 5: Register navigation**
+- [x] **Step 5: Register navigation**
 
   In `route-registry.tsx`:
 
@@ -770,7 +770,7 @@ Do not create:
 
   Add locale entries in `option.json`, keeping JSON valid.
 
-- [ ] **Step 6: Run frontend tests and commit**
+- [x] **Step 6: Run frontend tests and commit**
 
   Run:
 

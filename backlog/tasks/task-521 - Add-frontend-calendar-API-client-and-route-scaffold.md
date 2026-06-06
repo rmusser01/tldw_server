@@ -34,12 +34,14 @@ Implement Task 5 from the Calendar module implementation plan: typed frontend ca
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation complete for Task 5 frontend scope. Added typed calendar API client and service tests, minimal CalendarPage placeholder because Task 6 UI component did not exist, option/Next route wrappers, `/calendar` route registry entry, and `option:calendar.nav` locale key. Follow-up review remediation added recursive secret redaction for non-create/verify payloads, required delete targets with provider/read-only mutation context, and removed the broad root Vitest config by switching the calendar service/test imports to relative paths. Verification: initial red run failed as expected with missing `@/services/calendar`; final root and UI-package runs passed with 1 file / 8 tests. Bandit not applicable: frontend-only TypeScript/TSX changes.
+
+Review gate: spec review passed with no required fixes. Code-quality review found three Important issues: shallow nested secret stripping, delete without provider/read-only context, and broad root Vitest config. Fixed in `1025692111` and `67af3c9a59`; final focused re-review reported no Critical, Important, or Minor findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the Task 5 frontend calendar scaffold: typed calendar service client, contract tests, minimal placeholder CalendarPage, option and Next route wrappers, route registry navigation, and the `calendar.nav` locale key. Review remediation hardened non-create/verify secret stripping, required delete calls to carry item mutation context before local/provider read-only checks, and removed the temporary root Vitest shim so broad root test behavior is not hijacked. Verification recorded: initial red run failed on missing `@/services/calendar`; final `bunx vitest run apps/packages/ui/src/services/__tests__/calendar.test.ts` and UI-package `bunx vitest run src/services/__tests__/calendar.test.ts` both passed with 1 file and 8 tests. Bandit not applicable because no backend Python was touched.
+Added the Task 5 frontend calendar scaffold: typed calendar service client, contract tests, minimal placeholder CalendarPage, option and Next route wrappers, route registry navigation, and the `calendar.nav` locale key. Review remediation hardened non-create/verify secret stripping, required delete calls to carry item mutation context before local/provider read-only checks, and removed the temporary root Vitest shim so broad root test behavior is not hijacked. Verification recorded: initial red run failed on missing `@/services/calendar`; final `bunx vitest run apps/packages/ui/src/services/__tests__/calendar.test.ts` and UI-package `bunx vitest run src/services/__tests__/calendar.test.ts` both passed with 1 file and 8 tests. Spec and code-quality review gates are clear after remediation. Bandit not applicable because no backend Python was touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
