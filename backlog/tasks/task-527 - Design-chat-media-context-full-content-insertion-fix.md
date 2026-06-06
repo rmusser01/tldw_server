@@ -10,8 +10,11 @@ labels:
 priority: medium
 documentation:
 - Docs/superpowers/specs/2026-06-06-chat-media-context-full-content-design.md
+- Docs/superpowers/plans/2026-06-06-chat-media-context-full-content-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-06-06-chat-media-context-full-content-design.md
+- Docs/superpowers/plans/2026-06-06-chat-media-context-full-content-implementation-plan.md
+- apps/packages/ui/src/utils/rag-format.ts
 - apps/packages/ui/src/components/Knowledge/hooks/useKnowledgeSearch.ts
 - apps/packages/ui/src/components/Knowledge/hooks/useFileSearch.ts
 - apps/packages/ui/src/components/Knowledge/KnowledgePanel.tsx
