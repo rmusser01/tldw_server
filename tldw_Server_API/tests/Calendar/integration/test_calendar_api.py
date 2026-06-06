@@ -16,6 +16,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import ScheduledTask
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 pytestmark = pytest.mark.integration
 
@@ -72,6 +74,9 @@ def calendar_api_client(
 ) -> Generator[tuple[TestClient, CalendarDatabase, _ReminderServiceStub], None, None]:
     db = CalendarDatabase(db_path=tmp_path / "calendar_api.db")
     db.ensure_schema()
+    jobs_db_path = tmp_path / "calendar_jobs.db"
+    ensure_jobs_tables(jobs_db_path)
+    jobs_manager = JobManager(jobs_db_path)
     reminder_service = _ReminderServiceStub()
     caldav_provider = _CalDavProviderStub()
     current_user_id = {"value": 1}
@@ -99,12 +104,15 @@ def calendar_api_client(
     app.dependency_overrides[calendar_endpoint.get_scheduled_tasks_service] = lambda: reminder_service
     if hasattr(calendar_endpoint, "get_caldav_provider"):
         app.dependency_overrides[calendar_endpoint.get_caldav_provider] = lambda: caldav_provider
+    if hasattr(calendar_endpoint, "get_calendar_job_manager"):
+        app.dependency_overrides[calendar_endpoint.get_calendar_job_manager] = lambda: jobs_manager
 
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             client.current_user_id = current_user_id  # type: ignore[attr-defined]
             client.current_tenant_id = current_tenant_id  # type: ignore[attr-defined]
             client.caldav_provider = caldav_provider  # type: ignore[attr-defined]
+            client.jobs_manager = jobs_manager  # type: ignore[attr-defined]
             yield client, db, reminder_service
     finally:
         app.dependency_overrides.clear()
@@ -770,6 +778,56 @@ def test_external_binding_uses_request_user_tenant_for_created_calendar(
     assert account.json()["tenant_id"] == "tenant-a"
     assert binding.status_code == 201, binding.text
     assert binding.json()["calendar_id"] == calendar["id"]
+
+
+def test_trigger_external_calendar_sync_queues_calendar_job(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    client, _db, _reminder_service = calendar_api_client
+    calendar = _create_calendar(client, name="Personal import target")
+    account = client.post(
+        "/api/v1/calendar/external/accounts",
+        json={"provider": "caldav", "display_name": "Fastmail"},
+    )
+    assert account.status_code == 201, account.text
+    binding = client.post(
+        "/api/v1/calendar/external/bindings",
+        json={
+            "account_id": account.json()["id"],
+            "calendar_id": calendar["id"],
+            "remote_calendar_id": "remote-calendar",
+        },
+    )
+    assert binding.status_code == 201, binding.text
+    binding_id = binding.json()["id"]
+
+    response = client.post(
+        f"/api/v1/calendar/external/bindings/{binding_id}/sync",
+        json={
+            "reason": "manual",
+            "window_start": "2026-06-01T00:00:00+00:00",
+            "window_end": "2026-06-08T00:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["binding_id"] == binding_id
+    assert body["queued"] is True
+    assert body["status"] == "queued"
+    assert body["job_id"] is not None
+    jobs_manager = client.jobs_manager  # type: ignore[attr-defined]
+    job = jobs_manager.get_job(body["job_id"])
+    assert job["domain"] == "calendar"
+    assert job["job_type"] == "calendar_sync"
+    assert job["payload"] == {
+        "binding_id": binding_id,
+        "window_start": "2026-06-01T00:00:00+00:00",
+        "window_end": "2026-06-08T00:00:00+00:00",
+        "reason": "manual",
+    }
+    assert "password" not in json.dumps(job["payload"])
+    assert "secret_ref" not in json.dumps(job["payload"])
 
 
 def test_external_binding_list_and_sync_placeholders_enforce_owner_scope(

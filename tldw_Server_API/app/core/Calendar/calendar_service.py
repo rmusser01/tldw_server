@@ -40,10 +40,12 @@ class CalendarService:
         db: CalendarDatabase,
         tenant_id: str = "default",
         org_role_resolver: OrgRoleResolver | None = None,
+        job_manager: Any | None = None,
     ) -> None:
         self.db = db
         self.tenant_id = tenant_id
         self.org_role_resolver = org_role_resolver
+        self.job_manager = job_manager
 
     def create_calendar(
         self,
@@ -370,6 +372,30 @@ class CalendarService:
             local_tags_json=source.local_tags_json,
             metadata_json=source.metadata_json,
             copied_from_item_id=source.id,
+        )
+
+    def queue_binding_sync(
+        self,
+        *,
+        actor_user_id: int,
+        binding_id: int,
+        reason: str,
+        window_start: str,
+        window_end: str,
+    ) -> Any:
+        if self.job_manager is None:
+            raise CalendarValidationError("Calendar sync job manager is not configured")
+        from tldw_Server_API.app.core.Calendar.calendar_sync_worker import queue_calendar_binding_sync
+
+        return queue_calendar_binding_sync(
+            db=self.db,
+            job_manager=self.job_manager,
+            actor_user_id=actor_user_id,
+            tenant_id=self.tenant_id,
+            binding_id=binding_id,
+            reason=reason,
+            window_start=window_start,
+            window_end=window_end,
         )
 
     def _can_read_calendar(self, actor_user_id: int, calendar_id: int) -> bool:

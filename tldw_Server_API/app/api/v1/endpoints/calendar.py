@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
@@ -34,6 +35,7 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalendarSyncEventListResponse,
     CalendarSyncEventResponse,
     CalendarResponse,
+    CalendarSyncTriggerRequest,
     CalendarSyncTriggerResponse,
     CalendarViewItemResponse,
     CalendarViewLinkResponse,
@@ -77,6 +79,8 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarItemRow,
     CalendarRecurrenceRow,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import (
     ScheduledTasksControlPlaneService,
 )
@@ -90,6 +94,10 @@ def get_calendar_database() -> CalendarDatabase:
 
 def get_scheduled_tasks_service() -> ScheduledTasksControlPlaneService:
     return ScheduledTasksControlPlaneService()
+
+
+def get_calendar_job_manager() -> JobManager:
+    return jobs_manager_from_env()
 
 
 def get_caldav_provider() -> CalDavProvider:
@@ -183,6 +191,22 @@ def _provider_result_dict(result: Any) -> dict[str, Any]:
     if hasattr(result, "model_dump"):
         return result.model_dump()
     return dict(result)
+
+
+def _sync_window_for_binding(
+    binding: Any,
+    payload: CalendarSyncTriggerRequest | None,
+) -> tuple[str, str, str]:
+    now = datetime.now(timezone.utc)
+    default_start = (now - timedelta(days=int(binding.lookback_days))).isoformat()
+    default_end = (now + timedelta(days=int(binding.lookahead_days))).isoformat()
+    if payload is None:
+        return default_start, default_end, "manual"
+    return (
+        payload.window_start or default_start,
+        payload.window_end or default_end,
+        payload.reason,
+    )
 
 
 def _external_account_metadata(payload: ExternalCalendarAccountCreateRequest) -> dict[str, Any] | None:
@@ -1000,13 +1024,34 @@ async def list_external_calendar_binding_sync_events(
     dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
 )
 async def trigger_external_calendar_sync(
+    payload: CalendarSyncTriggerRequest | None = Body(default=None),
     binding_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
+    job_manager: JobManager = Depends(get_calendar_job_manager),
 ) -> CalendarSyncTriggerResponse:
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
+        binding = db.get_external_binding(binding_id)
+        window_start, window_end, reason = _sync_window_for_binding(binding, payload)
+        queued = CalendarService(
+            db=db,
+            tenant_id=_tenant_id(current_user),
+            job_manager=job_manager,
+        ).queue_binding_sync(
+            actor_user_id=_user_id(current_user),
+            binding_id=binding_id,
+            reason=reason,
+            window_start=window_start,
+            window_end=window_end,
+        )
     except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
         raise _map_calendar_error(exc) from exc
-    return CalendarSyncTriggerResponse(binding_id=binding_id)
+    return CalendarSyncTriggerResponse(
+        binding_id=binding_id,
+        queued=queued.queued,
+        status=queued.status,
+        job_id=queued.job_id,
+        idempotency_key=queued.idempotency_key,
+    )

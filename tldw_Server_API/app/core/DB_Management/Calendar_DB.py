@@ -1263,6 +1263,28 @@ class CalendarDatabase:
                 raise CalendarItemNotFound("Provider calendar item not found")
             return self._item_from_row(row)
 
+    def list_provider_items_for_binding(
+        self,
+        external_binding_id: int,
+        *,
+        include_deleted: bool = False,
+        include_remote_deleted: bool = False,
+    ) -> list[CalendarItemRow]:
+        clauses = ["external_binding_id = ?", "provider_owned = 1"]
+        params: list[Any] = [external_binding_id]
+        if not include_deleted:
+            clauses.append("deleted_at IS NULL")
+        if not include_remote_deleted:
+            clauses.append("remote_deleted_at IS NULL")
+        sql = f"""
+            SELECT * FROM calendar_items
+            WHERE {' AND '.join(clauses)}
+            ORDER BY COALESCE(start_at, due_at, created_at) ASC, id ASC
+            """  # nosec B608
+        with self.connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [self._item_from_row(row) for row in rows]
+
     def delete_remote_tombstones_eligible_for_cleanup(
         self,
         *,

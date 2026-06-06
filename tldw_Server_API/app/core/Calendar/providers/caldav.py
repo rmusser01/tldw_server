@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from html import escape as html_escape
 import ipaddress
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -180,19 +181,22 @@ class CalDavProvider:
         remote_calendar_url: str,
         username: str,
         password: str,
+        window_start: str | None = None,
+        window_end: str | None = None,
         limit: int = 500,
     ) -> list[CalDavEvent]:
         safe_url = self._validate_http_url(remote_calendar_url)
+        time_range = self._calendar_query_time_range(window_start=window_start, window_end=window_end)
         response = self._request(
             "REPORT",
             safe_url,
             username=username,
             password=password,
             depth="1",
-            body="""<?xml version="1.0" encoding="utf-8" ?>
+            body=f"""<?xml version="1.0" encoding="utf-8" ?>
 <cal:calendar-query xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
   <d:prop><d:getetag /><cal:calendar-data /></d:prop>
-  <cal:filter><cal:comp-filter name="VCALENDAR"><cal:comp-filter name="VEVENT" /></cal:comp-filter></cal:filter>
+  <cal:filter><cal:comp-filter name="VCALENDAR"><cal:comp-filter name="VEVENT">{time_range}</cal:comp-filter></cal:comp-filter></cal:filter>
 </cal:calendar-query>""",
         )
         root = self._parse_xml(response)
@@ -203,6 +207,25 @@ class CalDavProvider:
             if len(events) >= limit:
                 return events[:limit]
         return events
+
+    @staticmethod
+    def _calendar_query_time_range(
+        *,
+        window_start: str | None,
+        window_end: str | None,
+    ) -> str:
+        if not window_start or not window_end:
+            return ""
+        start = CalDavProvider._caldav_timestamp(window_start)
+        end = CalDavProvider._caldav_timestamp(window_end)
+        return f'<cal:time-range start="{html_escape(start, quote=True)}" end="{html_escape(end, quote=True)}" />'
+
+    @staticmethod
+    def _caldav_timestamp(value: str) -> str:
+        parsed = date_parser.parse(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     def _request(
         self,

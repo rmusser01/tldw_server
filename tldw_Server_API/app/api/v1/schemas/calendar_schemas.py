@@ -621,7 +621,17 @@ class CalendarSyncEventListResponse(BaseModel):
     total: int = Field(..., ge=0)
 
 
+class CalendarSyncTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="manual", min_length=1, max_length=64)
+    window_start: str | None = Field(default=None, min_length=1)
+    window_end: str | None = Field(default=None, min_length=1)
+
+
 class CalendarSyncTriggerResponse(BaseModel):
     binding_id: int
     queued: bool = False
-    status: Literal["not_implemented"] = "not_implemented"
+    status: str
+    job_id: int | None = None
+    idempotency_key: str | None = None
