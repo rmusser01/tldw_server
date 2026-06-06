@@ -138,6 +138,11 @@ without specifying a recorder.
 The first implementation must leave it empty unless an external host adapter
 provides an already-safe opaque reference. It must not write payload snapshots.
 
+The first implementation should always generate a fresh `event_id`. It should
+omit user, client, and session correlation fields by default. Request
+correlation ids may be included only when they are already opaque, bounded, and
+marked safe by the host context.
+
 ## Sanitization Rules
 
 The event builder must sanitize before persistence:
@@ -158,6 +163,28 @@ The event builder must sanitize before persistence:
 
 Export defaults must omit user/session correlation fields. A future export flag
 may include safe hashed ids for offline analysis.
+
+## Status And Reason Mapping
+
+The event builder should normalize protocol and gateway outcomes through a
+small explicit mapping table:
+
+| Source outcome | Status | Default reason code |
+| --- | --- | --- |
+| Tool call returned normally | `success` | empty |
+| Idempotency cache hit | `success` | `idempotency_replay` |
+| `InvalidParamsException`, validation `ValueError`, validation `TypeError` | `invalid_params` | `invalid_params` |
+| `PermissionError` from RBAC or allowed-tool checks | `denied` | `permission_denied` |
+| `GovernanceDeniedError` | `denied` | governance `reason_code` or `policy_denied` |
+| `ApprovalRequiredError` | `approval_required` | approval `reason_code` or `approval_required` |
+| `RateLimitExceeded` | `rate_limited` | `rate_limited` |
+| Missing module or unknown tool | `unavailable` | `tool_not_found` |
+| External runtime/server unavailable | `unavailable` | runtime-provided reason or `runtime_unavailable` |
+| Unhandled sanitized execution exception | `error` | sanitized exception family or `tool_execution_failed` |
+
+Gateway-specific policy errors such as `GatewayPolicyDenied` should map to
+`denied`, `approval_required`, or `unavailable` based on their status and
+reason code. The mapping must never persist raw exception text.
 
 ## Capture Flow
 
@@ -186,9 +213,16 @@ must not require a tool definition and must safely classify cases such as
 `tool_not_found`, `permission_denied`, `policy_denied`, `approval_required`,
 `invalid_params`, `rate_limited`, and `external_access_denied`.
 
+Idempotency capture must happen outside the idempotency execution wrapper. A
+cached replay should record an event with `execution_origin="cached"` and
+`idempotency_replay=true`, even when the underlying tool body is not executed.
+
 ### Gateway Path
 
 Gateway capture should be added as a wrapper around a `GatewayRuntime`.
+Install the wrapper during gateway config/bootstrap assembly, before FastAPI,
+WebSocket, or stdio transports receive the runtime. That keeps all gateway
+transports consistent and avoids per-transport capture drift.
 
 The wrapper records:
 
@@ -228,10 +262,12 @@ Use a store protocol and compliant implementations:
 - `delete_events_over_limit(max_events)`
 - `export_events(filters, format)`
 
-Standalone persistence should extend the current package storage pattern. The
-existing `SQLiteMCPStore` uses SQLAlchemy Core and offloads database work; a
-first implementation can either extend it with tool-use event tables or add a
-parallel SQLAlchemy-backed package store. It must not use raw `sqlite3`.
+Standalone persistence should use a separate SQLAlchemy-backed
+`SQLiteToolUseEventStore` module that follows the current package storage
+pattern and offloads database work. Keeping the tool-use event store separate
+avoids bumping the profile/external-registry `SQLiteMCPStore` schema unless a
+future shared-gateway database migration is explicitly desired. It must not use
+raw `sqlite3`.
 
 tldw_server integration should be a clean adapter seam. A later host adapter can
 write through existing Evaluations or DB_Management ownership patterns, but this
@@ -249,6 +285,14 @@ Retention must be explicit:
 - CLI cleanup command
 - no unbounded indefinite growth by default
 
+Query and export operations must also be bounded:
+
+- default time window for reports
+- maximum export row count
+- maximum report group count
+- maximum top reason-code count per group
+- cursor-based pagination for event export
+
 ## Recording Policy
 
 The first implementation should use:
@@ -262,6 +306,9 @@ The first implementation should use:
 
 This keeps behavior deterministic and avoids silent data loss semantics. A
 later bounded queue can be added with explicit flush-on-shutdown behavior.
+The write timeout protects the caller from waiting indefinitely; when a store
+uses thread offload, timeout cancellation might not abort the underlying local
+database write. First-slice stores therefore must be local and bounded.
 
 ## Reporting
 
@@ -303,21 +350,22 @@ Aggregate fields:
 
 - group key
 - call count
-- success count/rate
-- error count/rate
-- denied count/rate
-- unavailable count/rate
-- approval-required count/rate
-- invalid-params count/rate
-- rate-limited count/rate
-- truncation count/rate
-- idempotency replay count/rate
+- `tool_call_success_count` and `tool_call_success_rate`
+- `tool_call_error_count` and `tool_call_error_rate`
+- `tool_call_denied_count` and `tool_call_denied_rate`
+- `tool_call_unavailable_count` and `tool_call_unavailable_rate`
+- `tool_call_approval_required_count` and `tool_call_approval_required_rate`
+- `tool_call_invalid_params_count` and `tool_call_invalid_params_rate`
+- `tool_call_rate_limited_count` and `tool_call_rate_limited_rate`
+- `tool_call_truncation_count` and `tool_call_truncation_rate`
+- `tool_call_idempotency_replay_count` and `tool_call_idempotency_replay_rate`
 - p50 and p95 duration
 - top reason codes
 - local/external/federated counts
 - read/write counts
 
-Use careful names such as `tool_call_success_rate`, not `task_success_rate`.
+Report APIs and CLI JSON output must use `tool_call_*` names, not ambiguous
+terms such as `success_rate` or `task_success_rate`.
 
 ## Configuration
 
@@ -405,10 +453,6 @@ plan.
 
 ## Open Questions For Implementation Planning
 
-- Should the first package store extend `SQLiteMCPStore` or use a separate
-  SQLAlchemy-backed `SQLiteToolUseEventStore`?
-- Should gateway capture wrap the runtime during config bootstrap, FastAPI app
-  creation, or CLI entrypoint assembly?
 - Which host context keys are already safe for model id and mode id extraction?
 - Should the first CLI output include Markdown tables, JSON, or both?
 

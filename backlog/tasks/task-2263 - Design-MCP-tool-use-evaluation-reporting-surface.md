@@ -46,6 +46,8 @@ Integrated the ten design review findings: backward-compatible recorder dependen
 
 Second local review added three hardening improvements: no eager optional storage imports, bounded recorder write timeout, and capture scope for method-level `tools/call` rate-limit failures.
 
+Third local review integrated implementation-planning hardening: idempotency replay events must be recorded outside the idempotency execution wrapper; status/reason mappings are now explicit; direct recorder write timeout semantics note that thread-offloaded writes may continue; report/export queries require hard bounds; the first store is now a separate SQLAlchemy-backed `SQLiteToolUseEventStore`; gateway capture wrapper installation is fixed at config/bootstrap assembly; correlation ids are omitted by default unless already safe; report fields now use unambiguous `tool_call_*` names.
+
 Verification: `git diff --check` passed. ASCII scan over the spec and task file found no non-ASCII characters. Bandit skipped because this task only adds design documentation and Backlog metadata.
 
 Spec review note: subagent review was not run because the available multi-agent tool requires explicit user authorization to spawn agents. A local spec review was performed instead and the findings were integrated.
