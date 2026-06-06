@@ -29,6 +29,7 @@ export interface ChatSettingsConfig {
   userChatBubble: boolean
   autoCopyResponseToClipboard: boolean
   useMarkdownForUserMessage: boolean
+  renderMermaidDiagrams: boolean
   chatRichTextMode: ChatRichTextMode
   chatRichTextStylePreset: ChatRichTextStylePreset
   chatRichItalicColor: ChatRichTextColorOption
@@ -69,6 +70,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettingsConfig = {
   userChatBubble: true,
   autoCopyResponseToClipboard: false,
   useMarkdownForUserMessage: false,
+  renderMermaidDiagrams: true,
   chatRichTextMode: "safe_markdown",
   chatRichTextStylePreset: "default",
   chatRichItalicColor: "default",

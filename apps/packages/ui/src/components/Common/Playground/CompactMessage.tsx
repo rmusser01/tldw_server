@@ -34,6 +34,7 @@ import type { Character } from "@/types/character"
 import type { FeedbackThumb } from "@/store/feedback"
 import type { Source, GenerationInfo } from "./types"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
+import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -138,7 +139,13 @@ export function CompactMessage({
   const { cancel, isSpeaking, speak } = useTTS()
   const uiMode = useUiModeStore((state) => state.mode)
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
+  const [renderMermaidDiagrams] = useStorage(
+    "renderMermaidDiagrams",
+    DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
+  )
   const isProMode = uiMode === "pro"
+  const isActiveStreamingMessage =
+    Boolean(isStreaming) && currentMessageIndex === totalMessages - 1
   const actionBarVisibility = isProMode
     ? "opacity-100"
     : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
@@ -516,6 +523,11 @@ export function CompactMessage({
                         message={block.content}
                         searchQuery={searchQuery}
                         codeBlockVariant="github"
+                        enableMermaidDiagrams={
+                          isBot &&
+                          renderMermaidDiagrams !== false &&
+                          !isActiveStreamingMessage
+                        }
                       />
                     )
                   })}

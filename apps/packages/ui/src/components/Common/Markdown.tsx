@@ -11,6 +11,7 @@ import React from "react"
 import { CodeBlock } from "./CodeBlock"
 import { TableBlock } from "./TableBlock"
 import { ManagedMarkdownImage } from "./ManagedMarkdownImage"
+import { MermaidDiagramBlock } from "./MermaidDiagramBlock"
 import { preprocessLaTeX } from "@/utils/latex"
 import { useStorage } from "@plasmohq/storage/hook"
 import { highlightText } from "@/utils/text-highlight"
@@ -35,6 +36,15 @@ const RICH_TEXT_ELEMENT_STYLE_CLASS =
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
+const FENCE_START = /^(\s*)(`{3,}|~{3,})([^\n]*)$/
+const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/
+
+type ClosedMermaidFenceSource = {
+  blockIndex: number
+  closingLine: number
+  openingLine: number
+  source: string
+}
 
 const isManagedAssetReference = (url: string): boolean =>
   String(url || "").startsWith(MANAGED_ASSET_MARKER)
@@ -63,6 +73,57 @@ const transformMarkdownUrl = (url: string): string => {
   return ""
 }
 
+const getFenceLanguage = (infoString: string): string =>
+  infoString.trim().split(/\s+/)[0]?.toLowerCase() || ""
+
+const collectClosedMermaidFenceSources = (
+  markdown: string
+): ClosedMermaidFenceSource[] => {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n")
+  const sources: ClosedMermaidFenceSource[] = []
+  let fencedBlockIndex = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const startMatch = FENCE_START.exec(lines[index])
+    if (!startMatch) continue
+
+    const openingFence = startMatch[2]
+    const fenceMarker = openingFence[0]
+    const fenceLength = openingFence.length
+    const language = getFenceLanguage(startMatch[3] || "")
+    const sourceStartIndex = index + 1
+
+    for (let closeIndex = sourceStartIndex; closeIndex < lines.length; closeIndex += 1) {
+      const closeMatch = FENCE_CLOSE.exec(lines[closeIndex])
+      const closingFence = closeMatch?.[1]
+      if (
+        !closingFence ||
+        closingFence[0] !== fenceMarker ||
+        closingFence.length < fenceLength
+      ) {
+        continue
+      }
+
+      if (language === "mermaid") {
+        sources.push({
+          blockIndex: fencedBlockIndex,
+          closingLine: closeIndex + 1,
+          openingLine: index + 1,
+          source: lines
+            .slice(sourceStartIndex, closeIndex)
+            .join("\n")
+            .replace(/\n$/, "")
+        })
+      }
+      fencedBlockIndex += 1
+      index = closeIndex
+      break
+    }
+  }
+
+  return sources
+}
+
 export function Markdown({
   message,
   className = "prose break-words dark:prose-invert prose-p:leading-relaxed prose-pre:p-0 dark:prose-dark",
@@ -71,6 +132,7 @@ export function Markdown({
   allowExternalImages,
   richTextModeOverride,
   headingAnchorIds,
+  enableMermaidDiagrams = false,
 }: {
   message: string
   className?: string
@@ -79,6 +141,7 @@ export function Markdown({
   allowExternalImages?: boolean
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
+  enableMermaidDiagrams?: boolean
 }) {
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [codeTheme] = useStorage("codeTheme", "auto")
@@ -230,8 +293,22 @@ export function Markdown({
     () => processedMessage.includes(MANAGED_ASSET_MARKER),
     [processedMessage]
   )
+  const closedMermaidFenceSources = React.useMemo(
+    () =>
+      enableMermaidDiagrams
+        ? collectClosedMermaidFenceSources(processedMessage)
+        : [],
+    [enableMermaidDiagrams, processedMessage]
+  )
+  const closedMermaidFenceCursorRef = React.useRef(0)
+  closedMermaidFenceCursorRef.current = 0
+  const shouldUseComponentMermaid = closedMermaidFenceSources.length > 0
 
-  if (richTextMode === "st_compat" && !hasManagedAssetImages) {
+  if (
+    richTextMode === "st_compat" &&
+    !hasManagedAssetImages &&
+    !shouldUseComponentMermaid
+  ) {
     return (
       <div
         className={`${resolvedClassName} ${RICH_TEXT_ELEMENT_STYLE_CLASS} [&_.st-inline-spoiler]:rounded-sm [&_.st-inline-spoiler]:bg-surface2 [&_.st-inline-spoiler]:px-1 [&_.st-inline-spoiler]:py-0.5 [&_.st-inline-spoiler]:font-medium [&_.st-spoiler]:my-2 [&_.st-spoiler]:rounded-md [&_.st-spoiler]:border [&_.st-spoiler]:border-border [&_.st-spoiler]:bg-surface2/70 [&_.st-spoiler]:px-3 [&_.st-spoiler]:py-2 [&_.st-spoiler_>summary]:cursor-pointer [&_.st-spoiler_>summary]:font-medium [&_.st-external-image-blocked]:inline-flex [&_.st-external-image-blocked]:items-center [&_.st-external-image-blocked]:gap-2 [&_.st-external-image-blocked]:rounded-md [&_.st-external-image-blocked]:border [&_.st-external-image-blocked]:border-border [&_.st-external-image-blocked]:bg-surface2 [&_.st-external-image-blocked]:px-2 [&_.st-external-image-blocked]:py-1 [&_.st-external-image-blocked]:text-[11px] [&_.st-external-image-blocked]:text-text-muted`}
@@ -270,14 +347,46 @@ export function Markdown({
             const codeClassName = codeChild.props?.className as string | undefined
             const match = /language-([^\s]+)/.exec(codeClassName || "")
             const blockIndex = blockIndexRef.current++
-            const value = String(codeChild.props?.children ?? "").replace(/\n$/, "")
+            const value = String(codeChild.props?.children ?? "")
+              .replace(/\r\n?/g, "\n")
+              .replace(/\n$/, "")
+            const rawLanguage = match ? match[1] : ""
+            const normalizedLanguage = normalizeLanguage(rawLanguage)
+            const nodePosition = codeChild.props?.node?.position
+            const startLine = Number(nodePosition?.start?.line)
+            const endLine = Number(nodePosition?.end?.line)
+            const hasNodeLinePosition =
+              Number.isFinite(startLine) && Number.isFinite(endLine)
+            const closedMermaidFenceIndex = closedMermaidFenceSources.findIndex(
+              (fence, fenceIndex) => {
+                if (fenceIndex < closedMermaidFenceCursorRef.current) return false
+                if (fence.source !== value) return false
+                if (hasNodeLinePosition) {
+                  return (
+                    fence.openingLine === startLine &&
+                    fence.closingLine === endLine
+                  )
+                }
+                return fence.blockIndex === blockIndex
+              }
+            )
+
+            if (
+              enableMermaidDiagrams &&
+              rawLanguage.trim().toLowerCase() === "mermaid" &&
+              normalizedLanguage === "mermaid" &&
+              closedMermaidFenceIndex !== -1
+            ) {
+              closedMermaidFenceCursorRef.current = closedMermaidFenceIndex + 1
+              return (
+                <MermaidDiagramBlock source={value} blockIndex={blockIndex} />
+              )
+            }
 
             if (codeBlockVariant === "plain") {
               return <div className="my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 text-xs font-mono leading-relaxed text-text whitespace-pre overflow-x-auto">{value}</div>
             }
             if (codeBlockVariant === "compact") {
-              const rawLanguage = match ? match[1] : ""
-              const normalizedLanguage = normalizeLanguage(rawLanguage)
               const highlightLanguage = rawLanguage ? normalizedLanguage : "plaintext"
               return (
                 <div className="not-prose my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 overflow-x-auto">
@@ -305,8 +414,6 @@ export function Markdown({
               )
             }
             if (codeBlockVariant === "github") {
-              const rawLanguage = match ? match[1] : ""
-              const normalizedLanguage = normalizeLanguage(rawLanguage)
               return (
                 <div className="not-prose my-2 overflow-x-auto rounded-md border border-border/80 bg-surface2/70 px-4 py-3">
                   <Highlight

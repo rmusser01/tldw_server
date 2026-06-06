@@ -569,7 +569,7 @@ async def get_roles_matrix(
             )
             # fetch with limit/offset
             role_rows = await db.fetch(
-                f"SELECT id, name, description, COALESCE(is_system,0) as is_system FROM roles{role_where} ORDER BY name LIMIT ${len(role_params)+1} OFFSET ${len(role_params)+2}",  # nosec B608
+                f"SELECT id, name, description, COALESCE(is_system,FALSE) as is_system FROM roles{role_where} ORDER BY name LIMIT ${len(role_params)+1} OFFSET ${len(role_params)+2}",  # nosec B608
                 *role_params,
                 roles_limit,
                 roles_offset,
@@ -692,7 +692,7 @@ async def get_roles_matrix_boolean(
                 *role_params,
             )
             role_rows = await db.fetch(
-                f"SELECT id, name, description, COALESCE(is_system,0) as is_system FROM roles{role_where} ORDER BY name LIMIT ${len(role_params)+1} OFFSET ${len(role_params)+2}",  # nosec B608
+                f"SELECT id, name, description, COALESCE(is_system,FALSE) as is_system FROM roles{role_where} ORDER BY name LIMIT ${len(role_params)+1} OFFSET ${len(role_params)+2}",  # nosec B608
                 *role_params,
                 roles_limit,
                 roles_offset,
