@@ -35,31 +35,33 @@ def _recv_until(client, predicate, timeout=8.0):
     import time
 
     start = time.time()
-    while time.time() - start < timeout:
-        inbox: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+    inbox: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
 
-        def _reader() -> None:
+    def _reader() -> None:
+        while time.time() - start < timeout:
             try:
-                inbox.put(("ok", client.receive_text()))
+                msg = client.receive_text()
             except Exception as exc:  # pragma: no cover - test harness defensive path
                 inbox.put(("err", exc))
+                return
+            try:
+                data = json.loads(str(msg))
+            except json.JSONDecodeError:
+                continue
+            if predicate(data):
+                inbox.put(("ok", data))
+                return
 
-        thread = threading.Thread(target=_reader, daemon=True)
-        thread.start()
-        remaining = max(0.01, min(0.1, timeout - (time.time() - start)))
-        try:
-            status, payload = inbox.get(timeout=remaining)
-        except queue.Empty:
-            continue
-        if status == "err":
-            raise payload  # type: ignore[misc]
-        msg = str(payload)
-        try:
-            data = json.loads(msg)
-        except json.JSONDecodeError:
-            continue
-        if predicate(data):
-            return data
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+    try:
+        status, payload = inbox.get(timeout=timeout)
+    except queue.Empty:
+        raise AssertionError("Expected event not received in time")
+    if status == "err":
+        raise payload  # type: ignore[misc]
+    if status == "ok":
+        return payload
     raise AssertionError("Expected event not received in time")
 
 

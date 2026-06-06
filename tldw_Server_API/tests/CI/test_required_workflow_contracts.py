@@ -262,6 +262,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "admin-m-r" not in shard_names
         assert "admin-s-z" not in shard_names
         assert "ai-chromadb-chunking" not in shard_names
+        assert "ai-embeddings" not in shard_names
         assert "chat-character-legacy" not in shard_names
         assert "chat-character-integration" not in shard_names
         assert "product-claims" not in shard_names
@@ -300,7 +301,11 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "ai-chunking-core",
             "ai-chunking-semantic-security",
             "ai-chunking-templates",
-            "ai-embeddings",
+            "ai-embeddings-core",
+            "ai-embeddings-dlq-config",
+            "ai-embeddings-jobs-runtime",
+            "ai-embeddings-observability",
+            "ai-embeddings-policy-v5",
             "vector-stores",
             "paper-search",
             "rag-legacy",
@@ -346,7 +351,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         shard_path_sets = {
             name: set(str(paths).split()) for name, paths in shard_paths.items()
         }
-        assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings"]
+        assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings-core"]
         assert shard_path_sets["ai-chromadb"] == {"tldw_Server_API/tests/ChromaDB"}
         assert "tldw_Server_API/tests/Admin" not in shard_path_sets["core-smoke"]
         assert "tldw_Server_API/tests/RAG_NEW" not in shard_path_sets["rag-legacy"]
@@ -436,6 +441,36 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
                     covered_chunking_files[filename] = shard_name
 
         assert set(covered_chunking_files) == chunking_files
+
+        embedding_shards = {
+            "ai-embeddings-core",
+            "ai-embeddings-dlq-config",
+            "ai-embeddings-jobs-runtime",
+            "ai-embeddings-observability",
+            "ai-embeddings-policy-v5",
+        }
+        embedding_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Embeddings").glob("test*.py")
+        }
+        covered_embedding_files: dict[str, str] = {}
+        for shard_name in embedding_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Embeddings/")
+                matches = {
+                    filename
+                    for filename in embedding_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_embedding_files, (
+                        f"{filename} matched both "
+                        f"{covered_embedding_files[filename]} and {shard_name}"
+                    )
+                    covered_embedding_files[filename] = shard_name
+
+        assert set(covered_embedding_files) == embedding_files
 
         legacy_character_shards = {
             "chat-character-legacy-core",

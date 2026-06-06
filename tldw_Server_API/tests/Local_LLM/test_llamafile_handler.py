@@ -141,6 +141,9 @@ async def test_llamafile_stop_timeout(monkeypatch, tmp_path: Path):
         def terminate(self):
             self.returncode = None
 
+        def kill(self):
+            self.returncode = -9
+
     handler._active_servers[5555] = SlowProc()
 
     async def fake_wait_for(coro, timeout):
@@ -151,6 +154,7 @@ async def test_llamafile_stop_timeout(monkeypatch, tmp_path: Path):
     import os as _os
 
     monkeypatch.setattr(_os, "killpg", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
 
     msg = await handler.stop_server(port=5555)
     assert "stopped" in msg.lower() or "terminated" in msg.lower()

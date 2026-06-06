@@ -598,9 +598,66 @@ jobs:
               tldw_Server_API/tests/Chunking/test_thread_safety.py
               tldw_Server_API/tests/Chunking/test_tokens_offsets.py
               tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
-          - name: ai-embeddings
+          - name: ai-embeddings-core
             paths: >-
-              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/Embeddings/test_async_*.py
+              tldw_Server_API/tests/Embeddings/test_backpressure*.py
+              tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py
+              tldw_Server_API/tests/Embeddings/test_chromadb_*.py
+              tldw_Server_API/tests/Embeddings/test_chunk_metadata_backfill.py
+              tldw_Server_API/tests/Embeddings/test_circuit_breaker_*.py
+              tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
+              tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+          - name: ai-embeddings-dlq-config
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_dlq_*.py
+              tldw_Server_API/tests/Embeddings/test_embedding_*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_audit_adapter.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_fallback*.py
+          - name: ai-embeddings-jobs-runtime
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_jobs*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_local_api.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_loop_scoping.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_memory*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_metric*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_model_management.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_optional_deps_import.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_redis*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_rg_sync_helper.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
+          - name: ai-embeddings-policy-v5
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
+              tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+              tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_media_*.py
+              tldw_Server_API/tests/Embeddings/test_message_validator*.py
+          - name: ai-embeddings-observability
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_metrics*.py
+              tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
+              tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_orchestrator*.py
+              tldw_Server_API/tests/Embeddings/test_pgvector*.py
+              tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_redis_integration_smoke.py
+              tldw_Server_API/tests/Embeddings/test_reembed_schedule_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_request*.py
+              tldw_Server_API/tests/Embeddings/test_schema_drift.py
+              tldw_Server_API/tests/Embeddings/test_stage_controls.py
+              tldw_Server_API/tests/Embeddings/test_storage_idempotency_property.py
+              tldw_Server_API/tests/Embeddings/test_trace_headers.py
+              tldw_Server_API/tests/Embeddings/test_vector*.py
           - name: vector-stores
             paths: >-
               tldw_Server_API/tests/VectorStores
@@ -1063,7 +1120,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1072,7 +1129,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1304,9 +1361,66 @@ jobs:
               tldw_Server_API/tests/Chunking/test_thread_safety.py
               tldw_Server_API/tests/Chunking/test_tokens_offsets.py
               tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
-          - name: ai-embeddings
+          - name: ai-embeddings-core
             paths: >-
-              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/Embeddings/test_async_*.py
+              tldw_Server_API/tests/Embeddings/test_backpressure*.py
+              tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py
+              tldw_Server_API/tests/Embeddings/test_chromadb_*.py
+              tldw_Server_API/tests/Embeddings/test_chunk_metadata_backfill.py
+              tldw_Server_API/tests/Embeddings/test_circuit_breaker_*.py
+              tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
+              tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+          - name: ai-embeddings-dlq-config
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_dlq_*.py
+              tldw_Server_API/tests/Embeddings/test_embedding_*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_audit_adapter.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_fallback*.py
+          - name: ai-embeddings-jobs-runtime
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_jobs*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_local_api.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_loop_scoping.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_memory*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_metric*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_model_management.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_optional_deps_import.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_redis*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_rg_sync_helper.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
+          - name: ai-embeddings-policy-v5
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
+              tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+              tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_media_*.py
+              tldw_Server_API/tests/Embeddings/test_message_validator*.py
+          - name: ai-embeddings-observability
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_metrics*.py
+              tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
+              tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_orchestrator*.py
+              tldw_Server_API/tests/Embeddings/test_pgvector*.py
+              tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_redis_integration_smoke.py
+              tldw_Server_API/tests/Embeddings/test_reembed_schedule_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_request*.py
+              tldw_Server_API/tests/Embeddings/test_schema_drift.py
+              tldw_Server_API/tests/Embeddings/test_stage_controls.py
+              tldw_Server_API/tests/Embeddings/test_storage_idempotency_property.py
+              tldw_Server_API/tests/Embeddings/test_trace_headers.py
+              tldw_Server_API/tests/Embeddings/test_vector*.py
           - name: vector-stores
             paths: >-
               tldw_Server_API/tests/VectorStores
@@ -1713,7 +1827,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -1722,7 +1836,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1955,9 +2069,66 @@ jobs:
               tldw_Server_API/tests/Chunking/test_thread_safety.py
               tldw_Server_API/tests/Chunking/test_tokens_offsets.py
               tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
-          - name: ai-embeddings
+          - name: ai-embeddings-core
             paths: >-
-              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/Embeddings/test_async_*.py
+              tldw_Server_API/tests/Embeddings/test_backpressure*.py
+              tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py
+              tldw_Server_API/tests/Embeddings/test_chromadb_*.py
+              tldw_Server_API/tests/Embeddings/test_chunk_metadata_backfill.py
+              tldw_Server_API/tests/Embeddings/test_circuit_breaker_*.py
+              tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
+              tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+          - name: ai-embeddings-dlq-config
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_dlq_*.py
+              tldw_Server_API/tests/Embeddings/test_embedding_*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_audit_adapter.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_fallback*.py
+          - name: ai-embeddings-jobs-runtime
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_jobs*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_local_api.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_loop_scoping.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_memory*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_metric*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_model_management.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_optional_deps_import.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_redis*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_rg_sync_helper.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
+          - name: ai-embeddings-policy-v5
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
+              tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+              tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_media_*.py
+              tldw_Server_API/tests/Embeddings/test_message_validator*.py
+          - name: ai-embeddings-observability
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_metrics*.py
+              tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
+              tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_orchestrator*.py
+              tldw_Server_API/tests/Embeddings/test_pgvector*.py
+              tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_redis_integration_smoke.py
+              tldw_Server_API/tests/Embeddings/test_reembed_schedule_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_request*.py
+              tldw_Server_API/tests/Embeddings/test_schema_drift.py
+              tldw_Server_API/tests/Embeddings/test_stage_controls.py
+              tldw_Server_API/tests/Embeddings/test_storage_idempotency_property.py
+              tldw_Server_API/tests/Embeddings/test_trace_headers.py
+              tldw_Server_API/tests/Embeddings/test_vector*.py
           - name: vector-stores
             paths: >-
               tldw_Server_API/tests/VectorStores
@@ -2290,7 +2461,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -2299,7 +2470,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2531,9 +2702,66 @@ jobs:
               tldw_Server_API/tests/Chunking/test_thread_safety.py
               tldw_Server_API/tests/Chunking/test_tokens_offsets.py
               tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
-          - name: ai-embeddings
+          - name: ai-embeddings-core
             paths: >-
-              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/Embeddings/test_async_*.py
+              tldw_Server_API/tests/Embeddings/test_backpressure*.py
+              tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py
+              tldw_Server_API/tests/Embeddings/test_chromadb_*.py
+              tldw_Server_API/tests/Embeddings/test_chunk_metadata_backfill.py
+              tldw_Server_API/tests/Embeddings/test_circuit_breaker_*.py
+              tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
+              tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+          - name: ai-embeddings-dlq-config
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_dlq_*.py
+              tldw_Server_API/tests/Embeddings/test_embedding_*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_audit_adapter.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_fallback*.py
+          - name: ai-embeddings-jobs-runtime
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_jobs*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_local_api.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_loop_scoping.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_memory*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_metric*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_model_management.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_optional_deps_import.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_redis*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_rg_sync_helper.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
+          - name: ai-embeddings-policy-v5
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
+              tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+              tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_media_*.py
+              tldw_Server_API/tests/Embeddings/test_message_validator*.py
+          - name: ai-embeddings-observability
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_metrics*.py
+              tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
+              tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_orchestrator*.py
+              tldw_Server_API/tests/Embeddings/test_pgvector*.py
+              tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_redis_integration_smoke.py
+              tldw_Server_API/tests/Embeddings/test_reembed_schedule_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_request*.py
+              tldw_Server_API/tests/Embeddings/test_schema_drift.py
+              tldw_Server_API/tests/Embeddings/test_stage_controls.py
+              tldw_Server_API/tests/Embeddings/test_storage_idempotency_property.py
+              tldw_Server_API/tests/Embeddings/test_trace_headers.py
+              tldw_Server_API/tests/Embeddings/test_vector*.py
           - name: vector-stores
             paths: >-
               tldw_Server_API/tests/VectorStores
@@ -2866,7 +3094,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -2875,7 +3103,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -3109,9 +3337,66 @@ jobs:
               tldw_Server_API/tests/Chunking/test_thread_safety.py
               tldw_Server_API/tests/Chunking/test_tokens_offsets.py
               tldw_Server_API/tests/Chunking/unit/test_tokens_fallback_offsets.py
-          - name: ai-embeddings
+          - name: ai-embeddings-core
             paths: >-
-              tldw_Server_API/tests/Embeddings
+              tldw_Server_API/tests/Embeddings/test_async_*.py
+              tldw_Server_API/tests/Embeddings/test_backpressure*.py
+              tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py
+              tldw_Server_API/tests/Embeddings/test_chromadb_*.py
+              tldw_Server_API/tests/Embeddings/test_chunk_metadata_backfill.py
+              tldw_Server_API/tests/Embeddings/test_circuit_breaker_*.py
+              tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
+              tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+          - name: ai-embeddings-dlq-config
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_dlq_*.py
+              tldw_Server_API/tests/Embeddings/test_embedding_*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_audit_adapter.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_fallback*.py
+          - name: ai-embeddings-jobs-runtime
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_jobs*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_local_api.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_loop_scoping.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_memory*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_metric*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_model_management.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_optional_deps_import.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_redis*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_rg_sync_helper.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_test_mode_truthiness.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
+          - name: ai-embeddings-policy-v5
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_embeddings_policy*.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_v5*.py
+              tldw_Server_API/tests/Embeddings/test_hyde_backfill_cli.py
+              tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py
+              tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_media_*.py
+              tldw_Server_API/tests/Embeddings/test_message_validator*.py
+          - name: ai-embeddings-observability
+            paths: >-
+              tldw_Server_API/tests/Embeddings/test_metrics*.py
+              tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
+              tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_orchestrator*.py
+              tldw_Server_API/tests/Embeddings/test_pgvector*.py
+              tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_redis_integration_smoke.py
+              tldw_Server_API/tests/Embeddings/test_reembed_schedule_endpoint.py
+              tldw_Server_API/tests/Embeddings/test_request*.py
+              tldw_Server_API/tests/Embeddings/test_schema_drift.py
+              tldw_Server_API/tests/Embeddings/test_stage_controls.py
+              tldw_Server_API/tests/Embeddings/test_storage_idempotency_property.py
+              tldw_Server_API/tests/Embeddings/test_trace_headers.py
+              tldw_Server_API/tests/Embeddings/test_vector*.py
           - name: vector-stores
             paths: >-
               tldw_Server_API/tests/VectorStores
@@ -3444,7 +3729,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         uses: actions/cache@v5
         with:
           path: models/embeddings
@@ -3453,7 +3738,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy-v5' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'rag-new' || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |

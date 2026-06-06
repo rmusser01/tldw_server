@@ -395,6 +395,7 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     result = subprocess.run(  # nosec B603
@@ -431,6 +432,7 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     result = subprocess.run(  # nosec B603
@@ -511,6 +513,7 @@ def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -734,6 +737,7 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     python_wrapper.chmod(0o700)
     env = _entrypoint_process_env(env_file, marker_dir)

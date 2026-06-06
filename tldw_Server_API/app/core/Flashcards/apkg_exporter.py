@@ -602,6 +602,7 @@ def export_apkg_from_rows(
                     )
 
         conn.commit()
+        conn.close()
 
         # Package zip
         apkg_bytes = io.BytesIO()

@@ -54,11 +54,15 @@ app_main._shared_is_explicit_pytest_runtime = lambda: True
 def setup_client():
     # These setup API tests exercise handlers only. Entering TestClient lifespan
     # starts background services, and context-manager shutdown has timed out here.
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+    reset_lifecycle_state(app)
     client = TestClient(app)
     try:
         yield client
     finally:
         client.close()
+        reset_lifecycle_state(app)
 
 
 def _setup_needs_setup(monkeypatch):

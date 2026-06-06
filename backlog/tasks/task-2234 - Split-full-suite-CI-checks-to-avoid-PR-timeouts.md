@@ -45,12 +45,16 @@ modified_files:
 - tldw_Server_API/app/core/AuthNZ/session_manager.py
 - tldw_Server_API/app/core/DB_Management/migration_tools.py
 - tldw_Server_API/app/core/Evaluations/unified_evaluation_service.py
+- tldw_Server_API/app/core/Flashcards/apkg_exporter.py
 - tldw_Server_API/app/core/RAG/rag_service/query_features.py
+- tldw_Server_API/app/core/Scheduler/config.py
+- tldw_Server_API/app/core/Scheduler/tests/test_security_fixes.py
 - tldw_Server_API/app/services/enhanced_web_scraping_service.py
 - tldw_Server_API/app/core/RAG/rag_service/observability.py
 - tldw_Server_API/app/core/Resource_Governance/metrics_rg.py
 - tldw_Server_API/app/services/reading_digest_scheduler.py
 - tldw_Server_API/app/api/v1/endpoints/setup.py
+- tldw_Server_API/app/api/v1/endpoints/media/reprocess.py
 - tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 - tldw_Server_API/tests/ChaChaNotesDB/test_flashcard_deck_sharing.py
@@ -58,11 +62,15 @@ modified_files:
 - tldw_Server_API/tests/Characters/test_character_functionality_db.py
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint.py
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint_integration.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_sync_contracts.py
 - tldw_Server_API/tests/LLM_Adapters/unit/test_adapter_midstream_error_raises.py
+- tldw_Server_API/tests/Local_LLM/test_llamafile_handler.py
 - tldw_Server_API/tests/Embeddings/test_embeddings_v5_production.py
 - tldw_Server_API/tests/Evaluations/test_connection_pool.py
 - tldw_Server_API/tests/Evaluations/test_evaluation_integration.py
+- tldw_Server_API/tests/Evaluations/test_security.py
 - tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py
+- tldw_Server_API/tests/Infrastructure/test_circuit_breaker.py
 - tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
@@ -113,6 +121,7 @@ modified_files:
 - tldw_Server_API/tests/LLM_Adapters/benchmarks/test_streaming_unified_benchmark.py
 - tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py
 - tldw_Server_API/tests/Media_Ingestion_Modification/test_add_media_endpoint.py
+- tldw_Server_API/tests/Media_Ingestion_Modification/test_media_processing.py
 - tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_persona_budget_defaults.py
 - tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
@@ -120,6 +129,7 @@ modified_files:
 - tldw_Server_API/tests/RAG_NEW/integration/test_bm25_weights.py
 - tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
 - tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_analytics_db_dev_reconciliation.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
 - tldw_Server_API/tests/RAG/test_query_rewriting_loop.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
@@ -129,7 +139,10 @@ modified_files:
 - tldw_Server_API/tests/Setup/test_setup_manager_user_db_base_dir_validation.py
 - tldw_Server_API/tests/WebSearch/integration/test_websearch_engines_endpoint.py
 - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
+- tldw_Server_API/tests/Utils/test_docker_public_profile_compose.py
 - tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+- tldw_Server_API/tests/Services/test_startup_recurring_schedulers.py
+- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
 - tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py
 - tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
 - tldw_Server_API/tests/Services/test_document_processing_service.py
@@ -139,6 +152,7 @@ modified_files:
 - tldw_Server_API/tests/Web_Scraping/test_enhanced_web_scraping_guards.py
 - tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
 - tldw_Server_API/tests/WebScraping/integration/test_websearch_cancellation.py
+- tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
 - tldw_Server_API/tests/integration/test_setup_audio_packs.py
@@ -149,6 +163,8 @@ modified_files:
 - tldw_Server_API/tests/Watchlists/test_first_class_watchlists_db.py
 - tldw_Server_API/tests/Watchlists/test_include_org_default.py
 - tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py
+- tldw_Server_API/tests/prompt_studio/integration/test_concurrency_multiprocessing.py
+- tldw_Server_API/tests/prompt_studio/integration/test_mcts_observability_and_persistence.py
 references:
 - https://github.com/rmusser01/tldw_server/pull/2258
 ---
@@ -271,6 +287,10 @@ After all checks on run 27045516937 reached terminal state, `gh pr checks` repor
 2026-06-05 continued fresh-push recheck of run 27045516937 found additional completed failures before the matrix finished. Windows/Python 3.12 `chat-core` and `auth-db` hit Windows temp-directory cleanup errors from unclosed direct `CharactersRAGDB` SQLite handles in `Chat_NEW` fixtures and flashcard DB tests. Windows/Python 3.12 `product-evaluations` hit the same cleanup class in the evaluations migration temp DB. Ubuntu/Python 3.12 `llm-providers` blocked the Local LLM retry test through the strict egress allowlist before `httpx.MockTransport` could run. Windows/Python 3.12 `integrations` expected boolean validation for setup lifecycle flags that the endpoint now rejects before config-manager validation. Ubuntu/Windows `media-audio` exercised a real Parakeet ONNX transcription path for a plumbing upload test and returned a deterministic 207 transcription failure. Ubuntu/Python 3.12 `admin-a-b` and Windows/Python 3.12 `chat-character-legacy` were canceled by the workflow timeout without pytest assertion summaries, so the workflow needs finer-grained shards for backup-heavy Admin tests and legacy Character Chat tests. Newly touched files for this pass will include `.github/workflows/ci.yml`, `tldw_Server_API/tests/CI/test_required_workflow_contracts.py`, `tldw_Server_API/tests/Chat_NEW/conftest.py`, `tldw_Server_API/tests/ChaChaNotesDB/test_flashcards_basic.py`, `tldw_Server_API/tests/Evaluations/test_production_features_integration.py`, `tldw_Server_API/tests/Local_LLM/test_http_utils.py`, `tldw_Server_API/tests/Media_Ingestion_Modification/test_media_processing.py`, and `tldw_Server_API/tests/integration/test_setup_validation.py`.
 
 2026-06-05 continued fresh-push recheck of run 27045516937 after more jobs completed found additional distinct failures before pushing: platform-mcp teardown failed because `test_startup_auth.py` installed a partial `llm_provider_overrides` stub without the cache reset hook imported by AuthNZ teardown; product-prompts-workflows failed `test_watchlists_backoff` in the long shard due shared/fixed Watchlists database state suppressing the mocked fetch path; product-notes-persona failed the PersonalizationDB constructor contract because the test monkeypatched the global `Path.resolve` class method while current storage validation legitimately resolves trusted roots; Windows product-notes-persona timed out waiting for the Persona WebSocket `tool_plan` event; Windows `product-claims` and `product-prompts-workflows` also hit the 35-minute job cap without pytest failure summaries. The next patch will isolate those tests and further split the timeout-prone product shards. Newly touched files for this pass will include `tldw_Server_API/tests/Services/test_startup_auth.py`, `tldw_Server_API/tests/Watchlists/test_watchlists_backoff.py`, `tldw_Server_API/tests/Personalization/test_companion_activity_db.py`, `tldw_Server_API/tests/Persona/test_persona_ws.py`, `.github/workflows/ci.yml`, and `tldw_Server_API/tests/CI/test_required_workflow_contracts.py`.
+
+2026-06-06 continued current-head monitoring of run 27053166745 found additional completed failures while macOS shards were still pending: Ubuntu/Windows Prompt Studio MCTS tests used `asyncio.get_event_loop()` after fixture teardown had cleared the current loop on newer Python, the circuit-breaker probe-lease test relied on a short recovery timeout and raced into HALF_OPEN before asserting OPEN, Prompt Studio multiprocessing counted reclaimed leases without completing jobs, the Persona WebSocket helper spawned repeated blocked reader threads that could consume the `tool_plan` event, and macOS `chat-core` showed the same Chatbooks import response-schema assertion already fixed locally. The fixes now use `asyncio.run()` for the MCTS persistence helper, force the circuit breaker into HALF_OPEN deterministically, mark multiprocessing jobs completed inside the worker, use one reader thread per Persona WebSocket wait, and keep Chatbooks sync assertions aligned with the current schema. Local verification on 2026-06-06: the expanded focused matrix passed with 21 passed and 5 skipped, compileall passed for touched production/test files, `git diff --check` passed, production Bandit reported `results=0 errors=0`, and test-scope Bandit reported `results=0 errors=0`. GitHub still had 10 pending rows at this checkpoint, so no push was made.
+
+2026-06-06 final terminal audit of run 27053166745 found zero pending rows with 41 failed, 11 canceled, 276 passed, and 5 skipped rows. Newly terminal macOS failures mapped to local fixes: product-prompt-studio matched the Prompt Studio MCTS `asyncio.run()` fix, product-workflows matched the summarize adapter test-mode hook patch, integrations matched first-run lifecycle reset, chat-core matched Chatbooks schema assertions, and platform-mcp matched the startup-recurring rollback race. The macOS ai-embeddings row canceled after collecting 391 Embeddings tests and reaching 22% without a pytest failure summary, so the workflow now splits the broad `ai-embeddings` shard into core, DLQ/config, jobs/runtime, policy/v5, and observability shards across all full-suite matrices; the workflow contract rejects the old shard and proves Embeddings file coverage exactly once. The startup-recurring rollback test now waits for an explicit task-entered event instead of relying on a scheduling yield. Final local verification before staging: focused current-failure matrix plus workflow contract passed with 22 passed and 5 skipped; Embeddings collect-only over the new shard globs collected 391 tests; compileall passed; `git diff --check` passed; production Bandit and test-scope Bandit both reported `results=0 errors=0`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -337,6 +357,32 @@ Local remediation for that `ai-chromadb` failure adds a narrow retry for Chroma'
 2026-06-05 continued old-head CI audit for run 27049294618 found additional terminal failures before push. Ubuntu product-workflows, Ubuntu product-prompt-studio, Windows integrations, and Ubuntu platform-mcp matched already-local fixes for the summarize adapter test-mode hook, Prompt Studio heartbeat renewal, setup internal-error sanitization, and package-level llama.cpp endpoint patching. Distinct failures fixed in this pass were Ubuntu product-watchlists skipping schema setup for a fresh supplied Postgres backend after Python object-id reuse, Windows product-watchlists locking a repo-root AuthNZ SQLite test database, Windows product-prompt-studio hitting delayed SQLite file release during fixture teardown, and Windows product-notes-persona timing out waiting for the Persona WebSocket `tool_plan` event. The Watchlists DB schema cache now keys supplied backends by stable target path/DSN, the org-default watchlist test uses a temp AuthNZ database and resets the AuthNZ pool around env changes, Prompt Studio temp DB cleanup retries Windows SQLite sidecar unlinking, and the Persona WebSocket helper allows a longer CI receive window. Verification: focused latest-failure matrix passed locally (6 passed), first-class watchlist and Prompt Studio project endpoint groups passed locally (13 passed), the Postgres watchlist exact test skipped locally because no test Postgres fixture was available, compileall passed for touched Python files, `git diff --check` passed, production Bandit on `Watchlists_DB.py` passed, and Bandit on the touched test scope passed with test-only rules skipped.
 
 2026-06-05 final pre-push check-state audit for run 27049294618 found no running GitHub Actions rows remaining. `gh pr checks` reported 43 failed rows, 7 canceled rows, 275 passed rows, 4 skipped rows, and one external Cubic reviewer row in neutral/skipping state. The failed full-suite aggregate rows are explained by the inspected shard failures. Newly terminal rows from the previous pending set matched local fixes: Ubuntu/Python 3.13 `integrations` failed `test_update_config_masks_internal_errors` with 400 instead of 500, and Ubuntu/Windows `platform-mcp` failed `test_init_local_llm_manager_runs_llamacpp_runtime_reconciler` because the endpoint package still held the real llama.cpp module without `llm_manager`. Canceled LLM/vector/embedding/smoke rows had no pytest failure summaries; product-collections stalled during a HuggingFace model load after a 429 and then canceled; Windows auth-db showed the already-fixed `test_quizzes_basic_flow` SQLite file-lock failure before cancellation. No additional distinct failure class was found after the final poll.
+
+2026-06-05 post-push monitoring of new-head run 27053166745 found the first failure in macOS/Python 3.12 `rag-new`: `test_analytics_database_tracks_bootstrap_per_backend_target` expected one bootstrapped target but saw targets left by earlier tests in the same module. The test module now clears and restores `AnalyticsDatabase._bootstrapped_backend_targets` around each test so the production class-level cache remains global while the unit tests stay order-independent.
+
+2026-06-05 continued new-head monitoring found the Ubuntu/Python 3.13 `rag-new` row failing the same analytics bootstrap-cache test, Ubuntu/Python 3.13 `llm-providers` canceling at 93% after the runner received a shutdown signal with no pytest failure summary, Windows/Python 3.12 `core-smoke` rejecting an env fixture written with CRLF newlines, Ubuntu/Python 3.13 `media-audio` returning a deterministic 207 from the processing-only audio URL test after the local STT path failed, Windows/Python 3.12 `media-audio` returning the same 207 after strict egress blocked the known external fixture URL, and Ubuntu/Python 3.13 `auth-db` failing the media DB import-boundary contract because `media.reprocess` bound `MediaDatabase` at runtime for an annotation. The fixes now keep entrypoint env fixtures LF-only on Windows, treat processing-only URL transcription failure and explicit allowlist-denial as environment skips like download/egress failures, and move the `media.reprocess` `MediaDatabase` import behind `TYPE_CHECKING`.
+
+2026-06-05 continued new-head monitoring also found Ubuntu/Python 3.13 `chat-core` failing `test_sync_import_endpoint_returns_imported_items_and_warnings` because the test still asserted the older minimal Chatbook import response; a later Windows/Python 3.12 `chat-core` failure matched the same assertion. The sync import contract now asserts the current response schema, including `source_format` and nullable OpenWebUI result fields for chatbook imports. Verification: exact Chatbooks sync response tests passed locally (2 passed), the combined current-failure matrix passed locally (9 passed, 1 skipped for media-audio environment skip), compileall passed for the current touched Python scope, `git diff --check` passed, and Bandit on the touched Chatbooks test reported zero findings/errors. Newly canceled Ubuntu/Python 3.13 `rag-legacy` and `ai-embeddings` rows had no pytest failure summaries and only GitHub cancellation messages after normal test progress.
+
+2026-06-05 continued new-head monitoring found Windows/Python 3.12 `llm-providers` failing `test_llamafile_stop_timeout` because the test's fake process omitted the `kill()` method that real `asyncio.subprocess.Process` exposes and that the Windows graceful-timeout path invokes. The fake now implements `kill()` and the test forces the Windows branch locally so the CI-specific path is covered. Verification: the exact timeout regression passed locally (1 passed), the expanded focused matrix passed locally (10 passed, 1 skipped for media-audio environment skip), compileall passed for the current touched Python scope, `git diff --check` passed, and Bandit JSON reports for touched production/test scopes showed zero findings/errors.
+
+2026-06-05 continued new-head monitoring found Windows/Python 3.12 `product-evaluations-core` failing `TestConnectionPoolThreadSafety.test_concurrent_connection_access` with a `WinError 32` unlink of a SQLite temp file. The test now uses pytest `tmp_path` instead of an open `NamedTemporaryFile` handle and always shuts down the pool in `finally` before assertions. Verification: the exact Evaluations thread-safety regression passed locally (1 passed), the expanded focused matrix passed locally (11 passed, 1 skipped for media-audio environment skip), compileall passed for the current touched Python scope, `git diff --check` passed, and Bandit JSON reports for touched production/test scopes showed zero findings/errors.
+
+2026-06-05 continued new-head monitoring found Windows/Python 3.12 `product-flashcards` failing `test_apkg_basic_reverse_two_cards` because `export_apkg_from_rows()` left the temporary `collection.anki2` SQLite connection open when `TemporaryDirectory` cleaned up on Windows. The exporter now closes the connection after commit and before zipping/deleting the temp directory. Verification: the exact APKG exporter regression passed locally (1 passed), the expanded focused matrix passed locally (12 passed, 1 skipped for media-audio environment skip), compileall passed for the current touched Python scope, `git diff --check` passed, and Bandit JSON reports for touched production/test scopes showed zero findings/errors.
+
+2026-06-05 continued new-head monitoring found Windows/Python 3.12 `product-workflows` failing `test_summarize_adapter_sanitizes_backend_errors` because the test only cleared `TEST_MODE` while the summarize adapter still saw the current test-mode hook and returned a simulated summary. The test now patches `content.summarize.is_test_mode` directly to exercise the mocked backend-error path. Verification: the exact workflows adapter regression passed locally (1 passed).
+
+Fresh combined verification for the current new-head failure batch passed locally on 2026-06-05: the focused regression matrix covering RAG analytics bootstrap isolation, Docker env LF fixtures, media-audio environment skip handling, media reprocess import-boundary contracts, Chatbooks sync schema fields, Local LLM Windows timeout cleanup, Evaluations connection-pool temp cleanup, APKG exporter temp SQLite cleanup, and Workflows summarize backend-error handling passed with 13 passed and 1 skipped for the environment-sensitive media-audio URL path. `python -m compileall -q` passed for the touched production/test files, `git diff --check` passed, production Bandit on `media/reprocess.py` and `apkg_exporter.py` reported `results=0 errors=0`, and touched test-scope Bandit reported `results=0 errors=0` with only existing test-scope `nosec` warnings.
+
+Subsequent polling found Ubuntu/Python 3.12 `auth-db` failing the same `test_media_reprocess_endpoint_does_not_bind_media_database_from_media_db_v2` import-boundary contract already fixed locally in `media.reprocess`; no new root cause was added by that row.
+
+The same polling window moved Windows/Python 3.12 `auth-db` and `admin-e2e` to canceled. Direct job-log inspection found normal pytest progress followed by GitHub cancellation messages and no short test summary or assertion/error signature; no new remediation was identified from those canceled rows.
+
+Later polling of run 27053166745 found three new Windows/Python 3.12 completed failures. `integrations` failed `test_first_run_state_endpoint_returns_backend_state` with `503` because the shared app lifecycle drain state leaked into the module-level TestClient; the setup test fixture now resets lifecycle state before and after each client. `platform-mcp` failed `test_register_recurring_scheduler_task_bounds_failed_registration_rollback` because the test did not yield after creating the stubborn task, allowing Windows to cancel it before it entered the cancellation-swallowing loop; the test now yields once before forcing registration failure. `product-watchlists` failed `test_watchlist_schedule_has_jitter` because `SchedulerConfig` treated Windows 8.3 short-path segments such as `RUNNER~1` as tilde expansion; scheduler path validation now rejects traversal/home-expansion by path segment and includes a short-path regression. Newly canceled Windows `product-claims-core` and `ai-embeddings` rows had normal pytest progress followed by GitHub cancellation messages and no assertion/error summaries. Verification after this pass: the expanded focused matrix covering all current distinct failure classes passed locally with 17 passed and 1 skipped for the environment-sensitive media-audio URL path, compileall passed for the touched production/test files, `git diff --check` passed, production Bandit reported `results=0 errors=0`, and test-scope Bandit reported `results=0 errors=0` with only existing test-scope `nosec` warnings.
+
+Current-head follow-up on 2026-06-06 added the remaining local fixes from run 27053166745: deterministic event-loop use in Prompt Studio MCTS tests, timing-free circuit-breaker probe-lease assertions, completed-job marking in the multiprocessing lease test, and a single-reader Persona WebSocket wait helper. The latest local verification passed the focused current-failure matrix (21 passed, 5 skipped), compileall, `git diff --check`, and production/test Bandit with zero findings/errors. CI still had pending macOS full-suite rows at the last poll, so the branch was not pushed.
+
+Final current-head follow-up on 2026-06-06 waited for run 27053166745 to reach terminal state. The last macOS rows added no new assertion class beyond local fixes except a timeout-only `ai-embeddings` cancellation, now addressed by splitting Embeddings into five smaller full-suite shards with exact coverage-contract checks. Verification after the final edits: focused matrix plus workflow contract passed (22 passed, 5 skipped), Embeddings collect-only over the new shard globs collected 391 tests, compileall and `git diff --check` passed, and Bandit reported zero findings/errors for touched production and test scopes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

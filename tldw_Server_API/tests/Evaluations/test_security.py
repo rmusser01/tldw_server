@@ -276,51 +276,52 @@ class TestScoreParsingSecurity:
 class TestConnectionPoolThreadSafety:
     """Test connection pool thread safety"""
 
-    def test_concurrent_connection_access(self):
+    def test_concurrent_connection_access(self, tmp_path: Path):
 
         """Test that connections are thread-safe"""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            pool = ConnectionPool(
-                db_path=tmp.name,
-                pool_size=5,
-                max_overflow=10
-            )
+        db_path = tmp_path / "connection_pool_thread_safety.db"
+        pool = ConnectionPool(
+            db_path=str(db_path),
+            pool_size=5,
+            max_overflow=10
+        )
 
-            errors = []
-            results = []
+        errors = []
+        results = []
 
-            def worker(worker_id):
+        def worker(worker_id):
 
-                """Worker function that uses connections"""
-                try:
-                    for i in range(10):
-                        with pool.get_connection() as conn:
-                            # Each thread writes to its own table
-                            worker_id_str = str(worker_id)
-                            if not re.fullmatch(r"[A-Za-z0-9_-]+", worker_id_str):
-                                raise ValueError(f"Invalid worker_id for SQL identifier: {worker_id_str!r}")
-                            table_name = f"test_table_{worker_id_str}"
-                            escaped_table_name = table_name.replace('"', '""')
-                            quoted_table_name = f'"{escaped_table_name}"'
-                            create_sql = (
-                                f"CREATE TABLE IF NOT EXISTS {quoted_table_name} "
-                                "(id INTEGER, value TEXT)"
-                            )
-                            insert_sql = " ".join(("INSERT", "INTO", quoted_table_name, "VALUES", "(?, ?)"))
-                            select_sql = " ".join(("SELECT", "COUNT(*)", "FROM", quoted_table_name))
+            """Worker function that uses connections"""
+            try:
+                for i in range(10):
+                    with pool.get_connection() as conn:
+                        # Each thread writes to its own table
+                        worker_id_str = str(worker_id)
+                        if not re.fullmatch(r"[A-Za-z0-9_-]+", worker_id_str):
+                            raise ValueError(f"Invalid worker_id for SQL identifier: {worker_id_str!r}")
+                        table_name = f"test_table_{worker_id_str}"
+                        escaped_table_name = table_name.replace('"', '""')
+                        quoted_table_name = f'"{escaped_table_name}"'
+                        create_sql = (
+                            f"CREATE TABLE IF NOT EXISTS {quoted_table_name} "
+                            "(id INTEGER, value TEXT)"
+                        )
+                        insert_sql = " ".join(("INSERT", "INTO", quoted_table_name, "VALUES", "(?, ?)"))
+                        select_sql = " ".join(("SELECT", "COUNT(*)", "FROM", quoted_table_name))
 
-                            conn.execute(create_sql)
-                            conn.execute(insert_sql, (i, f"value_{i}"))
-                            conn.commit()
+                        conn.execute(create_sql)
+                        conn.execute(insert_sql, (i, f"value_{i}"))
+                        conn.commit()
 
-                            # Verify write
-                            cursor = conn.execute(select_sql)
-                            count = cursor.fetchone()[0]
-                            results.append((worker_id, count))
+                        # Verify write
+                        cursor = conn.execute(select_sql)
+                        count = cursor.fetchone()[0]
+                        results.append((worker_id, count))
 
-                except Exception as e:
-                    errors.append((worker_id, str(e)))
+            except Exception as e:
+                errors.append((worker_id, str(e)))
 
+        try:
             # Run multiple threads concurrently
             threads = []
             for i in range(10):
@@ -331,21 +332,19 @@ class TestConnectionPoolThreadSafety:
             # Wait for all threads
             for t in threads:
                 t.join()
-
-            # Clean up
+        finally:
             pool.shutdown()
-            os.unlink(tmp.name)
 
-            # Check results
-            assert len(errors) == 0, f"Thread safety errors: {errors}"
+        # Check results
+        assert len(errors) == 0, f"Thread safety errors: {errors}"
 
-            # Each worker should have successfully written its data
-            for worker_id in range(10):
-                worker_results = [r for r in results if r[0] == worker_id]
-                assert len(worker_results) == 10
-                # Counts should increase from 1 to 10
-                counts = [r[1] for r in worker_results]
-                assert counts == list(range(1, 11))
+        # Each worker should have successfully written its data
+        for worker_id in range(10):
+            worker_results = [r for r in results if r[0] == worker_id]
+            assert len(worker_results) == 10
+            # Counts should increase from 1 to 10
+            counts = [r[1] for r in worker_results]
+            assert counts == list(range(1, 11))
 
     def test_connection_pool_exhaustion(self):
 

@@ -73,6 +73,7 @@ def _worker_acquire_loop(spec: Dict[str, Any], out_ids):
                 continue
             idle_spins = 0
             out_ids.append(int(job["id"]))
+            db.update_job_status(int(job["id"]), "completed", result={"worker": "mp-worker"})
             # Light delay to encourage interleaving
             time.sleep(0.01)
     finally:
