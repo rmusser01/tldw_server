@@ -203,6 +203,7 @@ class CalendarViewService:
         recurrences = self.calendar_service.db.list_recurrences_for_items(row.id for row in readable_rows)
         view_items: list[CalendarViewItem] = []
         for item in readable_rows:
+            local_tags = self._local_tags_for_actor(actor_user_id=actor_user_id, item=item)
             recurrence = recurrences.get(item.id)
             if recurrence and recurrence.rrule and item.source_owner == CALENDAR_SOURCE_OWNER_TLDW:
                 view_items.extend(
@@ -211,11 +212,12 @@ class CalendarViewService:
                         recurrence=recurrence,
                         window_start=window_start,
                         window_end=window_end,
+                        local_tags=local_tags,
                     )
                 )
                 continue
             if _item_overlaps_window(item, window_start, window_end):
-                view_items.append(_view_item_from_row(item))
+                view_items.append(_view_item_from_row(item, local_tags=local_tags))
         return view_items
 
     async def load_scheduled_task_projections(
@@ -311,6 +313,7 @@ class CalendarViewService:
         recurrence: CalendarRecurrenceRow,
         window_start: datetime,
         window_end: datetime,
+        local_tags: list[str],
     ) -> list[CalendarViewItem]:
         master_start = item.start_at or item.due_at
         if master_start is None:
@@ -329,12 +332,31 @@ class CalendarViewService:
                 item=item,
                 recurrence=recurrence,
                 occurrence=occurrence,
+                local_tags=local_tags,
             )
             for occurrence in occurrences
         ]
 
+    def _local_tags_for_actor(
+        self,
+        *,
+        actor_user_id: int,
+        item: CalendarItemRow,
+    ) -> list[str]:
+        """Return item tags plus the actor's empty-body local tag overlay."""
 
-def _view_item_from_row(item: CalendarItemRow) -> CalendarViewItem:
+        tags = _json_list(item.local_tags_json)
+        for annotation in self.calendar_service.db.list_annotations(item.id):
+            if annotation.author_user_id == actor_user_id and annotation.body == "":
+                tags = _merge_tags(tags, _json_list(annotation.tags_json))
+        return tags
+
+
+def _view_item_from_row(
+    item: CalendarItemRow,
+    *,
+    local_tags: list[str] | None = None,
+) -> CalendarViewItem:
     start_at = item.start_at or item.due_at
     return CalendarViewItem(
         id=f"calendar_item:{item.id}",
@@ -350,7 +372,7 @@ def _view_item_from_row(item: CalendarItemRow) -> CalendarViewItem:
         due_at=item.due_at,
         all_day=item.all_day,
         status=item.status,
-        local_tags=_json_list(item.local_tags_json),
+        local_tags=local_tags if local_tags is not None else _json_list(item.local_tags_json),
         read_only_reason="provider" if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER else None,
     )
 
@@ -360,6 +382,7 @@ def _view_item_from_occurrence(
     item: CalendarItemRow,
     recurrence: CalendarRecurrenceRow,
     occurrence: RecurrenceOccurrence,
+    local_tags: list[str],
 ) -> CalendarViewItem:
     start_at = _serialize_temporal(occurrence.start_at)
     end_at = _serialize_temporal(occurrence.end_at)
@@ -377,7 +400,7 @@ def _view_item_from_occurrence(
         due_at=start_at if item.kind == "todo" and item.due_at else None,
         all_day=item.all_day,
         status=item.status,
-        local_tags=_json_list(item.local_tags_json),
+        local_tags=local_tags,
         recurrence_id=recurrence.id,
         occurrence_index=occurrence.occurrence_index,
     )
@@ -393,6 +416,18 @@ def _json_list(raw: str | None) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _merge_tags(base: list[str], overlay: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for tag in [*base, *overlay]:
+        normalized = tag.strip()
+        if not normalized or normalized in seen:
+            continue
+        merged.append(normalized)
+        seen.add(normalized)
+    return merged
 
 
 def _item_overlaps_window(item: CalendarItemRow, window_start: datetime, window_end: datetime) -> bool:

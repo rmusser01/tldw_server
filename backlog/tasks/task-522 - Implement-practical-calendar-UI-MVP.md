@@ -46,11 +46,10 @@ Implementation complete for Task 6 frontend UI scope. Added the CalendarPage wor
 
 Verification:
 - Initial Task 6 root UI run failed before the root DOM setup existed because `jsdom` could not be resolved by the temporary root `bunx` Vitest package.
-- Final `bunx vitest run apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarPage.test.tsx apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx` passed with 2 files / 8 tests.
-- Final UI-package run from `apps/packages/ui`, `bunx vitest run src/components/Option/Calendar/__tests__/CalendarPage.test.tsx src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx`, passed with 2 files / 8 tests.
-- Regression check `bunx vitest run apps/packages/ui/src/services/__tests__/calendar.test.ts` passed with 1 file / 8 tests.
-
-Bandit is not applicable because this task touched frontend TypeScript/TSX and test configuration only.
+- Review-fix root UI/service run `bunx vitest run apps/packages/ui/src/services/__tests__/calendar.test.ts apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarPage.test.tsx apps/packages/ui/src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx` passed with 3 files / 22 tests.
+- Review-fix UI-package run from `apps/packages/ui`, `bunx vitest run src/services/__tests__/calendar.test.ts src/components/Option/Calendar/__tests__/CalendarPage.test.tsx src/components/Option/Calendar/__tests__/CalendarItemDrawer.test.tsx`, passed with 3 files / 22 tests.
+- Review-fix backend run `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Calendar/unit/test_calendar_service.py tldw_Server_API/tests/Calendar/integration/test_calendar_api.py -v` passed with 39 tests.
+- Review-fix Bandit run `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/calendar.py tldw_Server_API/app/api/v1/schemas/calendar_schemas.py tldw_Server_API/app/core/Calendar/view_service.py -f json -o /tmp/bandit_calendar_task6_review_fix.json` reported 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

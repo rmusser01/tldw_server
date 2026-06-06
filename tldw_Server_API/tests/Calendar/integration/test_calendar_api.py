@@ -409,6 +409,20 @@ def test_update_provider_owned_item_local_tags(
     assert payload["tags"] == ["remote", "follow-up"]
     assert db.get_item(provider_item.id).local_tags_json is None
 
+    view_response = client.get(
+        "/api/v1/calendar/views/agenda",
+        params={
+            "start_at": "2026-06-05T00:00:00Z",
+            "end_at": "2026-06-06T00:00:00Z",
+            "include_scheduled_tasks": "false",
+        },
+    )
+
+    assert view_response.status_code == 200, view_response.text
+    [view_item] = view_response.json()["items"]
+    assert view_item["calendar_item_id"] == provider_item.id
+    assert view_item["local_tags"] == ["remote", "follow-up"]
+
 
 def test_create_link(calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub]) -> None:
     client, _db, _reminder_service = calendar_api_client

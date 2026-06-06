@@ -125,6 +125,8 @@ export const CalendarPage: React.FC = () => {
 
   const selectedCalendarQueryIds =
     selectedCalendarIds ?? calendars.map((calendar) => calendar.id)
+  const hasExplicitEmptyCalendarSelection =
+    selectedCalendarIds !== null && selectedCalendarIds.length === 0
 
   const agendaQuery = useQuery({
     queryKey: [
@@ -141,7 +143,10 @@ export const CalendarPage: React.FC = () => {
         calendar_ids: selectedCalendarQueryIds,
         include_scheduled_tasks: true
       }),
-    enabled: calendarSupported === true && calendarsQuery.isSuccess
+    enabled:
+      calendarSupported === true &&
+      calendarsQuery.isSuccess &&
+      !hasExplicitEmptyCalendarSelection
   })
 
   const weekQuery = useQuery({
@@ -152,7 +157,10 @@ export const CalendarPage: React.FC = () => {
         calendar_ids: selectedCalendarQueryIds,
         include_scheduled_tasks: true
       }),
-    enabled: calendarSupported === true && calendarsQuery.isSuccess
+    enabled:
+      calendarSupported === true &&
+      calendarsQuery.isSuccess &&
+      !hasExplicitEmptyCalendarSelection
   })
 
   const calendarsById = useMemo(
@@ -161,8 +169,9 @@ export const CalendarPage: React.FC = () => {
   )
 
   const filterItems = React.useCallback(
-    (items: CalendarViewItemResponse[]) =>
-      items.filter((item) => {
+    (items: CalendarViewItemResponse[]) => {
+      if (hasExplicitEmptyCalendarSelection) return []
+      return items.filter((item) => {
         const source = sourceFilterForItem(item, calendarsById)
         const kind = inferItemKind(item)
         if (!selectedSources.includes(source)) return false
@@ -171,8 +180,15 @@ export const CalendarPage: React.FC = () => {
           return false
         }
         return true
-      }),
-    [calendarsById, selectedCalendarQueryIds, selectedKinds, selectedSources]
+      })
+    },
+    [
+      calendarsById,
+      hasExplicitEmptyCalendarSelection,
+      selectedCalendarQueryIds,
+      selectedKinds,
+      selectedSources
+    ]
   )
 
   const agendaItems = useMemo(
