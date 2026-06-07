@@ -6,12 +6,13 @@ import {
   createKnowledgeQaStateFixture,
   type KnowledgeQaStateFixtureName,
 } from "./knowledgeQaStateFixtures"
+import type { CitationRef, RagResult } from "../types"
 
 const state = {
   settingsPanelOpen: false,
-  results: [] as Array<{ id: string }>,
+  results: [] as RagResult[],
   answer: null as string | null,
-  citations: [] as Array<{ id: string }>,
+  citations: [] as CitationRef[],
   hasSearched: false,
   isSearching: false,
   error: null as string | null,

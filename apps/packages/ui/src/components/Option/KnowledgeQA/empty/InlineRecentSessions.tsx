@@ -2,7 +2,7 @@ import React from "react"
 import { Clock3, FileText, Sparkles } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { SearchHistoryItem } from "../types"
-import { getKnowledgeAnswerTrustLabel } from "../trustState"
+import { buildHistoryStatusLabels } from "../historyUtils"
 
 type InlineRecentSessionsProps = {
   items: SearchHistoryItem[]
@@ -42,38 +42,44 @@ export function InlineRecentSessions({
         Recent searches
       </p>
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-        {visible.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => onRestore(item)}
-            className="flex min-w-[180px] max-w-[240px] flex-shrink-0 flex-col gap-1 rounded-lg border border-border/80 bg-surface px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-surface2"
-          >
-            <p className="truncate text-sm font-medium text-text">
-              {item.query}
-            </p>
-            <div className="flex items-center gap-2 text-[11px] text-text-muted">
-              <span className="inline-flex items-center gap-0.5">
-                <FileText className="h-3 w-3" />
-                {item.sourcesCount}
-              </span>
-              {item.hasAnswer && (
-                <span className="inline-flex items-center gap-0.5">
-                  <Sparkles className="h-3 w-3" />
+        {visible.map((item) => {
+          const statusLabels = buildHistoryStatusLabels(item)
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onRestore(item)}
+              className="flex min-w-[180px] max-w-[240px] flex-shrink-0 flex-col gap-1 rounded-lg border border-border/80 bg-surface px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-surface2"
+            >
+              <p className="truncate text-sm font-medium text-text">
+                {item.query}
+              </p>
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-text-muted">
+                <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                  <FileText className="h-3 w-3" />
+                  {item.sourcesCount}
                 </span>
-              )}
-              {item.trustState ? (
-                <span className="inline-flex min-w-0 truncate">
-                  {getKnowledgeAnswerTrustLabel(item.trustState)}
+                {item.hasAnswer && (
+                  <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                    <Sparkles className="h-3 w-3" />
+                  </span>
+                )}
+                {statusLabels.map((label) => (
+                  <span
+                    key={label}
+                    className="inline-flex min-w-0 max-w-full truncate whitespace-nowrap"
+                  >
+                    {label}
+                  </span>
+                ))}
+                <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                  <Clock3 className="h-3 w-3" />
+                  {formatRelativeTime(item.timestamp)}
                 </span>
-              ) : null}
-              <span className="inline-flex items-center gap-0.5">
-                <Clock3 className="h-3 w-3" />
-                {formatRelativeTime(item.timestamp)}
-              </span>
-            </div>
-          </button>
-        ))}
+              </div>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

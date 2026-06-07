@@ -22,11 +22,11 @@ import { useMobile } from "@/hooks/useMediaQuery"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import {
   buildGroupedHistorySections,
+  buildHistoryStatusLabels,
   buildHistoryExportMarkdown,
   filterHistoryItems,
   isKnowledgeQaHistoryItem,
 } from "./historyUtils"
-import { getKnowledgeAnswerTrustLabel } from "./trustState"
 
 type HistorySidebarProps = {
   className?: string
@@ -446,6 +446,7 @@ function HistoryItem({
     alwaysShowActions || item.pinned || confirmDelete
       ? "opacity-100"
       : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+  const statusLabels = buildHistoryStatusLabels(item)
 
   return (
     <div className="group relative px-2">
@@ -463,7 +464,7 @@ function HistoryItem({
           {item.answerPreview ? (
             <p className="mt-0.5 text-xs text-text-muted line-clamp-1">{item.answerPreview}</p>
           ) : null}
-          <div className="flex items-center gap-2 mt-0.5 text-xs text-text-muted">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-xs text-text-muted">
             <span className="flex items-center gap-1">
               <FileText className="w-3 h-3" />
               {item.sourcesCount}
@@ -473,9 +474,11 @@ function HistoryItem({
                 <Sparkles className="w-3 h-3" />
               </span>
             )}
-            {item.trustState ? (
-              <span className="truncate">{getKnowledgeAnswerTrustLabel(item.trustState)}</span>
-            ) : null}
+            {statusLabels.map((label) => (
+              <span key={label} className="max-w-full truncate whitespace-nowrap">
+                {label}
+              </span>
+            ))}
             <span>{formatTimestamp(item.timestamp)}</span>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import type { SearchHistoryItem } from "./types"
 import { getKnowledgeAnswerTrustLabel } from "./trustState"
+import { getEvidenceOriginLabel } from "./sourceListUtils"
 
 export type GroupedHistorySections = {
   pinned: SearchHistoryItem[]
@@ -91,6 +92,48 @@ export function truncateAnswerPreview(answer: string | null | undefined): string
   return `${normalized.slice(0, 117)}...`
 }
 
+function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+  return count === 1 ? singular : plural
+}
+
+function countSourceIssues(item: SearchHistoryItem): number {
+  const statuses = item.sourceStatus
+  if (!statuses || typeof statuses !== "object") return 0
+  return Object.values(statuses).filter((entry) => {
+    const status = String(entry?.status || "").trim().toLowerCase()
+    return status.length > 0 && status !== "searched" && status !== "ready"
+  }).length
+}
+
+export function buildHistoryStatusLabels(item: SearchHistoryItem): string[] {
+  const labels: string[] = []
+  if (item.trustState) {
+    labels.push(getKnowledgeAnswerTrustLabel(item.trustState))
+  }
+
+  if (item.evidenceOrigin && item.evidenceOrigin !== "unknown_origin") {
+    labels.push(getEvidenceOriginLabel(item.evidenceOrigin))
+  }
+
+  if (typeof item.citationCount === "number" && Number.isFinite(item.citationCount)) {
+    const citationCount = Math.max(0, Math.round(item.citationCount))
+    labels.push(
+      `${citationCount} ${pluralize(citationCount, "citation")}`
+    )
+  }
+
+  if (item.unsynced && item.trustState !== "unsynced_local_result") {
+    labels.push("Unsynced")
+  }
+
+  const sourceIssues = countSourceIssues(item)
+  if (sourceIssues > 0) {
+    labels.push(`${sourceIssues} ${pluralize(sourceIssues, "source issue")}`)
+  }
+
+  return labels
+}
+
 export function buildHistoryExportMarkdown(
   items: SearchHistoryItem[],
   exportedAt: Date = new Date()
@@ -117,6 +160,19 @@ export function buildHistoryExportMarkdown(
     }
     if (item.trustState) {
       lines.push(`- Trust: ${getKnowledgeAnswerTrustLabel(item.trustState)}`)
+    }
+    if (item.evidenceOrigin && item.evidenceOrigin !== "unknown_origin") {
+      lines.push(`- Evidence origin: ${getEvidenceOriginLabel(item.evidenceOrigin)}`)
+    }
+    if (typeof item.citationCount === "number" && Number.isFinite(item.citationCount)) {
+      lines.push(`- Citations: ${Math.max(0, Math.round(item.citationCount))}`)
+    }
+    if (item.unsynced) {
+      lines.push("- Unsynced: yes")
+    }
+    const sourceIssues = countSourceIssues(item)
+    if (sourceIssues > 0) {
+      lines.push(`- Source status: ${sourceIssues} ${pluralize(sourceIssues, "source issue")}`)
     }
     if (item.conversationId) {
       lines.push(`- Conversation ID: ${item.conversationId}`)

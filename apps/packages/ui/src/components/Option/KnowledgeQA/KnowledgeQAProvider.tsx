@@ -643,6 +643,26 @@ function mapRagContextDocumentsToResults(
   })
 }
 
+function buildHistorySourceStatusFromResults(
+  results: RagResult[]
+): Record<string, KnowledgeSourceStatus> | undefined {
+  const sourceStatus: Record<string, KnowledgeSourceStatus> = {}
+  results.forEach((result) => {
+    const sourceType = result.sourceType || result.metadata?.source_type || "unknown"
+    const status = getResultSourceStatus(result) ?? "searched"
+    const existing = sourceStatus[sourceType]
+    if (existing) {
+      existing.count += 1
+      if (existing.status === "searched" && status !== "searched") {
+        existing.status = status
+      }
+      return
+    }
+    sourceStatus[sourceType] = { status, count: 1 }
+  })
+  return Object.keys(sourceStatus).length > 0 ? sourceStatus : undefined
+}
+
 function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   query: string | null
   answer: string | null
@@ -654,6 +674,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   answerPreview?: string
   sourcesCount: number
   settingsSnapshot?: Partial<RagSettings> | null
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
 } | null {
   if (messages.length === 0) return null
 
@@ -736,6 +757,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     answerPreview: truncateAnswerPreview(answer),
     sourcesCount: results.length,
     settingsSnapshot: normalizeRestorableSettingsSnapshot(ragContext?.settings_snapshot),
+    sourceStatus: buildHistorySourceStatusFromResults(results),
   }
 }
 
@@ -2311,7 +2333,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                     streamResults,
                     effectiveSettings.strip_min_relevance
                   ),
-                }).state
+                })
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
@@ -2350,7 +2372,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                     streamResults,
                     effectiveSettings.strip_min_relevance
                   ),
-                }).state
+                })
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
@@ -2571,6 +2593,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             messageId: assistantMessageId || undefined,
             keywords: [KNOWLEDGE_QA_KEYWORD],
             trustState: historyTrustState,
+            trustReasonCodes: answerTrustReasonCodes,
+            evidenceOrigin: answerEvidenceOrigin ?? undefined,
+            sourceStatus:
+              resolvedSearchDetails?.sourceStatus ??
+              buildHistorySourceStatusFromResults(results),
+            unsynced: historyTrustState === "unsynced_local_result",
+            citationCount: citations.length,
           }
           markHistoryMutation()
           dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
@@ -2618,6 +2647,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
             keywords: [KNOWLEDGE_QA_KEYWORD],
             trustState: "failed_search",
+            trustReasonCodes: [],
+            unsynced: Boolean(threadId && isLocalThreadId(threadId)),
+            citationCount: 0,
           }
           markHistoryMutation()
           dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
@@ -2806,6 +2838,11 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               hasAnswer: Boolean(hydration.answer),
               sourcesCount: hydration.sourcesCount || matchingHistoryItem.sourcesCount,
               trustState: hydration.answerTrustState,
+              trustReasonCodes: hydration.answerTrustReasonCodes,
+              evidenceOrigin: hydration.answerEvidenceOrigin ?? undefined,
+              sourceStatus: hydration.sourceStatus,
+              unsynced: hydration.answerTrustState === "unsynced_local_result",
+              citationCount: hydration.citations.length,
             },
           },
         })

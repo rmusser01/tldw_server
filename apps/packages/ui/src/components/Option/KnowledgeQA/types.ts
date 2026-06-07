@@ -88,7 +88,7 @@ export type RagResult = {
     source?: string
     url?: string
     page_number?: number
-    chunk_id?: string
+    chunk_id?: string | number
     source_type?: string
     [key: string]: unknown
   }
@@ -253,6 +253,11 @@ export type SearchHistoryItem = {
   settingsSnapshot?: Partial<RagSettings>
   keywords?: string[]
   trustState?: KnowledgeAnswerTrustState
+  trustReasonCodes?: KnowledgeTrustReasonCode[]
+  evidenceOrigin?: EvidenceOrigin
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
+  unsynced?: boolean
+  citationCount?: number
 }
 
 // Thread/conversation for Knowledge QA

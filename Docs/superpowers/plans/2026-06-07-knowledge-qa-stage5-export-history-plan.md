@@ -37,7 +37,7 @@
 
 ## Task 1: Preserve Trust Metadata In History
 
-- [ ] **Step 1: Write failing storage tests**
+- [x] **Step 1: Write failing storage tests**
 
 Update `historyStorage.test.ts`:
 
@@ -68,7 +68,7 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/historyStorage.test.
 
 Expected: fail if history drops new fields.
 
-- [ ] **Step 2: Extend history types and persistence**
+- [x] **Step 2: Extend history types and persistence**
 
 Update `SearchHistoryItem` with:
 
@@ -83,7 +83,7 @@ Keep migration backwards compatible.
 
 ## Task 2: Render History And Recent Session Labels
 
-- [ ] **Step 1: Add failing UI tests**
+- [x] **Step 1: Add failing UI tests**
 
 Update `HistorySidebar.responsive.test.tsx` and `InlineRecentSessions.test.tsx` to assert labels for:
 
@@ -94,13 +94,13 @@ Update `HistorySidebar.responsive.test.tsx` and `InlineRecentSessions.test.tsx` 
 - failed
 - unsynced
 
-- [ ] **Step 2: Implement compact labels**
+- [x] **Step 2: Implement compact labels**
 
 Update `HistorySidebar.tsx` and `InlineRecentSessions.tsx`. Labels must not wrap awkwardly in compact layouts.
 
 ## Task 3: Gate And Label Export
 
-- [ ] **Step 1: Write failing export tests**
+- [x] **Step 1: Write failing export tests**
 
 Update `ExportDialog.a11y.test.tsx`:
 
@@ -120,7 +120,7 @@ Trust: unsupported draft
 Evidence origin: local library
 ```
 
-- [ ] **Step 2: Implement export acknowledgement**
+- [x] **Step 2: Implement export acknowledgement**
 
 Modify `ExportDialog.tsx` so:
 
@@ -129,25 +129,34 @@ Modify `ExportDialog.tsx` so:
 - failed/no-results/missing content cannot export as answer content
 - output labels unsupported draft material
 
+Implementation note: `persistKnowledgeQaHistory` already serializes the full `SearchHistoryItem`; the Stage 5 storage regression locks the trust, evidence, citation, source status, and unsynced payload into the serialized history contract.
+
 ## Task 4: Verify
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/KnowledgeQA/__tests__/historyStorage.test.ts src/components/Option/KnowledgeQA/__tests__/historyUtils.test.ts src/components/Option/KnowledgeQA/__tests__/HistorySidebar.responsive.test.tsx src/components/Option/KnowledgeQA/__tests__/InlineRecentSessions.test.tsx src/components/Option/KnowledgeQA/__tests__/ExportDialog.a11y.test.tsx src/components/Option/KnowledgeQA/__tests__/answerMarkdown.test.ts
 ```
 
-- [ ] **Step 2: Run diff and scope guards**
+- [x] **Step 2: Run diff and scope guards**
 
 ```bash
 git diff --check -- apps/packages/ui/src/components/Option/KnowledgeQA
-rg -n "flashcard|deck|spaced repetition|study set" apps/packages/ui/src/components/Option/KnowledgeQA
+rg -n "$KNOWLEDGE_QA_SCOPE_BOUNDARY_PATTERN" apps/packages/ui/src/components/Option/KnowledgeQA
 ```
 
 Expected: no scope matches in touched Knowledge QA runtime files.
 
-- [ ] **Step 3: Commit**
+Verification evidence:
+
+- `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json` passed in `apps/packages/ui`.
+- Focused Knowledge QA vitest command passed: 10 files, 125 tests.
+- `git diff --check` passed for touched Knowledge QA, plan, and Backlog files.
+- Scope guard had no runtime matches; only this plan's explicit `/knowledge` boundary reminder matched.
+
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2279.7 - Propagate-Knowledge-QA-trust-status-into-export-and-history.md"

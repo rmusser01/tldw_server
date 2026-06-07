@@ -1,4 +1,5 @@
 import {
+  buildHistoryStatusLabels,
   buildGroupedHistorySections,
   buildHistoryExportMarkdown,
   filterHistoryItems,
@@ -93,12 +94,55 @@ describe("historyUtils", () => {
         pinned: true,
         answerPreview: "Stage 3 adds pinning and filters.",
         trustState: "uncited_degraded_answer",
+        evidenceOrigin: "local_library",
+        citationCount: 0,
+        unsynced: true,
+        sourceStatus: {
+          media_db: { status: "unavailable", count: 0, reason: "index offline" },
+        },
       }),
     ])
 
     expect(markdown).toContain("# Knowledge QA History Export")
     expect(markdown).toContain("Pinned: yes")
     expect(markdown).toContain("Trust: Uncited answer")
+    expect(markdown).toContain("Evidence origin: Local library")
+    expect(markdown).toContain("Citations: 0")
+    expect(markdown).toContain("Unsynced: yes")
+    expect(markdown).toContain("Source status: 1 source issue")
     expect(markdown).toContain("Answer preview: Stage 3 adds pinning and filters.")
+  })
+
+  it("builds compact status labels for history and recent-session rows", () => {
+    expect(
+      buildHistoryStatusLabels(
+        makeItem({
+          trustState: "cited_answer",
+          evidenceOrigin: "local_library",
+          citationCount: 2,
+        })
+      )
+    ).toEqual(["Cited answer", "Local library", "2 citations"])
+
+    expect(
+      buildHistoryStatusLabels(
+        makeItem({
+          trustState: "failed_search",
+          sourceStatus: {
+            media_db: { status: "error", count: 0 },
+            notes: { status: "searched", count: 3 },
+          },
+        })
+      )
+    ).toEqual(["Failed search", "1 source issue"])
+
+    expect(
+      buildHistoryStatusLabels(
+        makeItem({
+          trustState: "unknown_trust",
+          unsynced: true,
+        })
+      )
+    ).toEqual(["Trust unknown", "Unsynced"])
   })
 })
