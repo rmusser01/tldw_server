@@ -190,6 +190,10 @@ class ChatProviderRegistry:
             return None
         return adapter
 
+    def resolve_provider_name(self, name: str | None) -> str:
+        """Return the canonical provider name after registry alias resolution."""
+        return self._base.resolve_provider_name(name)
+
     def get_all_capabilities(self) -> dict[str, dict[str, Any]]:
         """Return capabilities for all registered providers, initializing as needed."""
         out: dict[str, dict[str, Any]] = {}
