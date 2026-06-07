@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 40
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine
         ports:
           - 6379:6379
         options: >-

@@ -43,7 +43,7 @@ jobs:
        contains(fromJSON('["critical","all-tiers"]'), github.event.inputs.tier))
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
@@ -135,7 +135,7 @@ jobs:
       contains(fromJSON('["features","all-tiers"]'), github.event.inputs.tier)
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
@@ -219,7 +219,7 @@ jobs:
       contains(fromJSON('["admin","all-tiers"]'), github.event.inputs.tier)
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
