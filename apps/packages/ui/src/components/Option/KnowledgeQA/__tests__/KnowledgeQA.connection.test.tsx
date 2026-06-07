@@ -236,6 +236,18 @@ describe("KnowledgeQA connection states", () => {
     capabilitiesState.capabilities = { hasRag: true }
   })
 
+  it("keeps fixture connection timestamps deterministic", () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(42)
+
+    try {
+      expect(createKnowledgeQaStateFixture("readySearch").connection.lastCheckedAt).toBe(
+        Date.parse("2026-06-07T12:00:00.000Z")
+      )
+    } finally {
+      dateNow.mockRestore()
+    }
+  })
+
   it("renders the backend offline audited state from a deterministic fixture", () => {
     applyStateFixture("backendOffline")
 

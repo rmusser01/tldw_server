@@ -208,7 +208,17 @@ vi.mock("../panels/AnswerWorkspace", () => ({
 }))
 
 vi.mock("../panels/NoResultsRecovery", () => ({
-  NoResultsRecovery: () => <div data-testid="knowledge-no-results-recovery" />,
+  NoResultsRecovery: ({
+    onShowNearestMatches,
+  }: {
+    onShowNearestMatches: () => void
+  }) => (
+    <div data-testid="knowledge-no-results-recovery">
+      <button type="button" onClick={onShowNearestMatches}>
+        Show nearest matches
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock("../evidence/EvidenceRail", () => ({
@@ -379,6 +389,20 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     expect(await screen.findByTestId("knowledge-ready-state")).toHaveTextContent(
       "knowledge-ready-recovery:web_only"
     )
+  })
+
+  it("opens the details evidence view when showing nearest no-results matches", async () => {
+    applyStateFixture("noResults")
+    state.evidenceRailOpen = false
+    state.evidenceRailTab = "sources"
+
+    renderLayout()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show nearest matches" }))
+
+    expect(state.setEvidenceRailOpen).toHaveBeenCalledWith(true)
+    expect(state.setEvidenceRailTab).toHaveBeenCalledWith("details")
+    expect(state.focusSource).not.toHaveBeenCalled()
   })
 
   it("passes a visible no-indexed-source block reason to the composer", async () => {

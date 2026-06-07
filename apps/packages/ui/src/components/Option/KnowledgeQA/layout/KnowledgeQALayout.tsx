@@ -444,7 +444,7 @@ export function KnowledgeQALayout({
 
   const handleShowNearestMatches = () => {
     setEvidenceRailOpen(true)
-    setEvidenceRailTab("sources")
+    setEvidenceRailTab(results.length > 0 ? "sources" : "details")
     if (results.length > 0) {
       focusSource(0)
     }

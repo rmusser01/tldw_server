@@ -65,6 +65,7 @@ export type KnowledgeQaStateFixture = {
 }
 
 const nowIso = "2026-06-07T12:00:00.000Z"
+const nowMs = Date.parse(nowIso)
 
 function createSettings(overrides: Partial<RagSettings> = {}): RagSettings {
   return {
@@ -248,7 +249,7 @@ function createBaseFixture(): KnowledgeQaStateFixture {
     connection: {
       online: true,
       isChecking: false,
-      lastCheckedAt: Date.now(),
+      lastCheckedAt: nowMs,
       serverUrl: "http://127.0.0.1:8000",
       configStep: "health",
       errorKind: "none",
