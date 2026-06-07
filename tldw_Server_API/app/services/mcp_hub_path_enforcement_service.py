@@ -136,6 +136,8 @@ def _normalize_allowlist_prefix(raw_value: Any) -> str | None:
 
 
 def _normalize_workspace_relative_path(raw_value: Any) -> tuple[str | None, str | None]:
+    """Normalize a user-supplied path and reject values outside workspace-relative form."""
+
     value = str(raw_value or "").strip().replace("\\", "/")
     while value.startswith("./"):
         value = value[2:]
@@ -267,6 +269,8 @@ def _path_scope_action(metadata: dict[str, Any]) -> str:
 
 
 def _selected_profile_id(effective_policy: dict[str, Any] | None) -> int | None:
+    """Return the profile id for the explicitly selected policy assignment when present."""
+
     policy = dict(effective_policy or {})
     selected_assignment_id = policy.get("selected_assignment_id")
     if selected_assignment_id in (None, ""):
@@ -288,6 +292,8 @@ def _selected_profile_id(effective_policy: dict[str, Any] | None) -> int | None:
 
 
 def _preview_outcome(enforcement_result: dict[str, Any]) -> str:
+    """Map the path-enforcement result shape into the preview allow/ask/deny outcome."""
+
     if not bool(enforcement_result.get("enabled")):
         return "allow"
     if bool(enforcement_result.get("within_scope", True)):
@@ -298,6 +304,8 @@ def _preview_outcome(enforcement_result: dict[str, Any]) -> str:
 
 
 def _safe_path_decisions(enforcement_result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract serializable path-decision dictionaries from direct or nested result payloads."""
+
     raw_decisions = enforcement_result.get("path_decisions")
     if not isinstance(raw_decisions, list):
         scope_payload = enforcement_result.get("scope_payload")
