@@ -136,10 +136,7 @@ def test_get_or_create_media_db_factory_logs_one_info_on_cache_miss(monkeypatch)
     second = deps._get_or_create_media_db_factory(_make_user())
 
     assert first is second
-    expected_target = str(Path("/tmp/1.db").resolve())
-    assert recorder.info_calls == [
-        f"Initializing MediaDbFactory user_id=1 backend=sqlite target={expected_target}"
-    ]
+    assert recorder.info_calls == ["Initializing MediaDbFactory backend=sqlite"]
 
 
 def _make_user(user_id: int = 1) -> User:

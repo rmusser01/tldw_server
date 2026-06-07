@@ -752,7 +752,6 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
     marker_dir.mkdir()
     wrapper_dir.mkdir()
     _write_entrypoint_env(env_file)
-    (marker_dir / ".authnz_initialized_multi_user").write_text("", encoding="utf-8")
     python_wrapper = wrapper_dir / "python"
     python_wrapper.write_text(
         "\n".join(
@@ -762,6 +761,10 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
                 'if [ -z "$real_python" ]; then',
                 '  echo "[test-wrapper] TLDW_TEST_REAL_PYTHON is required" >&2',
                 "  exit 127",
+                "fi",
+                'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.initialize" ]; then',
+                '  echo "[test-wrapper] initialize succeeded"',
+                "  exit 0",
                 "fi",
                 'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.create_admin" ]; then',
                 '  echo "[test-wrapper] create_admin failed" >&2',
