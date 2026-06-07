@@ -1,10 +1,10 @@
 # Security Confirmation Audit - 2026-06-04
 
 **Related task:** TASK-2247
-**Follow-up:** TASK-2248
+**Follow-up:** TASK-2248, TASK-2311
 **Inventory row:** INV-029
 **Source candidate:** `tldw_Server_API/app/core/Security/README.md`
-**Disposition:** Current governing, but too broad for one accepted ADR. Split before ADR backfill.
+**Disposition:** Current governing, but too broad for one accepted ADR. Request-edge middleware is backfilled by ADR-019; outbound egress/SSRF policy is backfilled by ADR-026; secrets/serialization remains a separate optional adoption-audit slice.
 
 ## Decision Candidate Under Review
 
@@ -12,7 +12,7 @@ INV-029 summarized the Security module convention as:
 
 > Security controls are centralized for egress policy, security headers, request IDs, setup CSP/access guard, URL validation, and secret management; production should keep security middleware enabled.
 
-The candidate describes current governing conventions, but it combines multiple security boundaries. Backfill should not turn the full row into one immutable ADR. The confirmed material should be split into bounded ADRs so request-edge middleware, outbound egress/SSRF policy, and secrets/serialization policy do not overclaim each other's behavior.
+The candidate describes current governing conventions, but it combines multiple security boundaries. Backfill should not turn the full row into one immutable ADR. The confirmed material is split into bounded ADRs so request-edge middleware, outbound egress/SSRF policy, and secrets/serialization policy do not overclaim each other's behavior.
 
 ## Confirmed Evidence
 
@@ -35,14 +35,14 @@ The candidate describes current governing conventions, but it combines multiple 
 - Secret management and safe serialization should not be bundled into the first ADR unless a focused adoption audit confirms the repository-wide consumer behavior. Current evidence confirms the helpers and tests, not universal adoption.
 - Setup CSP intentionally allows inline scripts and allows eval by default unless `TLDW_SETUP_NO_EVAL` is truthy. Do not write an ADR that says setup CSP is strict.
 
-## Recommended Next Action
+## Backfill Results
 
 Do not backfill INV-029 as a single accepted ADR.
 
-Recommended bounded ADR follow-ups:
+Bounded ADR follow-ups:
 
-1. Request-edge Security middleware ADR via TASK-2248: startup installs request ID, drain gate, setup access/CSP, and security headers with path-specific CSP and production-default header enablement.
-2. Outbound egress/SSRF policy ADR: outbound integrations must use central `egress.py`/`url_validation.py` helpers, which enforce scheme, host, port, allow/deny, environment profile, tenant webhook, DNS, and private/reserved-address checks.
+1. Request-edge Security middleware ADR via TASK-2248: ADR-019 covers startup-installed request ID, drain gate, setup access/CSP, and security headers with path-specific CSP and production-default header enablement.
+2. Outbound egress/SSRF policy ADR via TASK-2311: ADR-026 covers the rule that outbound integrations must use central `egress.py`/`url_validation.py` helpers, which enforce scheme, host, port, allow/deny, environment profile, tenant webhook, DNS, and private/reserved-address checks.
 3. Optional later secrets/serialization ADR after a separate adoption audit: `SecretManager`, AES-GCM JSON helpers, and restricted pickle compatibility policy.
 
 Update INV-029 to record TASK-2247 confirmation and keep ADR creation split by boundary.
