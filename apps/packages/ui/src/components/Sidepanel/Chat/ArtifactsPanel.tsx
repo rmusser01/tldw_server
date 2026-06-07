@@ -16,7 +16,7 @@ import { Highlight, themes } from "prism-react-renderer"
 import { browser } from "wxt/browser"
 import { useArtifactsStore } from "@/store/artifacts"
 import { useStoreMessageOption } from "@/store/option"
-import { Mermaid } from "@/components/Common/Mermaid"
+import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
 import type { DataTable, DataTableColumn, DataTableSource } from "@/types/data-tables"
 import { queueDataTablesPrefill } from "@/utils/data-tables-prefill"
 
@@ -301,9 +301,9 @@ export const ArtifactsPanel = () => {
       </div>
       <div className="flex-1 overflow-auto px-4 py-3">
         {active.kind === "diagram" ? (
-          <Mermaid
-            code={active.content}
-            className="rounded-xl border border-border bg-surface2/60 px-4 py-3"
+          <MermaidDiagramBlock
+            enableArtifactAction={false}
+            source={active.content}
           />
         ) : isCodeArtifact ? (
           <Highlight
