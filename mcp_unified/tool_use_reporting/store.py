@@ -46,12 +46,10 @@ def cutoff_epoch_us(cutoff: datetime | int) -> int:
         return cutoff
     if cutoff.tzinfo is None or cutoff.utcoffset() is None:
         raise ValueError("cutoff must be timezone-aware")
-    return ToolUseEvent(
-        created_at=cutoff.astimezone(timezone.utc),
-        runtime_surface="protocol",
-        requested_tool_name="cutoff",
-        status="success",
-    ).created_at_epoch_us
+    utc_cutoff = cutoff.astimezone(timezone.utc)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = utc_cutoff - epoch
+    return (((delta.days * 86_400) + delta.seconds) * 1_000_000) + delta.microseconds
 
 
 def encode_event_cursor(event: ToolUseEvent) -> str:

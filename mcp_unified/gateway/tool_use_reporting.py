@@ -6,6 +6,8 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from loguru import logger
+
 from mcp_unified.tool_use_reporting import (
     NoopToolUseRecorder,
     ToolUseEvent,
@@ -171,25 +173,39 @@ class ToolUseReportingGatewayRuntime:
         duration_ms: float,
         result: Mapping[str, Any] | None = None,
     ) -> None:
-        metadata = _metadata(context)
-        result_metadata = _result_tool_use_metadata(result)
-        event = ToolUseEvent(
-            runtime_surface="gateway",
-            execution_origin=execution_origin,
-            requested_tool_name=_requested_tool_name(name, metadata, result_metadata),
-            effective_tool_name=_effective_tool_name(name, metadata, result_metadata),
-            status=status,
-            reason_code=reason_code,
-            duration_ms=duration_ms,
-            source_kind=_source_kind(metadata, result_metadata),
-            capture_ref=_requested_bridge_tool_id(metadata, result_metadata),
-            **extract_safe_context_dimensions(metadata),
-        )
-        await record_tool_use_safely(
-            self._recorder,
-            event,
-            timeout_seconds=self._write_timeout_seconds,
-        )
+        try:
+            metadata = _metadata(context)
+            result_metadata = _result_tool_use_metadata(result)
+            event = ToolUseEvent(
+                runtime_surface="gateway",
+                execution_origin=execution_origin,
+                requested_tool_name=_requested_tool_name(
+                    name,
+                    metadata,
+                    result_metadata,
+                ),
+                effective_tool_name=_effective_tool_name(
+                    name,
+                    metadata,
+                    result_metadata,
+                ),
+                status=status,
+                reason_code=reason_code,
+                duration_ms=duration_ms,
+                source_kind=_source_kind(metadata, result_metadata),
+                capture_ref=_requested_bridge_tool_id(metadata, result_metadata),
+                **extract_safe_context_dimensions(metadata),
+            )
+            await record_tool_use_safely(
+                self._recorder,
+                event,
+                timeout_seconds=self._write_timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - reporting must not affect tool calls.
+            logger.warning(
+                "Failed to build or record gateway tool-use event: {}",
+                exc.__class__.__name__,
+            )
 
 
 def _metadata(context: GatewayRequestContext) -> dict[str, Any]:

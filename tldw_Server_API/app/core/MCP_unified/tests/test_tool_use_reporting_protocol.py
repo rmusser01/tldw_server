@@ -12,6 +12,7 @@ from mcp_unified.tool_use_reporting.models import ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.protocol import (
     ErrorCode,
+    InvalidParamsException,
     MCPProtocol,
     RequestContext,
 )
@@ -237,6 +238,92 @@ async def test_protocol_recorder_failure_does_not_change_tool_response() -> None
 
     assert response["tool"] == "test.read"
     assert recorder.called is True
+
+
+@pytest.mark.asyncio
+async def test_protocol_event_build_failure_preserves_process_request_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, recorder = _protocol()
+
+    def fail_event(**_kwargs: Any) -> ToolUseEvent:
+        raise ValueError("telemetry build failed")
+
+    monkeypatch.setattr(protocol, "_build_tool_use_event", fail_event)
+
+    response = await protocol.process_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "tools/call",
+            "params": {"name": "../secret", "arguments": {}},
+        },
+        _request_context(),
+    )
+
+    assert response.error.code == ErrorCode.INTERNAL_ERROR
+    assert "Invalid tool name" in response.error.message
+    assert recorder.events == []
+
+
+@pytest.mark.asyncio
+async def test_protocol_event_build_failure_preserves_prepare_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, recorder = _protocol()
+
+    def fail_event(**_kwargs: Any) -> ToolUseEvent:
+        raise ValueError("telemetry build failed")
+
+    monkeypatch.setattr(protocol, "_build_tool_use_event", fail_event)
+
+    with pytest.raises(PermissionError):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"path": "/Users/me/secret.txt"}},
+            _request_context(metadata={"allowed_tools": ["other.tool"]}),
+        )
+
+    assert recorder.events == []
+
+
+@pytest.mark.asyncio
+async def test_protocol_event_build_failure_preserves_tool_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, recorder = _protocol()
+
+    def fail_event(**_kwargs: Any) -> ToolUseEvent:
+        raise ValueError("telemetry build failed")
+
+    monkeypatch.setattr(protocol, "_build_tool_use_event", fail_event)
+
+    response = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {}},
+        _request_context(),
+    )
+
+    assert response["tool"] == "test.read"
+    assert recorder.events == []
+
+
+@pytest.mark.asyncio
+async def test_protocol_event_build_failure_preserves_tool_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, recorder = _protocol(module=_ToolModule(fail=ValueError("original failure")))
+
+    def fail_event(**_kwargs: Any) -> ToolUseEvent:
+        raise RuntimeError("telemetry build failed")
+
+    monkeypatch.setattr(protocol, "_build_tool_use_event", fail_event)
+
+    with pytest.raises(InvalidParamsException, match="original failure"):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {}},
+            _request_context(),
+        )
+
+    assert recorder.events == []
 
 
 @pytest.mark.asyncio

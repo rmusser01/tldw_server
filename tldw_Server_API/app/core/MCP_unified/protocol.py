@@ -731,16 +731,26 @@ class MCPProtocol:
         if request.method != "tools/call" or not self._should_record_tool_use(context):
             return
         params = request.params if isinstance(request.params, dict) else {}
-        requested = requested_tool_name if requested_tool_name is not None else params.get("name")
-        event = self._build_tool_use_event(
-            context=context,
-            requested_tool_name=requested,
-            status=status,
-            execution_origin=self._tool_use_execution_origin_for_failure(status),
-            duration_ms=self._tool_use_duration_ms(start_ts),
-            reason_code=reason_code,
+        requested = (
+            requested_tool_name
+            if requested_tool_name is not None
+            else params.get("name")
         )
-        await self._record_tool_use_event(event)
+        try:
+            event = self._build_tool_use_event(
+                context=context,
+                requested_tool_name=requested,
+                status=status,
+                execution_origin=self._tool_use_execution_origin_for_failure(status),
+                duration_ms=self._tool_use_duration_ms(start_ts),
+                reason_code=reason_code,
+            )
+            await self._record_tool_use_event(event)
+        except Exception as exc:  # noqa: BLE001 - reporting must not affect requests.
+            logger.warning(
+                "Failed to build or record process-request tool-use event: {}",
+                exc.__class__.__name__,
+            )
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
         if not user_id:
@@ -2473,16 +2483,24 @@ class MCPProtocol:
             prepared = await self.prepare_tool_call(params=params, context=context)
         except Exception as exc:
             if self._should_record_tool_use(context):
-                status, reason_code = classify_tool_use_exception(exc)
-                event = self._build_tool_use_event(
-                    context=context,
-                    requested_tool_name=params.get("name") if isinstance(params, dict) else None,
-                    status=status,
-                    execution_origin="failed_before_execution",
-                    duration_ms=self._tool_use_duration_ms(start_ts),
-                    reason_code=reason_code,
-                )
-                await self._record_tool_use_event(event)
+                try:
+                    status, reason_code = classify_tool_use_exception(exc)
+                    event = self._build_tool_use_event(
+                        context=context,
+                        requested_tool_name=(
+                            params.get("name") if isinstance(params, dict) else None
+                        ),
+                        status=status,
+                        execution_origin="failed_before_execution",
+                        duration_ms=self._tool_use_duration_ms(start_ts),
+                        reason_code=reason_code,
+                    )
+                    await self._record_tool_use_event(event)
+                except Exception as record_exc:  # noqa: BLE001 - preserve original exception.
+                    logger.warning(
+                        "Failed to build or record prepare-failure tool-use event: {}",
+                        record_exc.__class__.__name__,
+                    )
             raise
         return await self.execute_prepared_tool_call(prepared)
 
@@ -2737,23 +2755,29 @@ class MCPProtocol:
             payload: dict[str, Any] | None = None,
             idempotency_replay: bool = False,
         ) -> None:
-            if not self._should_record_tool_use(context):
-                return
-            event = self._build_tool_use_event(
-                context=context,
-                requested_tool_name=tool_name,
-                effective_tool_name=tool_name,
-                status=status,
-                execution_origin=execution_origin,
-                duration_ms=self._tool_use_duration_ms(execution_start_ts),
-                module_id=module_id or getattr(module, "name", None),
-                tool_def=tool_def if isinstance(tool_def, dict) else None,
-                payload=payload,
-                is_write=is_write,
-                reason_code=reason_code,
-                idempotency_replay=idempotency_replay,
-            )
-            await self._record_tool_use_event(event)
+            try:
+                if not self._should_record_tool_use(context):
+                    return
+                event = self._build_tool_use_event(
+                    context=context,
+                    requested_tool_name=tool_name,
+                    effective_tool_name=tool_name,
+                    status=status,
+                    execution_origin=execution_origin,
+                    duration_ms=self._tool_use_duration_ms(execution_start_ts),
+                    module_id=module_id or getattr(module, "name", None),
+                    tool_def=tool_def if isinstance(tool_def, dict) else None,
+                    payload=payload,
+                    is_write=is_write,
+                    reason_code=reason_code,
+                    idempotency_replay=idempotency_replay,
+                )
+                await self._record_tool_use_event(event)
+            except Exception as exc:  # noqa: BLE001 - reporting must not affect tool calls.
+                logger.warning(
+                    "Failed to build or record prepared tool-use event: {}",
+                    exc.__class__.__name__,
+                )
 
         async def _execute_tool_call() -> dict[str, Any]:
             # Optional per-tool/category rate limits (ingestion vs read)

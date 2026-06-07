@@ -430,12 +430,16 @@ class ProfileAwareGatewayRuntime:
                 requested_tool_id=tool_id,
                 effective_tool_name=resolved_name.strip(),
             )
-            return await self._call_backend_tool_through_policy(
+            result = await self._call_backend_tool_through_policy(
                 profile,
                 resolved_name.strip(),
                 delegated_arguments,
                 delegated_context,
                 tool=resolution.get("tool"),
+            )
+            return _result_with_bridge_tool_use_metadata(
+                result,
+                _bridge_tool_use_metadata(delegated_context),
             )
 
         raise GatewayPolicyDenied(
@@ -799,14 +803,47 @@ def _context_with_bridge_tool_use_metadata(
 
     metadata = dict(context.metadata or {})
     metadata.update(side_channel)
-    if isinstance(context.metadata, dict):
-        context.metadata.update(side_channel)
     return GatewayRequestContext(
         request_id=context.request_id,
         client_id=context.client_id,
         user_id=context.user_id,
         metadata=metadata,
     )
+
+
+def _bridge_tool_use_metadata(context: GatewayRequestContext) -> dict[str, Any]:
+    """Return only bridge tool-use metadata from a context copy."""
+
+    bridge_keys = {
+        TOOL_USE_BRIDGE_TOOL_NAME_METADATA_KEY,
+        TOOL_USE_REQUESTED_TOOL_ID_METADATA_KEY,
+        TOOL_USE_EFFECTIVE_TOOL_NAME_METADATA_KEY,
+        TOOL_USE_SOURCE_KIND_METADATA_KEY,
+    }
+    return {
+        key: value
+        for key, value in context.metadata.items()
+        if key in bridge_keys
+    }
+
+
+def _result_with_bridge_tool_use_metadata(
+    result: dict[str, Any],
+    bridge_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a result copy with bridge metadata for outer reporting wrappers."""
+
+    if not bridge_metadata:
+        return result
+    copied = dict(result)
+    metadata = copied.get("metadata")
+    metadata_copy = dict(metadata) if isinstance(metadata, dict) else {}
+    tool_use = metadata_copy.get("mcp_tool_use")
+    tool_use_copy = dict(tool_use) if isinstance(tool_use, dict) else {}
+    tool_use_copy.update(bridge_metadata)
+    metadata_copy["mcp_tool_use"] = tool_use_copy
+    copied["metadata"] = metadata_copy
+    return copied
 
 
 def _json_safe_model(value: Any) -> Any:

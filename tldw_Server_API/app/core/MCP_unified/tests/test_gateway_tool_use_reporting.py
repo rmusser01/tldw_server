@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+import mcp_unified.gateway.tool_use_reporting as gateway_tool_use_reporting
 from mcp_unified.gateway.config import (
     GatewayProfileBootstrapConfig,
     bootstrap_profile_gateway_from_config,
@@ -259,6 +260,60 @@ async def test_gateway_wrapper_records_sanitized_backend_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_wrapper_event_build_failure_preserves_tool_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_dimensions(_metadata: dict[str, Any]) -> dict[str, Any]:
+        raise ValueError("metadata boom")
+
+    monkeypatch.setattr(
+        gateway_tool_use_reporting,
+        "extract_safe_context_dimensions",
+        fail_dimensions,
+    )
+    recorder = _MemoryToolUseRecorder()
+    backend = _FakeGatewayRuntime()
+    runtime = ToolUseReportingGatewayRuntime(backend, recorder=recorder)
+
+    response = await runtime.call_tool(
+        "git.status",
+        {},
+        GatewayRequestContext(request_id="req-1"),
+    )
+
+    assert response["content"][0]["text"] == "git.status"
+    assert recorder.events == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_wrapper_event_build_failure_preserves_backend_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_dimensions(_metadata: dict[str, Any]) -> dict[str, Any]:
+        raise ValueError("metadata boom")
+
+    monkeypatch.setattr(
+        gateway_tool_use_reporting,
+        "extract_safe_context_dimensions",
+        fail_dimensions,
+    )
+    recorder = _MemoryToolUseRecorder()
+    runtime = ToolUseReportingGatewayRuntime(
+        _ExplodingGatewayRuntime(),
+        recorder=recorder,
+    )
+
+    with pytest.raises(_ExplodingGatewayRuntime.BackendFailure):
+        await runtime.call_tool(
+            "git.status",
+            {},
+            GatewayRequestContext(request_id="req-1"),
+        )
+
+    assert recorder.events == []
+
+
+@pytest.mark.asyncio
 async def test_gateway_bridge_call_records_effective_tool_name_when_tool_id_differs() -> None:
     recorder = _MemoryToolUseRecorder()
     backend = _FakeGatewayRuntime()
@@ -287,6 +342,32 @@ async def test_gateway_bridge_call_records_effective_tool_name_when_tool_id_diff
     assert event.status == "success"
     assert backend.call_requests[-1][0] == "echo.search"
     assert "mcp_tool_use_effective_tool_name" not in context.metadata
+
+
+@pytest.mark.asyncio
+async def test_profile_bridge_call_does_not_mutate_source_context_metadata() -> None:
+    backend = _FakeGatewayRuntime()
+    profile_runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([_profile_with_deferred_tools()]),
+        default_profile_id="researcher",
+    )
+    context = GatewayRequestContext(
+        request_id="req-1",
+        metadata={"profile_id": "researcher"},
+    )
+
+    await profile_runtime.call_tool(
+        "tool_call",
+        {
+            "tool_id": "echo.search",
+            "arguments": {"query": "bridge"},
+        },
+        context,
+    )
+
+    assert context.metadata == {"profile_id": "researcher"}
+    assert backend.call_requests[-1][0] == "echo.search"
 
 
 def test_gateway_config_parses_tool_use_reporting_defaults() -> None:

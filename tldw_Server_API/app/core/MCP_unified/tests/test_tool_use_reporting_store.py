@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import mcp_unified.tool_use_reporting.store as store_module
 from mcp_unified.tool_use_reporting.models import (
     ToolUseEvent,
     ToolUseEventQuery,
@@ -19,6 +20,7 @@ from mcp_unified.tool_use_reporting.reporting import ToolUseReportService
 from mcp_unified.tool_use_reporting.sqlite import SQLiteToolUseEventStore
 from mcp_unified.tool_use_reporting.store import (
     InMemoryToolUseEventStore,
+    cutoff_epoch_us,
     encode_event_cursor,
 )
 
@@ -213,6 +215,21 @@ async def test_store_deletes_old_and_over_limit_events(
         await _close_store(store)
 
 
+def test_cutoff_epoch_us_calculates_directly_without_event_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_event_model(**_kwargs: Any) -> ToolUseEvent:
+        raise AssertionError("ToolUseEvent should not be built for cutoff math")
+
+    monkeypatch.setattr(store_module, "ToolUseEvent", fail_event_model)
+    cutoff = datetime(2026, 6, 6, 7, 30, tzinfo=timezone(timedelta(hours=-7)))
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = cutoff.astimezone(timezone.utc) - epoch
+    expected = (((delta.days * 86_400) + delta.seconds) * 1_000_000) + delta.microseconds
+
+    assert cutoff_epoch_us(cutoff) == expected
+
+
 @pytest.mark.asyncio
 async def test_report_groups_by_tool_prompt_with_tool_call_rates() -> None:
     store = InMemoryToolUseEventStore()
@@ -241,6 +258,34 @@ async def test_report_groups_by_tool_prompt_with_tool_call_rates() -> None:
     assert row.call_count == 2
     assert row.tool_call_success_rate == 0.5
     assert row.top_reason_codes[0]["reason_code"] == "permission_denied"
+
+
+@pytest.mark.asyncio
+async def test_report_percentiles_use_half_up_nearest_index() -> None:
+    store = InMemoryToolUseEventStore()
+    await store.append_event(
+        ToolUseEvent(
+            runtime_surface="protocol",
+            requested_tool_name="fs.read",
+            tool_prompt_id="fs.read.default",
+            status="success",
+            duration_ms=10,
+        )
+    )
+    await store.append_event(
+        ToolUseEvent(
+            runtime_surface="protocol",
+            requested_tool_name="fs.read",
+            tool_prompt_id="fs.read.default",
+            status="success",
+            duration_ms=20,
+        )
+    )
+
+    report = await ToolUseReportService(store).build_report(ToolUseReportQuery(group_by="tool_prompt"))
+
+    assert report.rows[0].p50_duration_ms == 20
+    assert report.rows[0].p95_duration_ms == 20
 
 
 @pytest.mark.asyncio

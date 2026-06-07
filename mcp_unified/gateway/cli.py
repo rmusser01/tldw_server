@@ -1769,6 +1769,8 @@ def _relative_since_epoch_us(value: str | None) -> int | None:
     text = _optional_cli_text(value, field="since")
     if text is None:
         return None
+    if not text:
+        return None
     unit = text[-1].lower()
     amount_text = text[:-1]
     if unit not in {"s", "m", "h", "d"} or not amount_text:
