@@ -1,11 +1,19 @@
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from tldw_Server_API.app.main import app
+
+from tldw_Server_API.app.api.v1.endpoints import chatbooks, llm_providers, notes, prompts
 
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    test_app = FastAPI()
+    test_app.include_router(notes.router, prefix="/api/v1/notes")
+    test_app.include_router(prompts.router, prefix="/api/v1/prompts")
+    test_app.include_router(chatbooks.router, prefix="/api/v1")
+    test_app.include_router(llm_providers.router, prefix="/api/v1")
+
+    with TestClient(test_app) as c:
         yield c
 
 

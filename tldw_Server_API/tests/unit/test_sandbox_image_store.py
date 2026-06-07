@@ -66,7 +66,11 @@ def test_sandbox_image_store_registers_bundle_reloads_and_plans_gc(tmp_path: Pat
     assert record.labels == {"profile": "minimal"}
     assert record.provenance == {"suite": "bookworm", "architecture": "arm64"}
     assert [template.template_id for template in reloaded.list_templates(runtime="vz_linux")] == [template_id]
-    assert any(item.target_path.endswith("run-123/rootfs.img") for item in clone_manifest.clone_items)
+    assert any(
+        Path(item.target_path).parent.name == "run-123"
+        and Path(item.target_path).name == "rootfs.img"
+        for item in clone_manifest.clone_items
+    )
     assert (tmp_path / "store" / "runs" / "run-123" / "manifest.json").exists()
     persisted_manifest = reloaded.get_run_clone_manifest("run-123")
     assert persisted_manifest is not None
