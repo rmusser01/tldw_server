@@ -846,7 +846,7 @@ export function KnowledgeContextBar({
       // Note: only a toggle callback is available (no direct setter).
       if (
         webFallbackAvailable &&
-        profile.enableWebFallback !== effectiveWebEnabled
+        (profile.enableWebFallback ?? false) !== effectiveWebEnabled
       ) {
         onToggleWeb()
       }
