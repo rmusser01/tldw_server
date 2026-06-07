@@ -1,5 +1,6 @@
 import importlib.machinery
 import json
+import os
 import sys
 import types
 
@@ -16,6 +17,13 @@ sys.modules.setdefault('torch', torch_stub)
 dill_stub = types.ModuleType("dill")
 dill_stub.__spec__ = None
 sys.modules.setdefault('dill', dill_stub)
+
+
+def _auth_headers():
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    key = get_settings().SINGLE_USER_API_KEY or os.getenv("SINGLE_USER_API_KEY", "test-api-key-12345")
+    return {"X-API-KEY": key}
 
 
 class _FakeConn:
@@ -58,7 +66,11 @@ async def test_metadata_search_normalizes_doi(monkeypatch):
     fake_db = _FakeDB()
     app.dependency_overrides[get_media_db_for_user] = lambda: fake_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=_auth_headers(),
+    ) as client:
         r = await client.get(
             "/api/v1/media/metadata-search",
             params={"field": "doi", "op": "eq", "value": "10.1234/ABC-123"},
@@ -77,7 +89,11 @@ async def test_metadata_search_invalid_doi_returns_400(monkeypatch):
     fake_db = _FakeDB()
     app.dependency_overrides[get_media_db_for_user] = lambda: fake_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=_auth_headers(),
+    ) as client:
         r = await client.get(
             "/api/v1/media/metadata-search",
             params={"field": "doi", "op": "eq", "value": "bad"},
@@ -95,7 +111,11 @@ async def test_metadata_search_forwards_standard_constraints(monkeypatch):
     fake_db = _FakeDB()
     app.dependency_overrides[get_media_db_for_user] = lambda: fake_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=_auth_headers(),
+    ) as client:
         r = await client.get(
             "/api/v1/media/metadata-search",
             params={

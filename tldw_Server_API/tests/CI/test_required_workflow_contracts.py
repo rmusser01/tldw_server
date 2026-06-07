@@ -212,6 +212,21 @@ def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     assert checked >= len(step_names)
 
 
+def test_embedding_model_cache_restore_is_non_blocking() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    cache_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Cache embedding models"
+    ]
+
+    assert len(cache_steps) == 5
+    for step in cache_steps:
+        assert step.get("uses") == "actions/cache@v5"
+        assert step.get("continue-on-error") is True
+
+
 def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
     workflow = _load(".github/workflows/ci.yml")
     job = workflow["jobs"]["full-suite-linux-311-smoke"]
@@ -378,7 +393,16 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chat-character-integration-chat",
             "chat-character-integration-context",
             "chat-core",
-            "llm-providers",
+            "llm-adapters-unit",
+            "llm-adapters-chat-endpoint",
+            "llm-adapters-chat-errors-core",
+            "llm-adapters-chat-errors-extra",
+            "llm-adapters-orchestrator-core",
+            "llm-adapters-orchestrator-extra",
+            "llm-calls-core",
+            "llm-calls-property",
+            "llm-local-runtime",
+            "llm-local-backends",
         }.issubset(shard_names)
         assert {
             "product-claims-core",
