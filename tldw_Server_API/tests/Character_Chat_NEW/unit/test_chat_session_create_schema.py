@@ -27,3 +27,35 @@ def test_chat_session_create_normalizes_tracked_character_identity():
 def test_chat_session_create_requires_assistant_id_for_tracked_persona_chat():
     with pytest.raises(ValidationError, match="Persona chats require assistant_id"):
         ChatSessionCreate(assistant_kind="persona", title="Tracked persona chat")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("memory_mode", ["read_only", "read_write"])
+def test_chat_session_create_preserves_explicit_persona_memory_mode(memory_mode):
+    chat = ChatSessionCreate(
+        assistant_kind="persona",
+        assistant_id="garden-helper",
+        persona_memory_mode=memory_mode,
+        title="Tracked persona chat",
+    )
+
+    assert chat.character_id is None
+    assert chat.assistant_kind == "persona"
+    assert chat.assistant_id == "garden-helper"
+    assert chat.persona_memory_mode == memory_mode
+
+
+@pytest.mark.unit
+def test_chat_session_create_rejects_persona_memory_mode_for_character_chat():
+    with pytest.raises(ValidationError, match="persona_memory_mode is only valid for persona chats"):
+        ChatSessionCreate(character_id=7, persona_memory_mode="read_only")
+
+
+@pytest.mark.unit
+def test_chat_session_create_rejects_invalid_persona_memory_mode():
+    with pytest.raises(ValidationError, match="persona_memory_mode"):
+        ChatSessionCreate(
+            assistant_kind="persona",
+            assistant_id="garden-helper",
+            persona_memory_mode="session",
+        )
