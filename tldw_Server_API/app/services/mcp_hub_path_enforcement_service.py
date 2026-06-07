@@ -21,7 +21,12 @@ _PATH_GRANT_EFFECTS = frozenset({"allow", "deny"})
 _SUPPORTED_PATH_ARGUMENT_HINTS = frozenset(
     {"path", "file_path", "target_path", "cwd", "paths", "file_paths", "files[].path"}
 )
-_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:")
+_PREVIEW_TOOL_METADATA = {
+    "uses_filesystem": True,
+    "path_boundable": True,
+    "path_argument_hints": ["path"],
+}
 
 
 def _as_bool(value: Any) -> bool | None:
@@ -128,6 +133,31 @@ def _normalize_allowlist_prefix(raw_value: Any) -> str | None:
     if not parts:
         return None
     return "/".join(parts)
+
+
+def _normalize_workspace_relative_path(raw_value: Any) -> tuple[str | None, str | None]:
+    """Normalize a user-supplied path and reject values outside workspace-relative form."""
+
+    value = str(raw_value or "").strip().replace("\\", "/")
+    while value.startswith("./"):
+        value = value[2:]
+    value = re.sub(r"/+", "/", value)
+    if not value:
+        return None, "path_required"
+    if value.startswith("/") or _WINDOWS_ABSOLUTE_PATH_RE.match(value):
+        return None, "path_must_be_workspace_relative"
+
+    parts: list[str] = []
+    for part in value.split("/"):
+        cleaned = str(part or "").strip()
+        if not cleaned or cleaned == ".":
+            continue
+        if cleaned == "..":
+            return None, "path_traversal_not_allowed"
+        parts.append(cleaned)
+    if not parts:
+        return ".", None
+    return "/".join(parts), None
 
 
 def _policy_allowlist_prefixes(effective_policy: dict[str, Any] | None) -> list[str]:
@@ -238,6 +268,51 @@ def _path_scope_action(metadata: dict[str, Any]) -> str:
     return "read"
 
 
+def _selected_profile_id(effective_policy: dict[str, Any] | None) -> int | None:
+    """Return the profile id for the explicitly selected policy assignment when present."""
+
+    policy = dict(effective_policy or {})
+    selected_assignment_id = policy.get("selected_assignment_id")
+    if selected_assignment_id in (None, ""):
+        return None
+    sources = policy.get("sources")
+    if not isinstance(sources, list):
+        return None
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        if source.get("assignment_id") != selected_assignment_id:
+            continue
+        try:
+            profile_id = source.get("profile_id")
+            return int(profile_id) if profile_id not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _preview_outcome(enforcement_result: dict[str, Any]) -> str:
+    """Map the path-enforcement result shape into the preview allow/ask/deny outcome."""
+
+    if not bool(enforcement_result.get("enabled")):
+        return "allow"
+    if bool(enforcement_result.get("within_scope", True)):
+        return "allow"
+    if bool(enforcement_result.get("force_approval", False)):
+        return "ask"
+    return "deny"
+
+
+def _safe_path_decisions(enforcement_result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract serializable path-decision dictionaries from direct or nested result payloads."""
+
+    raw_decisions = enforcement_result.get("path_decisions")
+    if not isinstance(raw_decisions, list):
+        scope_payload = enforcement_result.get("scope_payload")
+        raw_decisions = scope_payload.get("path_decisions") if isinstance(scope_payload, dict) else []
+    return [dict(decision) for decision in raw_decisions if isinstance(decision, Mapping)]
+
+
 def _relative_path_for_decision(root: Path, candidate: Path) -> str | None:
     try:
         relative = candidate.relative_to(root)
@@ -299,6 +374,89 @@ class McpHubPathEnforcementService:
     ) -> None:
         self._path_scope_service = path_scope_service
         self._multi_root_path_service = multi_root_path_service
+
+    async def preview_effective_path_permission(
+        self,
+        *,
+        effective_policy: dict[str, Any] | None,
+        context: Any | None,
+        tool_name: str,
+        action: str,
+        path: str,
+    ) -> dict[str, Any]:
+        """Return a redacted effective path-permission explanation for operators."""
+
+        requested_action = str(action or "").strip().lower()
+        normalized_path, path_error = _normalize_workspace_relative_path(path)
+        safe_requested_path = normalized_path if normalized_path is not None else "<redacted>"
+        base_payload: dict[str, Any] = {
+            "tool_name": str(tool_name or "").strip(),
+            "requested_action": requested_action,
+            "requested_path": safe_requested_path,
+            "normalized_path": normalized_path,
+            "selected_assignment_id": (effective_policy or {}).get("selected_assignment_id"),
+            "profile_id": _selected_profile_id(effective_policy),
+            "redacted": True,
+        }
+        if requested_action not in _PATH_GRANT_ACTIONS:
+            return {
+                **base_payload,
+                "outcome": "deny",
+                "within_scope": False,
+                "reason_code": "invalid_path_action",
+                "path_decisions": [],
+            }
+        if path_error or normalized_path is None:
+            return {
+                **base_payload,
+                "outcome": "deny",
+                "within_scope": False,
+                "reason_code": path_error,
+                "path_decisions": [],
+            }
+
+        tool_def = {
+            "name": base_payload["tool_name"],
+            "metadata": {
+                **_PREVIEW_TOOL_METADATA,
+                "path_scope_action": requested_action,
+            },
+        }
+        enforcement_result = await self.evaluate_tool_call(
+            effective_policy=effective_policy,
+            context=context,
+            tool_name=base_payload["tool_name"],
+            tool_args={"path": normalized_path},
+            tool_def=tool_def,
+            path_scope_candidates=[
+                PathScopeCandidate(
+                    path=normalized_path,
+                    action=requested_action,  # type: ignore[arg-type]
+                    source="effective_permission_preview",
+                    display_path=normalized_path,
+                )
+            ],
+        )
+
+        path_decisions = _safe_path_decisions(enforcement_result)
+        selected_decision = path_decisions[0] if path_decisions else {}
+        scope_payload = enforcement_result.get("scope_payload")
+        scope_payload = dict(scope_payload) if isinstance(scope_payload, Mapping) else {}
+        preview = {
+            **base_payload,
+            "outcome": _preview_outcome(enforcement_result),
+            "within_scope": bool(enforcement_result.get("within_scope", True)),
+            "reason_code": str(enforcement_result.get("reason") or "").strip() or None,
+            "grant_source": selected_decision.get("grant_source"),
+            "grant_outcome": selected_decision.get("grant_outcome"),
+            "matched_grant_prefix": selected_decision.get("matched_grant_prefix"),
+            "matched_grant_effect": selected_decision.get("matched_grant_effect"),
+            "path_scope_mode": scope_payload.get("path_scope_mode"),
+            "workspace_id": scope_payload.get("workspace_id"),
+            "path_allowlist_prefixes": list(scope_payload.get("path_allowlist_prefixes") or []),
+            "path_decisions": path_decisions,
+        }
+        return {key: value for key, value in preview.items() if value not in ("", [])}
 
     async def evaluate_tool_call(
         self,

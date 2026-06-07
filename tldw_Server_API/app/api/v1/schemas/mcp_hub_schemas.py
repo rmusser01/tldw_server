@@ -32,6 +32,8 @@ ToolRiskClass = Literal["low", "medium", "high", "unclassified"]
 ToolMetadataSource = Literal["explicit", "heuristic", "fallback"]
 PathScopeMode = Literal["none", "workspace_root", "cwd_descendants"]
 PathScopeEnforcement = Literal["approval_required_when_unenforceable"]
+PathPermissionAction = Literal["read", "edit", "write"]
+PathPermissionOutcome = Literal["allow", "ask", "deny"]
 WorkspaceSourceMode = Literal["inline", "named"]
 WorkspaceTrustSource = Literal["user_local", "shared_registry"]
 ExternalAuthTemplateTargetType = Literal["header", "env"]
@@ -530,6 +532,45 @@ class EffectivePolicyResponse(BaseModel):
     selected_assignment_workspace_ids: list[str] = Field(default_factory=list)
     sources: list[EffectivePolicySourceResponse] = Field(default_factory=list)
     provenance: list[EffectivePolicyProvenanceResponse] = Field(default_factory=list)
+
+
+class EffectivePermissionPreviewRequest(BaseModel):
+    """Request a redacted effective permission preview for a path-scoped MCP tool call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str = Field(..., min_length=1, max_length=255)
+    action: PathPermissionAction
+    path: str = Field(..., min_length=1, max_length=1024)
+    persona_id: str | None = Field(default=None, max_length=200)
+    group_id: str | None = Field(default=None, max_length=200)
+    org_id: int | None = None
+    team_id: int | None = None
+    workspace_id: str | None = Field(default=None, max_length=255)
+    cwd: str | None = Field(default=None, max_length=1024)
+
+
+class EffectivePermissionPreviewResponse(BaseModel):
+    """Redacted explanation of the effective path policy decision for an MCP tool call."""
+
+    tool_name: str
+    requested_action: PathPermissionAction
+    requested_path: str
+    normalized_path: str | None = None
+    outcome: PathPermissionOutcome
+    within_scope: bool
+    reason_code: str | None = None
+    selected_assignment_id: int | None = None
+    profile_id: int | None = None
+    grant_source: str | None = None
+    grant_outcome: str | None = None
+    matched_grant_prefix: str | None = None
+    matched_grant_effect: str | None = None
+    path_scope_mode: PathScopeMode | None = None
+    workspace_id: str | None = None
+    path_allowlist_prefixes: list[str] = Field(default_factory=list)
+    path_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    redacted: bool = True
 
 
 class ToolRegistryEntryResponse(BaseModel):
