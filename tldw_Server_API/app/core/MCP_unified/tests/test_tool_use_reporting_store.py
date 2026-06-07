@@ -107,10 +107,15 @@ async def test_store_filters_and_exports_jsonl(
         query = ToolUseEventQuery(profile_id="architect", limit=10)
         rows = await store.query_events(query)
         exported = await store.export_events(query, format="jsonl")
+        exported_json = await store.export_events(query, format="json")
 
         assert [row.requested_tool_name for row in rows] == ["fs.read"]
         exported_rows = [json.loads(line) for line in exported.splitlines() if line.strip()]
         assert exported_rows[0]["profile_id"] == "architect"
+        assert exported_json == json.dumps(
+            [row.model_dump(mode="json") for row in rows],
+            separators=(",", ":"),
+        )
     finally:
         await _close_store(store)
 

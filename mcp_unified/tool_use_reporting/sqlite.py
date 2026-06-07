@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -241,7 +242,10 @@ class SQLiteToolUseEventStore:
         rows = await self.query_events(query)
         if format == "jsonl":
             return "\n".join(event.model_dump_json() for event in rows)
-        return "[" + ",".join(event.model_dump_json() for event in rows) + "]"
+        return json.dumps(
+            [event.model_dump(mode="json") for event in rows],
+            separators=(",", ":"),
+        )
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine resources."""

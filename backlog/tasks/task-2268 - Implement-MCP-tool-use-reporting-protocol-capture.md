@@ -2,22 +2,19 @@
 id: TASK-2268
 title: Implement MCP tool-use reporting protocol capture
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-06-07 03:03'
 labels:
-- mcp
-- observability
-- evals
-- implementation
+  - mcp
+  - observability
+  - evals
+  - implementation
+dependencies: []
 references:
-- Docs/superpowers/specs/2026-06-06-mcp-tool-use-eval-reporting-design.md
-- Docs/superpowers/plans/2026-06-06-mcp-tool-use-eval-reporting-implementation-plan.md
-modified_files:
-- Docs/superpowers/plans/2026-06-06-mcp-tool-use-eval-reporting-implementation-plan.md
-- mcp_unified/tool_use_reporting/__init__.py
-- mcp_unified/tool_use_reporting/recorder.py
-- tldw_Server_API/app/core/MCP_unified/protocol.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
+  - Docs/superpowers/specs/2026-06-06-mcp-tool-use-eval-reporting-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-06-mcp-tool-use-eval-reporting-implementation-plan.md
 ---
 
 ## Description
@@ -28,6 +25,7 @@ Add Task 4 from the MCP tool-use evaluation reporting plan: protocol-side metada
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Protocol tool-use capture records success, denial, invalid params, unavailable, execution failure, and idempotency replay metadata without affecting tool behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -38,9 +36,11 @@ TDD slice for Task 4: add failing protocol capture tests for success, prepare de
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -50,10 +50,10 @@ Implemented protocol-side MCP tool-use reporting capture. Added safe recorder di
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

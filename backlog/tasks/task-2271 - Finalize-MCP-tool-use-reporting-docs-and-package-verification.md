@@ -2,17 +2,16 @@
 id: TASK-2271
 title: Finalize MCP tool-use reporting docs and package verification
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-06-07 03:03'
 labels:
-- mcp
-- docs
-- observability
-- evals
-- verification
-modified_files:
-- mcp_unified/README.md
-- mcp_unified/USER_GUIDE.md
-- tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-- Docs/superpowers/plans/2026-06-06-mcp-tool-use-eval-reporting-implementation-plan.md
+  - mcp
+  - docs
+  - observability
+  - evals
+  - verification
+dependencies: []
 ---
 
 ## Description
@@ -23,6 +22,8 @@ Document MCP tool-use reporting in the standalone package docs, add package-boun
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Package README and user guide document tool-use reporting enablement, CLI workflows, privacy boundaries, retention, and evaluation context.
+- [x] #2 Package-boundary tests verify reporting docs and lightweight import behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -33,9 +34,11 @@ Task 7 final slice: update mcp_unified README and USER_GUIDE with metadata-only 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -45,10 +48,10 @@ Completed MCP tool-use reporting docs and package-boundary verification. Verific
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -10,6 +10,7 @@ import pytest
 
 from mcp_unified.tool_use_reporting.models import ToolUseEvent
 
+from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
 from tldw_Server_API.app.core.MCP_unified.protocol import (
     ErrorCode,
     InvalidParamsException,
@@ -43,6 +44,12 @@ class _AllowAllRbac:
 class _NoopRateLimiter:
     async def check_rate_limit(self, *_args: Any, **_kwargs: Any) -> None:
         return None
+
+
+class _ToolOnlyRateLimiter:
+    async def check_rate_limit(self, key: str, *_args: Any, **_kwargs: Any) -> None:
+        if ":tool:" in key:
+            raise RateLimitExceeded(1)
 
 
 class _NoopMetrics:
@@ -141,13 +148,14 @@ def _protocol(
     *,
     module: _ToolModule | None = None,
     recorder: Any | None = None,
+    rate_limiter: Any | None = None,
 ) -> tuple[MCPProtocol, Any]:
     recorder = recorder or _RecordingToolUseRecorder()
     module = module or _ToolModule()
     deps = SimpleNamespace(
         module_registry=_Registry(module),
         rbac_policy=_AllowAllRbac(),
-        rate_limiter=_NoopRateLimiter(),
+        rate_limiter=rate_limiter or _NoopRateLimiter(),
         metrics_collector=_NoopMetrics(),
         telemetry_provider=_Telemetry(),
         tool_catalog_provider=object(),
@@ -377,3 +385,25 @@ async def test_protocol_records_idempotency_replay(monkeypatch: pytest.MonkeyPat
     assert module.calls == 1
     assert recorder.events[-1].execution_origin == "cached"
     assert recorder.events[-1].idempotency_replay is True
+
+
+@pytest.mark.asyncio
+async def test_protocol_process_request_does_not_double_record_handler_rate_limit() -> None:
+    protocol, recorder = _protocol(rate_limiter=_ToolOnlyRateLimiter())
+
+    with pytest.raises(RateLimitExceeded):
+        await protocol.process_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "req-1",
+                "method": "tools/call",
+                "params": {"name": "test.read", "arguments": {}},
+            },
+            _request_context(),
+        )
+
+    rate_limited_events = [
+        event for event in recorder.events if event.status == "rate_limited"
+    ]
+    assert len(rate_limited_events) == 1
+    assert rate_limited_events[0].execution_origin == "failed_before_execution"

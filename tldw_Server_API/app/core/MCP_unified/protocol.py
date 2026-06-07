@@ -1443,6 +1443,7 @@ class MCPProtocol:
         )
 
         start_ts = time.time()
+        handler_started = False
         try:
             # Check rate limit (skip when ingress RG already enforced)
             skip_rate_limit = False
@@ -1582,6 +1583,7 @@ class MCPProtocol:
                 },
             ) as span:
                 try:
+                    handler_started = True
                     result = await handler(request.params or {}, context)
                     span.set_attribute("mcp.status", "success")
                 except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _span_e:
@@ -1622,7 +1624,7 @@ class MCPProtocol:
                 self.metrics.record_rate_limit_hit(key_type=key_type)
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 pass
-            if isinstance(request, MCPRequest):
+            if isinstance(request, MCPRequest) and not handler_started:
                 await self._record_process_request_tool_use_failure(
                     request=request,
                     context=context,
