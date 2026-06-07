@@ -8,6 +8,7 @@ Data_Tables contains the Jobs worker that generates and regenerates structured t
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/data_tables.py`, declared under `/data-tables`.
 - Related schemas: `tldw_Server_API/app/api/v1/schemas/data_tables_schemas.py`.
 - Related tests: `tldw_Server_API/tests/DataTables/`.
+- Covering ADR: `Docs/ADR/023-data-tables-backend-storage-jobs-and-exports.md`
 
 ## Responsibilities
 
