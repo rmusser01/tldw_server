@@ -35,6 +35,7 @@ import type {
   ScopeSnapshot,
   PinnedSourceFilters,
   ThreadHydrationResult,
+  ExtensionKnowledgeFailureState,
 } from "./types"
 import {
   DEFAULT_RAG_SETTINGS,
@@ -110,6 +111,7 @@ const initialState: KnowledgeQAState = {
   answerTrustState: "unknown_trust",
   answerTrustReasonCodes: [],
   answerEvidenceOrigin: null,
+  extensionFailureState: null,
   searchDetails: null,
   error: null,
   queryWarning: null,
@@ -179,6 +181,16 @@ type Action =
   | { type: "SET_SEARCHING"; payload: boolean }
   | { type: "SET_RESULTS"; payload: ResultsPayload }
   | { type: "SET_PARTIAL_RESULTS"; payload: ResultsPayload }
+  | { type: "SET_EXTENSION_FAILURE_STATE"; payload: ExtensionKnowledgeFailureState | null }
+  | { type: "MARK_SYNC_FAILED" }
+  | {
+      type: "MARK_SYNC_SUCCEEDED"
+      payload: {
+        answerTrustState: KnowledgeAnswerTrustState
+        answerTrustReasonCodes: KnowledgeTrustReasonCode[]
+        answerEvidenceOrigin: EvidenceOrigin | null
+      }
+    }
   | { type: "SET_SEARCH_DETAILS"; payload: SearchRuntimeDetails | null }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "CLEAR_RESULTS" }
@@ -242,6 +254,10 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustState: action.payload.answerTrustState,
         answerTrustReasonCodes: action.payload.answerTrustReasonCodes ?? [],
         answerEvidenceOrigin: action.payload.answerEvidenceOrigin ?? null,
+        extensionFailureState:
+          action.payload.answerTrustState === "unsynced_local_result"
+            ? "search_succeeded_sync_failed"
+            : null,
         hasSearched: true,
         isSearching: false,
         queryStage: "complete",
@@ -255,8 +271,32 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustState: action.payload.answerTrustState,
         answerTrustReasonCodes: action.payload.answerTrustReasonCodes ?? [],
         answerEvidenceOrigin: action.payload.answerEvidenceOrigin ?? null,
+        extensionFailureState:
+          action.payload.answerTrustState === "unsynced_local_result"
+            ? "search_succeeded_sync_failed"
+            : state.extensionFailureState,
         hasSearched: true,
         isSearching: true,
+      }
+    case "SET_EXTENSION_FAILURE_STATE":
+      return { ...state, extensionFailureState: action.payload }
+    case "MARK_SYNC_FAILED":
+      return {
+        ...state,
+        isLocalOnlyThread: true,
+        answerTrustState: "unsynced_local_result",
+        answerTrustReasonCodes: [],
+        answerEvidenceOrigin: null,
+        extensionFailureState: "search_succeeded_sync_failed",
+      }
+    case "MARK_SYNC_SUCCEEDED":
+      return {
+        ...state,
+        isLocalOnlyThread: false,
+        answerTrustState: action.payload.answerTrustState,
+        answerTrustReasonCodes: action.payload.answerTrustReasonCodes,
+        answerEvidenceOrigin: action.payload.answerEvidenceOrigin,
+        extensionFailureState: null,
       }
     case "SET_SEARCH_DETAILS":
       return { ...state, searchDetails: action.payload }
@@ -267,6 +307,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustState: action.payload ? "failed_search" : state.answerTrustState,
         answerTrustReasonCodes: action.payload ? [] : state.answerTrustReasonCodes,
         answerEvidenceOrigin: action.payload ? null : state.answerEvidenceOrigin,
+        extensionFailureState: action.payload ? "search_failed" : null,
         hasSearched: true,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
@@ -280,6 +321,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustState: "unknown_trust",
         answerTrustReasonCodes: [],
         answerEvidenceOrigin: null,
+        extensionFailureState: null,
         searchDetails: null,
         error: null,
         queryWarning: null,
@@ -1718,6 +1760,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_QUERY", payload: query })
   }, [])
 
+  const setExtensionFailureState = useCallback(
+    (nextState: ExtensionKnowledgeFailureState | null) => {
+      dispatch({ type: "SET_EXTENSION_FAILURE_STATE", payload: nextState })
+    },
+    []
+  )
+
   const createNewThread = useCallback(
     async (title?: string, options?: CreateThreadOptions): Promise<string> => {
       const shouldActivate = options?.shouldActivate ?? (() => true)
@@ -1920,6 +1969,115 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     []
   )
 
+  const retrySync = useCallback(async (): Promise<boolean> => {
+    try {
+      const messagesToSync = state.messages.filter(
+        (candidate) =>
+          candidate.role === "user" ||
+          candidate.role === "assistant" ||
+          candidate.role === "system"
+      )
+      if (messagesToSync.length === 0) {
+        return false
+      }
+
+      let targetThreadId = state.currentThreadId
+      if (!targetThreadId || isLocalThreadId(targetThreadId)) {
+        const firstQuestion =
+          messagesToSync.find((candidate) => candidate.role === "user")?.content ||
+          state.query ||
+          "Knowledge QA"
+        targetThreadId = await createNewThread(firstQuestion)
+      }
+
+      if (!targetThreadId || isLocalThreadId(targetThreadId)) {
+        dispatch({ type: "MARK_SYNC_FAILED" })
+        return false
+      }
+
+      const syncedMessages: KnowledgeQAMessage[] = []
+      let parentMessageId: string | null = null
+      for (const messageToSync of messagesToSync) {
+        const persisted = await persistChatMessage(
+          targetThreadId,
+          messageToSync.role,
+          messageToSync.content,
+          parentMessageId
+        )
+        if (!persisted?.id) {
+          dispatch({ type: "MARK_SYNC_FAILED" })
+          return false
+        }
+        parentMessageId = persisted.id
+
+        if (messageToSync.role === "assistant" && messageToSync.ragContext) {
+          const persistedContext = await persistRagContext(
+            persisted.id,
+            messageToSync.ragContext
+          )
+          if (!persistedContext) {
+            dispatch({ type: "MARK_SYNC_FAILED" })
+            return false
+          }
+        }
+
+        syncedMessages.push({
+          ...messageToSync,
+          id: persisted.id,
+          conversationId: targetThreadId,
+          timestamp: persisted.timestamp || messageToSync.timestamp,
+        })
+      }
+
+      const postSyncTrust = normalizeKnowledgeAnswerTrust({
+        answer: state.answer,
+        results: state.results,
+        citations: state.citations,
+        hasRequiredMetadata: true,
+        weakEvidence: hasWeakEvidence(
+          state.results,
+          state.settings.strip_min_relevance
+        ),
+      })
+
+      dispatch({ type: "SET_THREAD_ID", payload: targetThreadId })
+      dispatch({ type: "SET_MESSAGES", payload: syncedMessages })
+      dispatch({
+        type: "MARK_SYNC_SUCCEEDED",
+        payload: {
+          answerTrustState: postSyncTrust.state,
+          answerTrustReasonCodes: postSyncTrust.reasonCodes,
+          answerEvidenceOrigin:
+            postSyncTrust.evidenceOrigin === "unknown_origin"
+              ? null
+              : postSyncTrust.evidenceOrigin,
+        },
+      })
+      message.open({
+        type: "success",
+        content: "Conversation synced.",
+        duration: 2,
+      })
+      return true
+    } catch (error) {
+      console.warn("Failed to retry Knowledge QA sync:", error)
+      dispatch({ type: "MARK_SYNC_FAILED" })
+      return false
+    }
+  }, [
+    createNewThread,
+    message,
+    persistChatMessage,
+    persistRagContext,
+    state.answer,
+    state.citations,
+    state.currentThreadId,
+    state.messages,
+    state.query,
+    state.results,
+    state.settings.strip_min_relevance,
+  ])
+
   const buildRagContext = useCallback(
     (
       question: string,
@@ -2018,7 +2176,17 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           return
         }
       }
-      const isThreadSyncFailed = () => Boolean(threadId && isLocalThreadId(threadId))
+      let threadSyncFailed = Boolean(threadId && isLocalThreadId(threadId))
+      const markThreadSyncFailed = () => {
+        threadSyncFailed = true
+        dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: true })
+        dispatch({
+          type: "SET_EXTENSION_FAILURE_STATE",
+          payload: "search_succeeded_sync_failed",
+        })
+      }
+      const isThreadSyncFailed = () =>
+        threadSyncFailed || Boolean(threadId && isLocalThreadId(threadId))
 
       const userTimestamp = new Date().toISOString()
       const persistedUser = threadId
@@ -2026,6 +2194,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         : null
       if (isStaleSearchRequest()) {
         return
+      }
+      if (threadId && !isLocalThreadId(threadId) && !persistedUser) {
+        markThreadSyncFailed()
       }
       const userMessageId = persistedUser?.id || crypto.randomUUID()
 
@@ -2311,6 +2482,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           if (isStaleSearchRequest()) {
             return
           }
+          if (threadId && !isLocalThreadId(threadId) && !persistedAssistant?.id) {
+            markThreadSyncFailed()
+          }
           assistantMessageId = persistedAssistant?.id || crypto.randomUUID()
           const assistantMessage: KnowledgeQAMessage = {
             id: assistantMessageId,
@@ -2323,9 +2497,15 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "ADD_MESSAGE", payload: assistantMessage })
 
           if (persistedAssistant?.id) {
-            await persistRagContext(persistedAssistant.id, ragContext)
+            const persistedContext = await persistRagContext(
+              persistedAssistant.id,
+              ragContext
+            )
             if (isStaleSearchRequest()) {
               return
+            }
+            if (!persistedContext) {
+              markThreadSyncFailed()
             }
           }
         }
@@ -2333,7 +2513,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         if (isStaleSearchRequest()) {
           return
         }
+        if (isThreadSyncFailed() && answerTrustState !== "unsynced_local_result") {
+          dispatch({ type: "MARK_SYNC_FAILED" })
+        }
         if (addToHistory) {
+          const historyTrustState = isThreadSyncFailed()
+            ? "unsynced_local_result"
+            : answerTrustState
           const historyItem: SearchHistoryItem = {
             id: crypto.randomUUID(),
             query: trimmedQuery,
@@ -2346,7 +2532,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
             messageId: assistantMessageId || undefined,
             keywords: [KNOWLEDGE_QA_KEYWORD],
-            trustState: answerTrustState,
+            trustState: historyTrustState,
           }
           markHistoryMutation()
           dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
@@ -3264,6 +3450,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       cancelSearch,
       clearResults,
       rerunWithTokenLimit,
+      retrySync,
+      setExtensionFailureState,
       createNewThread,
       startNewTopic,
       selectThread,
@@ -3298,6 +3486,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       cancelSearch,
       clearResults,
       rerunWithTokenLimit,
+      retrySync,
+      setExtensionFailureState,
       createNewThread,
       startNewTopic,
       selectThread,

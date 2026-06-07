@@ -189,6 +189,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     preset,
     settings,
     rerunWithTokenLimit,
+    retrySync,
     sourceHealth,
     expertMode = false,
   } = useKnowledgeQA()
@@ -200,6 +201,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     null
   )
   const [workspaceHandoffPending, setWorkspaceHandoffPending] = useState(false)
+  const [syncRetryPending, setSyncRetryPending] = useState(false)
   const [answerLengthAction, setAnswerLengthAction] = useState<"shorter" | "longer" | null>(
     null
   )
@@ -389,6 +391,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     setAnswerFeedbackError(null)
     setPendingFeedbackThumb(null)
     setWorkspaceHandoffPending(false)
+    setSyncRetryPending(false)
     setRecoveryDismissed(false)
     if (copiedAnswerTimeoutRef.current != null) {
       window.clearTimeout(copiedAnswerTimeoutRef.current)
@@ -580,6 +583,27 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         content: "Unable to copy answer.",
         duration: 3,
       })
+    }
+  }
+
+  const handleRetrySync = async () => {
+    if (syncRetryPending) return
+    const requestSessionKey = answerSessionKey
+    setSyncRetryPending(true)
+    try {
+      const synced = await retrySync()
+      if (activeAnswerSessionKeyRef.current !== requestSessionKey || synced) {
+        return
+      }
+      messageApi.open({
+        type: "warning",
+        content: "Unable to sync this result yet.",
+        duration: 3,
+      })
+    } finally {
+      if (activeAnswerSessionKeyRef.current === requestSessionKey) {
+        setSyncRetryPending(false)
+      }
     }
   }
 
@@ -802,6 +826,18 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           className="mt-3 flex flex-wrap items-center justify-between gap-3"
         >
           <div className="flex flex-wrap items-center gap-2">
+            {answerTrustState === "unsynced_local_result" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleRetrySync()
+                }}
+                disabled={syncRetryPending}
+                className="rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-xs text-warn hover:bg-warn/15 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {syncRetryPending ? "Syncing..." : "Retry sync"}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {

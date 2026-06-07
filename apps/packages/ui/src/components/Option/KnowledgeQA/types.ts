@@ -38,6 +38,15 @@ export type KnowledgeAnswerTrustState =
   | "unsynced_local_result"
   | "unknown_trust"
 
+export type ExtensionKnowledgeFailureState =
+  | "setup_missing"
+  | "setup_invalid"
+  | "backend_unreachable"
+  | "backend_auth_failed"
+  | "api_allowlist_blocked"
+  | "search_succeeded_sync_failed"
+  | "search_failed"
+
 export type KnowledgeTrustReasonCode =
   | "missing_citations"
   | "missing_inspectable_evidence"
@@ -280,6 +289,7 @@ export type KnowledgeQAState = {
   answerTrustState: KnowledgeAnswerTrustState
   answerTrustReasonCodes: KnowledgeTrustReasonCode[]
   answerEvidenceOrigin: EvidenceOrigin | null
+  extensionFailureState: ExtensionKnowledgeFailureState | null
   searchDetails: SearchRuntimeDetails | null
   error: string | null
   queryWarning: string | null
@@ -318,6 +328,8 @@ export type KnowledgeQAActions = {
   cancelSearch: () => void
   clearResults: () => void
   rerunWithTokenLimit: (tokenLimit: number) => Promise<void>
+  retrySync: () => Promise<boolean>
+  setExtensionFailureState: (state: ExtensionKnowledgeFailureState | null) => void
 
   // Thread actions
   createNewThread: (title?: string) => Promise<string>

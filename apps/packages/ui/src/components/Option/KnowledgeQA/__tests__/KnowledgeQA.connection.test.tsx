@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import { KnowledgeQA } from "../index"
+import { KnowledgeQASetupDiagnostics } from "../SetupDiagnostics"
 import {
   createKnowledgeQaStateFixture,
   type KnowledgeQaStateFixtureName,
 } from "./knowledgeQaStateFixtures"
+import type { ExtensionKnowledgeFailureState } from "../types"
 
 const state = {
   settingsPanelOpen: false,
@@ -214,6 +216,56 @@ describe("KnowledgeQA connection states", () => {
     capabilitiesState.loading = fixture.capabilities.loading
     capabilitiesState.capabilities = fixture.capabilities.capabilities
   }
+  const renderSetupDiagnostics = (
+    extensionFailureState: ExtensionKnowledgeFailureState
+  ) =>
+    render(
+      <KnowledgeQASetupDiagnostics
+        connection={{
+          serverUrl:
+            extensionFailureState === "setup_missing"
+              ? null
+              : "http://127.0.0.1:8000",
+          configStep:
+            extensionFailureState === "setup_missing" ||
+            extensionFailureState === "setup_invalid"
+              ? "url"
+              : extensionFailureState === "backend_auth_failed"
+                ? "auth"
+                : "health",
+          errorKind:
+            extensionFailureState === "backend_auth_failed"
+              ? "auth"
+              : extensionFailureState === "backend_unreachable" ||
+                  extensionFailureState === "api_allowlist_blocked"
+                ? "unreachable"
+                : "none",
+          lastError:
+            extensionFailureState === "api_allowlist_blocked"
+              ? "Absolute URL requests are blocked unless the request origin is explicitly allowlisted."
+              : null,
+          lastStatusCode:
+            extensionFailureState === "api_allowlist_blocked" ? 400 : null,
+          isChecking: false,
+        }}
+        uxState={
+          extensionFailureState === "setup_missing" ||
+          extensionFailureState === "setup_invalid"
+            ? "unconfigured"
+            : extensionFailureState === "backend_auth_failed"
+              ? "error_auth"
+              : "error_unreachable"
+        }
+        retryCountdownSeconds={30}
+        extensionFailureState={extensionFailureState}
+        onOpenSetup={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenDiagnostics={vi.fn()}
+        onRetryConnection={vi.fn()}
+        onRetrySearch={vi.fn()}
+        onRetrySync={vi.fn()}
+      />
+    )
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -267,10 +319,24 @@ describe("KnowledgeQA connection states", () => {
     renderKnowledgeQa()
 
     expect(screen.getByText("Setup Required")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Finish Setup" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Finish setup" })).toBeInTheDocument()
     expect(screen.getByTestId("knowledge-setup-diagnostics")).toBeInTheDocument()
     expect(screen.getByText("Server URL")).toBeInTheDocument()
     expect(screen.getByText("Add a tldw server URL before Knowledge QA can search your library.")).toBeInTheDocument()
+  })
+
+  it.each<[ExtensionKnowledgeFailureState, string]>([
+    ["setup_missing", "Finish setup"],
+    ["setup_invalid", "Fix setup"],
+    ["backend_unreachable", "Retry connection"],
+    ["backend_auth_failed", "Update credentials"],
+    ["api_allowlist_blocked", "Request host access"],
+    ["search_succeeded_sync_failed", "Retry sync"],
+    ["search_failed", "Retry search"],
+  ])("shows extension recovery for %s", (extensionFailureState, action) => {
+    renderSetupDiagnostics(extensionFailureState)
+
+    expect(screen.getByRole("button", { name: action })).toBeInTheDocument()
   })
 
   it("renders settings and export audited states from deterministic fixtures", async () => {
@@ -301,7 +367,7 @@ describe("KnowledgeQA connection states", () => {
     ).toBeInTheDocument()
     expect(screen.queryByText("Server Offline")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Update credentials" }))
     expect(connectivity.navigate).toHaveBeenCalledWith("/settings/tldw")
   })
 
@@ -319,7 +385,7 @@ describe("KnowledgeQA connection states", () => {
     expect(screen.getByText("Waiting for a server URL before checking credentials.")).toBeInTheDocument()
     expect(screen.queryByLabelText("Search your knowledge base")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }))
+    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }))
     expect(connectivity.navigate).toHaveBeenCalledWith("/")
   })
 
@@ -335,7 +401,7 @@ describe("KnowledgeQA connection states", () => {
     expect(screen.getByText("Configured server: http://127.0.0.1:8000")).toBeInTheDocument()
     expect(screen.getByText("Add the API key or login token for this tldw server.")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Update credentials" }))
     expect(connectivity.navigate).toHaveBeenCalledWith("/settings/tldw")
   })
 

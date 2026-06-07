@@ -10,6 +10,7 @@ import {
 
 import type { ConnectionState, ConnectionUxState } from "@/types/connection"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
+import type { ExtensionKnowledgeFailureState } from "./types"
 
 type DiagnosticStatus = "complete" | "missing" | "waiting" | "blocked" | "review"
 
@@ -36,6 +37,9 @@ type Props = {
   onOpenSettings: () => void
   onOpenDiagnostics: () => void
   onRetryConnection: () => void
+  onRetrySearch?: () => void
+  onRetrySync?: () => void
+  extensionFailureState?: ExtensionKnowledgeFailureState | null
 }
 
 const BROWSER_ACCESS_BLOCK_PATTERNS = [
@@ -112,19 +116,151 @@ export function KnowledgeQASetupDiagnostics({
   onOpenSettings,
   onOpenDiagnostics,
   onRetryConnection,
+  onRetrySearch,
+  onRetrySync,
+  extensionFailureState = null,
 }: Props) {
   const [hostPermissionNotice, setHostPermissionNotice] = useState<string | null>(null)
   const serverLabel = getServerOriginLabel(connection.serverUrl)
   const hasServerUrl = Boolean(serverLabel)
   const authMissing =
+    extensionFailureState === "backend_auth_failed" ||
     uxState === "configuring_auth" ||
     uxState === "error_auth" ||
     connection.configStep === "auth" ||
     connection.errorKind === "auth"
   const unreachable =
-    uxState === "error_unreachable" || connection.errorKind === "unreachable"
-  const browserBlocked = hasServerUrl && isBrowserAccessBlocked(connection.lastError)
-  const canRequestHostAccess = hasServerUrl && hasExtensionHostPermissionRequest()
+    extensionFailureState === "backend_unreachable" ||
+    extensionFailureState === "api_allowlist_blocked" ||
+    uxState === "error_unreachable" ||
+    connection.errorKind === "unreachable"
+  const browserBlocked =
+    hasServerUrl &&
+    (extensionFailureState === "api_allowlist_blocked" ||
+      isBrowserAccessBlocked(connection.lastError))
+  const canRequestHostAccess =
+    hasServerUrl &&
+    (extensionFailureState === "api_allowlist_blocked" ||
+      hasExtensionHostPermissionRequest())
+
+  const title =
+    extensionFailureState === "backend_auth_failed"
+      ? "Update credentials to use Knowledge QA"
+      : extensionFailureState === "setup_invalid"
+        ? "Fix server setup"
+        : extensionFailureState === "api_allowlist_blocked"
+          ? "Browser access is blocking Knowledge QA"
+          : extensionFailureState === "search_succeeded_sync_failed"
+            ? "Results are not saved yet"
+            : extensionFailureState === "search_failed"
+              ? "Knowledge QA search failed"
+              : uxState === "configuring_auth" || uxState === "error_auth"
+                ? "Add your credentials to use Knowledge QA"
+                : unreachable
+                  ? "Can't reach your tldw server right now"
+                  : "Setup Required"
+
+  const message =
+    extensionFailureState === "backend_auth_failed"
+      ? "Knowledge QA found your server, but credentials are missing or invalid."
+      : extensionFailureState === "setup_invalid"
+        ? "Review the saved server URL and setup details before searching your library."
+        : extensionFailureState === "api_allowlist_blocked"
+          ? "The extension cannot send Knowledge QA requests to this server origin until host access or the request allowlist is updated."
+          : extensionFailureState === "search_succeeded_sync_failed"
+            ? "Your answer is visible locally, but the conversation could not be saved to the backend."
+            : extensionFailureState === "search_failed"
+              ? "The last Knowledge QA search did not complete. Retry the search after checking the connection and selected sources."
+              : uxState === "configuring_auth" || uxState === "error_auth"
+                ? "Your server URL is saved, but Knowledge QA needs valid credentials before it can load."
+                : unreachable
+                  ? "Your server settings are saved, but Knowledge QA cannot reach the tldw server right now."
+                  : "Complete the server setup to start searching your documents."
+
+  const handleRequestHostAccess = () => {
+    const result = requestOptionalHostPermission(
+      connection.serverUrl,
+      (granted, origin) => {
+        setHostPermissionNotice(
+          granted
+            ? `Host access granted for ${origin}. Retrying connection...`
+            : `Host access was not granted for ${origin}.`
+        )
+        if (granted) {
+          onRetryConnection()
+        }
+      },
+      (error) => setHostPermissionNotice(error.message)
+    )
+
+    if (!result.supported) {
+      setHostPermissionNotice(
+        "Host access must be granted from the browser extension permissions screen."
+      )
+    }
+  }
+
+  const handlePrimaryAction = () => {
+    if (extensionFailureState === "setup_missing") {
+      onOpenSetup()
+      return
+    }
+    if (extensionFailureState === "setup_invalid") {
+      onOpenSettings()
+      return
+    }
+    if (extensionFailureState === "backend_auth_failed") {
+      onOpenSettings()
+      return
+    }
+    if (extensionFailureState === "api_allowlist_blocked") {
+      handleRequestHostAccess()
+      return
+    }
+    if (extensionFailureState === "search_succeeded_sync_failed") {
+      onRetrySync?.()
+      return
+    }
+    if (extensionFailureState === "search_failed") {
+      onRetrySearch?.()
+      return
+    }
+    if (!hasServerUrl) {
+      onOpenSetup()
+      return
+    }
+    if (authMissing) {
+      onOpenSettings()
+      return
+    }
+    onRetryConnection()
+  }
+
+  const primaryActionLabel =
+    extensionFailureState === "setup_missing"
+      ? "Finish setup"
+      : extensionFailureState === "setup_invalid"
+        ? "Fix setup"
+        : extensionFailureState === "backend_auth_failed"
+          ? "Update credentials"
+          : extensionFailureState === "api_allowlist_blocked"
+            ? "Request host access"
+            : extensionFailureState === "search_succeeded_sync_failed"
+              ? "Retry sync"
+              : extensionFailureState === "search_failed"
+                ? "Retry search"
+                : !hasServerUrl
+                  ? "Finish setup"
+                  : authMissing
+                    ? "Update credentials"
+                    : connection.isChecking
+                      ? "Checking connection..."
+                      : "Retry connection"
+  const primaryActionDisabled =
+    !extensionFailureState &&
+    hasServerUrl &&
+    !authMissing &&
+    connection.isChecking
 
   const checks = useMemo<DiagnosticCheck[]>(() => {
     const serverUrlCheck: DiagnosticCheck = hasServerUrl
@@ -231,43 +367,6 @@ export function KnowledgeQASetupDiagnostics({
     return [serverUrlCheck, credentialCheck, browserAccessCheck, backendCheck]
   }, [authMissing, browserBlocked, connection.isChecking, hasServerUrl, unreachable])
 
-  const title =
-    uxState === "configuring_auth" || uxState === "error_auth"
-      ? "Add your credentials to use Knowledge QA"
-      : unreachable
-        ? "Can't reach your tldw server right now"
-        : "Setup Required"
-
-  const message =
-    uxState === "configuring_auth" || uxState === "error_auth"
-      ? "Your server URL is saved, but Knowledge QA needs valid credentials before it can load."
-      : unreachable
-        ? "Your server settings are saved, but Knowledge QA cannot reach the tldw server right now."
-        : "Complete the server setup to start searching your documents."
-
-  const handleRequestHostAccess = () => {
-    const result = requestOptionalHostPermission(
-      connection.serverUrl,
-      (granted, origin) => {
-        setHostPermissionNotice(
-          granted
-            ? `Host access granted for ${origin}. Retrying connection...`
-            : `Host access was not granted for ${origin}.`
-        )
-        if (granted) {
-          onRetryConnection()
-        }
-      },
-      (error) => setHostPermissionNotice(error.message)
-    )
-
-    if (!result.supported) {
-      setHostPermissionNotice(
-        "Host access must be granted from the browser extension permissions screen."
-      )
-    }
-  }
-
   return (
     <div className="flex-1 flex items-center justify-center px-4 py-8">
       <section
@@ -323,34 +422,17 @@ export function KnowledgeQASetupDiagnostics({
         )}
 
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {!hasServerUrl ? (
-            <button
-              type="button"
-              onClick={onOpenSetup}
-              className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
-            >
-              Finish Setup
-            </button>
-          ) : authMissing ? (
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
-            >
-              Open Settings
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onRetryConnection}
-              disabled={connection.isChecking}
-              className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {connection.isChecking ? "Checking connection..." : "Retry connection"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handlePrimaryAction}
+            disabled={primaryActionDisabled}
+            className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {primaryActionLabel}
+          </button>
 
-          {canRequestHostAccess && (
+          {canRequestHostAccess &&
+            extensionFailureState !== "api_allowlist_blocked" && (
             <button
               type="button"
               onClick={handleRequestHostAccess}
@@ -359,7 +441,7 @@ export function KnowledgeQASetupDiagnostics({
               <KeyRound className="h-4 w-4" aria-hidden />
               Request host access
             </button>
-          )}
+            )}
 
           <button
             type="button"

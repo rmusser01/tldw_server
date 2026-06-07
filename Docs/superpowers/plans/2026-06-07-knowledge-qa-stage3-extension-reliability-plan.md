@@ -22,18 +22,20 @@
 
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/SetupDiagnostics.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx`
+- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/AnswerPanel.tsx`
+- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/index.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/types.ts`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQA.connection.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.persistence.test.tsx`
+- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx`
 - Modify: `apps/extension/tests/e2e/knowledge-qa-setup-diagnostics.spec.ts`
 - Modify: `apps/extension/tests/e2e/knowledge-qa-states.spec.ts`
-- Modify: `apps/extension/tests/e2e/utils/extension-build.ts`
-- Modify: `apps/extension/tests/e2e/utils/extension.launch.test.ts`
-- Modify: `apps/extension/playwright.config.ts` if harness timeout or build profile needs adjustment
+- Modify: `apps/extension/tests/e2e/utils/extension-common.ts`
+- Add: `apps/extension/tests/e2e/utils/extension-launch-health.spec.ts`
 
 ## Task 1: Define Extension Failure States
 
-- [ ] **Step 1: Write failing unit tests**
+- [x] **Step 1: Write failing unit tests**
 
 Update `KnowledgeQA.connection.test.tsx`:
 
@@ -61,7 +63,7 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/KnowledgeQA.connecti
 
 Expected: fail until states are modeled and rendered.
 
-- [ ] **Step 2: Add typed failure state**
+- [x] **Step 2: Add typed failure state**
 
 Extend `types.ts` with:
 
@@ -78,7 +80,7 @@ export type ExtensionKnowledgeFailureState =
 
 ## Task 2: Surface Sync Failure
 
-- [ ] **Step 1: Write failing provider persistence test**
+- [x] **Step 1: Write failing provider persistence test**
 
 In `KnowledgeQAProvider.persistence.test.tsx`, simulate search success followed by thread/message persistence failure. Assert:
 
@@ -87,30 +89,30 @@ In `KnowledgeQAProvider.persistence.test.tsx`, simulate search success followed 
 - trust state is `unsynced_local_result`
 - visible UI includes retry sync action
 
-- [ ] **Step 2: Implement local-result sync state**
+- [x] **Step 2: Implement local-result sync state**
 
 Update `KnowledgeQAProvider.tsx` so thread creation or message persistence failures set an unsynced state instead of only logging or silently proceeding.
 
-- [ ] **Step 3: Render retry action**
+- [x] **Step 3: Render retry action**
 
 Update shared UI to retry sync without rerunning the search when possible.
 
 ## Task 3: Repair Or Gate Extension Runtime Harness
 
-- [ ] **Step 1: Add explicit harness health test**
+- [x] **Step 1: Add explicit harness health test**
 
-Update `apps/extension/tests/e2e/utils/extension.launch.test.ts` to assert the built extension launches and options route `#/knowledge` is reachable.
+Added `apps/extension/tests/e2e/utils/extension-launch-health.spec.ts` to assert the built extension launches and options route `#/knowledge` is reachable. The probe is marked expected-failure with a `TASK-2279.5` release-blocker reason so the known packaged MV3 launch issue remains visible in CI/local runs.
 
 Run:
 
 ```bash
 cd apps/extension
-bunx playwright test tests/e2e/utils/extension.launch.test.ts --project=chromium-extension --reporter=line
+bunx playwright test tests/e2e/utils/extension-launch-health.spec.ts --project=chromium-extension --reporter=line
 ```
 
 Expected before fix: reproduce WXT build stall or route launch blocker.
 
-- [ ] **Step 2: Investigate build stall without broad refactors**
+- [x] **Step 2: Investigate build stall without broad refactors**
 
 Inspect:
 
@@ -119,37 +121,38 @@ Inspect:
 - `apps/extension/wxt.config.ts`
 - `apps/extension/playwright.config.ts`
 
-Limit attempts to three. If unresolved, document exact command, stall point, process tree, and owner in `TASK-2279.5`.
+Limited to three headed/sandbox launch attempts, then moved to headless default. Current blocker is documented in `TASK-2279.5`: sandboxed Chromium aborts before route code; unsandboxed headless Chromium launches but exposes no extension targets for `resolveExtensionId`; headed launch times out locally.
 
-- [ ] **Step 3: Run Knowledge QA extension E2E**
+- [x] **Step 3: Run Knowledge QA extension E2E**
 
 ```bash
 cd apps/extension
 bunx playwright test tests/e2e/knowledge-qa-setup-diagnostics.spec.ts tests/e2e/knowledge-qa-states.spec.ts --project=chromium-extension --reporter=line
 ```
 
-Expected: tests execute in browser. If blocked, mark release-blocking with evidence.
+Result: blocked before page assertions. The latest run failed 6/6 with `Could not determine extension id from [no extension targets]`.
 
 ## Task 4: Verify
 
-- [ ] **Step 1: Run focused unit and extension tests**
+- [x] **Step 1: Run focused unit and extension tests**
 
 ```bash
 cd apps/packages/ui
-bunx vitest run src/components/Option/KnowledgeQA/__tests__/KnowledgeQA.connection.test.tsx src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.persistence.test.tsx
+bunx vitest run src/components/Option/KnowledgeQA/__tests__/KnowledgeQA.connection.test.tsx src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.persistence.test.tsx src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx
 
 cd apps/extension
 bun run compile
-bunx playwright test tests/e2e/utils/extension.launch.test.ts tests/e2e/knowledge-qa-setup-diagnostics.spec.ts tests/e2e/knowledge-qa-states.spec.ts --project=chromium-extension --reporter=line
+bunx playwright test tests/e2e/utils/extension-launch-health.spec.ts --project=chromium-extension --reporter=line
+bunx playwright test tests/e2e/knowledge-qa-setup-diagnostics.spec.ts tests/e2e/knowledge-qa-states.spec.ts --project=chromium-extension --reporter=line
 ```
 
-- [ ] **Step 2: Run diff hygiene**
+- [x] **Step 2: Run diff hygiene**
 
 ```bash
-git diff --check -- apps/packages/ui/src/components/Option/KnowledgeQA apps/extension/tests/e2e apps/extension/playwright.config.ts
+git diff --check -- apps/packages/ui/src/components/Option/KnowledgeQA apps/extension/tests/e2e backlog/tasks Docs/superpowers/plans/2026-06-07-knowledge-qa-stage3-extension-reliability-plan.md
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/KnowledgeQA apps/extension/tests/e2e apps/extension/playwright.config.ts "backlog/tasks/task-2279.5 - Harden-Knowledge-QA-extension-runtime-and-sync-reliability.md"

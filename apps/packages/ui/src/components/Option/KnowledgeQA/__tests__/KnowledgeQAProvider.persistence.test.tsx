@@ -160,6 +160,92 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(warningCalls).toHaveLength(1)
   })
 
+  it("keeps successful search results visible when backend message sync fails", async () => {
+    searchCharactersMock.mockResolvedValue([
+      { id: 7, name: "Helpful AI Assistant" },
+    ])
+    addChatMessageMock.mockRejectedValue(new Error("message sync failed"))
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "doc-unsynced-1",
+          content: "Unsynced evidence",
+          metadata: { title: "Unsynced source" },
+          score: 0.9,
+        },
+      ],
+      generated_answer: "Unsynced answer [1]",
+      metadata: {},
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+
+    act(() => {
+      latestContext!.setQuery("question with sync failure")
+    })
+    act(() => {
+      void latestContext!.search()
+    })
+
+    await waitFor(() => {
+      expect(latestContext!.isSearching).toBe(false)
+      expect(latestContext!.answer).toBe("Unsynced answer [1]")
+      expect(latestContext!.results).toHaveLength(1)
+      expect(latestContext!.isLocalOnlyThread).toBe(true)
+      expect(latestContext!.answerTrustState).toBe("unsynced_local_result")
+      expect(latestContext!.extensionFailureState).toBe(
+        "search_succeeded_sync_failed"
+      )
+      expect(latestContext!.retrySync).toBeTypeOf("function")
+    })
+
+    addChatMessageMock.mockReset()
+    addChatMessageMock
+      .mockResolvedValueOnce({ id: "msg-user-synced" })
+      .mockResolvedValueOnce({ id: "msg-assistant-synced" })
+    fetchWithAuthMock.mockImplementation(async (path: string) => {
+      if (path.includes("/rag-context")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+          text: async () => "",
+        }
+      }
+      if (path.includes("/messages-with-context")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+          text: async () => "",
+        }
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => [],
+        text: async () => "",
+      }
+    })
+
+    await act(async () => {
+      await expect(latestContext!.retrySync()).resolves.toBe(true)
+    })
+
+    await waitFor(() => {
+      expect(ragSearchMock).toHaveBeenCalledTimes(1)
+      expect(latestContext!.extensionFailureState).toBeNull()
+      expect(latestContext!.isLocalOnlyThread).toBe(false)
+      expect(latestContext!.answerTrustState).toBe("cited_answer")
+    })
+  })
+
   it("persists materialized evidence identifiers in RAG context", async () => {
     let persistedRagContextBody: Record<string, any> | null = null
     searchCharactersMock.mockResolvedValue([

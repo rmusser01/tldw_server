@@ -20,7 +20,7 @@ test.describe("Knowledge QA deterministic extension states", () => {
       await forceUnconfigured(page, "knowledge-qa-setup-required")
 
       await expect(page.getByText(/Setup Required/i)).toBeVisible()
-      await expect(page.getByRole("button", { name: /Finish Setup/i })).toBeVisible()
+      await expect(page.getByRole("button", { name: /Finish setup/i })).toBeVisible()
     } finally {
       await context.close()
     }

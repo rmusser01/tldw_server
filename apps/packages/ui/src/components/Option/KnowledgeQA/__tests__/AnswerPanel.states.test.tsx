@@ -115,6 +115,7 @@ const state = {
   settings: createSettings(),
   preset: "balanced" as "fast" | "balanced" | "thorough" | "custom",
   rerunWithTokenLimit: vi.fn(),
+  retrySync: vi.fn(),
   searchDetails: null as
     | {
         tokensUsed?: number | null
@@ -184,6 +185,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
     settings: state.settings,
     preset: state.preset,
     rerunWithTokenLimit: state.rerunWithTokenLimit,
+    retrySync: state.retrySync,
     scrollToSource: state.scrollToSource,
     focusedSourceIndex: state.focusedSourceIndex,
     sourceHealth: state.sourceHealth,
@@ -207,6 +209,7 @@ describe("AnswerPanel state guardrails", () => {
     state.settings = createSettings()
     state.preset = "balanced"
     state.rerunWithTokenLimit = vi.fn().mockResolvedValue(undefined)
+    state.retrySync = vi.fn().mockResolvedValue(true)
     state.searchDetails = null
     state.query = "What does this source say?"
     state.currentThreadId = "thread-1"
@@ -395,7 +398,7 @@ describe("AnswerPanel state guardrails", () => {
     expect(screen.getByText("Low answer confidence")).toBeInTheDocument()
   })
 
-  it("shows unsynced local answers as degraded persistence state", () => {
+  it("shows unsynced local answers as degraded persistence state", async () => {
     state.answerTrustState = "unsynced_local_result"
     state.answer = "Local answer [1]."
     state.citations = [{ index: 1 }]
@@ -407,6 +410,10 @@ describe("AnswerPanel state guardrails", () => {
     expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
       "Trust: Unsynced local result."
     )
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry sync" }))
+
+    await waitFor(() => expect(state.retrySync).toHaveBeenCalledTimes(1))
   })
 
   it("shows failed searches with a failed trust status", () => {

@@ -67,6 +67,9 @@ function KnowledgeQAContent() {
     currentThreadId,
     selectThread,
     selectSharedThread,
+    extensionFailureState,
+    retrySync,
+    search,
   } = useKnowledgeQA()
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [retryNowMs, setRetryNowMs] = useState(() => Date.now())
@@ -305,6 +308,13 @@ function KnowledgeQAContent() {
           onOpenSettings={() => navigate("/settings/tldw")}
           onOpenDiagnostics={() => navigate("/settings/health")}
           onRetryConnection={handleRetryConnection}
+          onRetrySearch={() => {
+            void search()
+          }}
+          onRetrySync={() => {
+            void retrySync()
+          }}
+          extensionFailureState={extensionFailureState}
         />
       )
     }
