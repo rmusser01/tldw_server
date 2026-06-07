@@ -119,6 +119,50 @@ scope. `fs.grep` uses literal matching by default; regex matching requires the
 filesystem module `grep_allow_regex` setting. Grep scans are also bounded by
 per-file, total-byte, total-file, and walk-entry limits.
 
+### Safe File Read, Patch, And Write Tools
+
+Use `fs.read` as the canonical file-inspection tool. It returns bounded UTF-8
+content plus file size, newline style, SHA-256 when available, truncation state,
+and a short-lived read receipt for complete hashed reads.
+
+For existing-file edits, prefer `fs.patch` over whole-file replacement. It
+accepts unified diff text, derives affected paths before execution for path
+policy checks, validates context in memory, and only writes after preimage
+checks pass. For whole-file creation or deliberate replacement, use `fs.write`.
+`fs.write` `mode="create"` fails if the file already exists. `mode="replace"`
+requires either `expected_sha256` or a valid `read_receipt` from `fs.read`.
+
+This read-before-mutate flow protects against stale edits: if a file changes
+after the model read it, the expected hash or receipt no longer matches and the
+write is rejected instead of silently overwriting newer content.
+
+Example action-aware path grants:
+
+```json
+{
+  "path_scope_mode": "workspace_root",
+  "path_grants": [
+    {"path": "docs", "actions": ["read", "edit", "write"]},
+    {"path": "docs/private", "actions": ["edit", "write"], "effect": "deny"},
+    {"path": "downloads", "actions": ["read"]}
+  ]
+}
+```
+
+Actions do not imply each other. A profile with `read` can inspect files but not
+edit them. A profile with `edit` can use `fs.patch` for existing files. A
+profile with `write` can use `fs.write` and patch-created files when policy also
+allows creation. Deny grants take precedence over broader allow grants, so a
+private subtree can remain read-only or blocked under a writable parent.
+
+Denials and permission-decision metadata should be safe to show to operators:
+reason code, requested action, workspace-relative path, grant outcome, grant
+source, and redaction status. They should not include raw file content, read
+receipts, raw diffs, or absolute host paths.
+
+`fs.read_text` and `fs.write_text` remain compatibility tools for older clients.
+New profiles and front-ends should prefer `fs.read`, `fs.patch`, and `fs.write`.
+
 Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass
 profile policy and approval requirements.

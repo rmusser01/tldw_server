@@ -1,6 +1,6 @@
 # MCP Safe File Tools Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement workspace-scoped `fs.read`, `fs.patch`, and `fs.write` with action-aware path grants, read receipts, module-derived path enforcement, redacted observability metadata, and legacy compatibility.
 
@@ -42,7 +42,7 @@ Existing protocol path-scope call site: `tldw_Server_API/app/core/MCP_unified/pr
   - Adds descriptors, validation, candidate extraction, and execution for `fs.read`, `fs.patch`, and `fs.write`.
 - Modify `mcp_unified/profiles/presets.py`
   - Adds canonical file-tool buckets while keeping legacy tools explicit.
-- Modify `Docs/MCP_UNIFIED_USER_GUIDE.md`
+- Modify `mcp_unified/USER_GUIDE.md`
   - Documents canonical file tools, read-before-mutate flow, and path grants.
 - Test files:
   - `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
@@ -130,7 +130,7 @@ The writing-plans skill normally asks for a separate plan-review subagent. This 
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/base.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py`
 
-- [ ] **Step 1: Write failing interface tests**
+- [x] **Step 1: Write failing interface tests**
 
 Add protocol-focused tests that assert a module marked with `path_scope_candidate_source: "module"` is asked for candidates before path enforcement, and that missing candidates fail closed.
 
@@ -157,13 +157,13 @@ async def test_protocol_fails_closed_when_module_candidates_unavailable() -> Non
         await protocol.prepare_tool_call("fs.patch", {"diff": _PATCH}, _context())
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py -q`
 
 Expected: FAIL because `PathScopeCandidate` and the protocol extraction seam do not exist.
 
-- [ ] **Step 3: Add the interface model**
+- [x] **Step 3: Add the interface model**
 
 Create `mcp_unified/interfaces/path_scope.py` with `PathScopeAction`, `PathScopeCandidate`, `normalize_path_scope_candidate(raw)`, and `normalize_path_scope_candidates(raw_items)`.
 
@@ -174,7 +174,7 @@ Implementation requirements:
 - Reject blank paths and actions outside `read`, `edit`, `write`.
 - Keep paths as caller-provided strings; path resolution remains inside the enforcer.
 
-- [ ] **Step 4: Extend the protocols and base module**
+- [x] **Step 4: Extend the protocols and base module**
 
 Modify `mcp_unified/interfaces/policy.py` so `PathScopeEnforcer.evaluate_tool_call(...)` accepts:
 
@@ -194,7 +194,7 @@ async def extract_path_scope_candidates(
     raise NotImplementedError(f"Path scope candidate extraction not implemented for {tool_name}")
 ```
 
-- [ ] **Step 5: Wire protocol extraction**
+- [x] **Step 5: Wire protocol extraction**
 
 In `MCPProtocol.prepare_tool_call(...)`, after schema validation and before `_evaluate_path_scope(...)`, detect `tool_def["metadata"]["path_scope_candidate_source"] == "module"`. Call `module.extract_path_scope_candidates(...)`, normalize results, and pass the candidates into `_evaluate_path_scope(...)`.
 
@@ -206,13 +206,13 @@ For compatibility with old enforcer test doubles and host adapters:
 - If derived candidates are required and the enforcer cannot accept them, raise `PermissionError("path_scope_candidates_unsupported")`.
 - Do not swallow `TypeError` raised from inside the enforcer body; only fallback on an unexpected `path_scope_candidates` keyword error.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -227,7 +227,7 @@ git commit -m "feat: add mcp path scope candidate seam"
 - Modify: `tldw_Server_API/app/services/mcp_hub_path_enforcement_service.py`
 - Test: `tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py`
 
-- [ ] **Step 1: Write failing grant tests**
+- [x] **Step 1: Write failing grant tests**
 
 Add tests for three profiles over one temporary workspace:
 
@@ -262,13 +262,13 @@ assert result["path_decisions"][0] == {
 assert "/Users/" not in repr(result)
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py -q`
 
 Expected: FAIL on missing `path_grants` behavior.
 
-- [ ] **Step 3: Add grant normalization helpers**
+- [x] **Step 3: Add grant normalization helpers**
 
 Implement helpers near `_policy_allowlist_prefixes(...)`:
 
@@ -294,7 +294,7 @@ Accepted grant forms:
 
 Reject invalid grant entries by ignoring them, not by broadening access. If a grant uses a reserved future action, ignore that action for first-slice enforcement and return a safe invalid-policy decision only when the request depends on that unsupported action.
 
-- [ ] **Step 4: Evaluate derived candidates first**
+- [x] **Step 4: Evaluate derived candidates first**
 
 If `path_scope_candidates` is non-empty, evaluate only those candidates instead of extracting paths from `path_argument_hints`. Each candidate must match a grant for its own action.
 
@@ -308,19 +308,19 @@ Decision behavior:
 - If no allow grant applies and no deny grant applies, deny with `reason_code="path_action_not_granted"`.
 - Include `path_decisions` in the service result for both allowed and denied requests.
 
-- [ ] **Step 5: Preserve current fallback behavior**
+- [x] **Step 5: Preserve current fallback behavior**
 
 When `path_grants` is absent, keep the current `path_allowlist_prefixes` and multi-root behavior unchanged. This is the compatibility path for existing profiles and tests.
 
 When `path_grants` is present, do not fall back to `path_allowlist_prefixes` for candidates that fail to match an action grant. This prevents a profile from accidentally broadening action-specific policy by carrying an older allowlist field.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -336,7 +336,7 @@ git commit -m "feat: enforce mcp action aware path grants"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
 
-- [ ] **Step 1: Write failing `fs.read` tests**
+- [x] **Step 1: Write failing `fs.read` tests**
 
 Cover:
 
@@ -345,13 +345,13 @@ Cover:
 - Truncated reads set `truncated=True`, include a truncation reason, and omit `read_receipt`.
 - Binary/NUL, non-UTF-8, symlink, directory, and outside-workspace paths are rejected.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py -q`
 
 Expected: FAIL because `fs.read` is not registered.
 
-- [ ] **Step 3: Implement `filesystem_receipts.py`**
+- [x] **Step 3: Implement `filesystem_receipts.py`**
 
 Use stateless HMAC receipts:
 
@@ -375,7 +375,7 @@ class ReadReceiptManager:
     def validate(...)
 ```
 
-- [ ] **Step 4: Implement `fs.read`**
+- [x] **Step 4: Implement `fs.read`**
 
 In `filesystem_module.py`:
 
@@ -388,7 +388,7 @@ In `filesystem_module.py`:
 - Return a receipt only when the full hash is available and the read is not truncated.
 - Use the normalized workspace-relative path in the response and receipt, and keep absolute paths out of all returned metadata.
 
-- [ ] **Step 5: Add eval metadata to results**
+- [x] **Step 5: Add eval metadata to results**
 
 Return an `eval` map using `build_execution_eval_metadata(...)`:
 
@@ -404,13 +404,13 @@ Return an `eval` map using `build_execution_eval_metadata(...)`:
 
 Do not include file content, absolute paths, or receipt contents in eval metadata.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -425,7 +425,7 @@ git commit -m "feat: add mcp fs read tool"
 - Create: `tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_diff.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py`
 
-- [ ] **Step 1: Write parser tests first**
+- [x] **Step 1: Write parser tests first**
 
 Cover:
 
@@ -435,13 +435,13 @@ Cover:
 - Applies a simple modify patch in memory and returns the exact expected text.
 - Detects context mismatch with a stable reason code.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
 
 Expected: FAIL because the parser file does not exist.
 
-- [ ] **Step 3: Implement parser dataclasses**
+- [x] **Step 3: Implement parser dataclasses**
 
 Create:
 
@@ -467,7 +467,7 @@ class PatchFile:
     hunks: tuple[PatchHunk, ...]
 ```
 
-- [ ] **Step 4: Implement parser and planner**
+- [x] **Step 4: Implement parser and planner**
 
 Expose:
 
@@ -481,13 +481,13 @@ def apply_patch_to_text(original: str, patch_file: PatchFile) -> str:
 
 Keep all path normalization lexical and portable; workspace resolution still belongs to `FilesystemModule`.
 
-- [ ] **Step 5: Run parser tests**
+- [x] **Step 5: Run parser tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -504,7 +504,7 @@ git commit -m "feat: add mcp filesystem unified diff parser"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py`
 
-- [ ] **Step 1: Write failing `fs.patch` tests**
+- [x] **Step 1: Write failing `fs.patch` tests**
 
 Cover:
 
@@ -517,13 +517,13 @@ Cover:
 - Stale hash, stale receipt, mismatched receipt path, context mismatch, symlink, and outside-workspace paths are rejected.
 - Dry-run returns the planned changes and does not write.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py -q`
 
 Expected: FAIL because `fs.patch` is not implemented.
 
-- [ ] **Step 3: Implement candidate extraction**
+- [x] **Step 3: Implement candidate extraction**
 
 Override `FilesystemModule.extract_path_scope_candidates(...)`.
 
@@ -536,7 +536,7 @@ For `fs.patch`:
 
 For other tools, delegate to the base default only if they declare module-derived candidates.
 
-- [ ] **Step 4: Implement execution**
+- [x] **Step 4: Implement execution**
 
 Implementation order inside `execute_tool("fs.patch", ...)`:
 
@@ -552,17 +552,17 @@ Implementation order inside `execute_tool("fs.patch", ...)`:
 10. Write via temp file in the target directory, then atomic replace.
 11. Return per-file metadata: path, action, created, bytes_before, bytes_after, sha256_before, sha256_after.
 
-- [ ] **Step 5: Add rollback handling**
+- [x] **Step 5: Add rollback handling**
 
 Track parent directories created for new files. If a later file write fails, remove only empty directories created by this call and never remove pre-existing directories.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -577,7 +577,7 @@ git commit -m "feat: add mcp fs patch tool"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
 
-- [ ] **Step 1: Write failing `fs.write` tests**
+- [x] **Step 1: Write failing `fs.write` tests**
 
 Cover:
 
@@ -588,13 +588,13 @@ Cover:
 - Path escape, symlink, directory, binary/NUL content, and oversized content are rejected.
 - Dry-run returns metadata and does not write.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py -q`
 
 Expected: FAIL because `fs.write` is not implemented.
 
-- [ ] **Step 3: Implement descriptor and validation**
+- [x] **Step 3: Implement descriptor and validation**
 
 Add input schema fields:
 
@@ -605,7 +605,7 @@ Add input schema fields:
 - `read_receipt` string, optional.
 - `dry_run` boolean, optional default `False`.
 
-- [ ] **Step 4: Implement execution**
+- [x] **Step 4: Implement execution**
 
 Use the same workspace and no-follow path helpers as `fs.patch`.
 
@@ -626,13 +626,13 @@ For both:
 - Write through a temp file in the target directory and atomic replace.
 - Return metadata only, including `sha256_after`.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -649,7 +649,7 @@ git commit -m "feat: add mcp fs write tool"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
 
-- [ ] **Step 1: Write failing metadata/profile tests**
+- [x] **Step 1: Write failing metadata/profile tests**
 
 Cover:
 
@@ -662,13 +662,13 @@ Cover:
 - Tool-use reporting for filesystem tools records metadata fields only and never records returned file content, raw diffs, absolute paths, or receipts.
 - Permission decision metadata is allowed in tool-use reporting only through safe scalar fields or redacted relative path summaries.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py -q`
 
 Expected: FAIL on missing profile buckets or metadata.
 
-- [ ] **Step 3: Update profile buckets conservatively**
+- [x] **Step 3: Update profile buckets conservatively**
 
 Implement the spec buckets:
 
@@ -682,7 +682,7 @@ _LEGACY_FILES_WRITE_TOOLS = ["fs.write_text"]
 
 Do not grant file tools to any profile that currently lacks equivalent file access.
 
-- [ ] **Step 4: Add legacy metadata**
+- [x] **Step 4: Add legacy metadata**
 
 `fs.read_text` metadata should include:
 
@@ -696,17 +696,17 @@ Do not grant file tools to any profile that currently lacks equivalent file acce
 {"legacy_tool": True, "replacement_tools": ["fs.patch", "fs.write"], "path_scope_action": "write"}
 ```
 
-- [ ] **Step 5: Verify reporting remains metadata-only**
+- [x] **Step 5: Verify reporting remains metadata-only**
 
 If the current `ToolUseEvent` model already prevents content capture, add regression tests rather than expanding the model. If filesystem result metadata needs a nested `mcp_tool_use` envelope for gateway propagation, include only allowlisted scalar fields from the spec.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -718,10 +718,10 @@ git commit -m "feat: wire mcp safe file tools into profiles"
 ## Task 8: Update Documentation And Run Full Validation
 
 **Files:**
-- Modify: `Docs/MCP_UNIFIED_USER_GUIDE.md`
+- Modify: `mcp_unified/USER_GUIDE.md`
 - Modify: `backlog/tasks/task-2297 - Implement-MCP-safe-file-tools.md`
 
-- [ ] **Step 1: Document the user workflow**
+- [x] **Step 1: Document the user workflow**
 
 Add a section covering:
 
@@ -733,7 +733,7 @@ Add a section covering:
 - Safe permission decision payloads and denial reason codes.
 - Compatibility status of `fs.read_text` and `fs.write_text`.
 
-- [ ] **Step 2: Run targeted tests**
+- [x] **Step 2: Run targeted tests**
 
 Run:
 
@@ -749,7 +749,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run broader MCP smoke tests**
+- [x] **Step 3: Run broader MCP smoke tests**
 
 Run:
 
@@ -763,7 +763,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Bandit on touched code**
+- [x] **Step 4: Run Bandit on touched code**
 
 Run:
 
@@ -783,13 +783,13 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: PASS or only baseline findings outside changed lines. Fix any new touched-code findings before continuing.
 
-- [ ] **Step 5: Run diff hygiene**
+- [x] **Step 5: Run diff hygiene**
 
 Run: `git diff --check`
 
 Expected: no whitespace errors.
 
-- [ ] **Step 6: Update Backlog task**
+- [x] **Step 6: Update Backlog task**
 
 Record:
 
@@ -798,12 +798,12 @@ Record:
 - Bandit output path and outcome.
 - Any known skips with reasons.
 
-- [ ] **Step 7: Final commit**
+- [x] **Step 7: Final commit**
 
 Run:
 
 ```bash
-git add Docs/MCP_UNIFIED_USER_GUIDE.md "backlog/tasks/task-2297 - Implement-MCP-safe-file-tools.md"
+git add mcp_unified/USER_GUIDE.md "backlog/tasks/task-2297 - Implement-MCP-safe-file-tools.md"
 git commit -m "docs: document mcp safe file tools"
 ```
 
