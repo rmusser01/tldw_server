@@ -79,7 +79,7 @@ Record each live run with:
 
 ### 2026-06-04 Live Run
 
-- Backend: `http://127.0.0.1:18001`, `AUTH_MODE=single_user`, `SINGLE_USER_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY`, `CHAT_FORCE_MOCK=1`, `STREAMS_UNIFIED=1`.
+- Backend: `http://127.0.0.1:18001`, `AUTH_MODE=single_user`, `SINGLE_USER_API_KEY=<YOUR_API_KEY>`, `CHAT_FORCE_MOCK=1`, `STREAMS_UNIFIED=1`.
 - Frontend: `http://localhost:8080`, `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080'`, branch `codex/workspaces-manager-roadmap`.
 - Browser driver: Playwright/CDP via `npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line`.
 - Initial live run failed because `/workspaces` returned the WebUI 404 page; root cause was a missing Next.js `pages/workspaces.tsx` wrapper despite package route metadata coverage.
@@ -91,7 +91,7 @@ Record each live run with:
 - Backend focused verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces tldw_Server_API/tests/sandbox/test_workspace_volumes.py -v` passed with `292 passed, 8 warnings`.
 - Frontend focused verification: `./node_modules/.bin/vitest run src/services/__tests__/tldw-api-client.workspace-api.test.ts src/components/Option/Workspaces src/routes/__tests__/option-workspaces.route.test.tsx src/routes/__tests__/route-metadata.coverage.test.ts` passed with `8 files / 50 tests`.
 - Route/product-state guard: `./node_modules/.bin/vitest run src/design-system/__tests__/product-state-guard.mcp-acp-workspace-baseline.test.ts` passed with `1 file / 1 test`.
-- Live WebUI/backend smoke: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' TLDW_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line` passed with `2 passed (39.8s)` after rerunning outside the filesystem sandbox for local port binding.
+- Live WebUI/backend smoke: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' TLDW_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_API_KEY=<YOUR_API_KEY> npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line` passed with `2 passed (39.8s)` after rerunning outside the filesystem sandbox for local port binding.
 - Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Workspaces tldw_Server_API/app/core/Sandbox tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspaces_manager_final.json` exited `1` because the broad Sandbox tree contains 119 existing low-severity subprocess/start-process findings in runner/network/pool files. The report contains no findings in the Workspaces endpoint/schema or backend files changed by this Workspaces manager branch.
 
 ## Known Baseline Blockers At Creation

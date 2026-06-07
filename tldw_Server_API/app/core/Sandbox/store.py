@@ -137,11 +137,13 @@ def sanitize_workspace_volume_mount_path(value: str | None) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    if any(
-        text == prefix.rstrip("/") or text.startswith(prefix)
-        for prefix in _WORKSPACE_VOLUME_SAFE_MOUNT_PREFIXES
-    ):
-        return text
+    parts = [part for part in text.split("/") if part]
+    if text.startswith("/") and all(part not in {".", ".."} for part in parts):
+        normalized = "/" + "/".join(parts)
+        for prefix in _WORKSPACE_VOLUME_SAFE_MOUNT_PREFIXES:
+            base = prefix.rstrip("/")
+            if normalized == base or normalized.startswith(f"{base}/"):
+                return normalized
     return None
 
 

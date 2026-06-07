@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from tldw_Server_API.app.core.Sandbox.models import WorkspaceVolume, WorkspaceVolumeState
-from tldw_Server_API.app.core.Sandbox.store import IdempotencyConflict, InMemoryStore, SQLiteStore
+from tldw_Server_API.app.core.Sandbox.store import (
+    IdempotencyConflict,
+    InMemoryStore,
+    SQLiteStore,
+    sanitize_workspace_volume_mount_path,
+)
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 
 
@@ -176,6 +181,14 @@ def test_store_updates_volume_state_and_bound_ready_mount_hint_round_trips(tmp_p
     failed = store.get_workspace_volume(volume.id)
     assert failed is not None
     assert failed.mount_path == "/workspace/project"
+
+
+def test_workspace_volume_mount_path_sanitizer_rejects_escape_segments() -> None:
+    assert sanitize_workspace_volume_mount_path("/workspace/project") == "/workspace/project"
+    assert sanitize_workspace_volume_mount_path("/workspace/project/child") == "/workspace/project/child"
+    assert sanitize_workspace_volume_mount_path("/workspace/../../etc") is None
+    assert sanitize_workspace_volume_mount_path("/workspace/..") is None
+    assert sanitize_workspace_volume_mount_path("/workspace2/project") is None
 
 
 def test_store_direct_writes_bound_and_redact_workspace_volume_diagnostics(tmp_path):

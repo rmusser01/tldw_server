@@ -1,3 +1,5 @@
+"""Helpers for Workspace operation idempotency, polling payloads, and diagnostics redaction."""
+
 from __future__ import annotations
 
 import hashlib

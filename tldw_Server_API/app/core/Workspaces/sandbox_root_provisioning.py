@@ -1,3 +1,5 @@
+"""Provision Sandbox-owned durable roots and attach them to Project Workspaces."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,6 +13,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Sandbox.store import IdempotencyConflict
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Workspaces.operations import (
     fingerprint_workspace_command,
@@ -150,6 +153,27 @@ def provision_and_attach_sandbox_root(
             },
         )
         raise
+    except IdempotencyConflict as exc:
+        logger.warning(
+            "Workspace sandbox root idempotency conflict for workspace {} and key {}",
+            workspace_key,
+            exc.key,
+        )
+        db.update_workspace_operation(
+            workspace_key,
+            str(operation["id"]),
+            status="conflicted",
+            diagnostics={
+                "message": "Sandbox project root provisioning conflicted with a prior request.",
+                "code": "workspace_sandbox_volume_idempotency_conflict",
+                "retryable": False,
+            },
+        )
+        raise ConflictError(
+            "Sandbox project root provisioning idempotency key was reused with a different request.",
+            entity="workspace_sandbox_volume",
+            entity_id=exc.original_id,
+        ) from exc
     except (ConflictError, InputError, CharactersRAGDBError):
         raise
 

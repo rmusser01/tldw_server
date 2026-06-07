@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
@@ -25,7 +26,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.Sandbox.store import InMemoryStore
+from tldw_Server_API.app.core.Sandbox.store import IdempotencyConflict, InMemoryStore
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Workspaces import root_binding_service
 
@@ -45,15 +46,21 @@ class _FailingJobManager:
         raise RuntimeError("jobs backend unavailable")
 
 
+class _ConflictingSandboxVolumeService:
+    def provision_workspace_volume(self, **kwargs: Any) -> None:
+        _ = kwargs
+        raise IdempotencyConflict("volume-previous", key="workspace-root:previous")
+
+
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path: Path) -> CharactersRAGDB:
     d = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     d.add_character_card({"name": "Test Char"})
     return d
 
 
 @pytest.fixture
-def workspace_fastapi_app():
+def workspace_fastapi_app() -> FastAPI:
     app = FastAPI()
     app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
     return app
@@ -63,7 +70,7 @@ def _get_workspace_roots_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -83,7 +90,7 @@ def _get_workspace_capabilities_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -112,7 +119,7 @@ def _get_workspace_context_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -142,7 +149,7 @@ def _put_workspace_primary_root_response(
     db_like: Any,
     payload: dict[str, Any],
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -167,8 +174,8 @@ def _post_workspace_sandbox_root_response(
     payload: dict[str, Any],
     workspace_id: str = "ws-root",
     idempotency_key: str | None = "root-key",
-    sandbox_service: SandboxWorkspaceVolumeService | None = None,
-):
+    sandbox_service: Any | None = None,
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -202,7 +209,7 @@ def _get_workspace_operation_response(
     db_like: Any,
     workspace_id: str,
     operation_id: str,
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -868,6 +875,33 @@ def test_provision_workspace_sandbox_root_conflicts_for_changed_idempotent_reque
     )
 
     assert changed.status_code == 409, changed.text
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_maps_volume_idempotency_conflict_to_409(
+    workspace_fastapi_app: FastAPI,
+    db: CharactersRAGDB,
+) -> None:
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+
+    response = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+        sandbox_service=_ConflictingSandboxVolumeService(),
+    )
+
+    assert response.status_code == 409, response.text
+    operation = db.get_workspace_operation_by_idempotency(
+        workspace_id="ws-root",
+        user_id="1",
+        command="provision_sandbox_root",
+        idempotency_key="root-key",
+    )
+    assert operation is not None
+    assert operation["status"] == "conflicted"
+    assert operation["diagnostics"]["code"] == "workspace_sandbox_volume_idempotency_conflict"
 
 
 @pytest.mark.integration

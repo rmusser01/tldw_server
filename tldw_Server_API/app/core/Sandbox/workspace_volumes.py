@@ -1,3 +1,5 @@
+"""Service layer for durable Sandbox volumes that can back Project Workspace roots."""
+
 from __future__ import annotations
 
 import hashlib

@@ -3,9 +3,10 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
-from tldw_Server_API.app.core.Sandbox.store import InMemoryStore
+from tldw_Server_API.app.core.Sandbox.store import IdempotencyConflict, InMemoryStore
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
+    WORKSPACE_SANDBOX_ROOT_COMMAND,
     WorkspaceSandboxRootProvisionRequestData,
     provision_and_attach_sandbox_root,
 )
@@ -13,15 +14,21 @@ from tldw_Server_API.app.core.Workspaces.root_binding_service import WorkspaceRo
 
 
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path) -> CharactersRAGDB:
     database = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     database.upsert_workspace("ws-project", "Project Workspace")
     return database
 
 
 @pytest.fixture
-def volume_service():
+def volume_service() -> SandboxWorkspaceVolumeService:
     return SandboxWorkspaceVolumeService(store=InMemoryStore())
+
+
+class _ConflictingSandboxVolumeService:
+    def provision_workspace_volume(self, **kwargs: object) -> None:
+        _ = kwargs
+        raise IdempotencyConflict("volume-previous", key="workspace-root:previous")
 
 
 def test_provision_and_attach_sandbox_root_creates_active_operation_and_project_root(db, volume_service):
@@ -101,6 +108,32 @@ def test_provision_and_attach_sandbox_root_rejects_changed_request_for_same_key(
             ),
             idempotency_key="root-key",
         )
+
+
+def test_provision_and_attach_sandbox_root_maps_sandbox_idempotency_conflict(db: CharactersRAGDB) -> None:
+    with pytest.raises(ConflictError):
+        provision_and_attach_sandbox_root(
+            db=db,
+            sandbox_volume_service=_ConflictingSandboxVolumeService(),
+            workspace_id="ws-project",
+            user_id="user-1",
+            request=WorkspaceSandboxRootProvisionRequestData(
+                display_name="Project root",
+                requested_runtime="docker",
+            ),
+            idempotency_key="root-key",
+        )
+
+    operation = db.get_workspace_operation_by_idempotency(
+        workspace_id="ws-project",
+        user_id="user-1",
+        command=WORKSPACE_SANDBOX_ROOT_COMMAND,
+        idempotency_key="root-key",
+    )
+    assert operation is not None
+    assert operation["status"] == "conflicted"
+    assert operation["diagnostics"]["code"] == "workspace_sandbox_volume_idempotency_conflict"
+    assert operation["diagnostics"]["retryable"] is False
 
 
 def test_provision_and_attach_sandbox_root_parses_string_false_replace_existing(db, volume_service):
