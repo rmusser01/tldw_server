@@ -228,8 +228,11 @@ def _load_workspace_assistant_defaults_json(cls, value: Any) -> dict[str, Any] |
         return dict(value)
     if not isinstance(value, str) or not value.strip():
         return None
-    parsed = json.loads(value)
-    return dict(parsed) if isinstance(parsed, Mapping) else None
+    try:
+        parsed = json.loads(value)
+        return dict(parsed) if isinstance(parsed, Mapping) else None
+    except (json.JSONDecodeError, ValueError):
+        return None
 ```
 
 Do not store Persona names, prompts, avatars, tool scopes, or policy snapshots.
