@@ -13,7 +13,6 @@ from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
-from tldw_Server_API.app.core.MCP_unified import server as mcp_server
 
 
 # Disable HTTP security guard for these tests (IP allowlist/mTLS) to focus on auth behavior.
@@ -689,17 +688,12 @@ async def test_get_current_user_authnz_revoked_does_not_fallback(monkeypatch):
             detail="Could not validate credentials",
         )
 
-    class _JwtService:
-        def decode_access_token(self, token: str):
-            assert token == "revoked.jwt.token"
-            return {"sub": "42"}
-
     class _FailingJwtManager:
         def verify_token(self, _token: str):
             raise AssertionError("MCP JWT fallback should not be attempted")
 
     monkeypatch.setattr(mcp_ep, "verify_jwt_and_fetch_user", _revoked_verify)
-    monkeypatch.setattr(mcp_server, "get_jwt_service", lambda: _JwtService())
+    monkeypatch.setattr(mcp_ep, "_is_authnz_access_token", lambda token: token == "revoked.jwt.token")
     monkeypatch.setattr(mcp_ep, "get_jwt_manager", lambda: _FailingJwtManager())
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="revoked.jwt.token")
