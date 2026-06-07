@@ -3,25 +3,25 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Any
 
 import pytest
 
 
 @pytest.mark.integration
-def test_artifact_traversal_rejected_under_uvicorn() -> None:
-     # Only run if uvicorn is available
+def test_artifact_traversal_rejected_under_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only run if uvicorn is available
     try:
         import uvicorn  # type: ignore
     except ImportError:
         pytest.skip("uvicorn not installed")
 
     # Prepare environment for the app
-    os.environ.setdefault("TEST_MODE", "1")
-    os.environ.setdefault("SANDBOX_ENABLE_EXECUTION", "false")
-    os.environ.setdefault("SANDBOX_BACKGROUND_EXECUTION", "true")
-    os.environ.setdefault("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
-    api_key = os.environ.setdefault("SINGLE_USER_API_KEY", "test_sandbox_api_key_12345")
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "false")
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    api_key = os.environ.get("SINGLE_USER_API_KEY") or "test_sandbox_api_key_12345"
+    monkeypatch.setenv("SINGLE_USER_API_KEY", api_key)
 
     # Import app lazily after env is set
     from tldw_Server_API.app.main import app
@@ -37,18 +37,18 @@ def test_artifact_traversal_rejected_under_uvicorn() -> None:
     th = threading.Thread(target=server.run, daemon=True)
     th.start()
 
-    # Wait for server to start
-    deadline = time.time() + 10
-    while not server.started and time.time() < deadline:
-        time.sleep(0.05)
-    if not server.started:
-        pytest.skip("uvicorn server did not start in time")
-
-    # Drive API against real HTTP server so raw_path is preserved
     try:
+        # Wait for server to start
+        deadline = time.time() + 20
+        while not server.started and time.time() < deadline:
+            time.sleep(0.05)
+        if not server.started:
+            pytest.skip("uvicorn server did not start in time")
+
+        # Drive API against real HTTP server so raw_path is preserved
         import requests
         # Use the same timeout for all HTTP calls to avoid hangs
-        TIMEOUT = 5
+        TIMEOUT = 10
 
         # Create a run
         body = {

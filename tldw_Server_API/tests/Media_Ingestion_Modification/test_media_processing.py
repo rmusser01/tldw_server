@@ -1429,6 +1429,7 @@ class TestProcessDocuments:
             files = {"files": (SAMPLE_MD_PATH.name, f, "text/markdown")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
+        skip_if_external_fixture_url_unreachable(response, VALID_TXT_URL, "TXT fixture")
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         results = data["results"]
         assert len(results) == 2
