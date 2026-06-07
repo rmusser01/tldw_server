@@ -150,6 +150,27 @@ def merge_policy_decisions(
 def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRule]:
     """Compile legacy and structured profile policy rules into typed records."""
 
+    rules = compile_profile_tool_policy_rules(policy_document)
+    rules.extend(
+        _compile_structured_rules(
+            policy_document,
+            field_name="command_rules",
+            rule_type="command",
+        )
+    )
+    rules.extend(
+        _compile_structured_rules(
+            policy_document,
+            field_name="mcp_rules",
+            rule_type="mcp",
+        )
+    )
+    return rules
+
+
+def compile_profile_tool_policy_rules(policy_document: Any) -> list[PolicyDecisionRule]:
+    """Compile only legacy and structured tool policy rules."""
+
     rules: list[PolicyDecisionRule] = []
     for pattern in _as_sequence(_policy_value(policy_document, "denied_tools")):
         rules.append(
@@ -175,20 +196,6 @@ def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRul
             rule_type="tool",
         )
     )
-    rules.extend(
-        _compile_structured_rules(
-            policy_document,
-            field_name="command_rules",
-            rule_type="command",
-        )
-    )
-    rules.extend(
-        _compile_structured_rules(
-            policy_document,
-            field_name="mcp_rules",
-            rule_type="mcp",
-        )
-    )
     return rules
 
 
@@ -206,7 +213,7 @@ def evaluate_profile_tool_decision(
     subject = PolicyDecisionSubject(type="tool", normalized=tool_name)
     policy_document = profile.policy_document
     decisions: list[PolicyDecision] = []
-    for rule in compile_profile_policy_rules(policy_document):
+    for rule in compile_profile_tool_policy_rules(policy_document):
         if rule.rule_type != "tool" or rule.pattern != tool_name:
             continue
 

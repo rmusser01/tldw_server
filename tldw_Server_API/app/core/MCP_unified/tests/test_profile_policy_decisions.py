@@ -81,6 +81,67 @@ def test_evaluate_profile_tool_decision_allowed_tool_allows() -> None:
     assert decision.call_state == "callable"
 
 
+@pytest.mark.parametrize("tool_name", ["", "   "])
+def test_evaluate_profile_tool_decision_rejects_blank_tool_name(
+    tool_name: str,
+) -> None:
+    profile = MCPProfile(id="reader", name="Reader")
+
+    with pytest.raises(ValueError, match="tool_name cannot be blank"):
+        evaluate_profile_tool_decision(profile, tool_name)
+
+
+def test_evaluate_profile_tool_decision_ignores_unrelated_invalid_command_rules() -> None:
+    profile = MCPProfile(
+        id="reader",
+        name="Reader",
+        policy_document=ProfilePolicy.model_validate(
+            {
+                "allowed_tools": ["fs.read"],
+                "command_rules": [{"pattern": "git status", "outcome": "allow"}],
+            }
+        ),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.read")
+
+    assert decision.outcome == "allow"
+    assert decision.reason_code == "tool_allowed"
+
+
+def test_evaluate_profile_tool_decision_ignores_unrelated_invalid_mcp_rules() -> None:
+    profile = MCPProfile(
+        id="reader",
+        name="Reader",
+        policy_document=ProfilePolicy.model_validate(
+            {
+                "allowed_tools": ["fs.read"],
+                "mcp_rules": [{"outcome": "deny"}],
+            }
+        ),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.read")
+
+    assert decision.outcome == "allow"
+    assert decision.reason_code == "tool_allowed"
+
+
+def test_evaluate_profile_tool_decision_requires_exact_tool_rule_pattern() -> None:
+    profile = MCPProfile(
+        id="wildcard-like",
+        name="Wildcard Like",
+        policy_document=ProfilePolicy.model_validate(
+            {"tool_rules": [{"pattern": "fs.*", "outcome": "allow"}]}
+        ),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.read")
+
+    assert decision.outcome == "deny"
+    assert decision.reason_code == "tool_not_allowed"
+
+
 def test_evaluate_profile_tool_decision_allowed_capability_allows() -> None:
     profile = MCPProfile(
         id="capability-reader",
