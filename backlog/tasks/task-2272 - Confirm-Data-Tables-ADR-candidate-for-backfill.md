@@ -35,7 +35,17 @@ Started in isolated worktree .worktrees/confirm-data-tables-adr-candidate from o
 
 Confirmation result: INV-025 is current governing and ready for a bounded Data Tables backend ADR backfill. Added Docs/ADR/inventory/2026-06-07-data-tables-confirmation-audit.md, updated the inventory disposition, and created follow-up TASK-2273. Caveats recorded for numeric job IDs, wait-for-completion/direct-export paths, source ownership scope, bounded snapshots, and File Artifacts internals.
 
-Verification recorded before finalization: git diff --check passed; reference scan for TASK-2272/TASK-2273/INV-025/audit path found expected docs/task references and no developer-machine absolute paths in touched files; focused tests passed with source ../../.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/DataTables/test_data_tables_api.py tldw_Server_API/tests/DataTables/test_data_tables_export.py tldw_Server_API/tests/DataTables/test_data_tables_jobs_integration.py tldw_Server_API/tests/DataTables/test_data_tables_worker.py tldw_Server_API/tests/DB_Management/test_data_tables_crud.py tldw_Server_API/tests/DB_Management/test_media_db_data_table_child_ops.py tldw_Server_API/tests/DB_Management/test_media_db_data_table_generation_ops.py (77 passed).
+Verification recorded before finalization: git diff --check passed; reference scan for TASK-2272/TASK-2273/INV-025/audit path found expected docs/task references and no developer-machine absolute paths in touched files.
+
+Focused tests passed (77 passed) with:
+source ../../.venv/bin/activate && python -m pytest -q \\
+  tldw_Server_API/tests/DataTables/test_data_tables_api.py \\
+  tldw_Server_API/tests/DataTables/test_data_tables_export.py \\
+  tldw_Server_API/tests/DataTables/test_data_tables_jobs_integration.py \\
+  tldw_Server_API/tests/DataTables/test_data_tables_worker.py \\
+  tldw_Server_API/tests/DB_Management/test_data_tables_crud.py \\
+  tldw_Server_API/tests/DB_Management/test_media_db_data_table_child_ops.py \\
+  tldw_Server_API/tests/DB_Management/test_media_db_data_table_generation_ops.py
 
 Bandit applicability: skipped because touched files are Markdown docs and Backlog task records only; no Python/code paths changed.
 <!-- SECTION:NOTES:END -->
