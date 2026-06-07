@@ -861,7 +861,7 @@ git commit -m "feat: add MCP tool-use reporting CLI"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 - Modify: `backlog/tasks/task-2264 - Plan-MCP-tool-use-evaluation-reporting-implementation.md` only if this plan task is finalized in the same branch.
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document:
 
@@ -876,7 +876,7 @@ Document:
 - Privacy and retention guidance.
 - Relationship to operational metrics, traces, and future evaluator-labeled task outcomes.
 
-- [ ] **Step 2: Run focused verification**
+- [x] **Step 2: Run focused verification**
 
 Run:
 
@@ -894,7 +894,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched Python scopes**
+- [x] **Step 3: Run Bandit on touched Python scopes**
 
 Run:
 
@@ -911,13 +911,13 @@ python -m bandit -r \
 
 Expected: command exits 0, or any findings are existing/irrelevant and documented with evidence before merge.
 
-- [ ] **Step 4: Run diff whitespace check**
+- [x] **Step 4: Run diff whitespace check**
 
 Run: `git diff --check`
 
 Expected: no output.
 
-- [ ] **Step 5: Commit docs and final task updates**
+- [x] **Step 5: Commit docs and final task updates**
 
 ```bash
 git add mcp_unified/README.md mcp_unified/USER_GUIDE.md tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
@@ -936,15 +936,15 @@ git commit -m "docs: document MCP tool-use reporting"
 
 ## Final Verification Checklist
 
-- [ ] New event model tests pass.
-- [ ] Event model immutability test passes.
-- [ ] New store/report tests pass.
-- [ ] Report payload exposes `events_scanned`, `event_limit`, and `truncated`.
-- [ ] Protocol success, denial, invalid params, not found, early `process_request()` failure, recorder failure, and idempotency replay tests pass.
-- [ ] Protocol dependency compatibility test passes for a bundle without `tool_use_recorder`.
-- [ ] Gateway direct call, bridge call with `tool_id != tool_name`, policy denial, and double-counting guard tests pass.
-- [ ] CLI report/export/cleanup tests pass.
-- [ ] Package boundary test proves no eager SQLAlchemy import from lightweight reporting modules.
-- [ ] Bandit run is recorded for touched Python scopes.
-- [ ] Docs explain privacy boundaries and retention.
-- [ ] Backlog task for the implementation PR records touched files, verification, and known skips.
+- [x] New event model tests pass.
+- [x] Event model immutability test passes.
+- [x] New store/report tests pass.
+- [x] Report payload exposes `events_scanned`, `event_limit`, and `truncated`.
+- [x] Protocol success, denial, invalid params, not found, early `process_request()` failure, recorder failure, and idempotency replay tests pass.
+- [x] Protocol dependency compatibility test passes for a bundle without `tool_use_recorder`.
+- [x] Gateway direct call, bridge call with `tool_id != tool_name`, policy denial, and double-counting guard tests pass.
+- [x] CLI report/export/cleanup tests pass.
+- [x] Package boundary test proves no eager SQLAlchemy import from lightweight reporting modules.
+- [x] Bandit run is recorded for touched Python scopes.
+- [x] Docs explain privacy boundaries and retention.
+- [x] Backlog task for the implementation PR records touched files, verification, and known skips.
