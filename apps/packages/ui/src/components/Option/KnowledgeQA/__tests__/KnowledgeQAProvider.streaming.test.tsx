@@ -308,6 +308,76 @@ describe("KnowledgeQAProvider streaming search", () => {
     )
   })
 
+  it("falls back to non-stream rag search when stream completes without usable evidence", async () => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield {
+        type: "contexts",
+        contexts: [],
+        source_status: {
+          notes: { status: "empty", count: 0, reason: "no_matching_entries" },
+        },
+      }
+    })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "note-scoped",
+          content: "Scoped note answers must stay inside the selected source.",
+          metadata: {
+            title: "Knowledge QA UAT Scoped Note",
+            source_type: "notes",
+            source_id: "note-scoped",
+          },
+          score: 0.91,
+        },
+      ],
+      generated_answer:
+        "Scoped note answers must stay inside the selected source [1].",
+      metadata: {
+        source_status: {
+          notes: { status: "searched", count: 1 },
+        },
+      },
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-empty-stream-fallback")
+    })
+
+    act(() => {
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-scoped"])
+      latestContext!.setQuery("What does the selected note say?")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+    expect(ragSearchMock).toHaveBeenCalledTimes(1)
+    expect(latestContext!.results).toHaveLength(1)
+    expect(latestContext!.results[0].id).toBe("note-scoped")
+    expect(latestContext!.answer).toBe(
+      "Scoped note answers must stay inside the selected source [1]."
+    )
+    expect(latestContext!.isSearching).toBe(false)
+    expect(trackMetricMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "search_complete",
+        used_streaming: false,
+        has_answer: true,
+      })
+    )
+  })
+
   it("normalizes whitespace-only non-stream answers to null", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
       throw new Error("stream endpoint unavailable")

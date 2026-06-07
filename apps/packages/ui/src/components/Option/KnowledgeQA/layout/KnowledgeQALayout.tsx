@@ -351,9 +351,11 @@ export function KnowledgeQALayout({
 
   useEffect(() => {
     const resultsCount = results?.length ?? 0
+    const citationsCount = citations?.length ?? 0
+    const shouldOpenForEvidence = resultsCount >= 3 || citationsCount > 0
     if (
       hasResults &&
-      resultsCount >= 3 &&
+      shouldOpenForEvidence &&
       queryStage !== "searching" &&
       !settingsPanelOpen &&
       !evidenceRailOpen &&
@@ -369,6 +371,7 @@ export function KnowledgeQALayout({
     evidenceRailOpen,
     hasResults,
     queryStage,
+    citations?.length,
     results?.length,
     setEvidenceRailOpen,
     settingsPanelOpen,

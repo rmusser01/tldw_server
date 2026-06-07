@@ -66,6 +66,38 @@ def test_cited_answer_requires_citations_to_map_to_returned_sources():
     assert trust["reason_codes"] == ["citation_source_not_returned"]
 
 
+def test_chunk_citation_ids_map_to_returned_sources():
+    trust = classify_knowledge_answer_trust(
+        answer="Grounded answer [1].",
+        documents=[
+            {
+                "id": "late_chunk:1:0",
+                "content": "Inspectable evidence.",
+                "metadata": {
+                    "chunk_id": "late_chunk:1:0",
+                    "media_id": "1",
+                    "source_status": "searched",
+                },
+            }
+        ],
+        citations=[
+            {
+                "type": "academic",
+                "formatted": "(n.d.). *Grounded source*.",
+            },
+            {
+                "index": 1,
+                "chunk_id": "late_chunk:1:0",
+                "source_document_id": "1",
+            }
+        ],
+        web_fallback_used=False,
+    )
+
+    assert trust["state"] == "cited_answer"
+    assert trust["reason_codes"] == []
+
+
 def test_inline_citation_markers_map_by_returned_source_index():
     trust = classify_knowledge_answer_trust(
         answer="Grounded answer [1].",

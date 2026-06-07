@@ -526,6 +526,7 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
   it("does not auto-open the evidence rail when fewer than 3 results are returned", async () => {
     state.results = [{ id: "r1" }, { id: "r2" }]
     state.answer = "Short answer"
+    state.citations = []
     state.queryStage = "complete"
     state.evidenceRailOpen = false
 
@@ -545,6 +546,30 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
 
     expect(await screen.findByTestId("knowledge-evidence-rail-closed")).toBeInTheDocument()
     expect(state.setEvidenceRailOpen).not.toHaveBeenCalledWith(true)
+  })
+
+  it("auto-opens the evidence rail for a cited answer with fewer than 3 results", async () => {
+    state.results = [{ id: "r1" }, { id: "r2" }]
+    state.answer = "Cited answer [1]"
+    state.citations = [{ index: 1, documentId: "r1", excerpt: "Evidence one" }]
+    state.queryStage = "complete"
+    state.evidenceRailOpen = false
+
+    const { rerender } = renderLayout()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    rerender(<KnowledgeQALayout onExportClick={vi.fn()} />)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    rerender(<KnowledgeQALayout onExportClick={vi.fn()} />)
+
+    expect(state.setEvidenceRailOpen).toHaveBeenCalledWith(true)
   })
 
   it("auto-opens the evidence rail when exactly 3 results are returned", async () => {

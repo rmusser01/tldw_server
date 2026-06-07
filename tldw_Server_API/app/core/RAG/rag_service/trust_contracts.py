@@ -56,7 +56,18 @@ def _identifier_values(document: Any) -> set[str]:
 
 
 def _citation_document_id(citation: Any) -> str | None:
-    for key in ("document_id", "documentId", "doc_id", "source_id", "sourceId", "id"):
+    for key in (
+        "document_id",
+        "documentId",
+        "doc_id",
+        "source_id",
+        "sourceId",
+        "source_document_id",
+        "sourceDocumentId",
+        "chunk_id",
+        "chunkId",
+        "id",
+    ):
         value = _field(citation, key)
         if value not in (None, ""):
             return str(value)
@@ -84,6 +95,15 @@ def _inline_citations_from_answer(answer: str | None) -> list[dict[str, int]]:
         seen.add(index)
         citations.append({"index": index})
     return citations
+
+
+def _structural_citations(citations: list[Any]) -> list[Any]:
+    return [
+        citation
+        for citation in citations
+        if _citation_document_id(citation) is not None
+        or _citation_index(citation) is not None
+    ]
 
 
 def _document_for_citation(
@@ -193,7 +213,10 @@ def classify_knowledge_answer_trust(
     inspectable evidence. It does not make semantic claim-support judgments.
     """
     normalized_documents = list(documents or [])
-    normalized_citations = list(citations or []) or _inline_citations_from_answer(answer)
+    supplied_citations = list(citations or [])
+    normalized_citations = _structural_citations(
+        supplied_citations
+    ) or _inline_citations_from_answer(answer)
     evidence_origin = _evidence_origin(normalized_documents, web_fallback_used)
     has_answer = isinstance(answer, str) and bool(answer.strip())
 

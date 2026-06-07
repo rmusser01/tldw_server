@@ -164,6 +164,8 @@ def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
         return text
     if "-" in text and " " not in text:
         return f"\"{text}\""
+    if re.search(r"[?!:;,.()[\]{}]", text):
+        return _derive_bounded_media_term_query(text) or text
     return text
 
 
@@ -2140,13 +2142,14 @@ class NotesDBRetriever(BaseRetriever):
         **kwargs
     ) -> list[Document]:
         """Retrieve from notes database."""
+        allowed_note_ids = self._normalize_allowed_note_ids(kwargs.get("allowed_note_ids"))
+        if allowed_note_ids:
+            if self.chacha_db is not None:
+                return self._retrieve_allowed_notes_via_chacha(allowed_note_ids, notebook_id)
+            return self._retrieve_allowed_notes_via_sql(allowed_note_ids, notebook_id)
+
         if self.chacha_db is not None and not self.config.tags_filter:
             docs = self._retrieve_via_chacha(query, notebook_id)
-            # Optional restriction to specific note IDs
-            allowed_note_ids = kwargs.get("allowed_note_ids")
-            if allowed_note_ids and isinstance(allowed_note_ids, (list, tuple)):
-                allowed_set = {str(x) for x in allowed_note_ids}
-                docs = [d for d in docs if str(d.id).replace("note_", "") in allowed_set]
             return docs
 
         documents = []
@@ -2164,13 +2167,6 @@ class NotesDBRetriever(BaseRetriever):
         """
         params: list[Any] = [f"%{query}%", f"%{query}%"]
 
-        # Optional restriction to specific note IDs (e.g., from access control)
-        allowed_note_ids = kwargs.get("allowed_note_ids")
-        if allowed_note_ids and isinstance(allowed_note_ids, (list, tuple)):
-            placeholders = ",".join(["?"] * len(allowed_note_ids))
-            sql += f" AND n.id IN ({placeholders})"
-            params.extend(list(allowed_note_ids))
-
         # Order and limit
         sql += " ORDER BY n.last_modified DESC LIMIT ?"
         params.append(self.config.max_results)
@@ -2185,21 +2181,7 @@ class NotesDBRetriever(BaseRetriever):
             content_match = query.lower() in row["content"].lower()
             score = (1.0 if title_match else 0.0) + (0.5 if content_match else 0.0)
 
-            doc = Document(
-                id=f"note_{row['id']}",
-                content=f"# {row['title']}\n\n{row['content']}",
-                source=DataSource.NOTES,  # Add required source parameter
-                metadata={
-                    "title": row["title"],
-                    "notebook": None,
-                    "notebook_id": None,
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                    "source": "notes_db"
-                },
-                score=score
-            )
-            documents.append(doc)
+            documents.append(self._row_to_document(row, score=score))
 
         # Sort by score
         documents.sort(key=lambda x: x.score, reverse=True)
@@ -2207,6 +2189,84 @@ class NotesDBRetriever(BaseRetriever):
         logger.debug(f"Retrieved {len(documents)} documents from Notes_DB")
 
         return documents
+
+    @staticmethod
+    def _normalize_allowed_note_ids(value: Any) -> list[str]:
+        """Normalize an explicit note ID restriction into a stable string list."""
+        if not isinstance(value, (list, tuple)):
+            return []
+        normalized: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+
+    def _retrieve_allowed_notes_via_chacha(
+        self,
+        allowed_note_ids: list[str],
+        notebook_id: Optional[int],
+    ) -> list[Document]:
+        """Retrieve selected notes by ID without requiring a text-search match."""
+        documents: list[Document] = []
+        for note_id in allowed_note_ids[: int(self.config.max_results)]:
+            try:
+                row = self.chacha_db.get_note_by_id(note_id) if self.chacha_db else None
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                logger.debug(f"Selected note lookup failed for {note_id}: {exc}")
+                continue
+            if not row:
+                continue
+            if notebook_id and row.get("notebook_id") != notebook_id:
+                continue
+            documents.append(self._row_to_document(row, score=1.0))
+        return documents
+
+    def _retrieve_allowed_notes_via_sql(
+        self,
+        allowed_note_ids: list[str],
+        notebook_id: Optional[int],
+    ) -> list[Document]:
+        """Retrieve selected notes by ID through the raw SQL fallback."""
+        placeholders = ",".join(["?"] * len(allowed_note_ids))
+        sql = f"""
+            SELECT
+                n.id,
+                n.title,
+                n.content,
+                n.created_at,
+                n.last_modified AS updated_at
+            FROM notes n
+            WHERE n.deleted = 0 AND n.id IN ({placeholders})
+        """  # nosec B608 - placeholders are generated from the validated ID count.
+        params: list[Any] = list(allowed_note_ids)
+        if notebook_id is not None:
+            sql += " AND n.notebook_id = ?"
+            params.append(notebook_id)
+        sql += " ORDER BY n.last_modified DESC LIMIT ?"
+        params.append(self.config.max_results)
+        return [
+            self._row_to_document(row, score=1.0)
+            for row in self._execute_query(sql, tuple(params))
+        ]
+
+    def _row_to_document(self, row: dict[str, Any], *, score: float) -> Document:
+        """Convert a note row into the RAG document shape."""
+        updated_at = row.get("updated_at", row.get("last_modified"))
+        return Document(
+            id=f"note_{row['id']}",
+            content=f"# {row.get('title')}\n\n{row.get('content', '')}",
+            source=DataSource.NOTES,
+            metadata={
+                "title": row.get("title"),
+                "notebook": row.get("notebook_name"),
+                "notebook_id": row.get("notebook_id"),
+                "created_at": row.get("created_at"),
+                "updated_at": updated_at,
+                "source": "notes_db",
+            },
+            score=score,
+        )
 
     def _retrieve_via_chacha(self, query: str, notebook_id: Optional[int]) -> list[Document]:
         if self.chacha_db is None:
@@ -2256,14 +2316,9 @@ class NotesDBRetriever(BaseRetriever):
                     'source': 'notes_db',
                 }
             documents.append(
-                Document(
-                    id=f"note_{row.get('id')}",
-                    content=f"# {row.get('title')}\n\n{row.get('content', '')}",
-                    source=DataSource.NOTES,
-                    metadata=metadata,
-                    score=float(score_val),
-                )
+                self._row_to_document(row, score=float(score_val))
             )
+            documents[-1].metadata = metadata
         documents.sort(key=lambda x: getattr(x, 'score', 0.0), reverse=True)
         return documents
 
@@ -2765,6 +2820,8 @@ class PromptsDBRetriever(BaseRetriever):
 class ChatHistoryRetriever(BaseRetriever):
     """Retriever for chat conversation messages."""
 
+    _EXCLUDED_CONVERSATION_SOURCES = {"knowledge_qa"}
+
     def __init__(
         self,
         db_path: Optional[str],
@@ -2774,6 +2831,23 @@ class ChatHistoryRetriever(BaseRetriever):
     ) -> None:
         super().__init__(db_path, config, db_adapter=chacha_db)
         self.chacha_db = chacha_db
+
+    def _is_excluded_conversation_source(self, conversation_id: Any) -> bool:
+        """Return whether a conversation should be hidden from chat evidence."""
+        if not conversation_id:
+            return False
+        try:
+            rows = self._execute_query(
+                "SELECT source FROM conversations WHERE id = ? LIMIT 1",
+                (str(conversation_id),),
+            )
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+            logger.debug(f"Could not resolve conversation source for chat retrieval: {exc}")
+            return False
+        for row in rows:
+            source = str(row.get("source") or "").strip().lower()
+            return source in self._EXCLUDED_CONVERSATION_SOURCES
+        return False
 
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         documents: list[Document] = []
@@ -2787,15 +2861,18 @@ class ChatHistoryRetriever(BaseRetriever):
                 m.sender,
                 m.timestamp,
                 conv.character_id,
+                conv.source AS conversation_source,
                 cc.name AS character_name
             FROM messages m
             JOIN conversations conv ON m.conversation_id = conv.id
             LEFT JOIN character_cards cc ON conv.character_id = cc.id
-            WHERE m.deleted = 0 AND m.content LIKE ?
+            WHERE m.deleted = 0
+              AND m.content LIKE ?
+              AND COALESCE(conv.source, '') != ?
             ORDER BY m.timestamp DESC
             LIMIT ?
         """
-        rows = await self._execute_query_async(sql, (f"%{query}%", max_results))
+        rows = await self._execute_query_async(sql, (f"%{query}%", "knowledge_qa", max_results))
         for row in rows:
             documents.append(
                 Document(
@@ -2809,6 +2886,7 @@ class ChatHistoryRetriever(BaseRetriever):
                         "timestamp": row.get("timestamp"),
                         "character_id": row.get("character_id"),
                         "character_name": row.get("character_name"),
+                        "conversation_source": row.get("conversation_source"),
                         "type": "chat_message",
                         "source": "chats",
                     },
@@ -2827,6 +2905,8 @@ class ChatHistoryRetriever(BaseRetriever):
                 )
                 for row in msg_rows:
                     conv_id = row.get("conversation_id")
+                    if self._is_excluded_conversation_source(conv_id):
+                        continue
 
                     documents.append(
                         Document(

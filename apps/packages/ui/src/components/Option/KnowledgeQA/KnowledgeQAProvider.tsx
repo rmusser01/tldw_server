@@ -2400,15 +2400,25 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               }
             }
 
-            if (receivedStreamEvent) {
+            const normalizedStreamAnswer = normalizeAnswerText(streamAnswer)
+            const streamCompletedWithUsableResult =
+              streamResults.length > 0 &&
+              (!effectiveSettings.enable_generation ||
+                Boolean(normalizedStreamAnswer))
+
+            if (receivedStreamEvent && streamCompletedWithUsableResult) {
               results = streamResults
-              answer = normalizeAnswerText(streamAnswer)
+              answer = normalizedStreamAnswer
               usedStreaming = true
               resolvedSearchDetails = buildSearchDetailsFromStreaming(
                 streamResults,
                 streamWhyPayload,
                 streamSourceStatusPayload,
                 effectiveSettings
+              )
+            } else if (receivedStreamEvent) {
+              console.warn(
+                "Streaming search completed without usable evidence, falling back to standard search."
               )
             }
           } catch (streamError) {

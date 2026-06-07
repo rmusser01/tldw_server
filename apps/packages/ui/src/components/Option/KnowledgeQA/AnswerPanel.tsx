@@ -506,7 +506,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         )}
         title={`Jump to source ${citationNum}`}
       >
-        {citationNum}
+        [{citationNum}]
       </button>
     )
   }
