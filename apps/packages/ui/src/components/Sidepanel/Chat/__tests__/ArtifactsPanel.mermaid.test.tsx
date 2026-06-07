@@ -120,28 +120,30 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
     const scrollLatest = vi.fn()
     window.addEventListener("tldw:focus-artifacts-trigger", focusArtifactsTrigger)
     window.addEventListener("tldw:scroll-to-latest", scrollLatest)
-    useArtifactsStore.getState().openArtifact(diagramArtifact)
+    try {
+      useArtifactsStore.getState().openArtifact(diagramArtifact)
 
-    render(<ArtifactsPanel />)
+      render(<ArtifactsPanel />)
 
-    fireEvent.click(screen.getByTestId("artifacts-jump-source"))
+      fireEvent.click(screen.getByTestId("artifacts-jump-source"))
 
-    expect(origin.scrollIntoView).toHaveBeenCalledWith({
-      behavior: "smooth",
-      block: "center"
-    })
-    expect(useArtifactsStore.getState().isOpen).toBe(false)
-    expect(scrollLatest).not.toHaveBeenCalled()
+      expect(origin.scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "center"
+      })
+      expect(useArtifactsStore.getState().isOpen).toBe(false)
+      expect(scrollLatest).not.toHaveBeenCalled()
 
-    act(() => {
-      vi.runOnlyPendingTimers()
-    })
-    expect(focusArtifactsTrigger).toHaveBeenCalledTimes(1)
-
-    window.removeEventListener(
-      "tldw:focus-artifacts-trigger",
-      focusArtifactsTrigger
-    )
-    window.removeEventListener("tldw:scroll-to-latest", scrollLatest)
+      act(() => {
+        vi.runOnlyPendingTimers()
+      })
+      expect(focusArtifactsTrigger).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener(
+        "tldw:focus-artifacts-trigger",
+        focusArtifactsTrigger
+      )
+      window.removeEventListener("tldw:scroll-to-latest", scrollLatest)
+    }
   })
 })
