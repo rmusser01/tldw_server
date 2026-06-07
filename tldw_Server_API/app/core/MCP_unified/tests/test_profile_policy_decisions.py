@@ -6,6 +6,7 @@ import pytest
 
 from mcp_unified.profiles.decisions import (
     PolicyDecision,
+    PolicyDecisionRule,
     PolicyDecisionSubject,
     PolicyMatchedRule,
     compile_profile_policy_rules,
@@ -193,6 +194,15 @@ def test_compile_profile_policy_rules_includes_structured_extra_rules() -> None:
     ]
 
 
+def test_compile_profile_policy_rules_accepts_structured_command_tuple_argv() -> None:
+    rules = compile_profile_policy_rules({"command_rules": [{"argv": ("git", "status"), "outcome": "allow"}]})
+
+    command_rule = rules[0]
+    assert command_rule.rule_type == "command"
+    assert command_rule.argv == ("git", "status")
+    assert command_rule.outcome == "allow"
+
+
 def test_compile_profile_policy_rules_rejects_structured_command_string_argv() -> None:
     with pytest.raises(ValueError, match="command policy rule argv must be a sequence"):
         compile_profile_policy_rules({"command_rules": [{"argv": "git status", "outcome": "allow"}]})
@@ -217,3 +227,43 @@ def test_compile_profile_policy_rules_rejects_structured_wildcard_executables(
 ) -> None:
     with pytest.raises(ValueError, match="command executable must be fixed"):
         compile_profile_policy_rules({"command_rules": [{"argv": argv, "outcome": "allow"}]})
+
+
+def test_policy_decision_rule_rejects_command_wildcard_executable() -> None:
+    with pytest.raises(ValueError, match="command executable must be fixed"):
+        PolicyDecisionRule(
+            rule_type="command",
+            outcome="allow",
+            source="precompiled",
+            argv=("*", "--version"),
+        )
+
+
+@pytest.mark.parametrize("argv", [None, (), ("git", "")])
+def test_policy_decision_rule_rejects_invalid_command_argv(
+    argv: tuple[str, ...] | None,
+) -> None:
+    with pytest.raises(ValueError, match="command policy rule argv"):
+        PolicyDecisionRule(
+            rule_type="command",
+            outcome="allow",
+            source="precompiled",
+            argv=argv,
+        )
+
+
+def test_compile_profile_policy_rules_revalidates_precompiled_command_rules() -> None:
+    invalid_rule = PolicyDecisionRule.model_construct(
+        rule_type="command",
+        outcome="allow",
+        source="precompiled",
+        argv=("*", "--version"),
+    )
+
+    with pytest.raises(ValueError, match="command executable must be fixed"):
+        compile_profile_policy_rules({"command_rules": [invalid_rule]})
+
+
+def test_compile_profile_policy_rules_rejects_structured_bash_pattern_wildcard_executable() -> None:
+    with pytest.raises(ValueError, match="command executable must be fixed"):
+        compile_profile_policy_rules({"command_rules": [{"pattern": "Bash(* --version)", "outcome": "allow"}]})

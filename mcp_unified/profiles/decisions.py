@@ -73,6 +73,12 @@ class PolicyDecisionRule(BaseModel):
     argv: tuple[str, ...] | None = None
     reason_code: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_command_rule(self) -> "PolicyDecisionRule":
+        if self.rule_type == "command":
+            _validate_command_rule_argv(self.argv)
+        return self
+
 
 class PolicyDecision(BaseModel):
     """Final or intermediate permission decision for one policy subject."""
@@ -232,8 +238,18 @@ def _bash_pattern_argv(inner: str) -> tuple[str, ...]:
     argv = tuple(normalized.split())
     if not argv:
         raise ValueError("bash patterns must include a command")
-    _validate_fixed_command_executable(argv)
+    _validate_command_rule_argv(argv)
     return argv
+
+
+def _validate_command_rule_argv(argv: tuple[str, ...] | None) -> None:
+    """Validate command argv shape and fixed executable token."""
+
+    if argv is None:
+        raise ValueError("command policy rule argv is required")
+    if not argv or not all(isinstance(item, str) and item for item in argv):
+        raise ValueError("command policy rule argv must be non-empty strings")
+    _validate_fixed_command_executable(argv)
 
 
 def _validate_fixed_command_executable(argv: tuple[str, ...]) -> None:
@@ -287,7 +303,7 @@ def _compile_structured_rule(
     if isinstance(rule_document, PolicyDecisionRule):
         if rule_document.rule_type != rule_type:
             raise ValueError("structured rule type does not match source field")
-        return rule_document
+        return PolicyDecisionRule.model_validate(rule_document.model_dump())
 
     outcome = _structured_rule_outcome(rule_document)
     reason_code = _optional_string(_policy_value(rule_document, "reason_code"))
@@ -341,9 +357,7 @@ def _structured_command_argv(rule_document: Any) -> tuple[str, ...]:
         raise ValueError("command policy rule argv must be a sequence")
 
     argv = tuple(argv_value)
-    if not argv or not all(isinstance(item, str) and item for item in argv):
-        raise ValueError("command policy rule argv must be non-empty strings")
-    _validate_fixed_command_executable(argv)
+    _validate_command_rule_argv(argv)
     return argv
 
 
