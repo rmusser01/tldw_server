@@ -507,6 +507,7 @@ async def test_multi_root_path_grants_keep_deduped_paths_and_actions_aligned() -
             "selected_assignment_workspace_ids": ["ws-1", "ws-2"],
             "policy_document": {
                 "path_scope_mode": "workspace_root",
+                "path_allowlist_prefixes": ["legacy-only"],
                 "path_grants": [
                     {"prefix": "documents", "actions": ["read"]},
                     {"prefix": "downloads", "actions": ["write"]},
@@ -528,3 +529,63 @@ async def test_multi_root_path_grants_keep_deduped_paths_and_actions_aligned() -
     assert result["within_scope"] is True
     assert result["reason"] is None
     assert [decision["requested_action"] for decision in result["path_decisions"]] == ["read", "write"]
+    assert result["scope_payload"]["path_decisions"] == result["path_decisions"]
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result["path_decisions"])
+
+
+@pytest.mark.asyncio
+async def test_multi_root_path_grants_deny_override_blocks_matching_bundle_path() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    workspace_root = "/tmp/mcp-hub-path-enforcer/project"
+    scope = {
+        **_workspace_scope(),
+        "workspace_id": "ws-1",
+        "selected_workspace_trust_source": "sandbox_workspace_lookup",
+    }
+    multi_root = _FakeMultiRootPathService(workspace_root=workspace_root)
+    svc = McpHubPathEnforcementService(
+        path_scope_service=_FakePathScopeService(scope),
+        multi_root_path_service=multi_root,
+    )
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "selected_assignment_workspace_ids": ["ws-1", "ws-2"],
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_allowlist_prefixes": ["legacy-only"],
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read", "edit", "write"]},
+                    {"prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny"},
+                ],
+            },
+        },
+        context=SimpleNamespace(user_id="1", metadata={}),
+        tool_name="fs.patch",
+        tool_args={"diff": "not-inspected-here"},
+        tool_def=_filesystem_tool_def(action="edit"),
+        path_scope_candidates=[
+            PathScopeCandidate(path="documents/private/secret.md", action="edit", source="module"),
+        ],
+    )
+
+    assert result["within_scope"] is False
+    assert result["reason"] == "path_action_denied"
+    assert result["path_decisions"] == [
+        {
+            "requested_action": "edit",
+            "normalized_path": "documents/private/secret.md",
+            "grant_outcome": "denied",
+            "grant_source": "path_grants",
+            "matched_grant_prefix": "documents/private",
+            "matched_grant_effect": "deny",
+            "reason_code": "path_action_denied",
+            "redacted": True,
+        }
+    ]
+    assert result["scope_payload"]["path_decisions"] == result["path_decisions"]
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result)

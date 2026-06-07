@@ -426,6 +426,7 @@ class FilesystemModule(BaseModule):
                 args.get("read_receipt"),
                 bool(args.get("dry_run", False)),
                 self._setting_positive_int("write_max_bytes", 5_000_000),
+                self._setting_positive_int("write_preimage_max_bytes", 5_000_000),
                 context,
             )
 
@@ -1411,9 +1412,16 @@ class FilesystemModule(BaseModule):
                     target = plan["_target"]
                     if plan["_create_parent_directories"]:
                         target.parent.mkdir(parents=True, exist_ok=True)
+                    self._assert_preimage_unchanged(
+                        target,
+                        plan["result"].get("sha256_before"),
+                        int(plan["result"].get("bytes_before") or 0),
+                    )
                     self._atomic_write_text_file(target, str(plan["_text_after"]))
                     written.append(plan)
             except Exception as exc:
+                if not written:
+                    raise ValueError(str(exc)) from exc
                 for plan in reversed(written):
                     target = plan["_target"]
                     try:
@@ -1581,13 +1589,13 @@ class FilesystemModule(BaseModule):
             raise ValueError("patch_read_receipt_mismatch")
 
         context_workspace_id = self._context_metadata_value(context, "workspace_id")
-        if payload.workspace_id and context_workspace_id and payload.workspace_id != context_workspace_id:
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
             raise ValueError("patch_read_receipt_mismatch")
         context_session_id = _first_nonempty(
             getattr(context, "session_id", None),
             self._context_metadata_value(context, "session_id"),
         )
-        if payload.session_id and context_session_id and payload.session_id != context_session_id:
+        if payload.session_id and payload.session_id != context_session_id:
             raise ValueError("patch_read_receipt_mismatch")
 
     @staticmethod
@@ -1601,6 +1609,20 @@ class FilesystemModule(BaseModule):
                 elif line.kind == "remove":
                     deletions += 1
         return additions, deletions
+
+    @staticmethod
+    def _assert_preimage_unchanged(target: Path, expected_sha256: str | None, expected_size: int) -> None:
+        """Recheck the authorized file preimage immediately before committing writes."""
+
+        if expected_sha256 is None:
+            if expected_size == 0 and (target.exists() or target.is_symlink()):
+                raise ValueError("preimage_changed_during_commit")
+            return
+        if target.is_symlink() or not target.exists() or not target.is_file():
+            raise ValueError("preimage_changed_during_commit")
+        payload = target.read_bytes()
+        if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
+            raise ValueError("preimage_changed_during_commit")
 
     @staticmethod
     def _atomic_write_text_file(target: Path, text: str) -> None:
@@ -1632,6 +1654,7 @@ class FilesystemModule(BaseModule):
         read_receipt: Any,
         dry_run: bool,
         write_max_bytes: int,
+        preimage_max_bytes: int,
         context: Any | None,
     ) -> dict[str, Any]:
         if "\x00" in content:
@@ -1655,6 +1678,9 @@ class FilesystemModule(BaseModule):
                 raise FileNotFoundError(f"path not found: {target}")
             if not target.is_file():
                 raise ValueError("file_not_regular")
+            file_size = target.stat(follow_symlinks=False).st_size
+            if file_size > preimage_max_bytes:
+                raise ValueError("write_preimage_too_large")
             payload = target.read_bytes()
             if b"\x00" in payload:
                 raise ValueError("binary content is not supported by fs.write")
@@ -1676,6 +1702,7 @@ class FilesystemModule(BaseModule):
         sha256_after = hashlib.sha256(data_after).hexdigest()
         if not dry_run:
             target.parent.mkdir(parents=True, exist_ok=True)
+            self._assert_preimage_unchanged(target, sha256_before, bytes_before)
             self._atomic_write_text_file(target, content)
 
         result: dict[str, Any] = {
@@ -1738,13 +1765,13 @@ class FilesystemModule(BaseModule):
             raise ValueError("write_read_receipt_mismatch")
 
         context_workspace_id = self._context_metadata_value(context, "workspace_id")
-        if payload.workspace_id and context_workspace_id and payload.workspace_id != context_workspace_id:
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
             raise ValueError("write_read_receipt_mismatch")
         context_session_id = _first_nonempty(
             getattr(context, "session_id", None),
             self._context_metadata_value(context, "session_id"),
         )
-        if payload.session_id and context_session_id and payload.session_id != context_session_id:
+        if payload.session_id and payload.session_id != context_session_id:
             raise ValueError("write_read_receipt_mismatch")
 
     @staticmethod
@@ -1823,7 +1850,7 @@ class FilesystemModule(BaseModule):
         try:
             return payload.decode("utf-8")
         except UnicodeDecodeError as exc:
-            if allow_prefix and exc.reason == "unexpected end of data" and exc.start > 0:
+            if allow_prefix and exc.reason == "unexpected end of data":
                 return payload[: exc.start].decode("utf-8")
             raise ValueError("binary content is not supported by fs.read") from exc
 

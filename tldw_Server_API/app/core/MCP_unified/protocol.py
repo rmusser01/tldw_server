@@ -2707,13 +2707,25 @@ class MCPProtocol:
             # by raising a sentinel exception handled by process_request
             raise InvalidParamsException(str(ve)) from ve
 
-        path_scope_candidates = await self._extract_path_scope_candidates(
-            module=module,
-            tool_name=tool_name,
-            tool_args=tool_args,
-            context=context,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-        )
+        policy_document = (effective_policy or {}).get("policy_document")
+        path_scope_mode = ""
+        if isinstance(policy_document, dict):
+            path_scope_mode = str(policy_document.get("path_scope_mode") or "").strip()
+        elif isinstance(policy_document, BaseModel):
+            if hasattr(policy_document, "model_dump"):
+                policy_document_payload = policy_document.model_dump()
+            else:  # pragma: no cover - pydantic v1 compatibility
+                policy_document_payload = policy_document.dict()
+            path_scope_mode = str(policy_document_payload.get("path_scope_mode") or "").strip()
+        path_scope_candidates = None
+        if bool((effective_policy or {}).get("enabled")) and path_scope_mode not in {"", "none"}:
+            path_scope_candidates = await self._extract_path_scope_candidates(
+                module=module,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                context=context,
+                tool_def=tool_def if isinstance(tool_def, dict) else None,
+            )
         path_scope_result = await self._evaluate_path_scope(
             effective_policy=effective_policy,
             tool_name=tool_name,

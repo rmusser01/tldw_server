@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from mcp_unified.interfaces.path_scope import PathScopeCandidate
+from mcp_unified.interfaces.path_scope import PathScopeCandidate, normalize_path_scope_candidate
 from tldw_Server_API.app.core.MCP_unified.modules.base import (
     BaseModule,
     ModuleConfig,
@@ -148,7 +148,13 @@ class _PatchModule(BaseModule):
         return {"ok": True}
 
 
-def _build_protocol(module: BaseModule, path_scope_enforcer: Any) -> MCPProtocol:
+def _build_protocol(
+    module: BaseModule,
+    path_scope_enforcer: Any,
+    *,
+    effective_policy_enabled: bool = True,
+    path_scope_mode: str = "workspace_root",
+) -> MCPProtocol:
     protocol = MCPProtocol()
     protocol.module_registry = _RegistryStub(module)  # type: ignore[assignment]
     protocol.rbac_policy = _AllowAllRbac()
@@ -156,11 +162,11 @@ def _build_protocol(module: BaseModule, path_scope_enforcer: Any) -> MCPProtocol
 
     async def _effective_policy(_context: RequestContext) -> dict[str, Any]:
         return {
-            "enabled": True,
+            "enabled": effective_policy_enabled,
             "allowed_tools": ["fs.patch"],
             "denied_tools": [],
             "capabilities": [],
-            "policy_document": {"path_scope_mode": "workspace_root"},
+            "policy_document": {"path_scope_mode": path_scope_mode},
             "sources": [],
         }
 
@@ -218,9 +224,7 @@ async def test_protocol_fails_closed_when_module_candidates_unavailable() -> Non
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_protocol_fails_closed_when_enforcer_cannot_accept_required_candidates() -> None:
-    module = _PatchModule(
-        candidates=[PathScopeCandidate(path="src/app.py", action="edit", source="module")]
-    )
+    module = _PatchModule(candidates=[PathScopeCandidate(path="src/app.py", action="edit", source="module")])
     protocol = _build_protocol(module, _OldShapePathEnforcer())
 
     with pytest.raises(PermissionError, match="path_scope_candidates_unsupported"):
@@ -250,3 +254,60 @@ async def test_protocol_uses_real_filesystem_patch_candidates() -> None:
             requires_existing_file=True,
         )
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("effective_policy_enabled", "path_scope_mode"),
+    [
+        (False, "workspace_root"),
+        (True, "none"),
+    ],
+)
+async def test_protocol_skips_candidate_extraction_when_path_scope_inactive(
+    effective_policy_enabled: bool,
+    path_scope_mode: str,
+) -> None:
+    module = _PatchModule(include_candidate_hook=False)
+    protocol = _build_protocol(
+        module,
+        _RecordingPathEnforcer(),
+        effective_policy_enabled=effective_policy_enabled,
+        path_scope_mode=path_scope_mode,
+    )
+
+    prepared = await protocol.prepare_tool_call(
+        params={"name": "fs.patch", "arguments": {"diff": _PATCH_TEXT}},
+        context=_context(),
+    )
+
+    assert prepared.tool_name == "fs.patch"
+
+
+@pytest.mark.unit
+def test_path_scope_candidate_string_false_flags_remain_false() -> None:
+    candidate = normalize_path_scope_candidate(
+        {
+            "path": "src/app.py",
+            "action": "edit",
+            "source": "test",
+            "requires_existing_file": "false",
+            "creates_file": "0",
+        }
+    )
+
+    assert candidate.requires_existing_file is False
+    assert candidate.creates_file is False
+
+
+@pytest.mark.unit
+def test_path_scope_candidate_rejects_non_boolean_flags() -> None:
+    with pytest.raises(ValueError, match="requires_existing_file must be a boolean"):
+        normalize_path_scope_candidate(
+            {
+                "path": "src/app.py",
+                "action": "edit",
+                "requires_existing_file": "sometimes",
+            }
+        )

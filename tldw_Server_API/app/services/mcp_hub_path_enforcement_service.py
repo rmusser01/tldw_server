@@ -258,7 +258,8 @@ def _path_grant_decision(
     path_grants: list[dict[str, Any]],
 ) -> dict[str, Any]:
     matches = [
-        grant for grant in path_grants
+        grant
+        for grant in path_grants
         if action in set(grant.get("actions") or [])
         and _grant_prefix_matches(relative_path, str(grant.get("prefix") or ""))
     ]
@@ -341,9 +342,7 @@ class McpHubPathEnforcementService:
                 )
             return self._blocked_result(scope=scope, reason=reason)
 
-        allowed_workspace_ids = _unique(
-            _as_str_list((effective_policy or {}).get("selected_assignment_workspace_ids"))
-        )
+        allowed_workspace_ids = _unique(_as_str_list((effective_policy or {}).get("selected_assignment_workspace_ids")))
         active_workspace_id = str(scope.get("workspace_id") or "").strip()
         if allowed_workspace_ids and active_workspace_id not in allowed_workspace_ids:
             return self._blocked_result(
@@ -381,13 +380,14 @@ class McpHubPathEnforcementService:
         path_allowlist_prefixes = _policy_allowlist_prefixes(effective_policy)
         path_grants = _policy_path_grants(effective_policy)
         is_multi_root_candidate = (
-            str(scope.get("path_scope_mode") or "").strip() == "workspace_root"
-            and len(allowed_workspace_ids) > 1
+            str(scope.get("path_scope_mode") or "").strip() == "workspace_root" and len(allowed_workspace_ids) > 1
         )
 
         if is_multi_root_candidate:
             if self._multi_root_path_service is None:
-                raise RuntimeError("McpHubPathEnforcementService requires an explicit multi_root_path_service for multi-root evaluation")
+                raise RuntimeError(
+                    "McpHubPathEnforcementService requires an explicit multi_root_path_service for multi-root evaluation"
+                )
             bundle_raw_paths, bundle_candidate_actions = _unique_paths_with_actions(
                 raw_paths,
                 candidate_actions,
@@ -419,9 +419,7 @@ class McpHubPathEnforcementService:
 
             normalized_paths = list(multi_root_result.get("normalized_paths") or [])
             path_workspace_map = dict(multi_root_result.get("path_workspace_map") or {})
-            resolved_workspace_roots_by_id = dict(
-                multi_root_result.get("resolved_workspace_roots_by_id") or {}
-            )
+            resolved_workspace_roots_by_id = dict(multi_root_result.get("resolved_workspace_roots_by_id") or {})
             for path_index, normalized_text in enumerate(normalized_paths):
                 matched_workspace_id = str(path_workspace_map.get(normalized_text) or "").strip()
                 matched_root_text = str(resolved_workspace_roots_by_id.get(matched_workspace_id) or "").strip()
@@ -454,7 +452,11 @@ class McpHubPathEnforcementService:
                         workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),
                         path_workspace_map=path_workspace_map,
                     )
-                if allowlist_roots and not any(_is_within(root, normalized) for root in allowlist_roots):
+                if (
+                    path_grants is None
+                    and allowlist_roots
+                    and not any(_is_within(root, normalized) for root in allowlist_roots)
+                ):
                     return self._blocked_result(
                         scope=scope,
                         reason="path_outside_allowlist_scope",
@@ -495,13 +497,15 @@ class McpHubPathEnforcementService:
                             path_decisions=[decision],
                         )
             result["normalized_paths"] = normalized_paths
+            path_decisions: list[dict[str, Any]] = []
             if path_grants is not None:
-                path_decisions = []
                 for path_index, normalized_text in enumerate(normalized_paths):
                     matched_workspace_id = str(path_workspace_map.get(normalized_text) or "").strip()
                     matched_root_text = str(resolved_workspace_roots_by_id.get(matched_workspace_id) or "").strip()
                     matched_root = Path(matched_root_text).expanduser().resolve(strict=False)
-                    relative_path = _relative_path_for_decision(matched_root, Path(normalized_text).expanduser().resolve(strict=False))
+                    relative_path = _relative_path_for_decision(
+                        matched_root, Path(normalized_text).expanduser().resolve(strict=False)
+                    )
                     if relative_path is None:
                         continue
                     action = (
@@ -521,6 +525,7 @@ class McpHubPathEnforcementService:
                 scope=scope,
                 normalized_paths=normalized_paths,
                 path_allowlist_prefixes=path_allowlist_prefixes,
+                path_decisions=path_decisions,
                 allowed_workspace_ids=allowed_workspace_ids,
                 workspace_bundle_ids=list(multi_root_result.get("workspace_bundle_ids") or []),
                 workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),

@@ -59,8 +59,6 @@ Validation:
 Known skips/blockers: final subagent review could not run because the subagent tool hit a usage limit; the remaining review was completed locally with focused tests and diff inspection.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

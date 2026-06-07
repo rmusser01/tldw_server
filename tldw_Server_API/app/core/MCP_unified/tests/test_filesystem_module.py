@@ -487,6 +487,22 @@ async def test_filesystem_read_truncates_and_omits_receipt(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_filesystem_read_truncated_first_utf8_codepoint_returns_prefix(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "accent.txt").write_text("éclair\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-read-utf8-prefix", user_id="1", metadata={})
+
+    result = await mod.execute_tool("fs.read", {"path": "accent.txt", "max_bytes": 1}, context=context)
+
+    assert result["content"] == ""  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert result["truncation_reason"] == "max_bytes"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_read_omits_total_line_count_when_large_file_is_byte_truncated(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -783,6 +799,50 @@ async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_filesystem_patch_rechecks_preimage_immediately_before_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    original = "alpha\nbeta\ngamma\n"
+    target = docs_dir / "story.txt"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-patch-race", user_id="1", metadata={})
+    original_assert = FilesystemModule._assert_preimage_unchanged
+
+    def _mutate_before_final_preimage_check(
+        check_target: Path,
+        expected_sha256: str | None,
+        expected_size: int,
+    ) -> None:
+        if check_target == target:
+            target.write_text("concurrent\n", encoding="utf-8")
+        original_assert(check_target, expected_sha256, expected_size)
+
+    monkeypatch.setattr(
+        FilesystemModule,
+        "_assert_preimage_unchanged",
+        staticmethod(_mutate_before_final_preimage_check),
+    )
+
+    with pytest.raises(ValueError, match="preimage_changed_during_commit"):
+        await mod.execute_tool(
+            "fs.patch",
+            {
+                "diff": _PATCH_MODIFY_STORY,
+                "expected_sha256_by_path": {"docs/story.txt": hashlib.sha256(original.encode("utf-8")).hexdigest()},
+            },
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "concurrent\n"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_patch_applies_existing_file_with_read_receipt(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"
@@ -805,6 +865,37 @@ async def test_filesystem_patch_applies_existing_file_with_read_receipt(tmp_path
 
     assert target.read_text(encoding="utf-8") == "alpha\nBETTA\ngamma\n"  # nosec B101
     assert result["files"][0]["sha256_before"] == read_result["sha256"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_patch_rejects_bound_read_receipt_without_matching_context(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    target = docs_dir / "story.txt"
+    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    bound_context = RequestContext(
+        request_id="req-fs-patch-receipt-bound",
+        user_id="1",
+        session_id="session-1",
+        metadata={"workspace_id": "ws-1"},
+    )
+    unbound_context = RequestContext(request_id="req-fs-patch-receipt-unbound", user_id="1", metadata={})
+    read_result = await mod.execute_tool("fs.read", {"path": "docs/story.txt"}, context=bound_context)
+
+    with pytest.raises(ValueError, match="patch_read_receipt_mismatch"):
+        await mod.execute_tool(
+            "fs.patch",
+            {"diff": _PATCH_MODIFY_STORY, "read_receipt_by_path": {"docs/story.txt": read_result["read_receipt"]}},
+            context=unbound_context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\ngamma\n"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -907,6 +998,33 @@ async def test_filesystem_write_replace_requires_preimage(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_filesystem_write_replace_rejects_large_preimage_before_reading(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("large\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={"write_preimage_max_bytes": 3},
+        ),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-write-large-preimage", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+
+    with pytest.raises(ValueError, match="write_preimage_too_large"):
+        await mod.execute_tool(
+            "fs.write",
+            {"path": "story.txt", "content": "new\n", "mode": "replace", "expected_sha256": expected_sha},
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "large\n"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -928,6 +1046,46 @@ async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> No
     assert result["created"] is False  # nosec B101
     assert result["sha256_before"] == expected_sha  # nosec B101
     assert result["sha256_after"] == hashlib.sha256("new\n".encode("utf-8")).hexdigest()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_rechecks_preimage_immediately_before_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-race", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    original_assert = FilesystemModule._assert_preimage_unchanged
+
+    def _mutate_before_final_preimage_check(
+        check_target: Path,
+        expected_sha256: str | None,
+        expected_size: int,
+    ) -> None:
+        if check_target == target:
+            target.write_text("concurrent\n", encoding="utf-8")
+        original_assert(check_target, expected_sha256, expected_size)
+
+    monkeypatch.setattr(
+        FilesystemModule,
+        "_assert_preimage_unchanged",
+        staticmethod(_mutate_before_final_preimage_check),
+    )
+
+    with pytest.raises(ValueError, match="preimage_changed_during_commit"):
+        await mod.execute_tool(
+            "fs.write",
+            {"path": "story.txt", "content": "new\n", "mode": "replace", "expected_sha256": expected_sha},
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "concurrent\n"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -983,6 +1141,41 @@ async def test_filesystem_write_replace_with_read_receipt(tmp_path: Path) -> Non
 
     assert target.read_text(encoding="utf-8") == "new\n"  # nosec B101
     assert result["sha256_before"] == read_result["sha256"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_rejects_bound_read_receipt_without_matching_context(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    bound_context = RequestContext(
+        request_id="req-fs-write-receipt-bound",
+        user_id="1",
+        session_id="session-1",
+        metadata={"workspace_id": "ws-1"},
+    )
+    unbound_context = RequestContext(request_id="req-fs-write-receipt-unbound", user_id="1", metadata={})
+    read_result = await mod.execute_tool("fs.read", {"path": "story.txt"}, context=bound_context)
+
+    with pytest.raises(ValueError, match="write_read_receipt_mismatch"):
+        await mod.execute_tool(
+            "fs.write",
+            {
+                "path": "story.txt",
+                "content": "new\n",
+                "mode": "replace",
+                "read_receipt": read_result["read_receipt"],
+            },
+            context=unbound_context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
 
 
 @pytest.mark.asyncio

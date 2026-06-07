@@ -47,8 +47,6 @@ Verification: git diff --check passed for the planning changes. Bandit was not r
 Known skips/blockers: plan-document-reviewer subagent was not dispatched because the available multi-agent tool requires explicit user delegation; local review was used instead.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

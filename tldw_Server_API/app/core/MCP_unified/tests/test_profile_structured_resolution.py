@@ -548,3 +548,29 @@ def test_effective_policy_requires_approval_for_structured_tool_ask_rule() -> No
     assert result.policy is None
     assert result.decision is not None
     assert result.decision.outcome == "ask"
+
+
+def test_effective_policy_denied_capability_overrides_structured_tool_ask_rule() -> None:
+    profile = MCPProfile(
+        id="approval-with-deny",
+        name="Approval With Deny",
+        policy_document=ProfilePolicy.model_validate(
+            {
+                "capabilities": ["filesystem.patch"],
+                "denied_capabilities": ["filesystem.patch"],
+                "tool_rules": [{"pattern": "filesystem.patch", "outcome": "ask"}],
+            }
+        ),
+    )
+
+    result = profile_resolution.build_effective_policy_result(
+        profile,
+        tool_name="filesystem.patch",
+        capability="filesystem.patch",
+    )
+
+    assert result.status == "denied"
+    assert result.reason_code == "capability_denied"
+    assert result.policy is None
+    assert result.decision is not None
+    assert result.decision.outcome == "ask"

@@ -33,6 +33,22 @@ def _clean_optional_string(value: Any) -> str | None:
     return text or None
 
 
+def _coerce_bool_flag(value: Any, *, field_name: str) -> bool:
+    """Coerce candidate boolean flags without treating non-empty strings as true."""
+
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no", ""}:
+            return False
+    raise ValueError(f"path scope candidate {field_name} must be a boolean")
+
+
 def normalize_path_scope_candidate(raw: PathScopeCandidate | Mapping[str, Any]) -> PathScopeCandidate:
     """Normalize a raw candidate object from a module into the shared contract."""
 
@@ -55,8 +71,11 @@ def normalize_path_scope_candidate(raw: PathScopeCandidate | Mapping[str, Any]) 
         action=action,  # type: ignore[arg-type]
         source=source,
         display_path=_clean_optional_string(raw.get("display_path")),
-        requires_existing_file=bool(raw.get("requires_existing_file", False)),
-        creates_file=bool(raw.get("creates_file", False)),
+        requires_existing_file=_coerce_bool_flag(
+            raw.get("requires_existing_file"),
+            field_name="requires_existing_file",
+        ),
+        creates_file=_coerce_bool_flag(raw.get("creates_file"), field_name="creates_file"),
         workspace_id=_clean_optional_string(raw.get("workspace_id")),
     )
 

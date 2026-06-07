@@ -113,6 +113,7 @@ def build_effective_policy_result(
     denied_capabilities = list(policy_document.denied_capabilities or [])
 
     decision: PolicyDecision | None = None
+    approval_required = False
     if tool_name is not None:
         decision = evaluate_profile_tool_decision(
             profile,
@@ -131,12 +132,7 @@ def build_effective_policy_result(
                 provenance={**provenance, "tool_name": tool_name},
             )
         if decision.outcome == "ask":
-            return EffectivePolicyResult(
-                status="approval_required",
-                reason_code=decision.reason_code,
-                decision=decision,
-                provenance={**provenance, "tool_name": tool_name},
-            )
+            approval_required = True
 
     if capability is not None:
         if capability in denied_capabilities:
@@ -153,6 +149,16 @@ def build_effective_policy_result(
                 decision=decision,
                 provenance={**provenance, "capability": capability},
             )
+
+    if approval_required:
+        if decision is None:
+            raise RuntimeError("approval_required set without a policy decision")
+        return EffectivePolicyResult(
+            status="approval_required",
+            reason_code=decision.reason_code,
+            decision=decision,
+            provenance={**provenance, "tool_name": tool_name},
+        )
 
     return EffectivePolicyResult(
         status="resolved",
