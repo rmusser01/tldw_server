@@ -417,6 +417,7 @@ jobs:
 
       - name: Upload test results (Linux 3.11 smoke)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: full-suite-ubuntu-py3.11-${{ matrix.shard.name }}
@@ -1436,6 +1437,7 @@ jobs:
 
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: full-suite-ubuntu-py3.12-${{ matrix.shard.name }}
@@ -2414,6 +2416,7 @@ jobs:
 
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: full-suite-ubuntu-py3.13-${{ matrix.shard.name }}
@@ -3320,6 +3323,7 @@ jobs:
 
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: full-suite-macos-latest-py3.12-${{ matrix.shard.name }}
@@ -4225,6 +4229,7 @@ jobs:
 
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: full-suite-windows-latest-py3.12-${{ matrix.shard.name }}
@@ -5132,6 +5137,7 @@ jobs:
 
       - name: Upload test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: full-suite-${{ matrix.os }}-py3.13-${{ matrix.shard.name }}

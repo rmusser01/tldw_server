@@ -228,6 +228,22 @@ def test_embedding_model_cache_restore_is_non_blocking() -> None:
         assert "github.event_name != 'workflow_dispatch'" in str(step.get("if"))
 
 
+def test_full_suite_test_result_uploads_are_non_blocking() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    upload_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if str(step.get("name", "")).startswith("Upload test results")
+    ]
+
+    assert len(upload_steps) == 6
+    for step in upload_steps:
+        assert step.get("if") == "always()"
+        assert step.get("continue-on-error") is True
+        assert step.get("uses") == "actions/upload-artifact@v7"
+
+
 def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
     workflow = _load(".github/workflows/ci.yml")
     job = workflow["jobs"]["full-suite-linux-311-smoke"]
