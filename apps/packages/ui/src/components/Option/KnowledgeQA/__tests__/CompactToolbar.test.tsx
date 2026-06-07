@@ -28,6 +28,8 @@ type CompactToolbarTestProps = React.ComponentProps<typeof CompactToolbar>
 
 const defaultProps: CompactToolbarTestProps = {
   sources: [] as RagSource[],
+  includeMediaIds: [] as number[],
+  includeNoteIds: [] as string[],
   preset: "balanced" as const,
   webEnabled: false,
   onToggleWeb: vi.fn(),
@@ -146,6 +148,30 @@ describe("CompactToolbar", () => {
       ] as RagSource[],
     })
     expect(screen.getByText(/Sources:.*All sources/)).toBeDefined()
+  })
+
+  it("shows exact source counts in compact mode", () => {
+    renderToolbar({
+      sources: ["media_db", "notes"],
+      includeMediaIds: [7, 42],
+      includeNoteIds: ["note-a"],
+    })
+
+    expect(screen.getByText(/Specific:.*2 docs.*1 note/)).toBeDefined()
+  })
+
+  it("labels the compact source control as scope and profile access", () => {
+    renderToolbar({
+      sources: ["media_db", "notes"],
+      includeMediaIds: [7],
+      includeNoteIds: ["note-a"],
+    })
+
+    expect(
+      screen.getByRole("button", {
+        name: /Open source scope and saved profiles/i,
+      })
+    ).toHaveAttribute("title", "Open source scope and saved profiles")
   })
 
   it('renders preset label "Balanced" for preset "balanced"', () => {

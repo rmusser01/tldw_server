@@ -54,6 +54,7 @@ const connectivity = {
   online: true,
   isChecking: false,
   lastCheckedAt: Date.now(),
+  knowledgeStatus: "ready" as "unknown" | "ready" | "indexing" | "offline" | "empty",
   checkOnce: vi.fn(),
 }
 const capabilitiesState = {
@@ -98,6 +99,9 @@ vi.mock("@/hooks/useConnectionState", () => ({
     uxState: "connected_ok" as const,
     hasCompletedFirstRun: true,
   }),
+  useKnowledgeStatus: () => ({
+    knowledgeStatus: connectivity.knowledgeStatus,
+  }),
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
@@ -131,6 +135,12 @@ vi.mock("../SearchBar", () => ({
 vi.mock("../context/CompactToolbar", () => ({
   CompactToolbar: ({ className }: { className?: string }) => (
     <div data-testid="knowledge-compact-toolbar" data-class-name={className ?? ""} />
+  ),
+}))
+
+vi.mock("../context/KnowledgeContextBar", () => ({
+  KnowledgeContextBar: () => (
+    <div data-testid="knowledge-context-bar">Source Scope</div>
   ),
 }))
 
@@ -229,6 +239,7 @@ describe("KnowledgeQA golden layout guardrails", () => {
     connectivity.online = true
     connectivity.isChecking = false
     connectivity.lastCheckedAt = Date.now()
+    connectivity.knowledgeStatus = "ready"
     capabilitiesState.loading = false
     capabilitiesState.capabilities = { hasRag: true }
     setSimpleMode()
@@ -277,9 +288,10 @@ describe("KnowledgeQA golden layout guardrails", () => {
     renderKnowledgeQa()
 
     expect(screen.getByText("How it works")).toBeInTheDocument()
+    expect(screen.getByText("Web-only search")).toBeInTheDocument()
     expect(
       screen.getByText(
-        /No document sources are selected\. Web fallback uses your configured server default provider\./i
+        /No source categories are selected\. Because web fallback is enabled/i
       )
     ).toBeInTheDocument()
     expect(screen.getByText("How do I add my first source?")).toBeInTheDocument()
@@ -296,12 +308,13 @@ describe("KnowledgeQA golden layout guardrails", () => {
     expect(screen.queryByText("How do I add my first source?")).not.toBeInTheDocument()
   })
 
-  it("opens settings panel from ready-state source action in simple mode", () => {
+  it("opens source scope controls from ready-state source action in simple mode", () => {
     renderKnowledgeQa()
 
     fireEvent.click(screen.getByRole("button", { name: "No sources selected" }))
 
-    expect(state.setSettingsPanelOpen).toHaveBeenCalledWith(true)
+    expect(screen.getByRole("dialog", { name: "Source scope and profiles" })).toBeInTheDocument()
+    expect(screen.getByText("Source Scope")).toBeInTheDocument()
   })
 
   it("restores the newest restorable knowledge session from ready-state", () => {
