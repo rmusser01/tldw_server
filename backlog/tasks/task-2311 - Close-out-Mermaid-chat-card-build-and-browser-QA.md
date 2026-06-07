@@ -3,8 +3,8 @@ id: TASK-2311
 title: Close out Mermaid chat card build and browser QA
 status: Done
 references:
-- Docs/superpowers/specs/2026-06-04-chat-mermaid-diagrams-design.md
-- Docs/superpowers/plans/2026-06-04-chat-mermaid-diagrams-implementation-plan.md
+- docs/superpowers/specs/2026-06-04-chat-mermaid-diagrams-design.md
+- docs/superpowers/plans/2026-06-04-chat-mermaid-diagrams-implementation-plan.md
 - https://github.com/rmusser01/tldw_server/pull/2298
 modified_files:
 - apps/packages/ui/src/components/Common/Mermaid.tsx
