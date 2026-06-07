@@ -1,7 +1,7 @@
 ---
 id: TASK-2277
 title: Design MCP fs.read, fs.patch, and safe write tools
-status: In Progress
+status: Done
 labels:
 - mcp
 - filesystem
@@ -28,18 +28,19 @@ Create the design/spec for the next MCP slice after tool-use reporting: native f
 - [x] #5 Spec covers observability/evaluation redaction so raw diffs and file contents are not persisted.
 - [x] #6 Spec includes rollout and testing strategy for parser, filesystem module, path-scope, protocol, and profile coverage.
 - [x] #7 Spec defines fs.read as the paired canonical bounded text-read primitive with hash/truncation metadata and read-action path grants.
+- [x] #8 Spec incorporates final design review findings and Claude Code read/edit/write reference behavior.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Design review pass incorporated fs.read as the canonical read-side primitive, fs.write as the paired whole-file write primitive, explicit action semantics, segment-aware path grant matching, cross-platform diff path rejection, fail-closed derived path enforcement for fs.patch, preset migration guidance, and filesystem-wide eval redaction.
+Design review pass incorporated fs.read as the canonical read-side primitive, fs.write as the paired whole-file write primitive, explicit action semantics, segment-aware path grant matching, cross-platform diff path rejection, fail-closed derived path enforcement for fs.patch, preset migration guidance, filesystem-wide eval redaction, read receipts, concrete PathScopeCandidate requirements, canonical path_grants storage, legacy fs.write_text approval guidance, directory cleanup rules, and Claude Code read-before-edit/write reference behavior.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created and revised the MCP fs.read/fs.patch/fs.write safe file tools design spec at Docs/superpowers/specs/2026-06-07-mcp-fs-patch-write-safe-edit-tools-design.md. The design covers bounded text reads with hashes, unified-diff parsing, fs.write create/replace semantics, action-aware path grants, derived path preflight, cross-platform path constraints, observability redaction, rollout slices, and focused tests. Validation: git diff --cached --check passed; placeholder scan found no outstanding marker text. Bandit was skipped because this task changed only documentation and Backlog task metadata.
+Created and revised the MCP fs.read/fs.patch/fs.write safe file tools design spec at Docs/superpowers/specs/2026-06-07-mcp-fs-patch-write-safe-edit-tools-design.md. The design covers bounded text reads with hashes/read receipts, unified-diff parsing, read-before-mutate semantics, fs.write create/replace semantics, action-aware path grants, concrete derived path preflight, cross-platform path constraints, result redaction allowlists, rollout slices, focused tests, and Claude Code reference behavior. Validation: git diff --cached --check passed; placeholder scan found no outstanding marker text. Bandit was skipped because this task changed only documentation and Backlog task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

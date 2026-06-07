@@ -32,6 +32,12 @@ existing callers, but new role profiles, docs, and model guidance should prefer
 replaces a whole file and therefore requires the explicit `write` path action,
 including for replacements.
 
+Claude Code's file tools are the behavioral north star for this surface. The
+MCP design should copy the useful safety properties: read-before-mutate for
+existing files, exact/no-fuzzy edit semantics, full-file writes only through a
+dedicated write tool, and consistent permission/path matching for read and
+write-like operations.
+
 This slice also makes path constraints action-aware. A profile can read a path
 without being allowed to edit it, edit one folder without writing another, or
 write multiple workspace roots only when explicitly granted.
@@ -41,6 +47,8 @@ write multiple workspace roots only when explicitly granted.
 - Prefer unified-diff editing over raw text replacement whenever possible.
 - Provide a canonical read primitive that pairs with hash-guarded patch/write
   flows.
+- Enforce read-before-mutate semantics for existing files through read receipts
+  or expected hashes.
 - Keep all file mutation workspace-bounded and profile/path-scope governed.
 - Support granular path grants such as:
   - Profile A can read/edit/write `documents/` but cannot access `downloads/`.
@@ -110,7 +118,9 @@ Rejected alternatives:
 
 - Raw exact-text edit primitive first: easier to implement, but it encourages
   brittle unstructured edits and does not match the user's preferred diff-first
-  direction.
+  direction. A Claude Code-compatible exact string `fs.edit` can be a later
+  compatibility slice if model behavior shows diffs are too expensive for small
+  edits.
 - Host `patch` or `git apply`: familiar, but violates the no-shell/no-process
   filesystem model and is harder to make portable, bounded, and policy-aware.
 - Only improving `fs.write_text`: insufficient because full-file writes are too
@@ -120,7 +130,8 @@ Rejected alternatives:
 
 `fs.read` should become the preferred file-inspection primitive for text files.
 It pairs with `fs.patch` and `fs.write` by returning the file hash, newline
-style, size, and truncation state needed for conflict-aware follow-up calls.
+style, size, truncation state, and optional read receipt needed for
+conflict-aware follow-up calls.
 
 It must not become an unbounded content exfiltration path:
 
@@ -130,6 +141,9 @@ It must not become an unbounded content exfiltration path:
   partial file that looks complete.
 - The tool response may include file content for the active model call, but
   tool-use reporting and evaluation traces must not persist that raw content.
+- Reading a file through `fs.read` should create a short-lived read receipt when
+  the complete file can be hashed within configured limits. That receipt can be
+  supplied to `fs.patch` or `fs.write` instead of copying hashes manually.
 
 ### 3. `fs.write` as the write-side whole-file primitive
 
@@ -142,10 +156,15 @@ It must not become a silent overwrite escape hatch:
 - Callers must choose `mode: "create"` or `mode: "replace"`.
 - `mode: "create"` fails if the file already exists.
 - `mode: "replace"` fails if the file is missing and requires
-  `expected_sha256`.
+  `expected_sha256` or a valid read receipt for the same path and content hash.
 - No default upsert mode in the first slice.
 - `mode: "replace"` uses the `write` action rather than `edit`, because it
   replaces the whole file and does not carry hunk-level context.
+
+This follows Claude Code's Write behavior: full-file overwrite is separate from
+partial edit, and overwriting an existing file requires that the file was read
+first in the current working session. In MCP terms, `expected_sha256` and
+server-issued read receipts are the enforceable version of that rule.
 
 ### 4. Action-aware path grants
 
@@ -219,7 +238,8 @@ Response:
 - `line_count_total` when cheap to compute within limits
 - `bytes_read`
 - `bytes_total`
-- `sha256`
+- `sha256` when available
+- `read_receipt` when a complete-file preimage receipt is available
 - `newline_style`: `lf`, `crlf`, `cr`, or `mixed`
 - `truncated`: boolean
 - `truncation_reason`: `max_bytes`, `max_lines`, or absent
@@ -235,6 +255,7 @@ Failure response or exception reason codes should be stable:
 - `file_too_large`
 - `read_too_large`
 - `invalid_line_range`
+- `hash_omitted_file_too_large`
 
 Behavior:
 
@@ -247,8 +268,15 @@ Behavior:
 - Applies byte and line limits before returning content.
 - Returns `sha256` for the complete file, not only the returned slice, when the
   file is within `read_hash_max_file_bytes`.
-- If the file is too large to hash under configured limits, returns a stable
-  reason such as `hash_omitted_file_too_large` and keeps `sha256` absent.
+- Returns `read_receipt` only when the complete-file hash is available. The
+  receipt must bind at least the workspace id, normalized path, file size,
+  content hash, issued-at timestamp, and profile/session identity through a
+  server-side signature or opaque store entry.
+- If the file is too large to hash under configured limits, returns
+  `hash_omitted_file_too_large` and keeps both `sha256` and `read_receipt`
+  absent. In that case `fs.write replace` and strict `fs.patch` cannot proceed
+  unless the caller supplies a valid `expected_sha256` from another trusted
+  channel.
 - Does not persist returned `content` in tool-use reporting, audit summaries, or
   evaluation traces.
 
@@ -261,6 +289,8 @@ Arguments:
 - `diff: string` required. Unified diff text.
 - `expected_sha256_by_path: object[string,string]` optional. Workspace-relative
   paths mapped to expected preimage hashes.
+- `read_receipt_by_path: object[string,string]` optional. Workspace-relative
+  paths mapped to receipts returned by `fs.read`.
 - `create_parent_directories: boolean` optional, default `false`.
 - `allow_create: boolean` optional, default `false`.
 - `dry_run: boolean` optional, default `false`.
@@ -291,6 +321,8 @@ Failure response or exception reason codes should be stable:
 - `path_action_not_granted`
 - `patch_conflict`
 - `expected_hash_mismatch`
+- `read_receipt_invalid`
+- `read_before_mutate_required`
 - `file_missing`
 - `file_already_exists`
 - `binary_content_not_supported`
@@ -341,6 +373,10 @@ Patch application behavior:
 - Normalize parsed paths to a workspace-relative display path and a resolved
   filesystem path before policy checks. Only workspace-relative display paths
   may appear in responses, approval payloads, or telemetry.
+- For existing-file edits in strict/default mode, require either a matching
+  `expected_sha256_by_path` entry or valid `read_receipt_by_path` entry before
+  hunk matching. Compatibility mode may allow context-only patching, but bundled
+  strict profiles should keep read-before-mutate enabled.
 - Read existing target files as UTF-8 bytes with binary/NUL detection.
 - Reject files over `patch_max_file_bytes`.
 - Apply all hunks in memory before writing any file.
@@ -352,6 +388,9 @@ Patch application behavior:
   during commit, attempt rollback from in-memory backups and return or raise
   `partial_write_rollback_attempted`. The tool must not claim crash-proof
   filesystem transactions.
+- Track parent directories created by `fs.patch`. If commit fails after creating
+  directories, attempt best-effort cleanup of directories that are still empty
+  and were created by this call. Never remove pre-existing directories.
 
 ### `fs.write`
 
@@ -362,7 +401,10 @@ Arguments:
 - `path: string` required.
 - `content: string` required.
 - `mode: "create" | "replace"` required.
-- `expected_sha256: string` required for `mode="replace"`.
+- `expected_sha256: string` optional for `mode="replace"` when `read_receipt`
+  is supplied; otherwise required for `mode="replace"`.
+- `read_receipt: string` optional for `mode="replace"` as an alternative to
+  `expected_sha256`.
 - `create_parent_directories: boolean` optional, default `false`.
 - `dry_run: boolean` optional, default `false`.
 
@@ -381,7 +423,7 @@ Behavior:
 
 - `create` requires the path to be absent.
 - `replace` requires the path to exist, be a regular file, be UTF-8 text, and
-  match `expected_sha256`.
+  match `expected_sha256` or a valid `read_receipt`.
 - No upsert mode in the first slice.
 - Parent directories are created only for `mode="create"` when
   `create_parent_directories=true` and all parent paths remain inside the
@@ -390,6 +432,9 @@ Behavior:
 - Symlink targets are rejected in the first slice.
 - Content is UTF-8 only and subject to `write_max_bytes`.
 - Writes use temporary files and atomic replace where supported by the OS.
+- Parent directories created for `create` are tracked and cleaned up on
+  best-effort failure only when they are still empty and were created by the
+  current call.
 
 ### `fs.read_text`
 
@@ -413,22 +458,23 @@ For policy consistency:
 - It must remain path-boundable.
 - It requires the `write` path action when action-aware grants are enabled.
 - New profile recommendations should prefer `fs.write`.
-- Strict new profiles may omit `fs.write_text` while keeping `fs.write` and
-  `fs.patch`.
+- Strict new profiles should omit `fs.write_text` while keeping `fs.write` and
+  `fs.patch`. Compatibility profiles that keep `fs.write_text` should require
+  approval for existing-file overwrites until the legacy tool can be retired.
 
 ## Path Scope Preflight
 
 `fs.patch` cannot rely on `path_argument_hints` because the paths are embedded
 inside `diff`. The protocol and module need a derived path-candidate seam.
 
-Add an optional module hook:
+Add a module hook:
 
 ```python
 def extract_path_scope_candidates(
     self,
     tool_name: str,
     arguments: dict[str, Any],
-) -> list[dict[str, str]]:
+) -> list[PathScopeCandidate]:
     ...
 ```
 
@@ -438,14 +484,28 @@ Candidate shape:
 {
   "path": "documents/spec.md",
   "action": "edit",
-  "source": "unified_diff"
+  "source": "unified_diff",
+  "display_path": "documents/spec.md",
+  "requires_existing_file": true
 }
 ```
+
+The implementation should define a small package-level `PathScopeCandidate`
+typed model or dataclass with at least:
+
+- `path`: normalized workspace-relative path.
+- `action`: `read`, `edit`, `write`, or future `delete`.
+- `source`: `argument`, `unified_diff`, `legacy_hint`, or `hook_rewrite`.
+- `display_path`: redaction-safe relative path for policy payloads.
+- `requires_existing_file`: boolean when known.
+- `creates_file`: boolean when known.
+- `workspace_id`: optional for multi-root candidates.
 
 Protocol behavior:
 
 1. Sanitize and validate tool arguments.
-2. If the module implements `extract_path_scope_candidates`, call it before
+2. If tool metadata declares `path_scope_candidate_source: "module"`, require
+   the module to implement `extract_path_scope_candidates` and call it before
    path enforcement.
 3. Treat extraction failures as invalid params.
 4. Pass the derived candidates to `PathScopeEnforcer`.
@@ -454,10 +514,9 @@ Protocol behavior:
 
 Compatibility requirement:
 
-- Extend `PathScopeEnforcer.evaluate_tool_call` in a backward-compatible way,
-  for example by adding an optional `derived_candidates` argument or a small
-  companion method. Existing enforcers that only understand metadata hints
-  should continue to work for ordinary tools.
+- Extend `PathScopeEnforcer.evaluate_tool_call` in a backward-compatible way by
+  adding an optional `derived_candidates` argument. Existing enforcers that only
+  understand metadata hints should continue to work for ordinary tools.
 - `fs.patch` must fail closed when the protocol cannot pass derived candidates
   to the active enforcer, because metadata hints cannot prove which files the
   diff touches.
@@ -468,6 +527,9 @@ Path enforcer behavior:
 
 - Use derived candidates when present.
 - Fall back to metadata path hints for ordinary tools.
+- If tool metadata declares `path_scope_candidate_source: "module"` but no
+  derived candidates are present, deny with
+  `path_scope_candidates_unavailable`.
 - Check every candidate path against workspace root, cwd scope, multi-root
   workspace bundle, and action-aware `path_grants`.
 - Deny the whole request when any candidate is outside scope or lacks its
@@ -566,6 +628,13 @@ already has `fs.read_text` or `fs.write_text`, the migration may add `fs.read`,
 `fs.patch`, and `fs.write` while keeping the legacy tool temporarily for
 compatibility.
 
+Canonical storage for action-aware grants is `policy_document.path_grants`.
+Existing `MCPProfile.path_scopes` remains an attachment/listing surface for
+named scope objects, and `resource_constraints` remains for non-path
+constraints such as `requires_workspace_binding`. Import/export, snapshots, and
+admin APIs should normalize `path_grants` in `policy_document` and only mirror
+them elsewhere for display if needed.
+
 Example policy snippets:
 
 Profile A:
@@ -657,22 +726,36 @@ tool-use evaluation records.
 For `fs.read`, this means traces can record byte counts, truncation state,
 hash-present/hash-omitted status, and scoped path summaries, but not `content`.
 
+Result sanitization must be implemented through an explicit per-tool allowlist:
+
+- `fs.read`: `path`, `start_line`, `end_line`, `bytes_read`, `bytes_total`,
+  `truncated`, `truncation_reason`, `sha256_present`, `read_receipt_present`,
+  `newline_style`.
+- `fs.patch`: `applied`, `dry_run`, per-file `path`, `action`, `created`,
+  `hunks_applied`, `additions`, `deletions`, `bytes_written`, hash-present
+  booleans, `reason_code`.
+- `fs.write`: `path`, `mode`, `applied`, `dry_run`, `created`,
+  `bytes_written`, hash-present booleans, `reason_code`.
+- `fs.read_text` and `fs.write_text`: compatibility metadata only; never record
+  returned text or submitted content.
+
 ## Limits
 
 Recommended settings:
 
-- `read_max_bytes`
-- `read_max_lines`
-- `read_default_max_bytes`
-- `read_default_max_lines`
-- `read_hash_max_file_bytes`
-- `patch_max_bytes`
-- `patch_max_files`
-- `patch_max_hunks`
-- `patch_max_changed_lines`
-- `patch_max_file_bytes`
-- `write_max_bytes`
-- `write_create_parent_directories_default`
+- `read_default_max_bytes`: `200_000`.
+- `read_max_bytes`: `1_000_000`.
+- `read_default_max_lines`: `2_000`.
+- `read_max_lines`: `20_000`.
+- `read_hash_max_file_bytes`: `5_000_000`.
+- `read_receipt_ttl_seconds`: `1_800`.
+- `patch_max_bytes`: `1_000_000`.
+- `patch_max_files`: `20`.
+- `patch_max_hunks`: `200`.
+- `patch_max_changed_lines`: `10_000`.
+- `patch_max_file_bytes`: `5_000_000`.
+- `write_max_bytes`: `1_000_000`.
+- `write_create_parent_directories_default`: `false`.
 
 All limits must fail closed with stable reason codes.
 
@@ -691,6 +774,8 @@ Filesystem module tests:
 - `fs.read` enforces byte/line limits and clearly marks truncated responses.
 - `fs.read` rejects path escapes, symlinks, binary/NUL content, non-UTF-8
   content, oversized hash requests, and unsupported arguments.
+- `fs.read` produces a receipt for complete hashed reads and omits it with a
+  stable reason when the full preimage cannot be hashed.
 - `fs.patch` descriptor includes metadata, strict schema, and eval metadata.
 - `fs.write` descriptor includes metadata, strict schema, and eval metadata.
 - Unified diff parser accepts standard single-file and multi-file hunks.
@@ -703,6 +788,8 @@ Filesystem module tests:
 - Patch creates a file only with `allow_create=true` and write action.
 - Patch detects context conflict without writing.
 - Patch detects expected hash mismatch without writing.
+- Patch requires read receipt or expected hash in strict/default mode for
+  existing-file edits.
 - Multi-file patch writes nothing when one file conflicts.
 - Multi-file patch writes nothing when one file is outside path grant.
 - Symlink patch targets fail closed.
@@ -710,7 +797,10 @@ Filesystem module tests:
 - No-newline marker behavior.
 - Dry run returns planned results without writes.
 - `fs.write create` writes a new file and fails if it exists.
-- `fs.write replace` requires and validates `expected_sha256`.
+- `fs.write replace` requires and validates `expected_sha256` or a read
+  receipt.
+- `fs.write replace` also accepts a valid read receipt and rejects stale,
+  wrong-path, wrong-workspace, expired, or wrong-profile receipts.
 - `fs.write` rejects path escapes, symlinks, binary/NUL content, oversized
   content, missing parents unless enabled, and unsupported mode.
 
@@ -725,6 +815,9 @@ Policy/path-scope tests:
 - Any denied path/action denies the entire multi-file patch.
 - Existing `path_allowlist_prefixes` behavior remains compatible when
   `path_grants` is absent.
+- `policy_document.path_grants` is the canonical grant location; imports,
+  snapshots, and admin updates preserve it without moving data into
+  `path_scopes` or `resource_constraints`.
 - Multi-root workspace bundle enforcement still maps each path to an allowed
   workspace root before action grant checks.
 
@@ -759,11 +852,18 @@ Each slice should use TDD and focused security scans on touched Python code.
 
 - `path_argument_hints` alone cannot secure `fs.patch`; a derived path-candidate
   seam is required.
+- Module-derived path scope needs a concrete `PathScopeCandidate` contract and
+  fail-closed behavior for tools marked `path_scope_candidate_source: "module"`.
 - Path grants must be action-aware to support read-only, edit-only, and
   write-capable folders.
+- `policy_document.path_grants` is the canonical storage shape; profile
+  `path_scopes` and `resource_constraints` should not carry duplicate
+  executable grants.
 - `fs.read` should be a first-class bounded primitive rather than relying only
   on legacy `fs.read_text`, because safe patch/write flows need hashes,
   truncation state, and consistent read-action policy.
+- Existing-file mutation should follow Claude Code's read-before-edit/write
+  posture by requiring hashes or read receipts.
 - `fs.write` must be treated as a separate whole-file primitive with explicit
   create/replace modes, required replace hashes, and `write` action semantics.
 - Unified diff support must be intentionally narrow and reject unsupported
@@ -774,8 +874,19 @@ Each slice should use TDD and focused security scans on touched Python code.
 - Encoding and newline behavior must be specified.
 - Symlinks should fail closed in the first slice.
 - Tool-use reporting must avoid raw diffs and contents.
+- Tool-use reporting needs a per-tool result allowlist, not only prose
+  redaction rules.
 - Tests must include a Profile A/B/C permission matrix and denial no-write
   assertions.
 - Cross-platform path handling must reject ambiguous diff paths and perform
   path-segment-aware grants so policy behavior is consistent across macOS,
   Linux, and Windows hosts.
+- Parent directory creation must be tracked separately from file writes with
+  best-effort cleanup only for directories created by the current call.
+
+## External References
+
+- Claude Code tools reference:
+  <https://code.claude.com/docs/en/tools-reference#edit-tool-behavior>
+- Claude Code hooks guide:
+  <https://code.claude.com/docs/en/hooks-guide>
