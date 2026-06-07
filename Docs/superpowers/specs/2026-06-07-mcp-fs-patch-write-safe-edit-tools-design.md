@@ -1,19 +1,22 @@
-# MCP fs.patch And fs.write Safe Edit Tools Design
+# MCP fs.read, fs.patch, And fs.write Safe File Tools Design
 
 ## Status
 
 Draft specification for TASK-2277.
 
-This is the next MCP filesystem write-safety slice after metadata-only
-tool-use reporting. It adds a diff-first edit primitive and a deliberate
-whole-file write primitive while tightening path policy so profiles can grant
-different read, edit, and write access by workspace subpath.
+This is the next MCP filesystem safety slice after metadata-only tool-use
+reporting. It adds a canonical bounded read primitive, a diff-first edit
+primitive, and a deliberate whole-file write primitive while tightening path
+policy so profiles can grant different read, edit, and write access by
+workspace subpath.
 
 ## Summary
 
-Add two paired filesystem primitives to the workspace-bounded MCP filesystem
-module:
+Add three filesystem primitives to the workspace-bounded MCP filesystem module:
 
+- `fs.read`: canonical bounded UTF-8 text read primitive. It returns file
+  content with hash and truncation metadata so later `fs.patch` and `fs.write`
+  calls can be guarded against stale preimages.
 - `fs.patch`: preferred edit primitive. It accepts unified diffs, parses them
   in process, derives touched paths before execution, applies hunks with
   conflict detection, and never invokes a host shell or platform patch tool.
@@ -21,9 +24,10 @@ module:
   creating a complete file or intentionally replacing a complete file, not for
   incremental edits. Existing files require an expected content hash.
 
-`fs.write_text` remains as a compatibility surface for existing callers, but
-new role profiles, docs, and model guidance should prefer `fs.patch` for
-modifying existing files and `fs.write` for intentional whole-file writes.
+`fs.read_text` and `fs.write_text` remain as compatibility surfaces for
+existing callers, but new role profiles, docs, and model guidance should prefer
+`fs.read` for file inspection, `fs.patch` for modifying existing files, and
+`fs.write` for intentional whole-file writes.
 `fs.write` is intentionally higher impact than `fs.patch`: it creates or
 replaces a whole file and therefore requires the explicit `write` path action,
 including for replacements.
@@ -35,6 +39,8 @@ write multiple workspace roots only when explicitly granted.
 ## Goals
 
 - Prefer unified-diff editing over raw text replacement whenever possible.
+- Provide a canonical read primitive that pairs with hash-guarded patch/write
+  flows.
 - Keep all file mutation workspace-bounded and profile/path-scope governed.
 - Support granular path grants such as:
   - Profile A can read/edit/write `documents/` but cannot access `downloads/`.
@@ -57,8 +63,8 @@ write multiple workspace roots only when explicitly granted.
 - No AST-aware code refactoring.
 - No collaborative merge algorithm.
 - No UI implementation.
-- No change to the existing `fs.write_text` behavior beyond metadata/path-scope
-  participation needed for policy consistency.
+- No change to the existing `fs.read_text` or `fs.write_text` behavior beyond
+  metadata/path-scope participation needed for policy consistency.
 
 ## Existing Context
 
@@ -79,7 +85,7 @@ and uses metadata such as `uses_filesystem`, `path_boundable`, and
 `MCPProtocol.prepare_tool_call()` already validates tool schemas, determines
 write status, asks the injected `PathScopeEnforcer` to evaluate path scope, and
 then runs approval checks before execution. That is the correct boundary for
-`fs.patch` and `fs.write`.
+`fs.read`, `fs.patch`, and `fs.write`.
 
 The current `McpHubPathEnforcementService` supports:
 
@@ -110,7 +116,22 @@ Rejected alternatives:
 - Only improving `fs.write_text`: insufficient because full-file writes are too
   broad for routine edits.
 
-### 2. `fs.write` as the paired whole-file primitive
+### 2. `fs.read` as the canonical read-side primitive
+
+`fs.read` should become the preferred file-inspection primitive for text files.
+It pairs with `fs.patch` and `fs.write` by returning the file hash, newline
+style, size, and truncation state needed for conflict-aware follow-up calls.
+
+It must not become an unbounded content exfiltration path:
+
+- Reads require the explicit `read` path action.
+- Returned content is UTF-8 text only and subject to byte/line limits.
+- Large reads must report truncation clearly rather than silently returning a
+  partial file that looks complete.
+- The tool response may include file content for the active model call, but
+  tool-use reporting and evaluation traces must not persist that raw content.
+
+### 3. `fs.write` as the write-side whole-file primitive
 
 `fs.write` is useful when the model is creating a new file or deliberately
 replacing an entire file, such as writing a generated Markdown story, a new
@@ -126,7 +147,7 @@ It must not become a silent overwrite escape hatch:
 - `mode: "replace"` uses the `write` action rather than `edit`, because it
   replaces the whole file and does not carry hunk-level context.
 
-### 3. Action-aware path grants
+### 4. Action-aware path grants
 
 Path grants must include action semantics. Existing path-only allowlists cannot
 express "read downloads, edit documents" without overgranting.
@@ -152,8 +173,8 @@ First-slice grant rules:
 - `actions` is an explicit list from `read`, `edit`, `write`.
 - Actions do not imply one another. A grant with `write` alone does not allow
   reads or contextual patch edits unless `read` or `edit` is also listed.
-- `read` authorizes read tools such as `fs.read_text`, `fs.stat`, `fs.glob`,
-  and `fs.grep`.
+- `read` authorizes read tools such as `fs.read`, `fs.read_text`, `fs.stat`,
+  `fs.glob`, and `fs.grep`.
 - `edit` authorizes `fs.patch` modifications to existing files. The tool may
   read existing file content internally for conflict checks, but it must not
   return raw current content unless the caller also invokes a read tool.
@@ -173,6 +194,63 @@ First-slice grant rules:
   profiles should prefer explicit `path_grants`.
 
 ## Tool Contracts
+
+### `fs.read`
+
+Purpose: read a workspace-scoped UTF-8 text file with bounded output and
+preimage metadata for later `fs.patch` or `fs.write` calls.
+
+Arguments:
+
+- `path: string` required.
+- `start_line: integer` optional, one-based, default `1`.
+- `max_lines: integer` optional, default `read_default_max_lines`, bounded by
+  `read_max_lines`.
+- `max_bytes: integer` optional, default `read_default_max_bytes`, bounded by
+  `read_max_bytes`.
+- `include_line_numbers: boolean` optional, default `false`.
+
+Response:
+
+- `path`
+- `content`
+- `start_line`
+- `end_line`
+- `line_count_total` when cheap to compute within limits
+- `bytes_read`
+- `bytes_total`
+- `sha256`
+- `newline_style`: `lf`, `crlf`, `cr`, or `mixed`
+- `truncated`: boolean
+- `truncation_reason`: `max_bytes`, `max_lines`, or absent
+
+Failure response or exception reason codes should be stable:
+
+- `path_outside_workspace_scope`
+- `path_outside_allowlist_scope`
+- `path_action_not_granted`
+- `file_missing`
+- `file_not_regular`
+- `binary_content_not_supported`
+- `file_too_large`
+- `read_too_large`
+- `invalid_line_range`
+
+Behavior:
+
+- Requires the `read` path action.
+- Resolves and validates the path with the same workspace/path-scope rules as
+  other filesystem tools.
+- Reads regular files only; symlink targets are rejected in the first slice.
+- Rejects binary/NUL content and non-UTF-8 files with
+  `binary_content_not_supported`.
+- Applies byte and line limits before returning content.
+- Returns `sha256` for the complete file, not only the returned slice, when the
+  file is within `read_hash_max_file_bytes`.
+- If the file is too large to hash under configured limits, returns a stable
+  reason such as `hash_omitted_file_too_large` and keeps `sha256` absent.
+- Does not persist returned `content` in tool-use reporting, audit summaries, or
+  evaluation traces.
 
 ### `fs.patch`
 
@@ -313,6 +391,18 @@ Behavior:
 - Content is UTF-8 only and subject to `write_max_bytes`.
 - Writes use temporary files and atomic replace where supported by the OS.
 
+### `fs.read_text`
+
+`fs.read_text` remains for compatibility. It should keep its current request
+shape and behavior unless a later migration explicitly deprecates it.
+
+For policy consistency:
+
+- It must remain path-boundable.
+- It requires the `read` path action when action-aware grants are enabled.
+- New profile recommendations should prefer `fs.read`.
+- Strict new profiles may omit `fs.read_text` while keeping `fs.read`.
+
 ### `fs.write_text`
 
 `fs.write_text` remains for compatibility. It should keep its current request
@@ -371,8 +461,8 @@ Compatibility requirement:
 - `fs.patch` must fail closed when the protocol cannot pass derived candidates
   to the active enforcer, because metadata hints cannot prove which files the
   diff touches.
-- `fs.write` may continue to use ordinary path hints because its path is an
-  explicit schema field.
+- `fs.read` and `fs.write` may continue to use ordinary path hints because each
+  tool path is an explicit schema field.
 
 Path enforcer behavior:
 
@@ -392,6 +482,23 @@ belongs to the execution planner, and both phases should share the same parser
 library so they cannot disagree about target paths.
 
 ## Tool Metadata
+
+`fs.read` metadata:
+
+```json
+{
+  "category": "management",
+  "uses_filesystem": true,
+  "path_boundable": true,
+  "capabilities": ["filesystem.read"],
+  "path_argument_hints": ["path"],
+  "path_scope_action": "read",
+  "eval": {
+    "action_family": "filesystem_read",
+    "expected_result_kind": "structured_filesystem_read"
+  }
+}
+```
 
 `fs.patch` metadata:
 
@@ -427,6 +534,7 @@ library so they cannot disagree about target paths.
 ```
 
 Read tools should declare `path_scope_action: "read"`. Existing
+`fs.read_text` should declare `path_scope_action: "read"`, and existing
 `fs.write_text` should declare `path_scope_action: "write"`.
 
 For `fs.patch`, the module-derived candidates decide each file action:
@@ -437,22 +545,26 @@ For `fs.write`, both `create` and `replace` require `write`.
 
 Package defaults should keep current compatibility but move toward:
 
-- `_FILES_READ_TOOLS`: `fs.list`, `fs.read_text`, `fs.stat`, `fs.glob`,
-  `fs.grep`
+- `_FILES_READ_TOOLS`: `fs.list`, `fs.read`, `fs.stat`, `fs.glob`, `fs.grep`
 - `_FILES_EDIT_TOOLS`: `_FILES_READ_TOOLS`, `fs.patch`
 - `_FILES_WRITE_TOOLS`: `_FILES_EDIT_TOOLS`, `fs.write`
+- `_LEGACY_FILES_READ_TOOLS`: `fs.read_text`
 - `_LEGACY_FILES_WRITE_TOOLS`: `fs.write_text`
 
-Profiles that need routine source/document edits should receive `fs.patch`.
-Profiles that generate complete files should receive `fs.write`. Existing
-profiles that currently have `fs.write_text` can keep it until a compatibility
-review decides whether to replace it.
+Profiles that inspect files should receive `fs.read`. Profiles that need
+routine source/document edits should receive `fs.patch`. Profiles that generate
+complete files should receive `fs.write`. Existing profiles that currently have
+`fs.read_text` or `fs.write_text` can keep them until a compatibility review
+decides whether to replace them.
 
 The default preset update should avoid silently broadening existing roles. If a
-role currently has no file mutation capability, adding `fs.patch` or `fs.write`
-must be a deliberate preset change backed by an explicit path grant. If a role
-already has `fs.write_text`, the migration may add `fs.patch` and `fs.write`
-while keeping `fs.write_text` temporarily for compatibility.
+role currently has no file read capability, adding `fs.read` must be a
+deliberate preset change backed by an explicit `read` path grant. If a role
+currently has no file mutation capability, adding `fs.patch` or `fs.write` must
+be a deliberate preset change backed by an explicit path grant. If a role
+already has `fs.read_text` or `fs.write_text`, the migration may add `fs.read`,
+`fs.patch`, and `fs.write` while keeping the legacy tool temporarily for
+compatibility.
 
 Example policy snippets:
 
@@ -460,7 +572,7 @@ Profile A:
 
 ```json
 {
-  "allowed_tools": ["fs.read_text", "fs.patch", "fs.write"],
+  "allowed_tools": ["fs.read", "fs.patch", "fs.write"],
   "policy_document": {
     "path_scope_mode": "workspace_root",
     "path_grants": [
@@ -474,7 +586,7 @@ Profile B:
 
 ```json
 {
-  "allowed_tools": ["fs.read_text", "fs.patch", "fs.write"],
+  "allowed_tools": ["fs.read", "fs.patch", "fs.write"],
   "policy_document": {
     "path_scope_mode": "workspace_root",
     "path_grants": [
@@ -489,7 +601,7 @@ Profile C:
 
 ```json
 {
-  "allowed_tools": ["fs.read_text", "fs.stat", "fs.glob", "fs.grep"],
+  "allowed_tools": ["fs.read", "fs.stat", "fs.glob", "fs.grep"],
   "policy_document": {
     "path_scope_mode": "workspace_root",
     "path_grants": [
@@ -503,6 +615,7 @@ Profile C:
 
 The governed `run`/`bash`/`shell` runtime may later add commands such as:
 
+- `cat <path>` or `sed -n ...` -> `fs.read`
 - `patch < diff.patch` -> `fs.patch`
 - `write-file <path> ...` -> `fs.write`
 
@@ -521,10 +634,12 @@ Safe metadata:
 - requested tool
 - effective tool
 - action family
+- bytes read/written
+- line range when applicable
 - file count
 - hunk count
 - additions/deletions counts
-- created/edited/write booleans
+- read/created/edited/write booleans
 - dry-run flag
 - status
 - reason code
@@ -535,14 +650,22 @@ Safe metadata:
 - profile or mode id after existing sanitization
 
 Evaluation traces for all filesystem tools should use the same redaction
-contract. `fs.patch`, `fs.write`, `fs.write_text`, and read tools may report
-structured outcomes and scoped path summaries, but they must not persist
-content-bearing arguments or returned file text in tool-use evaluation records.
+contract. `fs.read`, `fs.read_text`, `fs.patch`, `fs.write`, `fs.write_text`,
+and other read tools may report structured outcomes and scoped path summaries,
+but they must not persist content-bearing arguments or returned file text in
+tool-use evaluation records.
+For `fs.read`, this means traces can record byte counts, truncation state,
+hash-present/hash-omitted status, and scoped path summaries, but not `content`.
 
 ## Limits
 
 Recommended settings:
 
+- `read_max_bytes`
+- `read_max_lines`
+- `read_default_max_bytes`
+- `read_default_max_lines`
+- `read_hash_max_file_bytes`
 - `patch_max_bytes`
 - `patch_max_files`
 - `patch_max_hunks`
@@ -553,14 +676,21 @@ Recommended settings:
 
 All limits must fail closed with stable reason codes.
 
-Limits should be evaluated before expensive work where possible. The diff byte
-limit can be checked before parsing, file and hunk count limits during parsing,
-and file-size limits before loading each target file.
+Limits should be evaluated before expensive work where possible. Read byte and
+line caps should be applied before returning content. The diff byte limit can be
+checked before parsing, file and hunk count limits during parsing, and file-size
+limits before loading each target file.
 
 ## Testing Strategy
 
 Filesystem module tests:
 
+- `fs.read` descriptor includes metadata, strict schema, and eval metadata.
+- `fs.read` returns UTF-8 content, full-file hash, byte counts, newline style,
+  and truncation metadata.
+- `fs.read` enforces byte/line limits and clearly marks truncated responses.
+- `fs.read` rejects path escapes, symlinks, binary/NUL content, non-UTF-8
+  content, oversized hash requests, and unsupported arguments.
 - `fs.patch` descriptor includes metadata, strict schema, and eval metadata.
 - `fs.write` descriptor includes metadata, strict schema, and eval metadata.
 - Unified diff parser accepts standard single-file and multi-file hunks.
@@ -606,6 +736,7 @@ Protocol tests:
 - Path-scope denials happen before filesystem reads/writes.
 - Approval payloads include bounded path-scope summaries.
 - Tool-use reporting records status/reason/action metadata without raw diffs.
+- Tool-use reporting records `fs.read` metadata without returned file content.
 
 Command runtime tests are deferred until command aliases are added.
 
@@ -616,10 +747,11 @@ Recommended implementation slices:
 1. Action-aware path grants in `McpHubPathEnforcementService`, with compatibility
    fallback for `path_allowlist_prefixes`.
 2. Protocol/module derived path-candidate seam.
-3. Unified diff parser and in-memory patch planner.
-4. `fs.patch` tool execution and tests.
-5. `fs.write` tool execution and tests.
-6. Profile metadata, docs, and package-boundary verification.
+3. `fs.read` tool execution and tests.
+4. Unified diff parser and in-memory patch planner.
+5. `fs.patch` tool execution and tests.
+6. `fs.write` tool execution and tests.
+7. Profile metadata, docs, and package-boundary verification.
 
 Each slice should use TDD and focused security scans on touched Python code.
 
@@ -629,6 +761,9 @@ Each slice should use TDD and focused security scans on touched Python code.
   seam is required.
 - Path grants must be action-aware to support read-only, edit-only, and
   write-capable folders.
+- `fs.read` should be a first-class bounded primitive rather than relying only
+  on legacy `fs.read_text`, because safe patch/write flows need hashes,
+  truncation state, and consistent read-action policy.
 - `fs.write` must be treated as a separate whole-file primitive with explicit
   create/replace modes, required replace hashes, and `write` action semantics.
 - Unified diff support must be intentionally narrow and reject unsupported
