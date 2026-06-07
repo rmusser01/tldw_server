@@ -1211,10 +1211,10 @@ export const PlaygroundMessage = (props: Props) => {
     !isSystemMessage &&
     renderMermaidDiagrams !== false &&
     !isActiveStreamingMessage
-  const mermaidArtifactContextId =
+  const mermaidArtifactBaseContextId =
     props.messageId ||
     props.serverMessageId ||
-    `${props.conversationInstanceId}-message-${props.currentMessageIndex}`
+    `${props.conversationInstanceId || "local"}-message-${props.currentMessageIndex}`
   const dynamicUIEnvelope = normalizeDynamicUIEnvelope(
     props.metadataExtra?.dynamic_ui
   )
@@ -2567,7 +2567,7 @@ export const PlaygroundMessage = (props: Props) => {
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
                       codeBlockVariant="compact"
-                      artifactContextId={mermaidArtifactContextId}
+                      artifactContextId={`${mermaidArtifactBaseContextId}-greeting`}
                       enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
                       enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                     />
@@ -2607,7 +2607,7 @@ export const PlaygroundMessage = (props: Props) => {
                             className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                             searchQuery={props.searchQuery}
                             codeBlockVariant="github"
-                            artifactContextId={mermaidArtifactContextId}
+                            artifactContextId={`${mermaidArtifactBaseContextId}-segment-${i}`}
                             enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />

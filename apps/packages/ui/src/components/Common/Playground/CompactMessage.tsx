@@ -35,18 +35,11 @@ import type { FeedbackThumb } from "@/store/feedback"
 import type { Source, GenerationInfo } from "./types"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
+import { stableHashString } from "@/utils/stable-hash"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
 const MAX_PREVIEW_SOURCES = 5
-
-const hashString = (input: string) => {
-  let hash = 0
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
-  }
-  return hash.toString(36)
-}
 
 interface CompactMessageProps {
   message: string
@@ -157,8 +150,11 @@ export function CompactMessage({
   const enableAssistantMermaidDiagrams =
     isBot && renderMermaidDiagrams !== false && !isActiveStreamingMessage
   const mermaidArtifactContextId = useMemo(
-    () => `compact-message-${currentMessageIndex}-${hashString(message)}`,
-    [currentMessageIndex, message]
+    () =>
+      enableAssistantMermaidDiagrams
+        ? `compact-message-${currentMessageIndex}-${stableHashString(message)}`
+        : undefined,
+    [currentMessageIndex, enableAssistantMermaidDiagrams, message]
   )
   const actionBarVisibility = isProMode
     ? "opacity-100"

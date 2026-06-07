@@ -325,11 +325,45 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
 
     expect(markdownCalls[0]).toEqual(
       expect.objectContaining({
-        artifactContextId: "assistant-message-123",
+        artifactContextId: "assistant-message-123-segment-0",
         enableMermaidArtifactActions: true,
         enableMermaidDiagrams: true
       })
     )
+  })
+
+  it("uses a safe local Mermaid artifact context when no message or conversation id is available", async () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        conversationInstanceId={undefined as any}
+      />
+    )
+
+    await screen.findByTestId("mock-markdown")
+
+    const contextId = String(markdownCalls[0]?.artifactContextId ?? "")
+    expect(contextId).toBe("local-message-0-segment-0")
+    expect(contextId).not.toContain("undefined")
+    expect(contextId).not.toContain("null")
+  })
+
+  it("namespaces Mermaid artifact contexts per assistant Markdown segment", async () => {
+    parseReasoningMock.mockImplementation(() => [
+      { type: "message", content: "```mermaid\ngraph TD\n  A-->B\n```" },
+      { type: "message", content: "```mermaid\ngraph TD\n  A-->B\n```" }
+    ])
+
+    render(<PlaygroundMessage {...baseProps} messageId="assistant-message-123" />)
+
+    await waitFor(() => {
+      expect(markdownCalls).toHaveLength(2)
+    })
+
+    expect(markdownCalls.map((call) => call.artifactContextId)).toEqual([
+      "assistant-message-123-segment-0",
+      "assistant-message-123-segment-1"
+    ])
   })
 
   it("uses plain text instead of Markdown while assistant output is streaming", () => {
@@ -447,5 +481,28 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
         enableMermaidDiagrams: true
       })
     )
+  })
+
+  it("does not compute a compact Mermaid artifact context when Mermaid actions are disabled", async () => {
+    render(
+      <CompactMessage
+        message="```mermaid\ngraph TD\n  A-->B\n```"
+        isBot
+        name="Assistant"
+        currentMessageIndex={0}
+        totalMessages={1}
+        isStreaming
+      />
+    )
+
+    await screen.findByTestId("mock-markdown")
+
+    expect(markdownCalls[0]).toEqual(
+      expect.objectContaining({
+        enableMermaidArtifactActions: false,
+        enableMermaidDiagrams: false
+      })
+    )
+    expect(markdownCalls[0]?.artifactContextId).toBeUndefined()
   })
 })

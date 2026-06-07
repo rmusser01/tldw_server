@@ -18,20 +18,13 @@ import React, {
 import Mermaid, { type MermaidRenderState } from "./Mermaid"
 import { MermaidPreviewDialog } from "./MermaidPreviewDialog"
 import { useArtifactsStore } from "@/store/artifacts"
+import { stableHashString } from "@/utils/stable-hash"
 
 export type MermaidDiagramBlockProps = {
   source: string
   blockIndex?: number
   artifactContextId?: string
   enableArtifactAction?: boolean
-}
-
-const hashString = (input: string) => {
-  let hash = 0
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
-  }
-  return hash.toString(36)
 }
 
 const sanitizeArtifactIdPart = (value: string) =>
@@ -130,7 +123,7 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
     )
     const blockPart =
       typeof blockIndex === "number" ? `block-${blockIndex}` : "block"
-    return `mermaid-${contextId}-${blockPart}-${hashString(source)}`
+    return `mermaid-${contextId}-${blockPart}-${stableHashString(source)}`
   }, [artifactContextId, blockIndex, componentId, source])
 
   const artifactLineCount = useMemo(
