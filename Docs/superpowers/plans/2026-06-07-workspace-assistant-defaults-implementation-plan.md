@@ -52,7 +52,8 @@ Frontend:
   - Add `WorkspaceAssistantDefaults`, `EffectiveWorkspaceAssistantDefault`, and extend workspace types.
 - Modify `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
   - Normalize Workspace assistant defaults in workspace responses and patch payloads.
-- Add or modify `apps/packages/ui/src/services/tldw/domains/workspaces.ts` if the current client has a workspace domain helper in the implementation branch; otherwise keep normalization in `TldwApiClient.ts`.
+- Modify `apps/packages/ui/src/services/tldw/domains/workspace-api.ts`
+  - Keep Workspace API contracts and methods in the existing `workspaceApiMethods` domain entrypoint.
 - Modify `apps/packages/ui/src/store/workspace.ts`
   - Keep active Workspace default metadata available to UI as server state; persist only stored references when necessary, never resolved labels.
 - Modify `apps/packages/ui/src/components/Option/ResearchWorkspace/WorkspaceHeader.tsx`

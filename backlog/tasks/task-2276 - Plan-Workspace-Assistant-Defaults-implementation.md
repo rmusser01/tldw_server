@@ -18,7 +18,7 @@ Create an implementation plan for GitHub issue #1911 after the Workspace Assista
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Plan is saved under docs/superpowers/plans with #1911 and PRD references.
+- [x] #1 Plan is saved under Docs/superpowers/plans with #1911 and PRD references.
 - [x] #2 Plan decomposes implementation into backend schema/storage, API/effective default resolution, frontend types/store, Workspace settings UI, Chat Workspace application, and verification tasks.
 - [x] #3 Plan keeps V1 Persona-only, reference-backed, no snapshots, and Chat Workspace as the first implementation target.
 - [x] #4 Plan identifies exact files and test commands for each task.
