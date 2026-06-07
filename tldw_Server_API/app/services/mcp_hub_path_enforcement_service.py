@@ -272,14 +272,17 @@ def _selected_profile_id(effective_policy: dict[str, Any] | None) -> int | None:
     sources = policy.get("sources")
     if not isinstance(sources, list):
         return None
+    valid_sources = [dict(source) for source in sources if isinstance(source, Mapping)]
     selected_source: dict[str, Any] | None = None
-    for source in sources:
-        if not isinstance(source, Mapping):
-            continue
-        if selected_assignment_id not in (None, "") and source.get("assignment_id") == selected_assignment_id:
-            selected_source = dict(source)
-            break
-        selected_source = dict(source)
+    if selected_assignment_id not in (None, ""):
+        for source in valid_sources:
+            if source.get("assignment_id") == selected_assignment_id:
+                selected_source = source
+                break
+    elif len(valid_sources) == 1:
+        selected_source = valid_sources[0]
+    if selected_source is None and len(valid_sources) == 1:
+        selected_source = valid_sources[0]
     if selected_source is None:
         return None
     try:
@@ -382,10 +385,11 @@ class McpHubPathEnforcementService:
 
         requested_action = str(action or "").strip().lower()
         normalized_path, path_error = _normalize_workspace_relative_path(path)
+        safe_requested_path = normalized_path if normalized_path is not None else "<redacted>"
         base_payload: dict[str, Any] = {
             "tool_name": str(tool_name or "").strip(),
             "requested_action": requested_action,
-            "requested_path": str(path or "").strip(),
+            "requested_path": safe_requested_path,
             "normalized_path": normalized_path,
             "selected_assignment_id": (effective_policy or {}).get("selected_assignment_id"),
             "profile_id": _selected_profile_id(effective_policy),

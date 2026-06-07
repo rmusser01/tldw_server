@@ -1551,6 +1551,40 @@ def test_preview_effective_permission_returns_redacted_path_decision() -> None:
     assert preview_service.calls[0]["context"].metadata["workspace_id"] == "workspace-alpha"
 
 
+def test_preview_effective_permission_redacts_rejected_absolute_path() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    app = _build_app(
+        _make_principal(
+            roles=[],
+            permissions=[],
+        ),
+        path_permission_preview=McpHubPathEnforcementService(path_scope_service=object()),
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/effective-permission-preview",
+            json={
+                "persona_id": "researcher",
+                "group_id": "team-red",
+                "workspace_id": "workspace-alpha",
+                "tool_name": "fs.read",
+                "action": "read",
+                "path": "/tmp/secrets.txt",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["outcome"] == "deny"
+    assert payload["reason_code"] == "path_must_be_workspace_relative"
+    assert payload["requested_path"] == "<redacted>"
+    assert "/tmp/secrets.txt" not in repr(payload)
+
+
 def test_list_policy_assignments_includes_override_summary_fields() -> None:
     app = _build_app(
         _make_principal(

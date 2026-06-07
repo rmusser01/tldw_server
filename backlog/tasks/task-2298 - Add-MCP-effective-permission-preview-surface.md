@@ -30,7 +30,7 @@ Add an admin/API/CLI surface that explains effective path permissions for a prof
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Added `EffectivePermissionPreviewRequest` / `EffectivePermissionPreviewResponse`, `POST /mcp/hub/effective-permission-preview`, and `McpHubPathEnforcementService.preview_effective_path_permission()`.
+Added `EffectivePermissionPreviewRequest` / `EffectivePermissionPreviewResponse`, `POST /api/v1/mcp/hub/effective-permission-preview`, and `McpHubPathEnforcementService.preview_effective_path_permission()`.
 
 The preview wrapper normalizes workspace-relative paths, invokes the existing enforcer using a synthetic path-boundable filesystem tool definition, and emits only redacted workspace-relative decision metadata. Standalone gateway CLI/admin simulation remains a separate follow-up under `TASK-2303`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -44,7 +44,7 @@ Implemented the MCP Hub effective permission preview surface for path-scoped too
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded: `python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_api.py` -> 55 passed
+- [x] #2 Tests or verification recorded: `python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_api.py` -> 57 passed
 - [x] #3 Documentation updated when relevant: schema and route tests cover this API-surface slice
 - [x] #4 Bandit run for touched code: `python -m bandit -r <touched production files> -f json -o /tmp/bandit_mcp_effective_permission_preview.json` -> 0 findings
 - [x] #5 Final summary added

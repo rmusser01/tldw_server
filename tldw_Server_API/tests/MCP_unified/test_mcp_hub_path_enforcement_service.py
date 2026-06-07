@@ -427,6 +427,38 @@ async def test_effective_permission_preview_returns_redacted_path_grant_decision
 
 
 @pytest.mark.asyncio
+async def test_effective_permission_preview_does_not_guess_profile_for_ambiguous_sources() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "selected_assignment_id": 99,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read"]},
+                ],
+            },
+            "sources": [
+                {"assignment_id": 11, "profile_id": 5},
+                {"assignment_id": 12, "profile_id": 6},
+            ],
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        action="read",
+        path="documents/story.md",
+    )
+
+    assert result["profile_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_path_grants_deny_overrides_broader_allow_grant() -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
