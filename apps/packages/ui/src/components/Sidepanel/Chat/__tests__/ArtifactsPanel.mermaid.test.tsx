@@ -5,6 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ArtifactsPanel } from "../ArtifactsPanel"
 import { useArtifactsStore, type ArtifactItem } from "@/store/artifacts"
 
+const mermaidDiagramBlockMock = vi.hoisted(() => vi.fn())
+
+type MermaidDiagramBlockMockProps = {
+  source: string
+  blockIndex?: number
+  artifactContextId?: string
+  enableArtifactAction?: boolean
+}
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback || _key
@@ -41,27 +50,23 @@ vi.mock("@/store/option", () => ({
     })
 }))
 
-vi.mock("@/components/Common/Mermaid", () => ({
-  Mermaid: ({
-    code,
-    className
-  }: {
-    code: string
-    className?: string
-  }) => (
-    <div
-      aria-label="Mock artifact Mermaid diagram"
-      className={className}
-      role="img"
-    >
-      {code}
-    </div>
-  ),
-  default: ({ code }: { code: string }) => (
-    <div aria-label="Mock artifact Mermaid diagram" role="img">
-      {code}
-    </div>
-  )
+vi.mock("@/components/Common/MermaidDiagramBlock", () => ({
+  MermaidDiagramBlock: (props: MermaidDiagramBlockMockProps) => {
+    mermaidDiagramBlockMock(props)
+    return (
+      <section data-testid="shared-mermaid-diagram-block">
+        <div aria-label="Mock shared Mermaid diagram" role="img">
+          {props.source}
+        </div>
+        {props.enableArtifactAction && (
+          <button type="button">View Mermaid diagram</button>
+        )}
+        <button type="button">Open Mermaid preview</button>
+        <button type="button">Copy Mermaid source</button>
+        <button type="button">Download Mermaid SVG</button>
+      </section>
+    )
+  }
 }))
 
 const diagramArtifact: ArtifactItem = {
@@ -86,6 +91,7 @@ const resetArtifactsStore = () => {
 
 describe("ArtifactsPanel Mermaid artifacts", () => {
   beforeEach(() => {
+    mermaidDiagramBlockMock.mockClear()
     resetArtifactsStore()
   })
 
@@ -96,7 +102,7 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
     resetArtifactsStore()
   })
 
-  it("renders diagram artifacts with the shared Mermaid renderer", () => {
+  it("renders diagram artifacts with the shared Mermaid block actions", () => {
     useArtifactsStore.getState().openArtifact(diagramArtifact)
 
     render(<ArtifactsPanel />)
@@ -104,10 +110,29 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
     expect(screen.getByTestId("artifacts-panel")).toBeInTheDocument()
     expect(screen.getByText("Mermaid diagram 1")).toBeInTheDocument()
     expect(
-      screen.getByRole("img", { name: "Mock artifact Mermaid diagram" })
+      screen.getByTestId("shared-mermaid-diagram-block")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "Mock shared Mermaid diagram" })
     ).toHaveTextContent("graph TD A-->B")
-    expect(screen.getByRole("button", { name: /copy/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /download/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Open Mermaid preview" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Copy Mermaid source" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Download Mermaid SVG" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View Mermaid diagram" })
+    ).not.toBeInTheDocument()
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enableArtifactAction: false,
+        source: diagramArtifact.content
+      })
+    )
   })
 
   it("jumps to the matching Mermaid artifact origin", () => {
