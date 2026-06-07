@@ -1744,7 +1744,7 @@ _LOCAL_CHAT_PROVIDERS = {
 }
 
 
-def _resolve_chat_provider_name(provider: str) -> str:
+def _resolve_chat_provider_name(provider: str | None) -> str:
     provider_key = (provider or "").strip().lower()
     if provider_key == "local":
         return "local-llm"
@@ -1754,7 +1754,7 @@ def _resolve_chat_provider_name(provider: str) -> str:
     return get_registry().resolve_provider_name(provider_key)
 
 
-def _find_local_request_url_override_keys(chat_args: Mapping[str, Any]) -> list[str]:
+def _find_local_request_url_override_keys(chat_args: dict[str, Any]) -> list[str]:
     return sorted(
         key
         for key, value in chat_args.items()
@@ -1762,7 +1762,7 @@ def _find_local_request_url_override_keys(chat_args: Mapping[str, Any]) -> list[
     )
 
 
-def _reject_local_request_url_overrides(provider: str, chat_args: Mapping[str, Any]) -> None:
+def _reject_local_request_url_overrides(provider: str, chat_args: dict[str, Any]) -> None:
     provider_key = (provider or "").strip().lower()
     if provider_key not in _LOCAL_CHAT_PROVIDERS:
         return

@@ -4,7 +4,7 @@ title: Reject local LLM request URL overrides
 status: Done
 assignee: []
 created_date: '2026-06-07 16:49'
-updated_date: '2026-06-07 17:01'
+updated_date: '2026-06-07 17:06'
 labels:
   - llm
   - providers
@@ -40,6 +40,8 @@ Started in isolated worktree .worktrees/llm-local-url-override-policy from origi
 Implemented the local provider request URL override guard in chat_service before adapter dispatch. RED verification: the new local-provider override tests failed before the guard with 3 failed and 4 passed because ChatBadRequestError was not raised. GREEN verification: focused Chat/LLM regression suite passed with 22 passed and 5 warnings. Bandit on the touched Python files exited 0 with zero findings after annotating test assertions with nosec B101. Additional checks: git diff --check exited 0; reference scan across touched files found no absolute developer-machine paths or temporary Bandit report artifact names. Follow-up TASK-2310 was created for bounded INV-027 ADR backfill.
 
 Alias hardening follow-up: provider names are canonicalized through the LLM adapter registry before the local-provider URL override guard runs, so local aliases such as llama-cpp and tabby_api are covered. Updated verification after this follow-up: focused Chat/LLM regression suite passed with 24 passed and 5 warnings; Bandit on touched Python files exited 0 with zero findings; git diff --check exited 0; reference scan across touched files found no absolute developer-machine paths or temporary report artifact names.
+
+Rebased PR branch on latest origin/dev and addressed Gemini review threads by allowing None in _resolve_chat_provider_name typing and matching the local override helper signatures to dict[str, Any]. Post-review verification: focused Chat/LLM regression suite passed with 24 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
