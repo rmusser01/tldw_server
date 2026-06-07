@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef } from "react"
-import { Download, PanelLeftOpen, PanelLeftClose } from "lucide-react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
+import { Download, PanelLeftOpen, PanelLeftClose, X } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { DEFAULT_RAG_SETTINGS, type RagSettings } from "@/services/rag/unified-rag"
@@ -8,9 +8,12 @@ import { KnowledgeContextBar } from "../context/KnowledgeContextBar"
 import { CompactToolbar } from "../context/CompactToolbar"
 import { KnowledgeComposer } from "../composer/KnowledgeComposer"
 import { KnowledgeReadyState } from "../empty/KnowledgeReadyState"
+import { classifyKnowledgeReadyRecoveryState } from "../empty/recoveryState"
+import type { KnowledgeReadyRecoveryState } from "../empty/recoveryState"
 import { AnswerWorkspace } from "../panels/AnswerWorkspace"
 import { useLayoutMode } from "../hooks/useLayoutMode"
 import { useMobile } from "@/hooks/useMediaQuery"
+import type { KnowledgeStatus } from "@/types/connection"
 import {
   ALL_RAG_SOURCES,
   getRagSourceLabel,
@@ -36,6 +39,8 @@ const LazyEvidenceRail = React.lazy(() =>
 
 type KnowledgeQALayoutProps = {
   onExportClick: () => void
+  knowledgeStatus?: KnowledgeStatus
+  webFallbackAvailable?: boolean
 }
 
 const READY_STATE_SUGGESTIONS = [
@@ -120,7 +125,23 @@ function getLatestUserTurnKey(
   return null
 }
 
-export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
+function getReadySearchBlockedMessage(
+  recoveryState: KnowledgeReadyRecoveryState
+): string | null {
+  if (recoveryState.kind === "backend_unavailable") {
+    return "Reconnect the Knowledge QA backend before asking Knowledge QA."
+  }
+  if (recoveryState.kind === "no_indexed_sources") {
+    return "Add or index library sources before asking Knowledge QA."
+  }
+  return null
+}
+
+export function KnowledgeQALayout({
+  onExportClick,
+  knowledgeStatus = "ready",
+  webFallbackAvailable = true,
+}: KnowledgeQALayoutProps) {
   const knowledgeQa = useKnowledgeQA()
   const results = knowledgeQa.results ?? []
   const answer = knowledgeQa.answer ?? null
@@ -154,6 +175,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const evidenceRailTab = knowledgeQa.evidenceRailTab ?? "sources"
   const setEvidenceRailTab = knowledgeQa.setEvidenceRailTab ?? (() => undefined)
   const lastSearchScope = knowledgeQa.lastSearchScope ?? null
+  const searchDetails = knowledgeQa.searchDetails ?? null
   const pinnedSourceFilters = knowledgeQa.pinnedSourceFilters ?? {
     mediaIds: [],
     noteIds: [],
@@ -167,10 +189,12 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
 
   // Mobile always forces simple mode layout (no sidebars)
   const effectiveSimple = isMobile || isSimple
+  const [compactScopePanelOpen, setCompactScopePanelOpen] = useState(false)
 
   // Track whether user manually closed the evidence rail for this search
   const userClosedRailRef = useRef(false)
   const latestUserTurnKeyRef = useRef<string | null>(null)
+  const compactScopeCloseButtonRef = useRef<HTMLButtonElement | null>(null)
 
   const hasResults = results.length > 0 || Boolean(answer)
   const showNoResultsState =
@@ -203,11 +227,31 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const isEvidenceRailOpen = canControlEvidence
     ? evidenceRailOpen
     : hasVisibleResultsArea
+  const readyRecoveryState = useMemo(
+    () =>
+      classifyKnowledgeReadyRecoveryState({
+        knowledgeStatus,
+        selectedSourceCount: settings.sources.length,
+        webFallbackAvailable,
+        webFallbackEnabled: settings.enable_web_fallback,
+      }),
+    [
+      knowledgeStatus,
+      settings.enable_web_fallback,
+      settings.sources.length,
+      webFallbackAvailable,
+    ]
+  )
   const readyStateSuggestions =
-    settings.sources.length > 0
+    readyRecoveryState.canSearchPersonalLibrary
       ? READY_STATE_SUGGESTIONS
       : READY_STATE_ONBOARDING_SUGGESTIONS
+  const readySearchBlockedMessage =
+    getReadySearchBlockedMessage(readyRecoveryState)
   const isDesktopReadyState = effectiveSimple && !isMobile && !hasVisibleResultsArea
+  const hasNearestMatches =
+    Array.isArray(searchDetails?.alsoConsidered) &&
+    searchDetails.alsoConsidered.length > 0
 
   const scopeChangeDetails = useMemo<string[]>(() => {
     if (!lastSearchScope) return []
@@ -331,6 +375,31 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
     }
   }, [settingsPanelOpen, evidenceRailOpen, setEvidenceRailOpen])
 
+  useEffect(() => {
+    if ((!effectiveSimple || settingsPanelOpen) && compactScopePanelOpen) {
+      setCompactScopePanelOpen(false)
+    }
+  }, [compactScopePanelOpen, effectiveSimple, settingsPanelOpen])
+
+  useEffect(() => {
+    if (!compactScopePanelOpen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCompactScopePanelOpen(false)
+      }
+    }
+
+    const frame = requestAnimationFrame(() => {
+      compactScopeCloseButtonRef.current?.focus()
+    })
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [compactScopePanelOpen])
+
   const focusSearchInput = () => {
     const input = document.getElementById(
       "knowledge-search-input"
@@ -359,9 +428,14 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   }
 
   const handleEnableWeb = () => {
-    if (!settings.enable_web_fallback) {
+    if (webFallbackAvailable && !settings.enable_web_fallback) {
       updateSetting("enable_web_fallback", true)
     }
+  }
+
+  const handleToggleWebFallback = () => {
+    if (!webFallbackAvailable) return
+    updateSetting("enable_web_fallback", !settings.enable_web_fallback)
   }
 
   const handleShowNearestMatches = () => {
@@ -373,9 +447,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   }
 
   const handleOpenSourceSelector = () => {
-    // In simple mode, open settings panel instead of inline source toggle
     if (effectiveSimple) {
-      setSettingsPanelOpen(true)
+      setCompactScopePanelOpen(true)
       return
     }
     const sourceSelectorButton = document.getElementById(
@@ -386,6 +459,11 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
       sourceSelectorButton.click()
       return
     }
+    setSettingsPanelOpen(true)
+  }
+
+  const handleOpenSettingsFromScopePanel = () => {
+    setCompactScopePanelOpen(false)
     setSettingsPanelOpen(true)
   }
 
@@ -433,11 +511,14 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
               {effectiveSimple ? (
                 <CompactToolbar
                   sources={settings.sources}
+                  includeMediaIds={Array.isArray(settings.include_media_ids) ? settings.include_media_ids : []}
+                  includeNoteIds={
+                    Array.isArray(settings.include_note_ids) ? settings.include_note_ids : []
+                  }
                   preset={preset}
                   webEnabled={settings.enable_web_fallback}
-                  onToggleWeb={() =>
-                    updateSetting("enable_web_fallback", !settings.enable_web_fallback)
-                  }
+                  webFallbackAvailable={webFallbackAvailable}
+                  onToggleWeb={handleToggleWebFallback}
                   onOpenSourceSelector={handleOpenSourceSelector}
                   onOpenSettings={() => setSettingsPanelOpen(true)}
                   generationProvider={settings.generation_provider ?? null}
@@ -465,9 +546,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                   }
                   onIncludeNoteIdsChange={(ids) => updateSetting("include_note_ids", ids)}
                   webEnabled={settings.enable_web_fallback}
-                  onToggleWeb={() =>
-                    updateSetting("enable_web_fallback", !settings.enable_web_fallback)
-                  }
+                  webFallbackAvailable={webFallbackAvailable}
+                  onToggleWeb={handleToggleWebFallback}
                   generationProvider={settings.generation_provider ?? null}
                   generationModel={settings.generation_model ?? null}
                   onGenerationProviderChange={(provider) =>
@@ -493,9 +573,11 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                       }
                     }}
                     onSelectSources={handleOpenSourceSelector}
+                    onEnableWebFallback={handleEnableWeb}
                     hasSources={settings.sources.length > 0}
                     hasRecentSession={Boolean(recentHistoryItem)}
                     webFallbackEnabled={settings.enable_web_fallback}
+                    recoveryState={readyRecoveryState}
                   />
                   {/* Inline recent sessions for returning users in Simple mode */}
                   {effectiveSimple && recentSessions.length > 0 && (
@@ -513,6 +595,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
               <KnowledgeComposer
                 autoFocus={!hasVisibleResultsArea}
                 showWebToggle={false}
+                webFallbackAvailable={webFallbackAvailable}
+                searchBlockedMessage={readySearchBlockedMessage}
                 widthMode={isDesktopReadyState ? "wide" : effectiveSimple ? "compact" : "wide"}
               />
             </div>
@@ -548,6 +632,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}
                       webEnabled={settings.enable_web_fallback}
+                      webAvailable={webFallbackAvailable}
+                      hasNearestMatches={hasNearestMatches}
                     />
                   </React.Suspense>
                 ) : null}
@@ -577,6 +663,76 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
           </React.Suspense>
         ) : null}
       </main>
+
+      {effectiveSimple && compactScopePanelOpen ? (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center px-3 py-4 sm:items-center sm:px-4"
+          role="presentation"
+        >
+          <button
+            type="button"
+            aria-hidden="true"
+            tabIndex={-1}
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setCompactScopePanelOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="knowledge-compact-scope-title"
+            className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <h2
+                  id="knowledge-compact-scope-title"
+                  className="text-sm font-semibold text-text"
+                >
+                  Source scope and profiles
+                </h2>
+              </div>
+              <button
+                ref={compactScopeCloseButtonRef}
+                type="button"
+                onClick={() => setCompactScopePanelOpen(false)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-muted hover:bg-hover hover:text-text transition-colors"
+                aria-label="Close source scope"
+                title="Close source scope"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-3 sm:p-4">
+              <KnowledgeContextBar
+                preset={preset}
+                onPresetChange={setPreset}
+                sources={settings.sources}
+                onSourcesChange={(sources) => updateSetting("sources", sources)}
+                includeMediaIds={Array.isArray(settings.include_media_ids) ? settings.include_media_ids : []}
+                onIncludeMediaIdsChange={(ids) => updateSetting("include_media_ids", ids)}
+                includeNoteIds={
+                  Array.isArray(settings.include_note_ids) ? settings.include_note_ids : []
+                }
+                onIncludeNoteIdsChange={(ids) => updateSetting("include_note_ids", ids)}
+                webEnabled={settings.enable_web_fallback}
+                webFallbackAvailable={webFallbackAvailable}
+                onToggleWeb={handleToggleWebFallback}
+                generationProvider={settings.generation_provider ?? null}
+                generationModel={settings.generation_model ?? null}
+                onGenerationProviderChange={(provider) =>
+                  updateSetting("generation_provider", provider)
+                }
+                onGenerationModelChange={(model) =>
+                  updateSetting("generation_model", model)
+                }
+                contextChangedSinceLastRun={contextChangedSinceLastRun}
+                scopeChangeDetails={scopeChangeDetails}
+                onOpenSettings={handleOpenSettingsFromScopePanel}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Mode toggle + promotion toast + help link */}
       <div className="fixed bottom-4 right-4 z-20 flex flex-col items-end gap-2">

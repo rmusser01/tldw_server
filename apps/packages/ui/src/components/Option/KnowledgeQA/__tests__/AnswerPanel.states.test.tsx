@@ -452,7 +452,7 @@ describe("AnswerPanel state guardrails", () => {
     render(<AnswerPanel />)
     expect(screen.getByText(/Searching documents/i)).toBeInTheDocument()
     expect(
-      screen.getByText(/Thorough preset may take up to 30 seconds/i)
+      screen.getByText(/Deep preset may take up to 30 seconds/i)
     ).toBeInTheDocument()
 
     act(() => {

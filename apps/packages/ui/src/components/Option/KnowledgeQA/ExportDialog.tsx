@@ -15,8 +15,18 @@ import {
 } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
-import type { ExportFormat, ExportOptions } from "./types"
-import type { RagCitationStyle } from "@/services/rag/unified-rag"
+import type {
+  CitationRef,
+  ExportFormat,
+  ExportOptions,
+  RagResult,
+  SearchRuntimeDetails,
+} from "./types"
+import type {
+  RagCitationStyle,
+  RagPresetName,
+  RagSettings,
+} from "@/services/rag/unified-rag"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { mapKnowledgeQaExportErrorMessage } from "./errorMessages"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -39,6 +49,15 @@ const CITATION_APPROXIMATION_NOTE =
 const SHARE_THREAD_LINKS_ENABLED = true
 const SHARE_THREAD_LINKS_HELP_TEXT =
   "Share links use a dedicated token with read-only access and an expiry window, independent from normal thread permissions. Extension shared-link routing is currently TBD."
+const SENSITIVE_EXPORT_KEY_PATTERN =
+  /(?:api[_-]?key|authorization|bearer|credential|password|secret|token)/i
+
+type ExportContext = {
+  citations?: CitationRef[]
+  settings?: Partial<RagSettings> | null
+  preset?: RagPresetName | string | null
+  searchDetails?: Partial<SearchRuntimeDetails> | null
+}
 
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
   const focusableSelectors = [
@@ -54,7 +73,17 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 }
 
 export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
-  const { messages, currentThreadId, results, answer, query } = useKnowledgeQA()
+  const {
+    messages,
+    currentThreadId,
+    results,
+    citations,
+    answer,
+    query,
+    settings,
+    preset,
+    searchDetails,
+  } = useKnowledgeQA()
   const message = useAntdMessage()
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
@@ -138,7 +167,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           answer,
           results,
           messages,
-          options
+          options,
+          { citations, settings, preset, searchDetails }
         )
         if (activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
@@ -151,7 +181,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           answer,
           results,
           messages,
-          options
+          options,
+          { citations, settings, preset, searchDetails }
         )
         if (activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
@@ -238,6 +269,10 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     answer,
     results,
     messages,
+    citations,
+    settings,
+    preset,
+    searchDetails,
     currentThreadId,
     onClose,
     message,
@@ -287,7 +322,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         answer,
         results,
         messages,
-        { ...options, format: "markdown" }
+        { ...options, format: "markdown" },
+        { citations, settings, preset, searchDetails }
       )
       const trimmedQuery = query.trim()
       const title =
@@ -347,6 +383,10 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     results,
     messages,
     options,
+    citations,
+    settings,
+    preset,
+    searchDetails,
     currentThreadId,
     message,
   ])
@@ -383,8 +423,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           return
         }
         message.open({
-          type: "warning",
-          content: "Share link created, but copying it to the clipboard failed.",
+          type: "error",
+          content: "Unable to copy share link, but the link remains active.",
           duration: 4,
         })
         console.error("Share link clipboard copy failed:", error)
@@ -890,22 +930,107 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+function getSourceTitle(result: RagResult | undefined, index: number): string {
+  return (
+    result?.metadata?.title ||
+    result?.metadata?.source ||
+    `Source ${index + 1}`
+  )
+}
+
+function collectCitationIndexes(
+  citations: CitationRef[] | undefined,
+  answer: string | null
+): number[] {
+  const indexes: number[] = []
+  const seen = new Set<number>()
+  const pushIndex = (value: unknown) => {
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+      return
+    }
+    if (seen.has(value)) return
+    seen.add(value)
+    indexes.push(value)
+  }
+
+  citations?.forEach((citation) => pushIndex(citation.index))
+
+  if (indexes.length === 0 && answer) {
+    for (const match of answer.matchAll(/\[(\d+)\]/g)) {
+      pushIndex(Number(match[1]))
+    }
+  }
+
+  return indexes
+}
+
+function sanitizeExportValue(value: unknown, depth = 0): unknown {
+  if (value == null) return value
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeExportValue(item, depth + 1))
+      .filter((item) => item !== undefined)
+  }
+  if (typeof value === "object" && depth < 5) {
+    const output: Record<string, unknown> = {}
+    Object.entries(value as Record<string, unknown>).forEach(([key, rawValue]) => {
+      if (SENSITIVE_EXPORT_KEY_PATTERN.test(key)) return
+      const sanitized = sanitizeExportValue(rawValue, depth + 1)
+      if (sanitized !== undefined) {
+        output[key] = sanitized
+      }
+    })
+    return output
+  }
+
+  return undefined
+}
+
+function hasSnapshotContent(value: unknown): value is Record<string, unknown> {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  )
+}
+
+function buildExportSettingsSnapshot(
+  options: ExportOptions,
+  context?: ExportContext
+): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {
+    format: options.format,
+    citationStyle: options.citationStyle,
+    includeSourceExcerpts: options.includeSourceExcerpts,
+    exportDate: new Date().toISOString(),
+  }
+
+  if (context?.preset) {
+    snapshot.preset = context.preset
+  }
+
+  const settingsSnapshot = sanitizeExportValue(context?.settings)
+  if (hasSnapshotContent(settingsSnapshot)) {
+    snapshot.settings = settingsSnapshot
+  }
+
+  const searchDetailsSnapshot = sanitizeExportValue(context?.searchDetails)
+  if (hasSnapshotContent(searchDetailsSnapshot)) {
+    snapshot.searchDetails = searchDetailsSnapshot
+  }
+
+  return snapshot
+}
+
 // Generate markdown content
 function generateMarkdown(
   query: string,
   answer: string | null,
-  results: Array<{
-    id?: string
-    content?: string
-    text?: string
-    metadata?: {
-      title?: string
-      source?: string
-      url?: string
-      page_number?: number
-    }
-    score?: number
-  }>,
+  results: RagResult[],
   messages: Array<{
     role: string
     content: string
@@ -918,9 +1043,11 @@ function generateMarkdown(
       }>
     }
   }>,
-  options: ExportOptions
+  options: ExportOptions,
+  context?: ExportContext
 ): string {
   const lines: string[] = []
+  const citationIndexes = collectCitationIndexes(context?.citations, answer)
 
   // Header
   lines.push("# Knowledge QA Export")
@@ -942,13 +1069,37 @@ function generateMarkdown(
     lines.push("")
   }
 
+  // Citation mappings
+  if (citationIndexes.length > 0) {
+    lines.push("## Citations")
+    lines.push("")
+    citationIndexes.forEach((citationIndex) => {
+      const sourceIndex = citationIndex - 1
+      const result = results[sourceIndex]
+      const title = getSourceTitle(result, sourceIndex)
+
+      if (!result) {
+        lines.push(`- [${citationIndex}] Source unavailable in exported results.`)
+        return
+      }
+
+      lines.push(`- [${citationIndex}] ${title} maps to Source ${sourceIndex + 1}.`)
+      if (result.metadata?.page_number) {
+        lines.push(`  Page: ${result.metadata.page_number}`)
+      }
+      if (result.metadata?.url) {
+        lines.push(`  URL: ${result.metadata.url}`)
+      }
+    })
+    lines.push("")
+  }
+
   // Sources
   if (results.length > 0) {
     lines.push("## Sources")
     lines.push("")
     results.forEach((result, index) => {
-      const title =
-        result.metadata?.title || result.metadata?.source || `Source ${index + 1}`
+      const title = getSourceTitle(result, index)
       const url = result.metadata?.url
       const score = result.score
       const content = result.content || result.text || ""
@@ -1004,15 +1155,7 @@ function generateMarkdown(
     lines.push("")
     lines.push("```json")
     lines.push(
-      JSON.stringify(
-        {
-          format: options.format,
-          citationStyle: options.citationStyle,
-          exportDate: new Date().toISOString(),
-        },
-        null,
-        2
-      )
+      JSON.stringify(buildExportSettingsSnapshot(options, context), null, 2)
     )
     lines.push("```")
   }

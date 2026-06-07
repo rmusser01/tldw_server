@@ -92,6 +92,71 @@ describe("ServerReadinessGate", () => {
     expect(screen.queryByText("App ready")).toBeNull()
   })
 
+  it("shows actionable recovery when health checks fail until timeout", async () => {
+    vi.useFakeTimers()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false
+    } as Response)
+
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <main data-testid="knowledge-main-region" />
+      </ServerReadinessGate>
+    )
+
+    expectReadinessStatus()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000)
+    })
+
+    expect(screen.getByTestId("knowledge-main-region")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: /Backend readiness check failed/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000/api/v1/health")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Server settings" })).toBeInTheDocument()
+  })
+
+  it("shows actionable recovery when the health request stalls until timeout", async () => {
+    vi.useFakeTimers()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined)
+    )
+
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <main data-testid="knowledge-main-region" />
+      </ServerReadinessGate>
+    )
+
+    expectReadinessStatus()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000)
+    })
+
+    expect(screen.getByTestId("knowledge-main-region")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: /Backend readiness check failed/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000/api/v1/health")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
+  })
+
   it("bypasses health checks when bypass is enabled", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
     const { ServerReadinessGate } = await import("../ServerReadinessGate")

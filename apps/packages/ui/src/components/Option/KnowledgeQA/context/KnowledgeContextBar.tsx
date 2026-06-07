@@ -35,6 +35,8 @@ const MAX_SAVED_PROFILES = 5
 type SearchProfile = {
   name: string
   sources: RagSource[]
+  includeMediaIds: number[]
+  includeNoteIds: string[]
   preset: RagPresetName
   enableWebFallback: boolean
 }
@@ -46,20 +48,55 @@ const VALID_PRESET_KEYS: ReadonlySet<RagPresetName> = new Set([
   "custom",
 ])
 
-function isSearchProfile(value: unknown): value is SearchProfile {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as SearchProfile).name === "string" &&
-    (value as SearchProfile).name.trim().length > 0 &&
-    Array.isArray((value as SearchProfile).sources) &&
-    (value as SearchProfile).sources.every(
-      (source): source is RagSource => isRagSource(source)
-    ) &&
-    typeof (value as SearchProfile).preset === "string" &&
-    VALID_PRESET_KEYS.has((value as SearchProfile).preset) &&
-    typeof (value as SearchProfile).enableWebFallback === "boolean"
-  )
+function normalizeProfileMediaIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value
+        .map((item) => asNumber(item))
+        .filter((item): item is number => item !== null && item > 0)
+    )
+  ).sort((left, right) => left - right)
+}
+
+function normalizeProfileNoteIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value
+        .map((item) => asString(item))
+        .filter((item): item is string => item !== null)
+    )
+  ).sort((left, right) => left.localeCompare(right))
+}
+
+function normalizeSearchProfile(value: unknown): SearchProfile | null {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const name = asString(record.name)
+  const preset =
+    typeof record.preset === "string" && VALID_PRESET_KEYS.has(record.preset as RagPresetName)
+      ? (record.preset as RagPresetName)
+      : null
+  const sources =
+    Array.isArray(record.sources) &&
+    record.sources.every((source): source is RagSource => isRagSource(source))
+      ? record.sources
+      : null
+
+  if (!name || !preset || !sources || typeof record.enableWebFallback !== "boolean") {
+    return null
+  }
+
+  return {
+    name,
+    sources,
+    includeMediaIds: normalizeProfileMediaIds(record.includeMediaIds),
+    includeNoteIds: normalizeProfileNoteIds(record.includeNoteIds),
+    preset,
+    enableWebFallback: record.enableWebFallback,
+  }
 }
 
 function loadSavedProfiles(): SearchProfile[] {
@@ -68,7 +105,10 @@ function loadSavedProfiles(): SearchProfile[] {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isSearchProfile).slice(0, MAX_SAVED_PROFILES)
+    return parsed
+      .map(normalizeSearchProfile)
+      .filter((profile): profile is SearchProfile => profile !== null)
+      .slice(0, MAX_SAVED_PROFILES)
   } catch {
     return []
   }
@@ -92,6 +132,7 @@ type KnowledgeContextBarProps = {
   includeNoteIds: string[]
   onIncludeNoteIdsChange: (ids: string[]) => void
   webEnabled: boolean
+  webFallbackAvailable?: boolean
   onToggleWeb: () => void
   generationProvider: string | null
   generationModel: string | null
@@ -123,6 +164,13 @@ const PRESET_OPTIONS: Array<{ value: PresetKey; label: string }> = [
   { value: "balanced", label: "Balanced" },
   { value: "thorough", label: "Deep" },
 ]
+
+const PRESET_LABELS: Record<RagPresetName, string> = {
+  fast: "Fast",
+  balanced: "Balanced",
+  thorough: "Deep",
+  custom: "Custom",
+}
 
 const PRESET_DETAILS: Record<PresetKey, PresetDetails> = {
   fast: {
@@ -291,6 +339,7 @@ export function KnowledgeContextBar({
   includeNoteIds,
   onIncludeNoteIdsChange,
   webEnabled,
+  webFallbackAvailable = true,
   onToggleWeb,
   generationProvider,
   generationModel,
@@ -344,7 +393,7 @@ export function KnowledgeContextBar({
             .map((value) => Math.round(value))
             .filter((value) => value > 0)
         )
-      ),
+      ).sort((left, right) => left - right),
     [includeMediaIds]
   )
 
@@ -357,12 +406,13 @@ export function KnowledgeContextBar({
             .map((value) => value.trim())
             .filter(Boolean)
         )
-      ),
+      ).sort((left, right) => left.localeCompare(right)),
     [includeNoteIds]
   )
 
   const selectedMediaSet = useMemo(() => new Set(normalizedMediaIds), [normalizedMediaIds])
   const selectedNoteSet = useMemo(() => new Set(normalizedNoteIds), [normalizedNoteIds])
+  const effectiveWebEnabled = webEnabled && webFallbackAvailable
 
   const presetDetail = preset === "custom" ? null : PRESET_DETAILS[preset]
   const presetDescription =
@@ -523,8 +573,10 @@ export function KnowledgeContextBar({
     const newProfile: SearchProfile = {
       name: trimmed,
       sources: [...normalizedSources],
+      includeMediaIds: [...normalizedMediaIds],
+      includeNoteIds: [...normalizedNoteIds],
       preset,
-      enableWebFallback: webEnabled,
+      enableWebFallback: effectiveWebEnabled,
     }
     const updated = [newProfile, ...savedProfiles.filter((p) => p.name !== trimmed)].slice(
       0,
@@ -534,20 +586,41 @@ export function KnowledgeContextBar({
     persistProfiles(updated)
     setProfileSaveMode(false)
     setProfileNameInput("")
-  }, [profileNameInput, normalizedSources, preset, webEnabled, savedProfiles])
+  }, [
+    effectiveWebEnabled,
+    profileNameInput,
+    normalizedMediaIds,
+    normalizedNoteIds,
+    normalizedSources,
+    preset,
+    savedProfiles,
+  ])
 
   const loadProfile = useCallback(
     (profile: SearchProfile) => {
       onSourcesChange(profile.sources)
+      onIncludeMediaIdsChange(profile.includeMediaIds)
+      onIncludeNoteIdsChange(profile.includeNoteIds)
       onPresetChange(profile.preset)
       // Only toggle web fallback if the profile value differs from current state.
       // Note: only a toggle callback is available (no direct setter).
-      if (profile.enableWebFallback !== webEnabled) {
+      if (
+        webFallbackAvailable &&
+        profile.enableWebFallback !== effectiveWebEnabled
+      ) {
         onToggleWeb()
       }
       setProfileMenuOpen(false)
     },
-    [onSourcesChange, onPresetChange, onToggleWeb, webEnabled]
+    [
+      effectiveWebEnabled,
+      onIncludeMediaIdsChange,
+      onIncludeNoteIdsChange,
+      onSourcesChange,
+      onPresetChange,
+      onToggleWeb,
+      webFallbackAvailable,
+    ]
   )
 
   const deleteProfile = useCallback(
@@ -902,20 +975,37 @@ export function KnowledgeContextBar({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Tooltip title="When enabled, includes web search results alongside your documents. Useful when your documents don't cover the topic.">
+        <Tooltip
+          title={
+            webFallbackAvailable
+              ? "When enabled, includes web search results alongside your documents. Useful when your documents don't cover the topic."
+              : "Web fallback is not available on this server."
+          }
+        >
           <button
             type="button"
             onClick={onToggleWeb}
+            disabled={!webFallbackAvailable}
             className={cn(
               "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
-              webEnabled
+              effectiveWebEnabled
                 ? "border-primary/40 bg-primary/10 text-primaryStrong"
-                : "border-border text-text-muted hover:bg-surface2 hover:text-text"
+                : "border-border text-text-muted hover:bg-surface2 hover:text-text",
+              !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-muted"
             )}
-            aria-pressed={webEnabled}
-            aria-label={`Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`}
+            aria-pressed={effectiveWebEnabled}
+            aria-label={
+              webFallbackAvailable
+                ? `Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`
+                : "Web fallback is not available on this server."
+            }
+            title={
+              webFallbackAvailable
+                ? undefined
+                : "Web fallback is not available on this server."
+            }
           >
-            <Globe className={cn("h-3.5 w-3.5", webEnabled ? "fill-current" : "")} />
+            <Globe className={cn("h-3.5 w-3.5", effectiveWebEnabled ? "fill-current" : "")} />
             Web
           </button>
         </Tooltip>
@@ -967,12 +1057,15 @@ export function KnowledgeContextBar({
                   >
                     <span className="truncate font-medium">{profile.name}</span>
                     <span className="text-[10px] text-text-muted">
-                      {profile.preset} &middot;{" "}
+                      {PRESET_LABELS[profile.preset]} &middot;{" "}
                       {profile.sources.length === 0
                         ? "no sources"
                         : profile.sources.length >= ALL_RAG_SOURCES.length
                           ? "all sources"
                           : `${profile.sources.length} source${profile.sources.length === 1 ? "" : "s"}`}
+                      {profile.includeMediaIds.length > 0 || profile.includeNoteIds.length > 0
+                        ? ` · ${summarizeSpecificSources(profile.includeMediaIds, profile.includeNoteIds)}`
+                        : ""}
                       {profile.enableWebFallback ? " &middot; web" : ""}
                     </span>
                   </button>

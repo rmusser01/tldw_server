@@ -77,6 +77,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
       renderContextBar({
         preset: "fast",
         sources: ["media_db", "notes"],
+        includeMediaIds: [42, 7],
+        includeNoteIds: ["note-b", "note-a"],
         webEnabled: true,
       })
 
@@ -92,6 +94,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
       expect(stored[0]).toEqual({
         name: "My Research Setup",
         sources: ["media_db", "notes"],
+        includeMediaIds: [7, 42],
+        includeNoteIds: ["note-a", "note-b"],
         preset: "fast",
         enableWebFallback: true,
       })
@@ -140,6 +144,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
           {
             name: "Deep Research",
             sources: ["media_db", "notes", "chats"],
+            includeMediaIds: [42],
+            includeNoteIds: ["note-a", "note-b"],
             preset: "thorough",
             enableWebFallback: false,
           },
@@ -161,8 +167,39 @@ describe("KnowledgeContextBar saved search profiles", () => {
         "chats",
       ])
       expect(props.onPresetChange).toHaveBeenCalledWith("thorough")
+      expect(props.onIncludeMediaIdsChange).toHaveBeenCalledWith([42])
+      expect(props.onIncludeNoteIdsChange).toHaveBeenCalledWith([
+        "note-a",
+        "note-b",
+      ])
       // webEnabled is true, profile says false -> onToggleWeb should be called
       expect(props.onToggleWeb).toHaveBeenCalledTimes(1)
+    })
+
+    it("clears exact source scope when a saved profile has no exact filters", () => {
+      localStorage.setItem(
+        PROFILES_STORAGE_KEY,
+        JSON.stringify([
+          {
+            name: "All Library",
+            sources: ["media_db", "notes"],
+            preset: "balanced",
+            enableWebFallback: true,
+          },
+        ])
+      )
+
+      const { props } = renderContextBar({
+        includeMediaIds: [42],
+        includeNoteIds: ["note-a"],
+        webEnabled: true,
+      })
+
+      openProfileMenu()
+      fireEvent.click(screen.getByRole("menuitem", { name: /All Library/i }))
+
+      expect(props.onIncludeMediaIdsChange).toHaveBeenCalledWith([])
+      expect(props.onIncludeNoteIdsChange).toHaveBeenCalledWith([])
     })
 
     it("does not toggle web when profile matches current state", () => {

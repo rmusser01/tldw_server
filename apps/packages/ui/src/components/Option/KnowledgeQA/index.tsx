@@ -8,10 +8,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { KnowledgeQAProvider, useKnowledgeQA } from "./KnowledgeQAProvider"
 import { KnowledgeQALayout } from "./layout/KnowledgeQALayout"
+import { KnowledgeQASetupDiagnostics } from "./SetupDiagnostics"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import {
   useConnectionActions,
+  useKnowledgeStatus,
   useConnectionState,
   useConnectionUxState
 } from "@/hooks/useConnectionState"
@@ -83,11 +85,14 @@ function KnowledgeQAContent() {
   const { capabilities, loading: capabilitiesLoading, refresh: refreshCapabilities } =
     useServerCapabilities()
   const { checkOnce } = useConnectionActions()
-  const { isChecking, lastCheckedAt } = useConnectionState()
+  const connectionState = useConnectionState()
+  const { knowledgeStatus } = useKnowledgeStatus()
+  const { isChecking, lastCheckedAt } = connectionState
   const { uxState } = useConnectionUxState()
 
   // Check if RAG is supported
   const hasRag = capabilities?.hasRag ?? true
+  const webFallbackAvailable = capabilities?.hasWebSearch !== false
   const retryCountdownSeconds = useMemo(
     () =>
       getRetryCountdownSeconds({
@@ -284,83 +289,23 @@ function KnowledgeQAContent() {
   //   5. No RAG        -- server online but embedding model not configured
   // -----------------------------------------------------------------------
   if (!online && uxState !== "testing") {
-    if (uxState === "unconfigured" || uxState === "configuring_url") {
+    if (
+      uxState === "unconfigured" ||
+      uxState === "configuring_url" ||
+      uxState === "configuring_auth" ||
+      uxState === "error_auth" ||
+      uxState === "error_unreachable"
+    ) {
       return (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <WifiOff className="w-16 h-16 mx-auto mb-4 text-text-muted" />
-            <h2 className="text-xl font-semibold mb-2">
-              Setup Required
-            </h2>
-            <p className="text-text-muted mb-4">
-              Complete the server setup to start searching your documents.
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate("/")}
-              className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
-            >
-              Finish Setup
-            </button>
-          </div>
-        </div>
-      )
-    }
-
-    if (uxState === "error_auth" || uxState === "configuring_auth") {
-      return (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <WifiOff className="w-16 h-16 mx-auto mb-4 text-text-muted" />
-            <h2 className="text-xl font-semibold mb-2">
-              Add your credentials to use Knowledge QA
-            </h2>
-            <p className="text-text-muted mb-4">
-              Your server is reachable, but Knowledge QA needs valid credentials before it can load.
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate("/settings/tldw")}
-              className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
-            >
-              Open Settings
-            </button>
-          </div>
-        </div>
-      )
-    }
-
-    if (uxState === "error_unreachable") {
-      return (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <WifiOff className="w-16 h-16 mx-auto mb-4 text-text-muted" />
-            <h2 className="text-xl font-semibold mb-2">Can't reach your tldw server right now</h2>
-            <p className="text-text-muted mb-3">
-              Your server settings are saved, but Knowledge QA cannot reach the tldw server right now.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={handleRetryConnection}
-                disabled={isChecking}
-                className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {isChecking ? "Checking connection..." : "Retry connection"}
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate("/settings/health")}
-                className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
-              >
-                Health & diagnostics
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-text-muted">
-              Retrying automatically in {retryCountdownSeconds}s...
-            </p>
-          </div>
-        </div>
+        <KnowledgeQASetupDiagnostics
+          connection={connectionState}
+          uxState={uxState}
+          retryCountdownSeconds={retryCountdownSeconds}
+          onOpenSetup={() => navigate("/")}
+          onOpenSettings={() => navigate("/settings/tldw")}
+          onOpenDiagnostics={() => navigate("/settings/health")}
+          onRetryConnection={handleRetryConnection}
+        />
       )
     }
   }
@@ -434,7 +379,11 @@ function KnowledgeQAContent() {
       data-testid="knowledge-page-root"
       className="relative flex h-full w-full min-w-0 flex-1"
     >
-      <KnowledgeQALayout onExportClick={() => setExportDialogOpen(true)} />
+      <KnowledgeQALayout
+        onExportClick={() => setExportDialogOpen(true)}
+        knowledgeStatus={knowledgeStatus}
+        webFallbackAvailable={webFallbackAvailable}
+      />
 
       {/* Settings panel (drawer) */}
       {settingsPanelOpen ? (

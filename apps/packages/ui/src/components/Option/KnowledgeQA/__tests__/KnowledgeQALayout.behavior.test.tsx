@@ -1,7 +1,11 @@
 import React from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { KnowledgeQALayout } from "../layout/KnowledgeQALayout"
+import {
+  createKnowledgeQaStateFixture,
+  type KnowledgeQaStateFixtureName,
+} from "./knowledgeQaStateFixtures"
 
 const state = {
   settingsPanelOpen: false,
@@ -65,6 +69,11 @@ const layoutModeState = {
   isResearch: false,
 }
 
+const layoutProps = {
+  knowledgeStatus: "ready" as "unknown" | "ready" | "indexing" | "offline" | "empty",
+  webFallbackAvailable: true,
+}
+
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => state,
 }))
@@ -92,10 +101,42 @@ vi.mock("../history/HistoryPane", () => ({
 vi.mock("../context/KnowledgeContextBar", () => ({
   KnowledgeContextBar: ({
     contextChangedSinceLastRun,
+    onSourcesChange,
+    onIncludeMediaIdsChange,
+    onIncludeNoteIdsChange,
+    onPresetChange,
+    onToggleWeb,
+    onOpenSettings,
   }: {
     contextChangedSinceLastRun: boolean
+    onSourcesChange: (sources: string[]) => void
+    onIncludeMediaIdsChange: (ids: number[]) => void
+    onIncludeNoteIdsChange: (ids: string[]) => void
+    onPresetChange: (preset: string) => void
+    onToggleWeb: () => void
+    onOpenSettings: () => void
   }) => (
     <div data-testid="knowledge-context-bar">
+      <p>Source Scope</p>
+      <button type="button" onClick={() => onSourcesChange(["media_db", "notes"])}>
+        Select documents and notes
+      </button>
+      <button type="button" onClick={() => onIncludeMediaIdsChange([42])}>
+        Select exact document
+      </button>
+      <button type="button" onClick={() => onIncludeNoteIdsChange(["note-a"])}>
+        Select exact note
+      </button>
+      <button type="button" onClick={() => onPresetChange("thorough")}>
+        Use deep preset
+      </button>
+      <button type="button" onClick={onToggleWeb}>
+        Toggle web fallback
+      </button>
+      <button type="button">Profiles</button>
+      <button type="button" onClick={onOpenSettings}>
+        Advanced settings
+      </button>
       {contextChangedSinceLastRun ? "Scope changed" : "Scope unchanged"}
     </div>
   ),
@@ -104,27 +145,58 @@ vi.mock("../context/KnowledgeContextBar", () => ({
 vi.mock("../context/CompactToolbar", () => ({
   CompactToolbar: ({
     contextChangedSinceLastRun,
+    onOpenSourceSelector,
   }: {
     contextChangedSinceLastRun: boolean
+    onOpenSourceSelector: () => void
   }) => (
     <div data-testid="knowledge-compact-toolbar">
+      <button type="button" onClick={onOpenSourceSelector}>
+        Open compact sources
+      </button>
       {contextChangedSinceLastRun ? "Scope changed" : "Scope unchanged"}
     </div>
   ),
 }))
 
 vi.mock("../composer/KnowledgeComposer", () => ({
-  KnowledgeComposer: () => (
-    <input
-      id="knowledge-search-input"
-      aria-label="Search your knowledge base"
+  KnowledgeComposer: ({
+    searchBlockedMessage,
+  }: {
+    searchBlockedMessage?: string | null
+  }) => (
+    <div
       data-testid="knowledge-composer"
-    />
+      data-search-blocked-message={searchBlockedMessage ?? ""}
+    >
+      <input
+        id="knowledge-search-input"
+        aria-label="Search your knowledge base"
+      />
+    </div>
   ),
 }))
 
 vi.mock("../empty/KnowledgeReadyState", () => ({
-  KnowledgeReadyState: () => <div data-testid="knowledge-ready-state" />,
+  KnowledgeReadyState: ({
+    recoveryState,
+    hasSources,
+    webFallbackEnabled,
+  }: {
+    recoveryState?: { kind: string }
+    hasSources: boolean
+    webFallbackEnabled: boolean
+  }) => (
+    <div data-testid="knowledge-ready-state">
+      {recoveryState
+        ? `knowledge-ready-recovery:${recoveryState.kind}`
+        : hasSources
+        ? "Ready with selected sources"
+        : webFallbackEnabled
+          ? "Ready with web fallback only"
+          : "No sources selected"}
+    </div>
+  ),
 }))
 
 vi.mock("../empty/InlineRecentSessions", () => ({
@@ -159,7 +231,47 @@ vi.mock("../evidence/EvidenceRail", () => ({
 }))
 
 describe("KnowledgeQALayout evidence-rail transitions", () => {
-  const renderLayout = () => render(<KnowledgeQALayout onExportClick={vi.fn()} />)
+  const renderLayoutElement = () => (
+    <KnowledgeQALayout
+      onExportClick={vi.fn()}
+      knowledgeStatus={layoutProps.knowledgeStatus}
+      webFallbackAvailable={layoutProps.webFallbackAvailable}
+    />
+  )
+  const renderLayout = () => render(renderLayoutElement())
+  const applyStateFixture = (name: KnowledgeQaStateFixtureName) => {
+    const fixture = createKnowledgeQaStateFixture(name).knowledgeQa
+    const fullFixture = createKnowledgeQaStateFixture(name)
+    layoutProps.knowledgeStatus =
+      fullFixture.sourceInventory.media.length === 0 &&
+      fullFixture.sourceInventory.notes.length === 0
+        ? "empty"
+        : "ready"
+    layoutProps.webFallbackAvailable =
+      fullFixture.capabilities.capabilities?.hasWebSearch !== false
+    state.settingsPanelOpen = fixture.settingsPanelOpen
+    state.results = fixture.results
+    state.answer = fixture.answer
+    state.citations = fixture.citations
+    state.hasSearched = fixture.hasSearched
+    state.isSearching = fixture.isSearching
+    state.error = fixture.error
+    state.queryStage = fixture.queryStage
+    state.preset = fixture.preset
+    state.settings = {
+      sources: fixture.settings.sources,
+      enable_web_fallback: fixture.settings.enable_web_fallback,
+      top_k: fixture.settings.top_k,
+      include_media_ids: fixture.settings.include_media_ids,
+      include_note_ids: fixture.settings.include_note_ids,
+    }
+    state.searchHistory = fixture.searchHistory
+    state.messages = fixture.messages
+    state.evidenceRailOpen = fixture.evidenceRailOpen
+    state.evidenceRailTab = fixture.evidenceRailTab
+    state.lastSearchScope = fixture.lastSearchScope
+    state.pinnedSourceFilters = fixture.pinnedSourceFilters
+  }
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -187,6 +299,8 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     layoutModeState.mode = "simple"
     layoutModeState.isSimple = true
     layoutModeState.isResearch = false
+    layoutProps.knowledgeStatus = "ready"
+    layoutProps.webFallbackAvailable = true
   })
 
   it("keeps the evidence rail closed while the settings panel is open", async () => {
@@ -214,6 +328,98 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     rerender(<KnowledgeQALayout onExportClick={vi.fn()} />)
 
     expect(await screen.findByTestId("knowledge-evidence-rail-closed")).toBeInTheDocument()
+  })
+
+  it.each([
+    ["noIndexedSources", "knowledge-ready-state", "knowledge-ready-recovery:no_indexed_sources"],
+    ["readySearch", "knowledge-ready-state", "knowledge-ready-recovery:ready"],
+    ["noSelectedSources", "knowledge-ready-state", "knowledge-ready-recovery:no_selected_sources"],
+    ["results", "knowledge-results-shell", "knowledge-answer-workspace"],
+    ["noResults", "knowledge-results-shell", "knowledge-no-results-recovery"],
+  ] as const)(
+    "renders the %s audited state from a deterministic fixture",
+    async (fixtureName, testId, expectedMarker) => {
+      applyStateFixture(fixtureName)
+
+      renderLayout()
+
+      const element = await screen.findByTestId(testId)
+      expect(element).toBeInTheDocument()
+      if (expectedMarker.startsWith("knowledge-")) {
+        if (expectedMarker.startsWith("knowledge-ready-recovery:")) {
+          expect(screen.getByText(expectedMarker)).toBeInTheDocument()
+        } else {
+          expect(await screen.findByTestId(expectedMarker)).toBeInTheDocument()
+        }
+      } else {
+        expect(screen.getByText(expectedMarker)).toBeInTheDocument()
+      }
+    }
+  )
+
+  it("classifies no selected sources as blocked when web fallback is unavailable", async () => {
+    applyStateFixture("noSelectedSources")
+    state.settings.enable_web_fallback = true
+    layoutProps.webFallbackAvailable = false
+
+    renderLayout()
+
+    expect(await screen.findByTestId("knowledge-ready-state")).toHaveTextContent(
+      "knowledge-ready-recovery:no_selected_sources"
+    )
+  })
+
+  it("classifies no selected sources as web-only when web fallback is enabled and available", async () => {
+    applyStateFixture("noSelectedSources")
+    state.settings.enable_web_fallback = true
+    layoutProps.webFallbackAvailable = true
+
+    renderLayout()
+
+    expect(await screen.findByTestId("knowledge-ready-state")).toHaveTextContent(
+      "knowledge-ready-recovery:web_only"
+    )
+  })
+
+  it("passes a visible no-indexed-source block reason to the composer", async () => {
+    applyStateFixture("noIndexedSources")
+
+    renderLayout()
+
+    expect(await screen.findByTestId("knowledge-composer")).toHaveAttribute(
+      "data-search-blocked-message",
+      "Add or index library sources before asking Knowledge QA."
+    )
+  })
+
+  it("opens shared source scope and profile controls from the compact source action", async () => {
+    renderLayout()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open compact sources" }))
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Source scope and profiles",
+    })
+    expect(within(dialog).getByText("Source Scope")).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Profiles" })).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Select documents and notes" }))
+    expect(state.updateSetting).toHaveBeenCalledWith("sources", ["media_db", "notes"])
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Select exact document" }))
+    expect(state.updateSetting).toHaveBeenCalledWith("include_media_ids", [42])
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Select exact note" }))
+    expect(state.updateSetting).toHaveBeenCalledWith("include_note_ids", ["note-a"])
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Use deep preset" }))
+    expect(state.setPreset).toHaveBeenCalledWith("thorough")
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Toggle web fallback" }))
+    expect(state.updateSetting).toHaveBeenCalledWith("enable_web_fallback", false)
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Advanced settings" }))
+    expect(state.setSettingsPanelOpen).toHaveBeenCalledWith(true)
   })
 
   it("reopens the evidence rail for a new search after a manual close", async () => {

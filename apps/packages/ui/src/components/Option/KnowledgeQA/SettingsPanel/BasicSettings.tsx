@@ -57,7 +57,7 @@ export function BasicSettings() {
           className="w-full accent-primary"
         />
         <p className="text-xs text-text-muted">
-          How many documents to retrieve (5-10 for quick, 20+ for thorough)
+          How many documents to retrieve (5-10 for quick, 20+ for deep searches)
         </p>
         {settings.top_k > 30 && preset === "thorough" && (
           <p className="text-xs text-warn">
