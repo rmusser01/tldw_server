@@ -89,6 +89,15 @@ def test_detail_role_filter_is_case_insensitive():
             "permissions": [],
             "feature_flags": set(),
             "allowed_scopes": {"rag.search"},
+        },
+        {
+            "id": "2",
+            "username": "Chris",
+            "primary_role": "Analyst",
+            "roles": ["Analyst"],
+            "permissions": [],
+            "feature_flags": set(),
+            "allowed_scopes": {"rag.search"},
         }
     ]
 
@@ -98,5 +107,6 @@ def test_detail_role_filter_is_case_insensitive():
         role_filter="admin",
     )
 
-    assert len(items) == 1
-    assert items[0]["role"] == "Admin"
+    assert items
+    assert {item["user_id"] for item in items} == {"1"}
+    assert {item["role"] for item in items} == {"Admin"}

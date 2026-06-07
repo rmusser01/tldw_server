@@ -1003,6 +1003,11 @@
     {
       "dependencies": [
         {
+          "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+          "type": "dependency"
+        },
+        {
           "id": "User_DB_Handling.get_request_user",
           "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
           "type": "dependency"
@@ -1105,6 +1110,38 @@
       ],
       "name": "create_workspace",
       "path": "/api/v1/agent-orchestration/workspaces",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "agent-orchestration",
+        "agent-orchestration"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Find or create an ACP execution workspace linked to a canonical workspace.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_orchestration.ensure_canonical_workspace_bridge",
+      "methods": [
+        "POST"
+      ],
+      "name": "ensure_canonical_workspace_bridge",
+      "path": "/api/v1/agent-orchestration/workspaces/canonical-bridge",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -2415,6 +2452,11 @@
     {
       "dependencies": [
         {
+          "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+          "type": "dependency"
+        },
+        {
           "id": "User_DB_Handling.get_request_user",
           "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
           "type": "dependency"
@@ -2486,6 +2528,38 @@
       ],
       "name": "create_workspace",
       "path": "/api/v1/agent-orchestration/workspaces",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "agent-orchestration",
+        "agent-orchestration"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Find or create an ACP execution workspace linked to a canonical workspace.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_orchestration.ensure_canonical_workspace_bridge",
+      "methods": [
+        "POST"
+      ],
+      "name": "ensure_canonical_workspace_bridge",
+      "path": "/api/v1/agent-orchestration/workspaces/canonical-bridge",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -2934,6 +3008,196 @@
     {
       "dependencies": [
         {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.list_audio_presets_endpoint",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_audio_presets_endpoint",
+      "path": "/api/v1/audio/presets",
+      "rate_limit_resources": [],
+      "summary": "List reusable audio presets.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.create_audio_preset_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets",
+      "rate_limit_resources": [],
+      "summary": "Create a reusable audio preset.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.delete_audio_preset_endpoint",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets/{preset_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a reusable audio preset.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.update_audio_preset_endpoint",
+      "methods": [
+        "PATCH"
+      ],
+      "name": "update_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets/{preset_id}",
+      "rate_limit_resources": [],
+      "summary": "Update a reusable audio preset.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.validate_audio_preset_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "validate_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets/{preset_id}/validate",
+      "rate_limit_resources": [],
+      "summary": "Validate a reusable audio preset against current runtime assumptions.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
           "id": "DB_Deps.try_get_media_db_for_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
           "type": "dependency"
@@ -3140,6 +3404,34 @@
       "path": "/api/v1/audio/transcriptions",
       "rate_limit_resources": [],
       "summary": "Transcribes audio into text (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Return read-only STT capability metadata without warming models.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_health.get_stt_capabilities",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_stt_capabilities",
+      "path": "/api/v1/audio/transcriptions/capabilities",
+      "rate_limit_resources": [],
+      "summary": "Summarize STT model capabilities",
       "tags": [
         "audio",
         "Audio",
@@ -4361,8 +4653,18 @@
           "type": "dependency"
         },
         {
+          "id": "Collections_DB_Deps.get_collections_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps",
+          "type": "dependency"
+        },
+        {
           "id": "DB_Deps.get_media_db_for_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "Prompts_DB_Deps.get_prompts_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps",
           "type": "dependency"
         },
         {
@@ -4402,6 +4704,45 @@
         "rag.search"
       ],
       "summary": "Unified RAG Search",
+      "tags": [
+        "rag-unified",
+        "rag-unified"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Read-only pre-query source readiness for Knowledge QA.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rag_unified.source_health_endpoint",
+      "methods": [
+        "GET"
+      ],
+      "name": "source_health_endpoint",
+      "path": "/api/v1/rag/source-health",
+      "rate_limit_resources": [
+        "rag.search"
+      ],
+      "summary": "Knowledge source health",
       "tags": [
         "rag-unified",
         "rag-unified"
@@ -4649,6 +4990,206 @@
       "path": "/api/v1/audio/history/{history_id}",
       "rate_limit_resources": [],
       "summary": "Update TTS history entry fields.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.presets.create": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.create_audio_preset_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets",
+      "rate_limit_resources": [],
+      "summary": "Create a reusable audio preset.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.presets.delete": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.delete_audio_preset_endpoint",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets/{preset_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a reusable audio preset.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.presets.list": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.list_audio_presets_endpoint",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_audio_presets_endpoint",
+      "path": "/api/v1/audio/presets",
+      "rate_limit_resources": [],
+      "summary": "List reusable audio presets.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.presets.update": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.update_audio_preset_endpoint",
+      "methods": [
+        "PATCH"
+      ],
+      "name": "update_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets/{preset_id}",
+      "rate_limit_resources": [],
+      "summary": "Update a reusable audio preset.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.presets.validate": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_presets.validate_audio_preset_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "validate_audio_preset_endpoint",
+      "path": "/api/v1/audio/presets/{preset_id}/validate",
+      "rate_limit_resources": [],
+      "summary": "Validate a reusable audio preset against current runtime assumptions.",
       "tags": [
         "audio",
         "Audio",
@@ -5006,6 +5547,36 @@
       "path": "/api/v1/audio/transcriptions",
       "rate_limit_resources": [],
       "summary": "Transcribes audio into text (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.transcriptions.capabilities": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Return read-only STT capability metadata without warming models.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_health.get_stt_capabilities",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_stt_capabilities",
+      "path": "/api/v1/audio/transcriptions/capabilities",
+      "rate_limit_resources": [],
+      "summary": "Summarize STT model capabilities",
       "tags": [
         "audio",
         "Audio",
@@ -6546,8 +7117,18 @@
           "type": "dependency"
         },
         {
+          "id": "Collections_DB_Deps.get_collections_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps",
+          "type": "dependency"
+        },
+        {
           "id": "DB_Deps.get_media_db_for_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "Prompts_DB_Deps.get_prompts_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps",
           "type": "dependency"
         },
         {
@@ -6587,6 +7168,45 @@
         "rag.search"
       ],
       "summary": "Unified RAG Search",
+      "tags": [
+        "rag-unified",
+        "rag-unified"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Read-only pre-query source readiness for Knowledge QA.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rag_unified.source_health_endpoint",
+      "methods": [
+        "GET"
+      ],
+      "name": "source_health_endpoint",
+      "path": "/api/v1/rag/source-health",
+      "rate_limit_resources": [
+        "rag.search"
+      ],
+      "summary": "Knowledge source health",
       "tags": [
         "rag-unified",
         "rag-unified"

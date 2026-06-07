@@ -18,6 +18,8 @@ def _apply_test_env_defaults() -> None:
     Sets environment flags to mirror test configuration and route scoping:
     - MINIMAL_TEST_APP: enable minimal app configuration for tests
     - TEST_MODE: activate test mode behaviors
+    - SINGLE_USER_API_KEY/AUTH_MODE/DATABASE_URL: mirror pytest's deterministic
+      AuthNZ defaults before importing the app
     - OTEL_SDK_DISABLED: disable OpenTelemetry instrumentation
     - ROUTES_DISABLE: ensure "research" is disabled and remove "notes" if
       present (parsed from comma/space-delimited values).  Must match
@@ -28,10 +30,15 @@ def _apply_test_env_defaults() -> None:
     os.environ["MINIMAL_TEST_APP"] = "1"
     os.environ["TEST_MODE"] = "1"
     os.environ["OTEL_SDK_DISABLED"] = "true"
-    # Route inclusion in app startup now keys off explicit pytest runtime, not
-    # only TEST_MODE. Mirror pytest's runtime signal so this helper produces
-    # the same snapshot shape as tests.
-    os.environ.setdefault("PYTEST_CURRENT_TEST", "snapshot_regen::helper (call)")
+    os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
+    os.environ["SINGLE_USER_API_KEY"] = os.environ["SINGLE_USER_TEST_API_KEY"]
+    os.environ["AUTH_MODE"] = "single_user"
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./Databases/users.db")
+    os.environ.pop("PROFILE", None)
+    # The snapshot test imports the app while pytest is collecting the test
+    # module, before PYTEST_CURRENT_TEST is set for a specific test call.
+    # Mirror that collection-time environment so route inclusion matches CI.
+    os.environ.pop("PYTEST_CURRENT_TEST", None)
     logger.debug("Set test environment flags: MINIMAL_TEST_APP, TEST_MODE, OTEL_SDK_DISABLED")
     existing_disable = os.getenv("ROUTES_DISABLE", "")
     disable_parts = [p for p in existing_disable.replace(" ", ",").split(",") if p]
