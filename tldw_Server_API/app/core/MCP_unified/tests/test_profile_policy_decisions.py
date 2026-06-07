@@ -239,6 +239,37 @@ def test_policy_decision_rule_rejects_command_wildcard_executable() -> None:
         )
 
 
+def test_policy_decision_rule_rejects_command_set_argv_before_coercion() -> None:
+    with pytest.raises(ValueError, match="command policy rule argv must be a sequence"):
+        PolicyDecisionRule(
+            rule_type="command",
+            outcome="allow",
+            source="precompiled",
+            argv={"*", "--version"},
+        )
+
+
+def test_policy_decision_rule_rejects_command_string_argv_before_coercion() -> None:
+    with pytest.raises(ValueError, match="command policy rule argv must be a sequence"):
+        PolicyDecisionRule(
+            rule_type="command",
+            outcome="allow",
+            source="precompiled",
+            argv="git status",
+        )
+
+
+def test_policy_decision_rule_accepts_command_list_argv() -> None:
+    rule = PolicyDecisionRule(
+        rule_type="command",
+        outcome="allow",
+        source="precompiled",
+        argv=["git", "status"],
+    )
+
+    assert rule.argv == ("git", "status")
+
+
 @pytest.mark.parametrize("argv", [None, (), ("git", "")])
 def test_policy_decision_rule_rejects_invalid_command_argv(
     argv: tuple[str, ...] | None,
@@ -261,6 +292,18 @@ def test_compile_profile_policy_rules_revalidates_precompiled_command_rules() ->
     )
 
     with pytest.raises(ValueError, match="command executable must be fixed"):
+        compile_profile_policy_rules({"command_rules": [invalid_rule]})
+
+
+def test_compile_profile_policy_rules_revalidates_precompiled_unordered_command_argv() -> None:
+    invalid_rule = PolicyDecisionRule.model_construct(
+        rule_type="command",
+        outcome="allow",
+        source="precompiled",
+        argv={"*", "--version"},
+    )
+
+    with pytest.raises(ValueError, match="command policy rule argv must be a sequence"):
         compile_profile_policy_rules({"command_rules": [invalid_rule]})
 
 

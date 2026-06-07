@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PolicyDecisionOutcome = Literal["deny", "ask", "allow"]
 PolicyDecisionVisibility = Literal["hidden", "direct", "deferred", "debug_only"]
@@ -72,6 +72,11 @@ class PolicyDecisionRule(BaseModel):
     pattern: str | None = None
     argv: tuple[str, ...] | None = None
     reason_code: str | None = None
+
+    @field_validator("argv", mode="before")
+    @classmethod
+    def _validate_argv_shape(cls, value: Any) -> Any:
+        return _validate_command_rule_argv_input(value)
 
     @model_validator(mode="after")
     def _validate_command_rule(self) -> "PolicyDecisionRule":
@@ -252,6 +257,16 @@ def _validate_command_rule_argv(argv: tuple[str, ...] | None) -> None:
     _validate_fixed_command_executable(argv)
 
 
+def _validate_command_rule_argv_input(value: Any) -> Any:
+    """Reject argv inputs whose ordering is ambiguous before coercion."""
+
+    if value is None:
+        return value
+    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, Sequence):
+        raise ValueError("command policy rule argv must be a sequence")
+    return value
+
+
 def _validate_fixed_command_executable(argv: tuple[str, ...]) -> None:
     """Require command rules to name a fixed executable token."""
 
@@ -303,6 +318,7 @@ def _compile_structured_rule(
     if isinstance(rule_document, PolicyDecisionRule):
         if rule_document.rule_type != rule_type:
             raise ValueError("structured rule type does not match source field")
+        _validate_command_rule_argv_input(rule_document.argv)
         return PolicyDecisionRule.model_validate(rule_document.model_dump())
 
     outcome = _structured_rule_outcome(rule_document)
@@ -353,10 +369,7 @@ def _structured_command_argv(rule_document: Any) -> tuple[str, ...]:
             return _bash_pattern_argv(pattern[len("Bash(") : -1])
         raise ValueError("command policy rules require argv")
 
-    if isinstance(argv_value, (str, bytes, Mapping)) or not isinstance(argv_value, Sequence):
-        raise ValueError("command policy rule argv must be a sequence")
-
-    argv = tuple(argv_value)
+    argv = tuple(_validate_command_rule_argv_input(argv_value))
     _validate_command_rule_argv(argv)
     return argv
 
