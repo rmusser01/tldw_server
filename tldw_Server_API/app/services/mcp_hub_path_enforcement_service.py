@@ -269,27 +269,22 @@ def _path_scope_action(metadata: dict[str, Any]) -> str:
 def _selected_profile_id(effective_policy: dict[str, Any] | None) -> int | None:
     policy = dict(effective_policy or {})
     selected_assignment_id = policy.get("selected_assignment_id")
+    if selected_assignment_id in (None, ""):
+        return None
     sources = policy.get("sources")
     if not isinstance(sources, list):
         return None
-    valid_sources = [dict(source) for source in sources if isinstance(source, Mapping)]
-    selected_source: dict[str, Any] | None = None
-    if selected_assignment_id not in (None, ""):
-        for source in valid_sources:
-            if source.get("assignment_id") == selected_assignment_id:
-                selected_source = source
-                break
-    elif len(valid_sources) == 1:
-        selected_source = valid_sources[0]
-    if selected_source is None and len(valid_sources) == 1:
-        selected_source = valid_sources[0]
-    if selected_source is None:
-        return None
-    try:
-        profile_id = selected_source.get("profile_id")
-        return int(profile_id) if profile_id not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        if source.get("assignment_id") != selected_assignment_id:
+            continue
+        try:
+            profile_id = source.get("profile_id")
+            return int(profile_id) if profile_id not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _preview_outcome(enforcement_result: dict[str, Any]) -> str:
