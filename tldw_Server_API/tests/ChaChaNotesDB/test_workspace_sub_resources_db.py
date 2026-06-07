@@ -8,7 +8,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 def db(tmp_path):
     d = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     d.upsert_workspace("ws-1", "Test WS")
-    return d
+    try:
+        yield d
+    finally:
+        d.close_all_connections()
 
 
 class TestWorkspaceSources:

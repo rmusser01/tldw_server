@@ -1,5 +1,6 @@
 import os
 import tempfile
+from contextlib import contextmanager
 
 import pytest
 from hypothesis import given, settings, strategies as st
@@ -10,11 +11,19 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 
-def test_writing_sessions_crud_and_clone():
+@contextmanager
+def _temp_chacha_db():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "ChaChaNotes.db")
         db = CharactersRAGDB(db_path, client_id="test")
+        try:
+            yield db
+        finally:
+            db.close_all_connections()
 
+
+def test_writing_sessions_crud_and_clone():
+    with _temp_chacha_db() as db:
         payload = {"prompt": "Once upon a time", "tokens": 12}
         session_id = db.add_writing_session(name="Draft One", payload=payload)
         session = db.get_writing_session(session_id)
@@ -58,10 +67,7 @@ def test_writing_sessions_crud_and_clone():
 
 
 def test_writing_templates_and_themes_versioning():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         db.add_writing_template(name="Template A", payload={"preset": "alpha"}, is_default=False)
         template = db.get_writing_template_by_name("Template A")
         assert template is not None
@@ -110,10 +116,7 @@ def test_writing_templates_and_themes_versioning():
 
 
 def test_update_writing_session_payload_json_dict_serialized():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         session_id = db.add_writing_session(name="Draft", payload={"prompt": "Original"})
         update_payload = {"prompt": "Direct payload_json", "tokens": 5}
         db.update_writing_session(
@@ -128,10 +131,7 @@ def test_update_writing_session_payload_json_dict_serialized():
 
 
 def test_update_writing_template_payload_json_dict_serialized():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         db.add_writing_template(name="Template B", payload={"preset": "alpha"})
         update_payload = {"preset": "beta", "notes": "direct payload_json"}
         db.update_writing_template(
@@ -163,10 +163,7 @@ _PAYLOAD_DICTS = st.dictionaries(
 @given(payload=_PAYLOAD_DICTS)
 @settings(max_examples=25, deadline=None)
 def test_writing_session_payload_round_trip(payload):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "ChaChaNotes.db")
-        db = CharactersRAGDB(db_path, client_id="test")
-
+    with _temp_chacha_db() as db:
         session_id = db.add_writing_session(name="Round Trip", payload=payload)
         session = db.get_writing_session(session_id)
         assert session is not None
