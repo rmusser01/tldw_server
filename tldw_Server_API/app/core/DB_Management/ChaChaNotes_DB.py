@@ -596,7 +596,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 48  # Schema v48 adds Notes task-backed checklist storage
+    _CURRENT_SCHEMA_VERSION = 49  # Schema v49 adds Workspace Assistant Defaults storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -3323,7 +3323,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
     last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted       BOOLEAN NOT NULL DEFAULT false,
     client_id     TEXT    NOT NULL DEFAULT 'unknown',
-    version       INTEGER NOT NULL DEFAULT 1
+    version       INTEGER NOT NULL DEFAULT 1,
+    assistant_defaults_json TEXT
 );
 
 ALTER TABLE conversations
@@ -5584,6 +5585,16 @@ UPDATE db_schema_version
    AND version < 48;
 """
 
+    _MIGRATION_SQL_V48_TO_V49 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 49 — Workspace Assistant Defaults storage (2026-06-07)
+───────────────────────────────────────────────────────────────*/
+UPDATE db_schema_version
+   SET version = 49
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 49;
+"""
+
     _MIGRATION_SQL_V47_TO_V48_POSTGRES = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
@@ -5689,6 +5700,18 @@ UPDATE db_schema_version
    SET version = 48
  WHERE schema_name = 'rag_char_chat_schema'
    AND version < 48;
+"""
+
+    _MIGRATION_SQL_V48_TO_V49_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 49 — Workspace Assistant Defaults storage (2026-06-07) [Postgres]
+───────────────────────────────────────────────────────────────*/
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS assistant_defaults_json TEXT;
+
+UPDATE db_schema_version
+   SET version = 49
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 49;
 """
 
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
@@ -7583,7 +7606,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     deleted       BOOLEAN  NOT NULL DEFAULT 0,
                     client_id     TEXT    NOT NULL DEFAULT 'unknown',
-                    version       INTEGER  NOT NULL DEFAULT 1
+                    version       INTEGER  NOT NULL DEFAULT 1,
+                    assistant_defaults_json TEXT
                 )
             """)
 
@@ -7887,6 +7911,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V47->V48: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V48 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v48_to_v49(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V48 to V49 (Workspace Assistant Defaults storage)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V48 to V49 for DB: {self.db_path_str}...")
+        try:
+            self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
+            conn.executescript(self._MIGRATION_SQL_V48_TO_V49)
+            final_version = self._get_db_version(conn)
+            if final_version != 49:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V48->V49 failed version check. Expected 49, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V49 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V48->V49 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V48->V49 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V48->V49: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V49 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
@@ -8874,6 +8919,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "audio_model": "TEXT",
                 "audio_voice": "TEXT",
                 "audio_speed": "REAL DEFAULT 1.0",
+                "assistant_defaults_json": "TEXT",
             }
             for col_name, col_type in new_ws_cols.items():
                 if col_name not in ws_cols:
@@ -9065,6 +9111,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite workspace sub-resource schema: {exc}") from exc  # noqa: TRY003
 
+    def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure Workspace Assistant Defaults storage exists for SQLite."""
+        try:
+            ws_cols = {row[1] for row in conn.execute("PRAGMA table_info('workspaces')").fetchall()}
+            if "assistant_defaults_json" not in ws_cols:
+                conn.execute("ALTER TABLE workspaces ADD COLUMN assistant_defaults_json TEXT")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite workspace assistant defaults schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_workspace_subresource_schema_postgres(self, conn: Any) -> None:
         """Ensure workspace settings columns and sub-resource tables exist for PostgreSQL."""
         if not hasattr(self.backend, "execute"):
@@ -9081,6 +9136,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_model TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_voice TEXT",
             "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS audio_speed REAL DEFAULT 1.0",
+            "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS assistant_defaults_json TEXT",
             """
             CREATE TABLE IF NOT EXISTS workspace_project_roots (
                 root_id              TEXT PRIMARY KEY NOT NULL,
@@ -9681,6 +9737,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_recent_voice_command_schema_sqlite(conn)
                     self._ensure_note_folder_schema_sqlite(conn)
                     self._ensure_note_studio_schema_sqlite(conn)
+                    self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                     # Seed/heal character_cards_fts before request traffic. Schema V4
                     # inserts "Default Assistant" before FTS triggers are created.
                     self._self_heal_character_cards_fts_sqlite(conn)
@@ -9824,6 +9881,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 48 and current_db_version == 47:
                         self._migrate_from_v47_to_v48(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 49 and current_db_version == 48:
+                        self._migrate_from_v48_to_v49(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -10176,6 +10236,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 self._migrate_from_v46_to_v47(conn)
                             elif fallback_version == 47:
                                 self._migrate_from_v47_to_v48(conn)
+                            elif fallback_version == 48:
+                                self._migrate_from_v48_to_v49(conn)
                             else:
                                 raise SchemaError(  # noqa: TRY003, TRY301
                                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
@@ -10296,12 +10358,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 48 and current_db_version == 47:
                     self._migrate_from_v47_to_v48(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 49 and current_db_version == 48:
+                    self._migrate_from_v48_to_v49(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
+                self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -14131,6 +14197,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 48:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V47_TO_V48_POSTGRES, conn, expected_version=48)
                 current_version = 48
+            if current_version < 49:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V48_TO_V49_POSTGRES, conn, expected_version=49)
+                current_version = 49
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -14743,7 +14812,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 deleted       BOOLEAN NOT NULL DEFAULT false,
                 client_id     TEXT    NOT NULL DEFAULT 'unknown',
-                version       INTEGER NOT NULL DEFAULT 1
+                version       INTEGER NOT NULL DEFAULT 1,
+                assistant_defaults_json TEXT
             )
             """,
             connection=conn,
@@ -15721,6 +15791,52 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         return CharactersRAGDBError(f"Workspace project root write failed: {exc}")  # noqa: TRY003
 
+    @classmethod
+    def _serialize_workspace_assistant_defaults_json(cls, value: Any) -> str | None:
+        """Serialize Workspace Assistant Defaults for DB storage."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                parsed = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError):
+                return None
+            return stripped if isinstance(parsed, Mapping) else None
+        if not isinstance(value, Mapping):
+            return None
+        try:
+            return json.dumps(dict(value), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _load_workspace_assistant_defaults_json(cls, value: Any) -> dict[str, Any] | None:
+        """Load Workspace Assistant Defaults from DB storage."""
+        if value is None:
+            return None
+        if isinstance(value, Mapping):
+            return dict(value)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return dict(parsed) if isinstance(parsed, Mapping) else None
+
+    @classmethod
+    def _workspace_row_to_dict(cls, row: Any) -> dict[str, Any]:
+        """Convert a workspace DB row to the public DB-layer dict shape."""
+        workspace = dict(row)
+        if "assistant_defaults_json" in workspace:
+            workspace["assistant_defaults_json"] = cls._load_workspace_assistant_defaults_json(
+                workspace["assistant_defaults_json"]
+            )
+        return workspace
+
     def upsert_workspace(
         self,
         workspace_id: str,
@@ -15807,13 +15923,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = "SELECT * FROM workspaces WHERE id = ? AND deleted = 0"
         cursor = self.execute_query(query, (workspace_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return self._workspace_row_to_dict(row) if row else None
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         """Return all non-deleted workspaces ordered by name."""
         query = "SELECT * FROM workspaces WHERE deleted = 0 ORDER BY name"
         cursor = self.execute_query(query, ())
-        return [dict(row) for row in cursor.fetchall()]
+        return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
 
     def update_workspace(
         self,
@@ -15851,11 +15967,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "name", "description", "metadata_json", "study_materials_policy", "workspace_profile", "archived", "tag",
             "banner_title", "banner_subtitle", "banner_color",
             "audio_provider", "audio_model", "audio_voice", "audio_speed",
+            "assistant_defaults_json",
         ):
             if col in update_data:
                 set_clauses.append(f"{col} = ?")
                 if col == "workspace_profile":
                     params.append(self._validate_workspace_profile(update_data[col]))
+                elif col == "assistant_defaults_json":
+                    params.append(self._serialize_workspace_assistant_defaults_json(update_data[col]))
                 else:
                     params.append(update_data[col])
 
