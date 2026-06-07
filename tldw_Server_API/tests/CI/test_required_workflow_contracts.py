@@ -225,6 +225,7 @@ def test_embedding_model_cache_restore_is_non_blocking() -> None:
     for step in cache_steps:
         assert step.get("uses") == "actions/cache@v5"
         assert step.get("continue-on-error") is True
+        assert "github.event_name != 'workflow_dispatch'" in str(step.get("if"))
 
 
 def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
