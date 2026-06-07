@@ -147,3 +147,37 @@
 - [ ] Resuming Persona-backed chats restores Persona identity from server metadata without falling back to Character identity.
 - [ ] Backend API contracts store and return Persona assistant metadata and reject invalid Character/Persona memory combinations.
 - [ ] No Buddy runtime, Workspace defaults, scheduling, broad memory, or design-system files are modified.
+
+---
+
+## Closeout Evidence: 2026-06-06
+
+The Persona-backed Chat Startup hardening slices have landed on `dev` and the
+final closeout verification ran on `origin/dev` at merge commit
+`e6e7cd29cf2cc136d277a7223bd60b0d7cbe5a6c`.
+
+Merged implementation records:
+- `TASK-474`: plan-only PRD hardening plan.
+- `TASK-477`: assistant selection contract coverage.
+- `TASK-476`: Persona server chat memory isolation.
+- `TASK-478`: first-send Persona startup contract.
+- `TASK-479`: Persona chat resume metadata contract.
+- `TASK-2264`: backend chat session metadata contract.
+
+Final focused verification:
+- `./node_modules/.bin/vitest run src/types/__tests__/assistant-selection.test.ts src/components/Common/__tests__/AssistantSelect.behavior.test.tsx` from `apps/packages/ui`: 2 files, 36 tests passed.
+- `./node_modules/.bin/vitest run src/hooks/chat/__tests__/personaServerChat.test.ts` from `apps/packages/ui`: 1 file, 7 tests passed.
+- `./node_modules/.bin/vitest run src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx` from `apps/packages/ui`: 1 file, 4 tests passed.
+- `./node_modules/.bin/vitest run src/hooks/__tests__/useServerChatLoader.test.ts` from `apps/packages/ui`: 1 file, 27 tests passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py -k persona -q`: 1 passed, 14 deselected.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_session_create_schema.py -q`: 11 passed.
+
+Closeout notes:
+- Bandit is not applicable to this closeout PR because it updates Markdown
+  plan/Backlog evidence only and changes no Python executable code.
+- Dependency hydration with `bun install` was required in the isolated
+  worktree to restore broken package-local Vitest symlink targets; generated
+  dependency file changes were discarded before closeout edits.
+- Scope remained strictly Persona ordinary chat startup. No Buddy runtime,
+  Persona visual pack, Workspace defaults, scheduling, broad memory, or
+  design-system files were modified.
