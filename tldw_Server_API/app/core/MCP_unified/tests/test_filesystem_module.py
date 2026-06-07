@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,10 @@ from mcp_unified.interfaces.path_scope import PathScopeCandidate
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module import (
     FilesystemModule,
+)
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_receipts import (
+    ReadReceiptError,
+    ReadReceiptManager,
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException, MCPProtocol, RequestContext
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
@@ -419,6 +425,37 @@ async def test_filesystem_read_returns_content_hash_and_receipt(tmp_path: Path) 
     }
 
 
+def test_read_receipts_require_configured_stable_secret() -> None:
+    manager = ReadReceiptManager(secret=None)
+
+    with pytest.raises(ReadReceiptError, match="read_receipt_secret_unconfigured"):
+        manager.issue(path="story.txt", sha256="0" * 64, size=1)
+    with pytest.raises(ReadReceiptError, match="read_receipt_secret_unconfigured"):
+        manager.validate("not-a-valid-receipt")
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_omits_receipt_without_configured_secret(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "story.txt").write_text("alpha\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-read-no-receipt-secret", user_id="1", metadata={})
+
+    result = await mod.execute_tool("fs.read", {"path": "story.txt"}, context=context)
+
+    assert result["sha256"] == hashlib.sha256(b"alpha\n").hexdigest()  # nosec B101
+    assert "read_receipt" not in result  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_filesystem_read_truncates_and_omits_receipt(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
@@ -447,6 +484,32 @@ async def test_filesystem_read_truncates_and_omits_receipt(tmp_path: Path) -> No
     assert "read_receipt" not in result  # nosec B101
     assert result["eval"]["truncated"] is True  # nosec B101
     assert result["eval"]["path_filter_used"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_omits_total_line_count_when_large_file_is_byte_truncated(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "long.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "workspace-1"})
+    mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={
+                "read_hash_max_file_bytes": 3,
+                "read_receipt_secret": "unit-test-secret",
+            },
+        ),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-read-large-truncated", user_id="1", metadata={})
+
+    result = await mod.execute_tool("fs.read", {"path": "long.txt", "max_bytes": 4}, context=context)
+
+    assert result["content"] == "one\n"  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert result["line_count_total"] is None  # nosec B101
+    assert result["hash_omitted_reason"] == "hash_omitted_file_too_large"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -518,8 +581,12 @@ async def test_filesystem_read_applies_configured_caps(tmp_path: Path) -> None:
     )
     context = RequestContext(request_id="req-fs-read-capped", user_id="1", metadata={})
 
-    byte_capped = await byte_capped_mod.execute_tool("fs.read", {"path": "story.txt", "max_bytes": 100}, context=context)
-    line_capped = await line_capped_mod.execute_tool("fs.read", {"path": "story.txt", "max_lines": 100}, context=context)
+    byte_capped = await byte_capped_mod.execute_tool(
+        "fs.read", {"path": "story.txt", "max_bytes": 100}, context=context
+    )
+    line_capped = await line_capped_mod.execute_tool(
+        "fs.read", {"path": "story.txt", "max_lines": 100}, context=context
+    )
 
     assert byte_capped["content"] == "one\n"  # nosec B101
     assert byte_capped["bytes_read"] == 4  # nosec B101
@@ -629,6 +696,63 @@ async def test_filesystem_patch_applies_existing_file_with_expected_hash(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_filesystem_patch_rolls_back_previous_writes_on_partial_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    first = docs_dir / "one.txt"
+    second = docs_dir / "two.txt"
+    first_original = "alpha\n"
+    second_original = "beta\n"
+    first.write_text(first_original, encoding="utf-8")
+    second.write_text(second_original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-patch-rollback", user_id="1", metadata={})
+    original_atomic_write = FilesystemModule._atomic_write_text_file
+
+    def _fail_on_second_write(target: Path, text: str) -> None:
+        if target.name == "two.txt":
+            raise OSError("simulated write failure")
+        original_atomic_write(target, text)
+
+    monkeypatch.setattr(
+        FilesystemModule,
+        "_atomic_write_text_file",
+        staticmethod(_fail_on_second_write),
+    )
+
+    with pytest.raises(ValueError, match="partial_write_rollback_attempted"):
+        await mod.execute_tool(
+            "fs.patch",
+            {
+                "diff": """--- a/docs/one.txt
++++ b/docs/one.txt
+@@ -1 +1 @@
+-alpha
++ALPHA
+--- a/docs/two.txt
++++ b/docs/two.txt
+@@ -1 +1 @@
+-beta
++BETA
+""",
+                "expected_sha256_by_path": {
+                    "docs/one.txt": hashlib.sha256(first_original.encode("utf-8")).hexdigest(),
+                    "docs/two.txt": hashlib.sha256(second_original.encode("utf-8")).hexdigest(),
+                },
+            },
+            context=context,
+        )
+
+    assert first.read_text(encoding="utf-8") == first_original  # nosec B101
+    assert second.read_text(encoding="utf-8") == second_original  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"
@@ -653,7 +777,9 @@ async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == original  # nosec B101
     assert result["applied"] is False  # nosec B101
     assert result["dry_run"] is True  # nosec B101
-    assert result["files"][0]["sha256_after"] == hashlib.sha256("alpha\nBETTA\ngamma\n".encode("utf-8")).hexdigest()  # nosec B101
+    assert (
+        result["files"][0]["sha256_after"] == hashlib.sha256("alpha\nBETTA\ngamma\n".encode("utf-8")).hexdigest()
+    )  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -802,6 +928,32 @@ async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> No
     assert result["created"] is False  # nosec B101
     assert result["sha256_before"] == expected_sha  # nosec B101
     assert result["sha256_after"] == hashlib.sha256("new\n".encode("utf-8")).hexdigest()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_replace_preserves_existing_file_mode(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "script.sh"
+    target.write_text("#!/bin/sh\necho old\n", encoding="utf-8")
+    os.chmod(target, 0o755)
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-mode", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+
+    await mod.execute_tool(
+        "fs.write",
+        {
+            "path": "script.sh",
+            "content": "#!/bin/sh\necho new\n",
+            "mode": "replace",
+            "expected_sha256": expected_sha,
+        },
+        context=context,
+    )
+
+    assert stat.S_IMODE(target.stat(follow_symlinks=False).st_mode) == 0o755  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1268,9 +1420,7 @@ async def test_filesystem_glob_returns_symlink_directories_without_traversing(tm
 
     result = await mod.execute_tool("fs.glob", {"pattern": "*"}, context=context)
 
-    assert result["matches"] == [  # nosec B101
-        {"path": "outside-link", "type": "symlink"}
-    ]
+    assert result["matches"] == [{"path": "outside-link", "type": "symlink"}]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1728,7 +1878,9 @@ async def test_filesystem_read_text_rejects_binary_payload(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_filesystem_read_text_rejects_files_over_size_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filesystem_read_text_rejects_files_over_size_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     large_path = workspace_root / "large.txt"

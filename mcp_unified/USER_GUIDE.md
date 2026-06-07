@@ -123,7 +123,8 @@ per-file, total-byte, total-file, and walk-entry limits.
 
 Use `fs.read` as the canonical file-inspection tool. It returns bounded UTF-8
 content plus file size, newline style, SHA-256 when available, truncation state,
-and a short-lived read receipt for complete hashed reads.
+and a short-lived read receipt for complete hashed reads when the filesystem
+module has a stable `read_receipt_secret` configured.
 
 For existing-file edits, prefer `fs.patch` over whole-file replacement. It
 accepts unified diff text, derives affected paths before execution for path

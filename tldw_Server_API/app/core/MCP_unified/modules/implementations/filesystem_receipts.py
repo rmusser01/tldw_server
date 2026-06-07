@@ -6,7 +6,6 @@ import base64
 import hashlib
 import hmac
 import json
-import secrets
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -38,12 +37,19 @@ class ReadReceiptManager:
     def __init__(self, *, secret: str | bytes | None = None, ttl_seconds: int = 1_800) -> None:
         if isinstance(secret, bytes):
             secret_bytes = secret
-        elif isinstance(secret, str) and secret:
-            secret_bytes = secret.encode("utf-8")
+        elif isinstance(secret, str) and secret.strip():
+            secret_bytes = secret.strip().encode("utf-8")
         else:
-            secret_bytes = secrets.token_bytes(32)
+            secret_bytes = b""
         self._secret = secret_bytes
+        self._enabled = bool(secret_bytes)
         self._ttl_seconds = max(1, int(ttl_seconds))
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether a stable receipt-signing secret is configured."""
+
+        return self._enabled
 
     def issue(
         self,
@@ -56,6 +62,8 @@ class ReadReceiptManager:
     ) -> str:
         """Return a signed receipt for a complete file preimage."""
 
+        if not self._enabled:
+            raise ReadReceiptError("read_receipt_secret_unconfigured")
         now = int(time.time())
         payload: dict[str, Any] = {
             "v": 1,
@@ -77,6 +85,8 @@ class ReadReceiptManager:
     def validate(self, receipt: str) -> ReadReceiptPayload:
         """Validate and decode a signed receipt."""
 
+        if not self._enabled:
+            raise ReadReceiptError("read_receipt_secret_unconfigured")
         try:
             envelope_bytes = base64.urlsafe_b64decode(receipt.encode("ascii"))
             envelope = json.loads(envelope_bytes.decode("utf-8"))
@@ -105,4 +115,6 @@ class ReadReceiptManager:
 
 
 def _canonical_json(payload: dict[str, Any]) -> bytes:
+    """Serialize JSON bytes with stable key ordering for HMAC signing."""
+
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")

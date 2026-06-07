@@ -25,6 +25,8 @@ class PathScopeCandidate:
 
 
 def _clean_optional_string(value: Any) -> str | None:
+    """Normalize optional candidate strings by trimming blanks to None."""
+
     if value is None:
         return None
     text = str(value).strip()

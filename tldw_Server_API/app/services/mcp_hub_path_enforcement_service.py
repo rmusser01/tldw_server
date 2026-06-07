@@ -65,6 +65,28 @@ def _unique(values: list[str]) -> list[str]:
     return out
 
 
+def _unique_paths_with_actions(
+    raw_paths: list[str],
+    candidate_actions: list[str],
+    *,
+    default_action: str,
+) -> tuple[list[str], list[str]]:
+    """De-duplicate candidate paths while keeping their action indexes aligned."""
+
+    out_paths: list[str] = []
+    out_actions: list[str] = []
+    seen: set[str] = set()
+    for index, raw_path in enumerate(raw_paths):
+        cleaned = str(raw_path or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out_paths.append(cleaned)
+        action = candidate_actions[index] if index < len(candidate_actions) else default_action
+        out_actions.append(action if action in _PATH_GRANT_ACTIONS else default_action)
+    return out_paths, out_actions
+
+
 def _is_within(root: Path, candidate: Path) -> bool:
     return candidate == root or root in candidate.parents
 
@@ -121,8 +143,10 @@ def _policy_allowlist_prefixes(effective_policy: dict[str, Any] | None) -> list[
     return sorted(out)
 
 
-def _policy_path_grants(effective_policy: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _policy_path_grants(effective_policy: dict[str, Any] | None) -> list[dict[str, Any]] | None:
     policy_document = _as_dict((effective_policy or {}).get("policy_document"))
+    if "path_grants" not in policy_document:
+        return None
     raw_grants = policy_document.get("path_grants")
     if not isinstance(raw_grants, Iterable) or isinstance(raw_grants, (str, bytes, bytearray, dict)):
         return []
@@ -364,8 +388,13 @@ class McpHubPathEnforcementService:
         if is_multi_root_candidate:
             if self._multi_root_path_service is None:
                 raise RuntimeError("McpHubPathEnforcementService requires an explicit multi_root_path_service for multi-root evaluation")
+            bundle_raw_paths, bundle_candidate_actions = _unique_paths_with_actions(
+                raw_paths,
+                candidate_actions,
+                default_action=inferred_action,
+            )
             multi_root_result = await self._multi_root_path_service.resolve_path_bundle(
-                raw_paths=raw_paths,
+                raw_paths=bundle_raw_paths,
                 active_workspace_id=active_workspace_id,
                 active_workspace_root=str(scope.get("workspace_root") or "").strip() or None,
                 active_base_path=str(scope.get("cwd") or workspace_root),
@@ -393,8 +422,7 @@ class McpHubPathEnforcementService:
             resolved_workspace_roots_by_id = dict(
                 multi_root_result.get("resolved_workspace_roots_by_id") or {}
             )
-            for normalized_text in normalized_paths:
-                path_index = normalized_paths.index(normalized_text)
+            for path_index, normalized_text in enumerate(normalized_paths):
                 matched_workspace_id = str(path_workspace_map.get(normalized_text) or "").strip()
                 matched_root_text = str(resolved_workspace_roots_by_id.get(matched_workspace_id) or "").strip()
                 if not matched_root_text:
@@ -437,7 +465,7 @@ class McpHubPathEnforcementService:
                         workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),
                         path_workspace_map=path_workspace_map,
                     )
-                if path_grants:
+                if path_grants is not None:
                     relative_path = _relative_path_for_decision(matched_root, normalized)
                     if relative_path is None:
                         return self._blocked_result(
@@ -450,7 +478,11 @@ class McpHubPathEnforcementService:
                             workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),
                             path_workspace_map=path_workspace_map,
                         )
-                    action = candidate_actions[path_index] if path_index < len(candidate_actions) else inferred_action
+                    action = (
+                        bundle_candidate_actions[path_index]
+                        if path_index < len(bundle_candidate_actions)
+                        else inferred_action
+                    )
                     decision = _path_grant_decision(
                         relative_path=relative_path,
                         action=action,
@@ -463,7 +495,7 @@ class McpHubPathEnforcementService:
                             path_decisions=[decision],
                         )
             result["normalized_paths"] = normalized_paths
-            if path_grants:
+            if path_grants is not None:
                 path_decisions = []
                 for path_index, normalized_text in enumerate(normalized_paths):
                     matched_workspace_id = str(path_workspace_map.get(normalized_text) or "").strip()
@@ -472,7 +504,11 @@ class McpHubPathEnforcementService:
                     relative_path = _relative_path_for_decision(matched_root, Path(normalized_text).expanduser().resolve(strict=False))
                     if relative_path is None:
                         continue
-                    action = candidate_actions[path_index] if path_index < len(candidate_actions) else inferred_action
+                    action = (
+                        bundle_candidate_actions[path_index]
+                        if path_index < len(bundle_candidate_actions)
+                        else inferred_action
+                    )
                     path_decisions.append(
                         _path_grant_decision(
                             relative_path=relative_path,
@@ -516,7 +552,7 @@ class McpHubPathEnforcementService:
                     normalized_paths=normalized_paths,
                     path_allowlist_prefixes=path_allowlist_prefixes,
                 )
-            if path_grants:
+            if path_grants is not None:
                 relative_path = _relative_path_for_decision(workspace_root, normalized)
                 if relative_path is None:
                     return self._blocked_result(

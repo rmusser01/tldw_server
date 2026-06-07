@@ -376,13 +376,16 @@ class FilesystemModule(BaseModule):
                 bool(args.get("include_receipt", True))
                 and not result.get("truncated")
                 and isinstance(result.get("sha256"), str)
+                and self._read_receipts.enabled
             ):
                 result["read_receipt"] = self._read_receipts.issue(
                     path=rel_path,
                     sha256=str(result["sha256"]),
                     size=int(result.get("bytes_total") or 0),
                     workspace_id=self._context_metadata_value(context, "workspace_id"),
-                    session_id=_first_nonempty(getattr(context, "session_id", None), self._context_metadata_value(context, "session_id")),
+                    session_id=_first_nonempty(
+                        getattr(context, "session_id", None), self._context_metadata_value(context, "session_id")
+                    ),
                 )
             result["eval"] = build_execution_eval_metadata(
                 tool_name="fs.read",
@@ -746,9 +749,7 @@ class FilesystemModule(BaseModule):
                     raise ValueError("regex grep is disabled by module configuration")
                 max_pattern_length = self._setting_positive_int("grep_max_pattern_length", 512)
                 if len(pattern) > max_pattern_length:
-                    raise ValueError(
-                        f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})"
-                    )
+                    raise ValueError(f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})")
             return
 
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -771,8 +772,7 @@ class FilesystemModule(BaseModule):
         if value is None:
             return
         if not isinstance(value, dict) or not all(
-            isinstance(map_key, str) and isinstance(map_value, str)
-            for map_key, map_value in value.items()
+            isinstance(map_key, str) and isinstance(map_value, str) for map_key, map_value in value.items()
         ):
             raise ValueError(f"{key} must be an object with string values")
 
@@ -782,6 +782,8 @@ class FilesystemModule(BaseModule):
         arguments: dict[str, Any],
         context: Any | None = None,
     ) -> list[PathScopeCandidate]:
+        """Derive per-file path/action candidates for patch tools before enforcement."""
+
         del context
         if tool_name != "fs.patch":
             return await super().extract_path_scope_candidates(tool_name, arguments, None)
@@ -1062,9 +1064,8 @@ class FilesystemModule(BaseModule):
                 else:
                     candidate_type = candidate_kind
 
-                include_candidate = (
-                    (candidate_kind == "file" and include_files)
-                    or (candidate_kind == "directory" and include_directories)
+                include_candidate = (candidate_kind == "file" and include_files) or (
+                    candidate_kind == "directory" and include_directories
                 )
                 if not include_candidate:
                     continue
@@ -1404,11 +1405,25 @@ class FilesystemModule(BaseModule):
         ]
 
         if not dry_run:
-            for plan in plans:
-                target = plan["_target"]
-                if plan["_create_parent_directories"]:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                self._atomic_write_text_file(target, str(plan["_text_after"]))
+            written: list[dict[str, Any]] = []
+            try:
+                for plan in plans:
+                    target = plan["_target"]
+                    if plan["_create_parent_directories"]:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                    self._atomic_write_text_file(target, str(plan["_text_after"]))
+                    written.append(plan)
+            except Exception as exc:
+                for plan in reversed(written):
+                    target = plan["_target"]
+                    try:
+                        if plan["_existed_before"]:
+                            self._atomic_write_text_file(target, str(plan["_text_before"]))
+                        else:
+                            target.unlink(missing_ok=True)
+                    except Exception:
+                        logger.exception("Failed to roll back partial fs.patch write for {}", target.name)
+                raise ValueError("partial_write_rollback_attempted") from exc
 
         file_results = []
         for plan in plans:
@@ -1470,6 +1485,7 @@ class FilesystemModule(BaseModule):
             bytes_before = 0
             created = True
             action = "write"
+            text_before = None
         else:
             if target.is_symlink():
                 raise ValueError("file_not_regular")
@@ -1499,6 +1515,7 @@ class FilesystemModule(BaseModule):
             )
             created = False
             action = "edit"
+            text_before = original_text
 
         try:
             text_after = apply_patch_to_text(original_text, patch_file)
@@ -1511,6 +1528,8 @@ class FilesystemModule(BaseModule):
         return {
             "_target": target,
             "_text_after": text_after,
+            "_text_before": text_before,
+            "_existed_before": not created,
             "_create_parent_directories": create_parent_directories,
             "result": {
                 "path": response_path,
@@ -1585,10 +1604,17 @@ class FilesystemModule(BaseModule):
 
     @staticmethod
     def _atomic_write_text_file(target: Path, text: str) -> None:
+        """Atomically replace a text file while preserving existing file mode."""
+
+        existing_mode: int | None = None
+        if target.exists() and not target.is_symlink():
+            existing_mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
         fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
         tmp_path = Path(tmp_name)
         try:
             with os.fdopen(fd, "wb") as handle:
+                if existing_mode is not None:
+                    os.fchmod(handle.fileno(), existing_mode)
                 handle.write(text.encode("utf-8"))
             os.replace(tmp_path, target)
         finally:
@@ -1758,12 +1784,18 @@ class FilesystemModule(BaseModule):
         text = FilesystemModule._decode_utf8_text(output_payload, allow_prefix=byte_truncated)
         newline_style = FilesystemModule._detect_newline_style(output_payload)
         all_lines = text.splitlines(keepends=True)
-        line_count_total = len((full_text if full_text is not None else text).splitlines())
+        line_count_total = (
+            len((full_text if full_text is not None else text).splitlines())
+            if full_text is not None or not byte_truncated
+            else None
+        )
         start_index = max(0, start_line - 1)
         selected_lines = all_lines[start_index : start_index + max_lines]
         line_truncated = start_index + max_lines < len(all_lines)
         selected_content = "".join(selected_lines)
-        content = FilesystemModule._numbered_lines(selected_lines, start_line) if include_line_numbers else selected_content
+        content = (
+            FilesystemModule._numbered_lines(selected_lines, start_line) if include_line_numbers else selected_content
+        )
         end_line = start_line + len(selected_lines) - 1 if selected_lines else start_line - 1
 
         result: dict[str, Any] = {
@@ -1823,9 +1855,7 @@ class FilesystemModule(BaseModule):
 
         file_size = target.stat().st_size
         if file_size > max_read_bytes:
-            raise ValueError(
-                f"file exceeds fs.read_text limit ({file_size} bytes > {max_read_bytes} bytes)"
-            )
+            raise ValueError(f"file exceeds fs.read_text limit ({file_size} bytes > {max_read_bytes} bytes)")
 
         payload = target.read_bytes()
         if b"\x00" in payload:

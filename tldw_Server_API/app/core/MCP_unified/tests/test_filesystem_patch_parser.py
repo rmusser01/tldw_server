@@ -119,6 +119,24 @@ def test_parse_unified_diff_enforces_limits() -> None:
     assert hunk_exc.value.reason_code == "diff_hunk_limit_exceeded"  # nosec B101
 
 
+def test_apply_patch_rejects_add_only_hunk_beyond_end_of_file() -> None:
+    parsed = parse_unified_diff(
+        """--- a/docs/story.txt
++++ b/docs/story.txt
+@@ -50,0 +50,1 @@
++late
+""",
+        max_files=10,
+        max_hunks=10,
+        max_bytes=10_000,
+    )
+
+    with pytest.raises(FilesystemPatchError) as exc_info:
+        apply_patch_to_text("alpha\n", parsed[0])
+
+    assert exc_info.value.reason_code == "patch_context_mismatch"  # nosec B101
+
+
 def test_apply_patch_to_text_modifies_content_in_memory() -> None:
     parsed = parse_unified_diff(
         """--- a/docs/story.txt

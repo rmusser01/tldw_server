@@ -594,6 +594,9 @@ def _optional_string(value: Any) -> str | None:
 def _policy_value(policy_document: Any, key: str) -> Any:
     """Read a field from objects, Pydantic extras, or mapping documents."""
 
+    if isinstance(policy_document, Mapping):
+        return policy_document.get(key)
+
     value = getattr(policy_document, key, None)
     if value is not None:
         return value
@@ -601,6 +604,4 @@ def _policy_value(policy_document: Any, key: str) -> Any:
     model_extra = getattr(policy_document, "model_extra", None)
     if isinstance(model_extra, Mapping) and key in model_extra:
         return model_extra[key]
-    if isinstance(policy_document, Mapping):
-        return policy_document.get(key)
     return None

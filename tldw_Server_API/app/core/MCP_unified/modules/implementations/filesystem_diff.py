@@ -123,7 +123,7 @@ def apply_patch_to_text(original: str, patch_file: PatchFile) -> str:
 
     for hunk in patch_file.hunks:
         hunk_start = max(0, hunk.old_start - 1)
-        if hunk_start < cursor:
+        if hunk_start < cursor or hunk_start > len(original_lines):
             raise FilesystemPatchError("patch_context_mismatch")
         output.extend(original_lines[cursor:hunk_start])
         cursor = hunk_start
@@ -146,6 +146,8 @@ def apply_patch_to_text(original: str, patch_file: PatchFile) -> str:
 
 
 def _parse_hunk(lines: list[str], start_index: int) -> tuple[PatchHunk, int]:
+    """Parse one unified-diff hunk and return the next unread line index."""
+
     match = _HUNK_HEADER.match(lines[start_index])
     if match is None:
         raise FilesystemPatchError("invalid_hunk_header")

@@ -16,6 +16,28 @@ class _FakePathScopeService:
         return dict(self.result)
 
 
+class _FakeMultiRootPathService:
+    def __init__(self, workspace_root: str, workspace_id: str = "ws-1") -> None:
+        self.workspace_root = workspace_root
+        self.workspace_id = workspace_id
+        self.calls: list[dict] = []
+
+    async def resolve_path_bundle(self, **kwargs):  # noqa: ANN001
+        self.calls.append(dict(kwargs))
+        normalized_paths = [
+            str((Path(self.workspace_root) / raw_path).resolve()) for raw_path in kwargs.get("raw_paths", [])
+        ]
+        return {
+            "ok": True,
+            "reason": None,
+            "normalized_paths": normalized_paths,
+            "workspace_bundle_ids": [self.workspace_id],
+            "workspace_bundle_roots": [self.workspace_root],
+            "path_workspace_map": {normalized_path: self.workspace_id for normalized_path in normalized_paths},
+            "resolved_workspace_roots_by_id": {self.workspace_id: self.workspace_root},
+        }
+
+
 def _workspace_scope() -> dict:
     return {
         "enabled": True,
@@ -429,3 +451,80 @@ async def test_path_grants_are_authoritative_when_legacy_allowlist_also_present(
     assert result["reason"] == "path_action_not_granted"
     assert result["path_decisions"][0]["normalized_path"] == "documents/story.md"
     assert result["path_decisions"][0]["grant_source"] == "path_grants"
+
+
+@pytest.mark.asyncio
+async def test_empty_path_grants_fail_closed_even_with_legacy_allowlist() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_allowlist_prefixes": ["documents"],
+                "path_grants": [],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="read"),
+    )
+
+    assert result["within_scope"] is False
+    assert result["reason"] == "path_action_not_granted"
+    assert result["path_decisions"][0]["grant_outcome"] == "not_granted"
+
+
+@pytest.mark.asyncio
+async def test_multi_root_path_grants_keep_deduped_paths_and_actions_aligned() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    workspace_root = "/tmp/mcp-hub-path-enforcer/project"
+    scope = {
+        **_workspace_scope(),
+        "workspace_id": "ws-1",
+        "selected_workspace_trust_source": "sandbox_workspace_lookup",
+        "selected_workspace_scope_type": "user",
+        "selected_workspace_scope_id": 7,
+    }
+    multi_root = _FakeMultiRootPathService(workspace_root=workspace_root)
+    svc = McpHubPathEnforcementService(
+        path_scope_service=_FakePathScopeService(scope),
+        multi_root_path_service=multi_root,
+    )
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "selected_assignment_workspace_ids": ["ws-1", "ws-2"],
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read"]},
+                    {"prefix": "downloads", "actions": ["write"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(user_id="1", metadata={}),
+        tool_name="fs.patch",
+        tool_args={"diff": "not-inspected-here"},
+        tool_def=_filesystem_tool_def(action="edit"),
+        path_scope_candidates=[
+            PathScopeCandidate(path="documents/story.md", action="read", source="module"),
+            PathScopeCandidate(path="documents/story.md", action="read", source="module"),
+            PathScopeCandidate(path="downloads/export.md", action="write", source="module"),
+        ],
+    )
+
+    assert multi_root.calls[0]["raw_paths"] == ["documents/story.md", "downloads/export.md"]
+    assert result["within_scope"] is True
+    assert result["reason"] is None
+    assert [decision["requested_action"] for decision in result["path_decisions"]] == ["read", "write"]
