@@ -261,6 +261,18 @@ def test_explain_profile_tool_decision_includes_permission_mode() -> None:
     assert explanation.permission_mode == "plan/read-only"
 
 
+def test_profile_decision_api_exports_from_profiles_package() -> None:
+    from mcp_unified.profiles import (
+        PolicyDecision,
+        PolicyDecisionSubject,
+        explain_profile_tool_decision,
+    )
+
+    assert PolicyDecision is not None
+    assert PolicyDecisionSubject is not None
+    assert explain_profile_tool_decision is not None
+
+
 def test_merge_policy_decisions_uses_deny_over_ask_over_allow() -> None:
     subject = PolicyDecisionSubject(type="tool", normalized="fs.write")
     merged = merge_policy_decisions(
