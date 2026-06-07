@@ -961,6 +961,14 @@ export const ROUTE_METADATA = [
     rationale: "Web debug route for sidepanel chat rendering."
   }),
   defineRoute({
+    path: "/__debug__/mermaid-chat-cards",
+    label: "Debug Mermaid Chat Cards",
+    group: "extension",
+    surface: "internal_qa_debug",
+    smoke: "exclude",
+    rationale: "Web debug route for Mermaid chat-card browser QA."
+  }),
+  defineRoute({
     path: "/__debug__/sidepanel-error-boundary",
     label: "Debug Sidepanel Error Boundary",
     group: "extension",

@@ -163,6 +163,8 @@ export default function App({ Component, pageProps }: AppProps) {
       : pathname
   const isPublicAuthRoute = routePath === "/login"
   const isSetupRoute = routePath === "/setup"
+  const isDebugRoute =
+    routePath === "/__debug__" || routePath.startsWith("/__debug__/")
   const isSettingsRoute =
     routePath === "/settings" || routePath.startsWith("/settings/")
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
@@ -297,7 +299,8 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [authResolved, isAuthenticated, isPublicAuthRoute, routePath, router])
 
   const hideShellNav = !authResolved || !isAuthenticated
-  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute || isSetupRoute
+  const shouldBypassGates =
+    isPublicAuthRoute || isSettingsRoute || isSetupRoute || isDebugRoute
   const shouldAllowDegradedReadiness = DEGRADED_READINESS_ROUTES.has(routePath)
   const firstRunRouteParts = React.useMemo(
     () => splitRouteAsPath(router.asPath || routePath || "/"),
