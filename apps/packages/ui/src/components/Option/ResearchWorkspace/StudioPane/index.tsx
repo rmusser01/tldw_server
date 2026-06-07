@@ -1191,7 +1191,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       Modal.info({
         title: artifact.title,
         content: renderArtifactModalContent(
-          <MindMapArtifactViewer title={artifact.title} content={artifact.content} />,
+          <MindMapArtifactViewer content={artifact.content} />,
           t("playground:studio.loadingOutputViewer", "Loading output viewer...")
         ),
         ...responsiveModalProps(960),
