@@ -11,6 +11,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from mcp_unified.tool_use_reporting.recorder import (
+    NoopToolUseRecorder,
+    ToolUseRecorder,
+)
+
 from .policy import (
     ApprovalEvaluator,
     EffectivePolicyResolver,
@@ -305,3 +310,4 @@ class MCPRuntimeDependencies:
     policy_context_provider: PolicyContextProvider
     environment_flags_provider: EnvironmentFlagsProvider
     websocket_stream_factory: WebSocketStreamFactory
+    tool_use_recorder: ToolUseRecorder = field(default_factory=NoopToolUseRecorder)

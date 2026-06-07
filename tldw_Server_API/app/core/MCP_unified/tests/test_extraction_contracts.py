@@ -622,11 +622,13 @@ def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
     names = [
         "AuthenticatedIdentity",
         "LifecycleGuard",
+        "NoopToolUseRecorder",
         "ModuleConfigProvider",
         "PermissionSeeder",
         "PolicyContextProvider",
         "ServerAuthProvider",
         "ToolCatalogProvider",
+        "ToolUseRecorder",
         "EnvironmentFlagsProvider",
         "WebSocketStream",
         "WebSocketStreamFactory",
@@ -637,12 +639,39 @@ def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
 
 
 def test_mcp_protocol_accepts_runtime_dependencies() -> None:
+    from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
+
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
 
     deps = _fake_runtime_dependencies()
     protocol = MCPProtocol(dependencies=deps)
     assert protocol.module_registry is deps.module_registry
     assert protocol.rbac_policy is deps.rbac_policy
+    assert isinstance(protocol._tool_use_recorder, NoopToolUseRecorder)
+
+
+def test_mcp_protocol_treats_none_tool_use_recorder_as_unconfigured() -> None:
+    from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
+
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
+
+    deps = _fake_runtime_dependencies()
+    deps.tool_use_recorder = None
+
+    protocol = MCPProtocol(dependencies=deps)
+
+    assert isinstance(protocol._tool_use_recorder, NoopToolUseRecorder)
+
+
+def test_runtime_dependencies_default_to_noop_tool_use_recorder() -> None:
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+    from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
+
+    deps = _fake_runtime_dependencies()
+    dependency_kwargs = vars(deps).copy()
+    runtime_dependencies = MCPRuntimeDependencies(**dependency_kwargs)
+
+    assert isinstance(runtime_dependencies.tool_use_recorder, NoopToolUseRecorder)
 
 
 def test_mcp_server_accepts_runtime_dependencies() -> None:

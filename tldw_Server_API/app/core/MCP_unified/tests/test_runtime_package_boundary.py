@@ -759,6 +759,8 @@ def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
     [
         ("mcp_unified.storage", ("mcp_unified.storage.sqlite", "sqlalchemy")),
         ("mcp_unified.federation", ("mcp_unified.storage.sqlite", "sqlalchemy")),
+        ("mcp_unified.tool_use_reporting.recorder", ("sqlalchemy",)),
+        ("mcp_unified.tool_use_reporting.builders", ("sqlalchemy",)),
     ],
 )
 def test_package_imports_do_not_eagerly_load_sqlite_backend(

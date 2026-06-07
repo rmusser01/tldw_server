@@ -37,7 +37,11 @@ from loguru import logger
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
-from .interfaces.runtime import MCPRuntimeDependencies, TelemetryProvider
+from .interfaces.runtime import (
+    MCPRuntimeDependencies,
+    NoopToolUseRecorder,
+    TelemetryProvider,
+)
 from .modules.base import BaseModule
 from .tool_observability import (
     attach_execution_eval_metadata,
@@ -563,6 +567,14 @@ class MCPProtocol:
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
         self.tool_catalog_provider = self.dependencies.tool_catalog_provider
+        self._tool_use_recorder = (
+            getattr(
+                self.dependencies,
+                "tool_use_recorder",
+                NoopToolUseRecorder(),
+            )
+            or NoopToolUseRecorder()
+        )
         self.protocol_version = "2024-11-05"
         self.metrics = self.dependencies.metrics_collector
         # Strict tool name validation regex

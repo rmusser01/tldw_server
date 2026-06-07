@@ -172,7 +172,7 @@ Run: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mcp_unified/tool_use_reporting tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py
@@ -190,7 +190,7 @@ git commit -m "feat: add MCP tool-use reporting event models"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 
-- [ ] **Step 1: Write failing tests for status mapping and default dependency compatibility**
+- [x] **Step 1: Write failing tests for status mapping and default dependency compatibility**
 
 ```python
 from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
@@ -226,7 +226,7 @@ def test_protocol_accepts_dependency_bundle_without_tool_use_recorder(runtime_de
 If no reusable `runtime_dependency_kwargs` fixture exists, add a local fixture with the same fake dependencies used by existing runtime boundary tests.
 If no namespace fixture exists, add the compatibility test beside `_fake_runtime_dependencies()` in `test_extraction_contracts.py`, which already constructs `SimpleNamespace` dependency bundles.
 
-- [ ] **Step 2: Implement builder and recorder contracts**
+- [x] **Step 2: Implement builder and recorder contracts**
 
 Implementation requirements:
 
@@ -244,7 +244,7 @@ Implementation requirements:
 - Add `MCPRuntimeDependencies.tool_use_recorder` as the final dataclass field with `field(default_factory=NoopToolUseRecorder)`.
 - In `MCPProtocol.__init__`, resolve the recorder with `getattr(self.dependencies, "tool_use_recorder", NoopToolUseRecorder())` rather than direct attribute access, because host tests and embedders may pass duck-typed dependency bundles.
 
-- [ ] **Step 3: Add import boundary test**
+- [x] **Step 3: Add import boundary test**
 
 Add or extend `test_runtime_package_boundary.py`:
 
@@ -263,7 +263,7 @@ def test_tool_use_reporting_core_imports_do_not_import_sqlalchemy(monkeypatch):
     assert "sqlalchemy" not in sys.modules
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -277,7 +277,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mcp_unified/tool_use_reporting mcp_unified/interfaces/runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py

@@ -6,7 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from mcp_unified.tool_use_reporting.builders import (
+    classify_tool_use_exception,
+    extract_safe_context_dimensions,
+)
 from mcp_unified.tool_use_reporting.models import ToolUseEvent
+from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
 from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 
 
@@ -64,3 +69,62 @@ def test_sanitize_safe_id_drops_paths_emails_and_long_values() -> None:
 def test_sanitize_safe_id_drops_values_with_unsafe_characters() -> None:
     assert sanitize_safe_id("profile id with spaces", field="profile_id") is None
     assert sanitize_safe_id("../escape", field="tool_prompt_id") is None
+
+
+def test_exception_classifier_maps_structured_governance_denials_safely() -> None:
+    class _FakeGovernanceDenied(PermissionError):
+        def __init__(self) -> None:
+            super().__init__("workspace denied for /Users/example/private.txt")
+            self.governance = {
+                "reason_code": "workspace_out_of_scope",
+                "path": "/Users/example/private.txt",
+            }
+
+    status, reason_code = classify_tool_use_exception(_FakeGovernanceDenied())
+
+    assert status == "denied"
+    assert reason_code == "workspace_out_of_scope"
+    assert "/Users/example" not in reason_code
+
+
+@pytest.mark.asyncio
+async def test_noop_tool_use_recorder_accepts_events_without_persistence() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="git.status",
+        status="success",
+    )
+
+    await NoopToolUseRecorder().record_tool_use(event)
+
+
+def test_context_dimension_extraction_uses_only_safe_metadata_keys() -> None:
+    dimensions = extract_safe_context_dimensions(
+        {
+            "profile_id": "Architect-01",
+            "mcp_mode_id": "review.default",
+            "mcp_model_id": "gpt-4.1-mini",
+            "user_id": "person@example.com",
+            "raw_arguments": {"path": "/Users/example/private.txt"},
+            "request_id": "/Users/example/private.txt",
+            "correlation_id": "corr-123",
+        }
+    )
+
+    assert dimensions == {
+        "profile_id": "Architect-01",
+        "mode_id": "review.default",
+        "model_id": "gpt-4.1-mini",
+    }
+
+
+def test_context_dimension_extraction_requires_correlation_side_channel() -> None:
+    dimensions = extract_safe_context_dimensions(
+        {
+            "mcp_tool_use_safe_correlation_id": True,
+            "request_id": "req-123",
+            "correlation_id": "corr-456",
+        }
+    )
+
+    assert dimensions["correlation_id"] == "corr-456"
