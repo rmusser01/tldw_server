@@ -52,10 +52,11 @@ def test_chat_session_create_rejects_persona_memory_mode_for_character_chat():
 
 
 @pytest.mark.unit
-def test_chat_session_create_rejects_invalid_persona_memory_mode():
+@pytest.mark.parametrize("invalid_mode", ["session", "", 123])
+def test_chat_session_create_rejects_invalid_persona_memory_mode(invalid_mode):
     with pytest.raises(ValidationError, match="persona_memory_mode"):
         ChatSessionCreate(
             assistant_kind="persona",
             assistant_id="garden-helper",
-            persona_memory_mode="session",
+            persona_memory_mode=invalid_mode,
         )
