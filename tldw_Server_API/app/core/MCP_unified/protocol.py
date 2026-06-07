@@ -2966,6 +2966,18 @@ class MCPProtocol:
                     profile_id=profile_id,
                     duration_ms=duration_ms,
                 )
+                result_eval = self._tool_use_eval_metadata(payload=result if isinstance(result, dict) else None)
+                for key in (
+                    "tool_prompt_id",
+                    "tool_prompt_version",
+                    "action_family",
+                    "result_kind",
+                    "path_filter_used",
+                    "truncated",
+                    "reason_code",
+                ):
+                    if key in result_eval:
+                        execution_eval[key] = result_eval[key]
                 if isinstance(result, str):
                     content = [{"type": "text", "text": result}]
                 elif isinstance(result, list):

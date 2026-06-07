@@ -230,6 +230,14 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert write_metadata["eval"]["task_families"] == ["filesystem_write"]  # nosec B101
     assert write_metadata["eval"]["expected_result_kind"] == "structured_filesystem_write"  # nosec B101
     assert by_name["fs.write"]["inputSchema"]["additionalProperties"] is False  # nosec B101
+    read_text_metadata = by_name["fs.read_text"]["metadata"]
+    assert read_text_metadata["legacy_tool"] is True  # nosec B101
+    assert read_text_metadata["replacement_tool"] == "fs.read"  # nosec B101
+    assert read_text_metadata["path_scope_action"] == "read"  # nosec B101
+    write_text_metadata = by_name["fs.write_text"]["metadata"]
+    assert write_text_metadata["legacy_tool"] is True  # nosec B101
+    assert write_text_metadata["replacement_tools"] == ["fs.patch", "fs.write"]  # nosec B101
+    assert write_text_metadata["path_scope_action"] == "write"  # nosec B101
     assert by_name["fs.write_text"]["metadata"]["category"] == "management"  # nosec B101
 
 

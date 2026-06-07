@@ -110,6 +110,9 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
+                "path_scope_action": "read",
+                "legacy_tool": True,
+                "replacement_tool": "fs.read",
                 **shared_path_metadata,
             },
         )
@@ -221,7 +224,12 @@ class FilesystemModule(BaseModule):
             },
             metadata={
                 "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
                 "capabilities": ["filesystem.write"],
+                "path_scope_action": "write",
+                "legacy_tool": True,
+                "replacement_tools": ["fs.patch", "fs.write"],
                 **shared_path_metadata,
             },
         )

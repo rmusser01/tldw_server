@@ -194,14 +194,22 @@ def test_preset_direct_categories_do_not_exceed_max_direct_tools() -> None:
 
 
 def test_filesystem_read_presets_include_helper_tools() -> None:
-    expected = {"fs.stat", "fs.glob", "fs.grep"}
+    expected = {"fs.read", "fs.stat", "fs.glob", "fs.grep"}
     for preset in presets.list_builtin_presets():
         tooling = preset.profile.metadata.get("tooling")
         if not isinstance(tooling, dict):
             continue
         enabled_tools = set(tooling.get("enabled_tools") or [])
-        if {"fs.list", "fs.read_text"} <= enabled_tools:
+        if {"fs.list", "fs.read"} <= enabled_tools:
             assert expected <= enabled_tools
+
+
+def test_filesystem_tool_buckets_prefer_canonical_safe_tools() -> None:
+    assert presets._FILES_READ_TOOLS == ["fs.list", "fs.read", "fs.stat", "fs.glob", "fs.grep"]  # nosec B101
+    assert presets._FILES_EDIT_TOOLS == [*presets._FILES_READ_TOOLS, "fs.patch"]  # nosec B101
+    assert presets._FILES_WRITE_TOOLS == [*presets._FILES_EDIT_TOOLS, "fs.write"]  # nosec B101
+    assert presets._LEGACY_FILES_READ_TOOLS == ["fs.read_text"]  # nosec B101
+    assert presets._LEGACY_FILES_WRITE_TOOLS == ["fs.write_text"]  # nosec B101
 
 
 def test_web_search_is_recommended_unavailable_not_enabled() -> None:
