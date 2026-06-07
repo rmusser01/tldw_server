@@ -179,6 +179,7 @@ The new policy shape should be:
   "path_scope_enforcement": "approval_required_when_unenforceable",
   "path_grants": [
     { "prefix": "documents", "actions": ["read", "edit", "write"] },
+    { "prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny" },
     { "prefix": "downloads", "actions": ["read"] }
   ]
 }
@@ -190,6 +191,8 @@ First-slice grant rules:
 - Absolute paths, drive-qualified paths, UNC roots, and parent traversal are
   rejected.
 - `actions` is an explicit list from `read`, `edit`, `write`.
+- `effect` is optional and defaults to `allow`. The only accepted values are
+  `allow` and `deny`.
 - Actions do not imply one another. A grant with `write` alone does not allow
   reads or contextual patch edits unless `read` or `edit` is also listed.
 - `read` authorizes read tools such as `fs.read`, `fs.read_text`, `fs.stat`,
@@ -201,6 +204,8 @@ First-slice grant rules:
   creations.
 - A candidate path must match at least one grant prefix that includes the
   required action.
+- Deny grants take precedence over allow grants. If both an allow and deny
+  grant match a candidate/action, deny wins regardless of ordering.
 - Prefix matching is path-segment aware. A grant for `documents` matches
   `documents/spec.md` and `documents/nested/file.md`, but not
   `documents-private/file.md`.
@@ -211,6 +216,26 @@ First-slice grant rules:
 - A policy with neither `path_grants` nor `path_allowlist_prefixes` keeps the
   existing path-scope behavior for backward compatibility; strict bundled
   profiles should prefer explicit `path_grants`.
+
+The executable core remains flat. A future admin authoring layer may support
+hierarchical org -> workspace -> folder -> file policy and compile it into this
+flat effective grant list, but the runtime enforcer should only depend on
+normalized effective grants.
+
+Reserved future actions:
+
+- `delete`
+- `rename`
+- `move`
+- `share`
+- `export`
+- `chmod`
+- `admin`
+- `lock`
+
+These names are reserved so future file-operation tools do not overload
+`write`. In particular, `share` and `export` are exfiltration-sensitive and
+must not be bundled under write authority.
 
 ## Tool Contracts
 
@@ -534,6 +559,27 @@ Path enforcer behavior:
   workspace bundle, and action-aware `path_grants`.
 - Deny the whole request when any candidate is outside scope or lacks its
   required action.
+- Return or attach structured permission-decision metadata for every checked
+  candidate. This data must be safe for logs and troubleshooting and must not
+  include absolute host paths.
+
+Permission-decision metadata should include:
+
+- `requested_action`
+- `normalized_path`, workspace-relative
+- `grant_outcome`: `allowed`, `denied`, or `not_granted`
+- `grant_source`: `path_grants`, `path_allowlist_prefixes`, `cwd_scope`,
+  `workspace_bundle`, or `none`
+- `matched_grant_prefix` when safe and workspace-relative
+- `matched_grant_effect`: `allow` or `deny`
+- `reason_code`
+- `redacted`: boolean
+
+Denial responses should be safe but actionable. The stable payload should
+include `reason_code`, `requested_action`, `normalized_path`,
+`required_grant_action`, `grant_outcome`, and the safe matched grant fields
+above when available. It must not include raw absolute paths, raw diff text, or
+file contents.
 
 This is required for security. The caller must not provide a separate `paths`
 field for `fs.patch`, because that lets the request lie about the diff.
@@ -717,6 +763,12 @@ Safe metadata:
 - truncation/limit flags
 - duration bucket
 - profile or mode id after existing sanitization
+- permission decision metadata: requested action, normalized workspace-relative
+  path, grant outcome, grant source, matched grant effect, denial reason, and
+  redaction flag
+- before/after hash-present booleans for mutating tools, and before/after hash
+  values only when the existing tool-use redaction contract explicitly permits
+  hashes
 
 Evaluation traces for all filesystem tools should use the same redaction
 contract. `fs.read`, `fs.read_text`, `fs.patch`, `fs.write`, `fs.write_text`,
@@ -833,12 +885,36 @@ Protocol tests:
 
 Command runtime tests are deferred until command aliases are added.
 
+## Deferred Operational Follow-Ups
+
+The following Fastio-inspired enhancements are relevant, but should not expand
+the first safe-file-tools implementation slice:
+
+- Effective permission preview surfaces for explaining why a profile can or
+  cannot perform a path/action.
+- Hierarchical policy authoring that compiles org, workspace, folder, and file
+  inheritance into the flat `path_grants` runtime model.
+- File lock leases such as `fs.lock_acquire` and `fs.lock_release`, with
+  optional lock validation for `fs.patch` and `fs.write` when policy requires
+  it.
+- TTL-bound temporary session grants for one run or a short time window.
+- File-policy audit reporting for safe decision metadata, hashes, redaction
+  state, and denial reasons.
+- Policy simulation CLI/admin tooling for validating profiles before exposing
+  them to agents.
+- Governance hooks and audit trails for permission changes, especially grants
+  involving future `write`, `delete`, `share`, `export`, `admin`, or `lock`
+  actions.
+- Expanded file-operation actions and tools for delete, rename, move,
+  share/export, chmod/admin, and lock semantics.
+
 ## Rollout
 
 Recommended implementation slices:
 
-1. Action-aware path grants in `McpHubPathEnforcementService`, with compatibility
-   fallback for `path_allowlist_prefixes`.
+1. Action-aware path grants in `McpHubPathEnforcementService`, with deny
+   precedence, structured permission-decision metadata, and compatibility
+   fallback for `path_allowlist_prefixes` only when `path_grants` is absent.
 2. Protocol/module derived path-candidate seam.
 3. `fs.read` tool execution and tests.
 4. Unified diff parser and in-memory patch planner.

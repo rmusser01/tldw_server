@@ -10,6 +10,7 @@ labels:
 references:
 - Docs/superpowers/specs/2026-06-07-mcp-fs-patch-write-safe-edit-tools-design.md
 modified_files:
+- Docs/superpowers/specs/2026-06-07-mcp-fs-patch-write-safe-edit-tools-design.md
 - Docs/superpowers/plans/2026-06-07-mcp-safe-file-tools-implementation-plan.md
 - mcp_unified/interfaces/path_scope.py
 - mcp_unified/interfaces/policy.py

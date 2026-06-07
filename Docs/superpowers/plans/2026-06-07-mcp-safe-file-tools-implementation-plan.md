@@ -67,10 +67,15 @@ Path grants:
   "path_scope_mode": "enforce",
   "path_grants": [
     {"path": "documents", "actions": ["read", "edit", "write"]},
+    {"path": "documents/private", "actions": ["edit", "write"], "effect": "deny"},
     {"path": "downloads", "actions": ["read"]}
   ]
 }
 ```
+
+`effect` is optional and defaults to `allow`. Deny grants take precedence over allow grants for the same path/action. The runtime enforcer should consume a flat effective grant list; future hierarchical authoring can compile into that flat list.
+
+Reserved future path actions are `delete`, `rename`, `move`, `share`, `export`, `chmod`, `admin`, and `lock`. The first implementation enforces only `read`, `edit`, and `write`, but these names should be rejected as first-slice executable actions instead of being folded into `write`.
 
 Candidate shape:
 
@@ -110,6 +115,9 @@ The writing-plans skill normally asks for a separate plan-review subagent. This 
 
 - The protocol seam must remain compatible with old test fakes and host enforcers. It may fall back to the old enforcer call shape only when no derived candidates are required; if derived candidates exist and the enforcer cannot accept them, fail closed.
 - If `path_grants` is present, malformed or non-matching grants must not fall through to broader legacy allowlists. Legacy `path_allowlist_prefixes` is a fallback only when `path_grants` is absent.
+- Deny grants should be supported in the first implementation so private subtrees can override broader writable parent grants.
+- Path-enforcement results should expose safe structured decision metadata now, because permission previews, simulations, audit events, and troubleshooting can build on the same contract later.
+- Denial payloads should be actionable but redacted: reason code, requested action, normalized workspace-relative path, required grant class, matched grant effect/source when available, and no absolute host path.
 - Read receipts must bind to normalized workspace-relative paths, not raw user input or absolute filesystem paths.
 - Patch and write flows must check configured byte limits before loading or writing content, including existing-file preimages.
 - Tests should use explicit receipt secrets so receipt assertions are deterministic and do not depend on process-global random state.
@@ -229,6 +237,31 @@ Add tests for three profiles over one temporary workspace:
 
 Also add regression coverage that `path_allowlist_prefixes` still authorizes legacy tools without `path_grants`.
 
+Add deny precedence coverage:
+
+- `documents/**` is writable through an allow grant.
+- `documents/private/**` has a deny grant for `edit` and `write`.
+- `fs.read` for `documents/private/notes.md` remains allowed when read is not denied.
+- `fs.patch` or `fs.write` for `documents/private/notes.md` is denied with a safe reason payload.
+
+Add decision-metadata coverage:
+
+```python
+result = await service.evaluate_tool_call(...)
+assert result["allowed"] is False
+assert result["reason_code"] == "path_action_denied"
+assert result["path_decisions"][0] == {
+    "requested_action": "write",
+    "normalized_path": "documents/private/notes.md",
+    "grant_outcome": "denied",
+    "grant_source": "path_grants",
+    "matched_grant_prefix": "documents/private",
+    "matched_grant_effect": "deny",
+    "redacted": True,
+}
+assert "/Users/" not in repr(result)
+```
+
 - [ ] **Step 2: Run tests to verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py -q`
@@ -241,11 +274,15 @@ Implement helpers near `_policy_allowlist_prefixes(...)`:
 
 ```python
 _PATH_GRANT_ACTIONS = {"read", "edit", "write"}
+_RESERVED_PATH_GRANT_ACTIONS = {"delete", "rename", "move", "share", "export", "chmod", "admin", "lock"}
 
 def _policy_path_grants(policy_document: Mapping[str, Any]) -> list[dict[str, Any]]:
     ...
 
 def _candidate_action(tool_def: Mapping[str, Any], candidate: PathScopeCandidate | None) -> str:
+    ...
+
+def _path_permission_decision(...) -> dict[str, Any]:
     ...
 ```
 
@@ -253,14 +290,23 @@ Accepted grant forms:
 
 - `{"path": "documents", "actions": ["read", "edit"]}`
 - `{"prefix": "documents", "actions": ["read"]}` for compatibility with naming variants
+- `{"prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny"}`
 
-Reject invalid grant entries by ignoring them, not by broadening access.
+Reject invalid grant entries by ignoring them, not by broadening access. If a grant uses a reserved future action, ignore that action for first-slice enforcement and return a safe invalid-policy decision only when the request depends on that unsupported action.
 
 - [ ] **Step 4: Evaluate derived candidates first**
 
 If `path_scope_candidates` is non-empty, evaluate only those candidates instead of extracting paths from `path_argument_hints`. Each candidate must match a grant for its own action.
 
 For non-derived paths, infer the action from `tool_def.metadata.path_scope_action`, defaulting to `write` for write-capable tools and `read` for read-only tools.
+
+Decision behavior:
+
+- Normalize all checked paths to workspace-relative display paths before returning metadata.
+- Never return absolute host paths.
+- If any matching deny grant applies, deny with `reason_code="path_action_denied"`.
+- If no allow grant applies and no deny grant applies, deny with `reason_code="path_action_not_granted"`.
+- Include `path_decisions` in the service result for both allowed and denied requests.
 
 - [ ] **Step 5: Preserve current fallback behavior**
 
@@ -464,6 +510,7 @@ Cover:
 
 - Catalog descriptor includes `path_scope_candidate_source="module"` and write metadata.
 - Candidate extraction returns `edit` for existing-file modification and `write` for create.
+- Candidate paths are normalized to workspace-relative paths before read-receipt validation and permission-decision metadata.
 - Existing-file patch in strict mode requires `expected_sha256_by_path` or `read_receipt_by_path`.
 - Valid expected hash applies the patch and returns metadata without content.
 - Valid read receipt applies the patch.
@@ -613,6 +660,7 @@ Cover:
 - `fs.read_text` declares `path_scope_action="read"` and legacy metadata.
 - `fs.write_text` declares `path_scope_action="write"` and legacy metadata.
 - Tool-use reporting for filesystem tools records metadata fields only and never records returned file content, raw diffs, absolute paths, or receipts.
+- Permission decision metadata is allowed in tool-use reporting only through safe scalar fields or redacted relative path summaries.
 
 - [ ] **Step 2: Run tests to verify failure**
 
@@ -681,6 +729,8 @@ Add a section covering:
 - How `expected_sha256` and read receipts protect against stale edits.
 - Why `fs.patch` is preferred over raw whole-file writes.
 - Example `path_grants` for read-only, edit-only, and write-enabled profiles.
+- Example deny override for a private subtree under a broader writable parent.
+- Safe permission decision payloads and denial reason codes.
 - Compatibility status of `fs.read_text` and `fs.write_text`.
 
 - [ ] **Step 2: Run targeted tests**
@@ -760,6 +810,7 @@ git commit -m "docs: document mcp safe file tools"
 ## Risk Review
 
 - **Path-scope bypass through patch paths:** `fs.patch` must never use caller-provided path hints. It must parse diff paths and pass module-derived candidates before execution.
+- **Deny override bypass:** When `path_grants` is present, deny effects must take precedence over allow effects and must not fall through to `path_allowlist_prefixes`.
 - **Symlink escapes:** Use existing no-follow resolution and reject symlink targets for mutating tools. Do not follow symlinks during write or patch.
 - **Stale edits:** Strict mode requires a matching hash or read receipt before mutating existing files.
 - **Receipt secrecy:** Receipts must not embed file content, absolute paths, or secrets. Sign canonical JSON with HMAC and compare signatures with `hmac.compare_digest`.
@@ -772,6 +823,7 @@ git commit -m "docs: document mcp safe file tools"
 - `fs.read`, `fs.patch`, and `fs.write` are in the filesystem catalog with schemas, metadata, and eval metadata.
 - `fs.patch` uses module-derived path candidates and fails closed when candidate extraction is unavailable.
 - `path_grants` enforce `read`, `edit`, and `write` separately while preserving legacy allowlist behavior.
+- Deny path grants override broader allow grants and return safe denial metadata.
 - Existing-file `fs.patch` and `fs.write replace` require `expected_sha256` or a valid read receipt.
 - Legacy tools still work and are marked as compatibility tools.
 - Profile presets prefer canonical file tools without accidentally expanding roles that had no file access.
