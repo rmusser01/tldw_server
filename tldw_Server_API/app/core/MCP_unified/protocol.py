@@ -2985,7 +2985,11 @@ class MCPProtocol:
                 status, reason_code = classify_tool_use_exception(exc)
                 await _record_prepared_event(
                     status=status,
-                    execution_origin="failed_before_execution" if status != "error" else "executed",
+                    execution_origin=(
+                        self._tool_use_execution_origin_for_failure(status)
+                        if status != "error"
+                        else "executed"
+                    ),
                     reason_code=reason_code,
                 )
                 raise
@@ -3003,7 +3007,11 @@ class MCPProtocol:
             status, reason_code = classify_tool_use_exception(exc)
             await _record_prepared_event(
                 status=status,
-                execution_origin="failed_before_execution" if status in {"invalid_params", "rate_limited"} else "executed",
+                execution_origin=(
+                    self._tool_use_execution_origin_for_failure(status)
+                    if status != "error"
+                    else "executed"
+                ),
                 reason_code=reason_code,
             )
             raise

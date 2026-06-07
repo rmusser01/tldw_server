@@ -1455,7 +1455,7 @@ async def _tool_events_export_for_cli(
     output_path = args.output
     if output_path is not None:
         try:
-            output_path.write_text(exported, encoding="utf-8")
+            await asyncio.to_thread(output_path.write_text, exported, encoding="utf-8")
         except OSError as exc:
             raise _CliArgumentError(f"Unable to write tool event export: {exc}") from exc
         return {

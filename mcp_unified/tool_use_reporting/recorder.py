@@ -52,7 +52,16 @@ class StoreBackedToolUseRecorder:
             )
         except Exception as exc:  # pragma: no cover - exercised through host sinks.
             logger.warning(
-                "MCP tool-use recorder failed; event dropped. error_class={}",
+                (
+                    "MCP tool-use recorder failed; event dropped. "
+                    "event_id={} runtime_surface={} requested_tool_name={} "
+                    "effective_tool_name={} status={} error_class={}"
+                ),
+                event.event_id,
+                event.runtime_surface,
+                event.requested_tool_name,
+                event.effective_tool_name,
+                event.status,
                 exc.__class__.__name__,
             )
 
@@ -75,6 +84,15 @@ async def record_tool_use_safely(
         )
     except Exception as exc:
         logger.warning(
-            "MCP tool-use recorder failed; event dropped. error_class={}",
+            (
+                "MCP tool-use recorder failed; event dropped. "
+                "event_id={} runtime_surface={} requested_tool_name={} "
+                "effective_tool_name={} status={} error_class={}"
+            ),
+            event.event_id,
+            event.runtime_surface,
+            event.requested_tool_name,
+            event.effective_tool_name,
+            event.status,
             exc.__class__.__name__,
         )

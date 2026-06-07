@@ -1856,6 +1856,47 @@ def test_gateway_cli_tool_events_export_reads_sqlite_store(
     assert payload["events"][0]["profile_id"] == "devops"
 
 
+def test_gateway_cli_tool_events_export_output_uses_thread_offload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Writing export output is offloaded from the async CLI helper."""
+
+    class _ExportStore:
+        async def export_events(self, _query: Any, *, format: str) -> str:
+            assert format == "json"
+            return '[{"ok":true}]'
+
+    calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def fake_to_thread(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(gateway_cli.asyncio, "to_thread", fake_to_thread)
+    output_path = tmp_path / "events.json"
+    args = gateway_cli.argparse.Namespace(
+        effective_tool_name=None,
+        format="json",
+        limit=10,
+        mode_id=None,
+        model_id=None,
+        output=output_path,
+        profile_id=None,
+        requested_tool_name=None,
+        since=None,
+        status=None,
+        tool_prompt_id=None,
+    )
+
+    payload = asyncio.run(gateway_cli._tool_events_export_for_cli(_ExportStore(), args))
+
+    assert payload == {"format": "json", "ok": True, "output": str(output_path)}
+    assert output_path.read_text(encoding="utf-8") == '[{"ok":true}]'
+    assert calls
+    assert calls[0][0] == output_path.write_text
+
+
 def test_gateway_cli_tool_events_cleanup_deletes_over_limit(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

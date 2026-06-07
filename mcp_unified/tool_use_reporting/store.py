@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 from datetime import datetime, timezone
 from typing import Protocol
@@ -72,7 +73,7 @@ def decode_event_cursor(cursor: str | None) -> tuple[int, str] | None:
         raw = base64.urlsafe_b64decode(padded.encode("ascii"))
         epoch_us, event_id = json.loads(raw.decode("utf-8"))
         return int(epoch_us), str(event_id)
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except (binascii.Error, ValueError, TypeError):
         return None
 
 

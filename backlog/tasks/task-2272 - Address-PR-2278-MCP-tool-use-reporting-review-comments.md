@@ -21,10 +21,12 @@ modified_files:
 - mcp_unified/gateway/cli.py
 - mcp_unified/gateway/profile_runtime.py
 - mcp_unified/gateway/tool_use_reporting.py
+- mcp_unified/tool_use_reporting/recorder.py
 - mcp_unified/tool_use_reporting/reporting.py
 - mcp_unified/tool_use_reporting/sqlite.py
 - mcp_unified/tool_use_reporting/store.py
 - tldw_Server_API/app/core/MCP_unified/protocol.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_store.py
@@ -46,7 +48,7 @@ Verify and address still-valid PR #2278 review comments for MCP tool-use reporti
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Review-fix pass for PR #2278: verify each unresolved Gemini thread against rebased code; add failing regression tests for still-valid findings; patch only the reporting isolation, bridge metadata, cutoff math, percentile rounding, and CLI guard paths; run focused tests, Bandit, and diff checks; push the review-fix commit.
+Review-fix pass for PR #2278: verify each unresolved Gemini/CodeRabbit/Qodo thread against rebased code; add failing regression tests for still-valid findings; patch only minimal reporting resilience, CLI async file I/O, cursor decoding, warning context, and failure-origin paths; document skip reasons for non-applicable comments; run focused tests, Bandit, and diff checks; push the review-fix commit.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -60,7 +62,7 @@ Review-fix pass for PR #2278: verify each unresolved Gemini thread against rebas
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2278 onto latest origin/dev and addressed all unresolved Gemini/CodeRabbit review threads that were still valid. Added regression tests for tool-use event construction failures, bridge metadata mutation, direct cutoff epoch math, half-up percentile selection, and handler rate-limit double-counting. Reconciled completed Backlog task AC/DoD checklists and made SQLite JSON export explicitly use compact serialization. Final verification: focused MCP tool-use reporting suite passed with 166 passed and 5 warnings; Bandit passed with 0 findings in /tmp/bandit_mcp_tool_use_reporting_pr2278_review_final.json; git diff --check passed. Known skip: the empty --since comment was already behaviorally guarded by _optional_cli_text, so only a defensive extra guard was needed.
+Rebased PR #2278 onto latest origin/dev and addressed the new Qodo follow-up findings that were still valid. Fixed async CLI export output to offload Path.write_text with asyncio.to_thread, added safe event identifiers to recorder warning logs, made cursor decode exception handling explicit, and changed protocol failure-origin labeling to use the shared helper so unavailable failures report execution_origin=unavailable. Added regression coverage for malformed cursors, recorder warning context, CLI file-write offload, and unavailable failure origin. Verification: focused MCP tool-use reporting suite passed with 169 passed and 5 warnings; Bandit passed with 0 findings in /tmp/bandit_mcp_tool_use_reporting_pr2278_qodo_followup.json; git diff --check passed. Skip: the SQLiteToolUseEventStore DB-layer comment was not changed because mcp_unified is the standalone package boundary and must not import tldw_Server_API.app.core.DB_Management; the store uses SQLAlchemy Core rather than raw sqlite3/raw SQL, matching the existing mcp_unified/storage/sqlite.py package-boundary precedent.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

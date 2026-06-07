@@ -364,6 +364,22 @@ async def test_protocol_records_execution_failure_without_raw_arguments() -> Non
 
 
 @pytest.mark.asyncio
+async def test_protocol_records_unavailable_failure_origin_as_unavailable() -> None:
+    protocol, recorder = _protocol(module=_ToolModule(fail=LookupError("missing tool")))
+
+    with pytest.raises(Exception):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {}},
+            _request_context(),
+        )
+
+    event = recorder.events[-1]
+    assert event.status == "unavailable"
+    assert event.reason_code == "tool_unavailable"
+    assert event.execution_origin == "unavailable"
+
+
+@pytest.mark.asyncio
 async def test_protocol_records_idempotency_replay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
     from tldw_Server_API.app.core.MCP_unified.config import get_config

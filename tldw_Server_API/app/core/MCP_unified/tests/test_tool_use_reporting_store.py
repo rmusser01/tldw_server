@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import mcp_unified.tool_use_reporting.recorder as recorder_module
 import mcp_unified.tool_use_reporting.store as store_module
 from mcp_unified.tool_use_reporting.models import (
     ToolUseEvent,
@@ -36,6 +37,16 @@ async def _close_store(store: Any) -> None:
     close = getattr(store, "close", None)
     if close is not None:
         close()
+
+
+class _FailingToolUseEventStore:
+    async def append_event(self, _event: ToolUseEvent) -> None:
+        raise RuntimeError("sink unavailable")
+
+
+class _FailingToolUseRecorder:
+    async def record_tool_use(self, _event: ToolUseEvent) -> None:
+        raise RuntimeError("recorder unavailable")
 
 
 @pytest.fixture(
@@ -172,11 +183,42 @@ async def test_store_ignores_malformed_cursor(
             )
         )
 
-        rows = await store.query_events(ToolUseEventQuery(cursor="----", limit=10))
+        rows = await store.query_events(ToolUseEventQuery(cursor="a", limit=10))
 
         assert [row.requested_tool_name for row in rows] == ["fs.read"]
     finally:
         await _close_store(store)
+
+
+@pytest.mark.asyncio
+async def test_recorder_failure_logs_safe_event_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[tuple[str, tuple[Any, ...]]] = []
+
+    def fake_warning(message: str, *args: Any, **_kwargs: Any) -> None:
+        captured.append((message, args))
+
+    monkeypatch.setattr(recorder_module.logger, "warning", fake_warning)
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.read",
+        status="success",
+    )
+
+    recorder = recorder_module.StoreBackedToolUseRecorder(_FailingToolUseEventStore())
+    await recorder.record_tool_use(event)
+    await recorder_module.record_tool_use_safely(_FailingToolUseRecorder(), event)
+
+    assert len(captured) == 2
+    rendered = [
+        " ".join([message, *(str(arg) for arg in args)])
+        for message, args in captured
+    ]
+    for message in rendered:
+        assert event.event_id in message
+        assert "protocol" in message
+        assert "fs.read" in message
 
 
 @pytest.mark.asyncio
