@@ -325,6 +325,23 @@ rg -n "deck|spaced repetition|study-set|study set" \
 
 This guard intentionally excludes the word `flashcards` because documentation may mention the separate flashcards route when explaining what `/knowledge` does not do.
 
+## Follow-On Trust Release Gates
+
+Use `Docs/Plans/2026-06-07-knowledge-qa-follow-on-gap-matrix.md` when closing the follow-on trust remediation series. The matrix maps live QA findings to `TASK-2279.2` through `TASK-2279.9` and should be treated as the owner map for remaining trust, evidence, extension runtime, scoped-search, export/history, and live UAT work.
+
+Follow-on signoff requires:
+
+- Normal successful answers have valid citations that map to returned inspectable evidence.
+- Missing trust metadata fails closed as unknown or degraded, not grounded success.
+- Empty, weak, unavailable, filtered, deleted, or permission-limited evidence cannot produce normal success.
+- Web fallback remains disabled unless explicitly enabled, and web evidence is labeled anywhere answer, evidence, history, or export content is shown.
+- Source rows expose evidence text or a specific unavailable reason.
+- Search history, recent sessions, restored sessions, and export output preserve trust state and evidence origin.
+- Scoped-search requests, saved profiles, and rendered results round-trip selected source categories plus exact document/note ids.
+- Extension setup, backend reachability, auth, allowlist, search failure, and sync failure states have visible recovery paths.
+
+Extension runtime E2E is not a soft skip. If the WXT build or runtime harness cannot launch `options.html#/knowledge`, release signoff must record the blocker, exact command, timeout, failure artifact, and owner. Do not claim extension browser behavior was verified when the browser phase did not launch.
+
 ## Current Known Blockers
 
 - Extension E2E can be blocked by the WXT production build stalling before browser tests start. When that happens, record the build stall as an environment/build blocker and do not claim extension runtime behavior was verified.
