@@ -26,6 +26,7 @@ import {
   filterHistoryItems,
   isKnowledgeQaHistoryItem,
 } from "./historyUtils"
+import { getKnowledgeAnswerTrustLabel } from "./trustState"
 
 type HistorySidebarProps = {
   className?: string
@@ -472,6 +473,9 @@ function HistoryItem({
                 <Sparkles className="w-3 h-3" />
               </span>
             )}
+            {item.trustState ? (
+              <span className="truncate">{getKnowledgeAnswerTrustLabel(item.trustState)}</span>
+            ) : null}
             <span>{formatTimestamp(item.timestamp)}</span>
           </div>
         </div>

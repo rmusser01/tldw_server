@@ -24,6 +24,7 @@ import type {
   KnowledgeQAMessage,
   KnowledgeQAThread,
   CitationRef,
+  KnowledgeAnswerTrustState,
   SearchRuntimeDetails,
   KnowledgeSourceStatus,
   KnowledgeSourceHealthState,
@@ -51,6 +52,10 @@ import {
   EMPTY_SOURCE_HEALTH_STATE,
   normalizeKnowledgeSourceHealth,
 } from "./sourceHealth"
+import {
+  isKnowledgeAnswerTrustState,
+  normalizeKnowledgeAnswerTrust,
+} from "./trustState"
 
 const LOCAL_THREAD_PREFIX = "local-"
 const DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
@@ -91,6 +96,7 @@ const initialState: KnowledgeQAState = {
   results: [],
   answer: null,
   citations: [],
+  answerTrustState: "unknown_trust",
   searchDetails: null,
   error: null,
   queryWarning: null,
@@ -123,6 +129,13 @@ const initialState: KnowledgeQAState = {
 const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
+type ResultsPayload = {
+  results: RagResult[]
+  answer: string | null
+  citations: CitationRef[]
+  answerTrustState: KnowledgeAnswerTrustState
+}
+
 function sliceMessagesForBranch(
   messages: KnowledgeQAMessage[],
   fromUserMessageId: string
@@ -149,8 +162,8 @@ type Action =
   | { type: "SET_QUERY"; payload: string }
   | { type: "SET_QUERY_WARNING"; payload: string | null }
   | { type: "SET_SEARCHING"; payload: boolean }
-  | { type: "SET_RESULTS"; payload: { results: RagResult[]; answer: string | null; citations: CitationRef[] } }
-  | { type: "SET_PARTIAL_RESULTS"; payload: { results: RagResult[]; answer: string | null; citations: CitationRef[] } }
+  | { type: "SET_RESULTS"; payload: ResultsPayload }
+  | { type: "SET_PARTIAL_RESULTS"; payload: ResultsPayload }
   | { type: "SET_SEARCH_DETAILS"; payload: SearchRuntimeDetails | null }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "CLEAR_RESULTS" }
@@ -211,6 +224,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         results: action.payload.results,
         answer: action.payload.answer,
         citations: action.payload.citations,
+        answerTrustState: action.payload.answerTrustState,
         hasSearched: true,
         isSearching: false,
         queryStage: "complete",
@@ -221,6 +235,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         results: action.payload.results,
         answer: action.payload.answer,
         citations: action.payload.citations,
+        answerTrustState: action.payload.answerTrustState,
         hasSearched: true,
         isSearching: true,
       }
@@ -230,6 +245,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         error: action.payload,
+        answerTrustState: action.payload ? "failed_search" : state.answerTrustState,
         hasSearched: true,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
@@ -240,6 +256,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         results: [],
         answer: null,
         citations: [],
+        answerTrustState: "unknown_trust",
         searchDetails: null,
         error: null,
         queryWarning: null,
@@ -518,6 +535,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   answer: string | null
   results: RagResult[]
   citations: CitationRef[]
+  answerTrustState: KnowledgeAnswerTrustState
   answerPreview?: string
   sourcesCount: number
   settingsSnapshot?: Partial<RagSettings> | null
@@ -540,6 +558,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
       answer: null,
       results: [],
       citations: [],
+      answerTrustState: "unknown_trust",
       sourcesCount: 0,
       settingsSnapshot: null,
     }
@@ -551,6 +570,17 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     normalizeAnswerText(ragContext?.generated_answer) ??
     normalizeAnswerText(latestAssistantMessage.content)
   const citations = answer ? parseCitations(answer, results) : []
+  const storedTrustState = isKnowledgeAnswerTrustState(ragContext?.trust_state)
+    ? ragContext.trust_state
+    : null
+  const answerTrustState =
+    storedTrustState ??
+    normalizeKnowledgeAnswerTrust({
+      answer,
+      results,
+      citations,
+      hasRequiredMetadata: false,
+    }).state
   const queryFromContext =
     typeof ragContext?.search_query === "string" &&
     ragContext.search_query.trim().length > 0
@@ -563,6 +593,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     answer,
     results,
     citations,
+    answerTrustState,
     answerPreview: truncateAnswerPreview(answer),
     sourcesCount: results.length,
     settingsSnapshot: normalizeRestorableSettingsSnapshot(ragContext?.settings_snapshot),
@@ -640,6 +671,17 @@ function calculateAverageRelevance(results: RagResult[]): number | null {
   if (numericScores.length === 0) return null
   const sum = numericScores.reduce((acc, value) => acc + value, 0)
   return sum / numericScores.length
+}
+
+function hasWeakEvidence(results: RagResult[], threshold: number | undefined): boolean {
+  const normalizedThreshold =
+    typeof threshold === "number" && Number.isFinite(threshold) ? threshold : 0.3
+  const scoredResults = results.filter(
+    (result): result is RagResult & { score: number } =>
+      typeof result.score === "number" && Number.isFinite(result.score)
+  )
+  if (scoredResults.length === 0) return false
+  return scoredResults.every((result) => result.score < normalizedThreshold)
 }
 
 function normalizeMetric(value: unknown): number | null {
@@ -1786,7 +1828,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       question: string,
       results: RagResult[],
       answer: string | null,
-      settings: RagSettings
+      settings: RagSettings,
+      answerTrustState: KnowledgeAnswerTrustState
     ): RagContextData => ({
       search_query: question,
       search_mode: settings.search_mode,
@@ -1802,6 +1845,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         page_number: r.metadata?.page_number,
       })),
       generated_answer: answer || undefined,
+      trust_state: answerTrustState,
       timestamp: new Date().toISOString(),
     }),
     []
@@ -1864,6 +1908,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           return
         }
       }
+      const isThreadSyncFailed = () => Boolean(threadId && isLocalThreadId(threadId))
 
       const userTimestamp = new Date().toISOString()
       const persistedUser = threadId
@@ -1957,12 +2002,24 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 const partialCitations = partialAnswer
                   ? parseCitations(partialAnswer, streamResults)
                   : []
+                const partialTrustState = normalizeKnowledgeAnswerTrust({
+                  answer: partialAnswer,
+                  results: streamResults,
+                  citations: partialCitations,
+                  hasRequiredMetadata: true,
+                  syncFailed: isThreadSyncFailed(),
+                  weakEvidence: hasWeakEvidence(
+                    streamResults,
+                    effectiveSettings.strip_min_relevance
+                  ),
+                }).state
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
                     results: streamResults,
                     answer: partialAnswer,
                     citations: partialCitations,
+                    answerTrustState: partialTrustState,
                   },
                 })
                 receivedStreamEvent = true
@@ -1976,14 +2033,27 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 if (!deltaText) continue
                 streamAnswer += deltaText
                 const partialAnswer = normalizeAnswerText(streamAnswer)
+                const partialCitations = partialAnswer
+                  ? parseCitations(partialAnswer, streamResults)
+                  : []
+                const partialTrustState = normalizeKnowledgeAnswerTrust({
+                  answer: partialAnswer,
+                  results: streamResults,
+                  citations: partialCitations,
+                  hasRequiredMetadata: true,
+                  syncFailed: isThreadSyncFailed(),
+                  weakEvidence: hasWeakEvidence(
+                    streamResults,
+                    effectiveSettings.strip_min_relevance
+                  ),
+                }).state
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
                     results: streamResults,
                     answer: partialAnswer,
-                    citations: partialAnswer
-                      ? parseCitations(partialAnswer, streamResults)
-                      : [],
+                    citations: partialCitations,
+                    answerTrustState: partialTrustState,
                   },
                 })
                 receivedStreamEvent = true
@@ -2058,10 +2128,18 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         // Parse citations from answer
         dispatch({ type: "SET_QUERY_STAGE", payload: "verifying" })
         const citations = answer ? parseCitations(answer, results) : []
+        const answerTrustState = normalizeKnowledgeAnswerTrust({
+          answer,
+          results,
+          citations,
+          hasRequiredMetadata: true,
+          syncFailed: isThreadSyncFailed(),
+          weakEvidence: hasWeakEvidence(results, effectiveSettings.strip_min_relevance),
+        }).state
 
         dispatch({
           type: "SET_RESULTS",
-          payload: { results, answer, citations },
+          payload: { results, answer, citations, answerTrustState },
         })
         dispatch({ type: "SET_SEARCH_DETAILS", payload: resolvedSearchDetails })
         dispatch({
@@ -2081,7 +2159,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           trimmedQuery,
           results,
           answer,
-          effectiveSettings
+          effectiveSettings,
+          answerTrustState
         )
 
         if (answer && threadId) {
@@ -2129,6 +2208,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
             messageId: assistantMessageId || undefined,
             keywords: [KNOWLEDGE_QA_KEYWORD],
+            trustState: answerTrustState,
           }
           markHistoryMutation()
           dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
@@ -2164,6 +2244,22 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           type: "SET_ERROR",
           payload: errorMessage,
         })
+        if (addToHistory) {
+          const historyItem: SearchHistoryItem = {
+            id: crypto.randomUUID(),
+            query: trimmedQuery,
+            timestamp: new Date().toISOString(),
+            sourcesCount: 0,
+            hasAnswer: false,
+            preset: state.preset,
+            settingsSnapshot: createRestorableSettingsSnapshot(effectiveSettings),
+            conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
+            keywords: [KNOWLEDGE_QA_KEYWORD],
+            trustState: "failed_search",
+          }
+          markHistoryMutation()
+          dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
+        }
       } finally {
         if (activeSearchAbortRef.current === abortController) {
           activeSearchAbortRef.current = null
@@ -2316,6 +2412,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             results: hydration.results,
             answer: hydration.answer,
             citations: hydration.citations,
+            answerTrustState: hydration.answerTrustState,
           },
         })
       } else {
@@ -2344,6 +2441,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               answerPreview: hydration.answerPreview,
               hasAnswer: Boolean(hydration.answer),
               sourcesCount: hydration.sourcesCount || matchingHistoryItem.sourcesCount,
+              trustState: hydration.answerTrustState,
             },
           },
         })
@@ -2409,6 +2507,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               results: hydration.results,
               answer: hydration.answer,
               citations: hydration.citations,
+              answerTrustState: hydration.answerTrustState,
             },
           })
         } else {
@@ -2559,6 +2658,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             results: hydration.results,
             answer: hydration.answer,
             citations: hydration.citations,
+            answerTrustState: isLocalThreadId(branchThreadId)
+              ? "unsynced_local_result"
+              : hydration.answerTrustState,
           },
         })
       } else {

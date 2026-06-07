@@ -92,11 +92,13 @@ describe("historyUtils", () => {
         query: "What changed in stage 3?",
         pinned: true,
         answerPreview: "Stage 3 adds pinning and filters.",
+        trustState: "uncited_degraded_answer",
       }),
     ])
 
     expect(markdown).toContain("# Knowledge QA History Export")
     expect(markdown).toContain("Pinned: yes")
+    expect(markdown).toContain("Trust: Uncited answer")
     expect(markdown).toContain("Answer preview: Stage 3 adds pinning and filters.")
   })
 })

@@ -19,6 +19,14 @@ const state = {
     answerPreview?: string
     pinned?: boolean
     conversationId?: string
+    trustState?:
+      | "cited_answer"
+      | "uncited_degraded_answer"
+      | "no_answer_insufficient_evidence"
+      | "no_results"
+      | "failed_search"
+      | "unsynced_local_result"
+      | "unknown_trust"
   }>,
   setHistorySidebarOpen: vi.fn(),
   restoreFromHistory: vi.fn(),
@@ -168,6 +176,24 @@ describe("HistorySidebar responsive layout", () => {
     const deleteButton = await screen.findByLabelText("Delete from history")
     expect(deleteButton.className).toContain("opacity-100")
     expect(deleteButton.className).not.toContain("group-hover:opacity-100")
+  })
+
+  it("shows compact trust labels for history items with trust state", async () => {
+    state.searchHistory = [
+      {
+        id: "h-trust",
+        query: "Trust-labeled query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 2,
+        hasAnswer: true,
+        trustState: "uncited_degraded_answer",
+      },
+    ]
+
+    render(<HistorySidebar />)
+
+    expect(await screen.findByText("Uncited answer")).toBeInTheDocument()
   })
 
   it("marks the active history thread with aria-current", async () => {

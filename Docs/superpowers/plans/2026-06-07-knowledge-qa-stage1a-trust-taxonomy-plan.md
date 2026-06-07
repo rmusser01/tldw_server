@@ -10,6 +10,8 @@
 
 **Backlog Task:** TASK-2279.2
 
+**Status:** Complete on 2026-06-07. Verification passed for the focused Stage 1A test set, provider slice, full Knowledge QA test folder, scope guard, diff hygiene, and Bandit touched-scope scan.
+
 ---
 
 ## Boundaries
@@ -36,7 +38,7 @@
 
 ## Task 1: Define Shared Trust Types
 
-- [ ] **Step 1: Write failing trust-state tests**
+- [x] **Step 1: Write failing trust-state tests**
 
 Create `trustState.test.ts`:
 
@@ -80,7 +82,7 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/trustState.test.ts
 
 Expected: fail because `trustState.ts` does not exist.
 
-- [ ] **Step 2: Implement minimal trust helper**
+- [x] **Step 2: Implement minimal trust helper**
 
 First add the public trust state type to `types.ts`:
 
@@ -122,7 +124,7 @@ export function normalizeKnowledgeAnswerTrust(input: KnowledgeTrustInput) {
 }
 ```
 
-- [ ] **Step 3: Add trust fields to shared types**
+- [x] **Step 3: Add trust fields to shared types**
 
 Modify `types.ts`:
 
@@ -142,7 +144,7 @@ Run the focused test again. Expected: pass after imports are corrected.
 
 ## Task 2: Wire Provider State
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Update `KnowledgeQAProvider.history.test.tsx` to assert:
 
@@ -159,17 +161,17 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.
 
 Expected: fail because provider does not persist trust state.
 
-- [ ] **Step 2: Normalize in `KnowledgeQAProvider.tsx`**
+- [x] **Step 2: Normalize in `KnowledgeQAProvider.tsx`**
 
 Call `normalizeKnowledgeAnswerTrust()` when setting results, partial results, errors, local-only thread state, and search history entries.
 
-- [ ] **Step 3: Preserve backwards compatibility**
+- [x] **Step 3: Preserve backwards compatibility**
 
 Older payloads without trust metadata must become `unknown_trust`, not `cited_answer`.
 
 ## Task 3: Render Trust States
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Update `AnswerPanel.states.test.tsx` and `trustSummary.test.ts` to assert visible labels for:
 
@@ -189,17 +191,17 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.t
 
 Expected: fail until UI labels are wired.
 
-- [ ] **Step 2: Update answer and low-quality surfaces**
+- [x] **Step 2: Update answer and low-quality surfaces**
 
 Modify `AnswerPanel.tsx`, `LowQualityRecoveryBanner.tsx`, and `trustSummary.ts` to style uncited, unknown, failed, and unsynced states as degraded or blocked. Do not use success styling for unsupported answers.
 
-- [ ] **Step 3: Update history previews**
+- [x] **Step 3: Update history previews**
 
 Modify `HistorySidebar.tsx` and `InlineRecentSessions.tsx` to show compact trust labels without increasing layout height unexpectedly.
 
 ## Task 4: Verify
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 ```bash
 cd apps/packages/ui
@@ -208,7 +210,7 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/trustState.test.ts s
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run scope guard**
+- [x] **Step 2: Run scope guard**
 
 ```bash
 rg -n "flashcard|deck|spaced repetition|study set" apps/packages/ui/src/components/Option/KnowledgeQA
@@ -216,7 +218,7 @@ rg -n "flashcard|deck|spaced repetition|study set" apps/packages/ui/src/componen
 
 Expected: no matches in touched Knowledge QA runtime files.
 
-- [ ] **Step 3: Run diff hygiene**
+- [x] **Step 3: Run diff hygiene**
 
 ```bash
 git diff --check -- apps/packages/ui/src/components/Option/KnowledgeQA
@@ -224,7 +226,7 @@ git diff --check -- apps/packages/ui/src/components/Option/KnowledgeQA
 
 Expected: exit 0.
 
-- [ ] **Step 4: Update Backlog and commit**
+- [x] **Step 4: Update Backlog and commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2279.2 - Define-Knowledge-QA-trust-taxonomy-and-safe-response-handling.md"

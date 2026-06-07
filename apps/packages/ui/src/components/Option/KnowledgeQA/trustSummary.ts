@@ -1,5 +1,7 @@
 import { getRagSourceLabel } from "@/services/rag/sourceMetadata"
 import type { RagSource } from "@/services/rag/unified-rag"
+import type { KnowledgeAnswerTrustState } from "./types"
+import { getKnowledgeAnswerTrustLabel } from "./trustState"
 
 export type AnswerTrustLabel = "Strong" | "Partial" | "Weak"
 
@@ -12,7 +14,8 @@ type BuildAnswerTrustSummaryInput = {
   generationProvider: string | null | undefined
   generationModel: string | null | undefined
   sourceHealthCaveatCount: number
-  trustLabel: AnswerTrustLabel | null | undefined
+  trustState?: KnowledgeAnswerTrustState | null | undefined
+  trustLabel?: AnswerTrustLabel | null | undefined
 }
 
 function pluralize(count: number, singular: string, plural = `${singular}s`): string {
@@ -48,6 +51,7 @@ export function buildAnswerTrustSummary({
   generationProvider,
   generationModel,
   sourceHealthCaveatCount,
+  trustState,
   trustLabel,
 }: BuildAnswerTrustSummaryInput): string[] {
   const lines = [
@@ -75,7 +79,9 @@ export function buildAnswerTrustSummary({
     lines.push("Selected sources look ready.")
   }
 
-  if (trustLabel) {
+  if (trustState) {
+    lines.push(`Trust: ${getKnowledgeAnswerTrustLabel(trustState)}.`)
+  } else if (trustLabel) {
     lines.push(`Trust: ${trustLabel}.`)
   }
 

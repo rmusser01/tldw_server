@@ -188,6 +188,7 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
     results: [],
     answer: null,
     citations: [],
+    answerTrustState: "unknown_trust",
     searchDetails: null,
     error: null,
     queryWarning: null,

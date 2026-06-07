@@ -1,5 +1,6 @@
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import type { SearchHistoryItem } from "./types"
+import { getKnowledgeAnswerTrustLabel } from "./trustState"
 
 export type GroupedHistorySections = {
   pinned: SearchHistoryItem[]
@@ -113,6 +114,9 @@ export function buildHistoryExportMarkdown(
     }
     if (item.pinned) {
       lines.push("- Pinned: yes")
+    }
+    if (item.trustState) {
+      lines.push(`- Trust: ${getKnowledgeAnswerTrustLabel(item.trustState)}`)
     }
     if (item.conversationId) {
       lines.push(`- Conversation ID: ${item.conversationId}`)

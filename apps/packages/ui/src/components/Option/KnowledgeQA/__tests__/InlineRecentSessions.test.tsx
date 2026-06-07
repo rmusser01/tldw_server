@@ -76,6 +76,19 @@ describe("InlineRecentSessions", () => {
     expect(screen.getByText("12")).toBeInTheDocument()
   })
 
+  it("shows compact trust label when an item has trust state", () => {
+    const item = makeItem({
+      hasAnswer: true,
+      trustState: "unsynced_local_result",
+    })
+
+    render(
+      <InlineRecentSessions items={[item]} onRestore={vi.fn()} />
+    )
+
+    expect(screen.getByText("Unsynced local result")).toBeInTheDocument()
+  })
+
   it("shows sparkle icon only for items with hasAnswer=true", () => {
     const items = [
       makeItem({ id: "with-answer", query: "answered", hasAnswer: true }),

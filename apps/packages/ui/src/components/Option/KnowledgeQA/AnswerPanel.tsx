@@ -18,8 +18,12 @@ import {
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
 import { remarkCitationLinks } from "./answerMarkdown"
 import { LowQualityRecoveryBanner } from "./panels/LowQualityRecoveryBanner"
-import { buildAnswerTrustSummary, type AnswerTrustLabel } from "./trustSummary"
+import { buildAnswerTrustSummary } from "./trustSummary"
 import type { KnowledgeSourceHealth } from "./types"
+import {
+  getKnowledgeAnswerTrustPresentation,
+  type KnowledgeTrustTone,
+} from "./trustState"
 
 type AnswerPanelProps = {
   className?: string
@@ -128,6 +132,32 @@ function describeFaithfulness(score: number | null): TrustDescriptor | null {
   }
 }
 
+function getTrustBadgeClassName(tone: KnowledgeTrustTone): string {
+  if (tone === "success") {
+    return "border-success/40 bg-success/15 text-success"
+  }
+  if (tone === "danger") {
+    return "border-danger/40 bg-danger/15 text-danger"
+  }
+  if (tone === "warning") {
+    return "border-warn/40 bg-warn/15 text-warn"
+  }
+  return "border-border bg-surface text-text-muted"
+}
+
+function getAnswerPanelClassName(tone: KnowledgeTrustTone): string {
+  if (tone === "success") {
+    return "rounded-xl bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/20"
+  }
+  if (tone === "danger") {
+    return "rounded-xl border border-danger/25 bg-danger/5"
+  }
+  if (tone === "warning") {
+    return "rounded-xl border border-warn/25 bg-warn/5"
+  }
+  return "rounded-xl border border-border bg-surface"
+}
+
 function sourceHealthNeedsAttention(
   health: KnowledgeSourceHealth | null | undefined
 ): boolean {
@@ -141,6 +171,7 @@ function sourceHealthNeedsAttention(
 export function AnswerPanel({ className }: AnswerPanelProps) {
   const {
     answer,
+    answerTrustState = "unknown_trust",
     citations,
     isSearching,
     error,
@@ -192,6 +223,10 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     if (typeof answer !== "string") return null
     return answer.trim().length > 0 ? answer : null
   }, [answer])
+  const answerTrustPresentation = useMemo(
+    () => getKnowledgeAnswerTrustPresentation(answerTrustState),
+    [answerTrustState]
+  )
   const answerSessionKey = useMemo(
     () =>
       `${currentThreadId ?? "no-thread"}::${latestAssistantMessageId ?? "no-assistant"}::${
@@ -222,8 +257,6 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       sourceHealthNeedsAttention(sourceHealth?.bySource[source])
     ).length
   }, [settings?.sources, sourceHealth?.bySource])
-  const answerTrustLabel: AnswerTrustLabel =
-    faithfulnessDescriptor?.label ?? (citations.length > 0 ? "Partial" : "Weak")
   const answerTrustSummaryLines = useMemo(
     () =>
       buildAnswerTrustSummary({
@@ -236,10 +269,10 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         generationProvider: settings?.generation_provider,
         generationModel: settings?.generation_model,
         sourceHealthCaveatCount,
-        trustLabel: answerTrustLabel,
+        trustState: answerTrustState,
       }),
     [
-      answerTrustLabel,
+      answerTrustState,
       citations.length,
       results.length,
       searchDetails?.webFallbackEnabled,
@@ -253,6 +286,22 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   )
   const lowConfidenceRecovery = useMemo(() => {
     if (!normalizedAnswer || results.length === 0) return null
+
+    if (answerTrustState === "unknown_trust") {
+      return {
+        title: "Low answer confidence",
+        description:
+          "This answer does not include trust metadata. Re-run the search before treating it as a grounded answer.",
+      }
+    }
+
+    if (answerTrustState === "unsynced_local_result") {
+      return {
+        title: "Results not saved",
+        description:
+          "This answer was produced in a local-only or unsynced session. Re-run after connection recovery before relying on it later.",
+      }
+    }
 
     const threshold = settings?.strip_min_relevance ?? 0.3
     const hasScoredResults = results.some(
@@ -301,6 +350,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
 
     return null
   }, [
+    answerTrustState,
     citations.length,
     faithfulnessDescriptor?.label,
     groundingCoverage?.percent,
@@ -589,6 +639,9 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <AlertCircle className="w-5 h-5 text-danger mt-0.5" />
           <div>
             <p className="font-medium text-danger">{errorPresentation.title}</p>
+            <p className="mt-1 text-xs font-medium text-danger">
+              Answer status: {answerTrustPresentation.label}
+            </p>
             <p className="text-sm text-text-muted mt-1">{error}</p>
             <p className="text-sm text-text-muted mt-1">{errorPresentation.guidance}</p>
           </div>
@@ -602,6 +655,28 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     // Show empty state only if we have no results either
     if (results.length === 0) {
       return null
+    }
+
+    if (answerTrustState === "no_answer_insufficient_evidence") {
+      return (
+        <div className={cn("p-6 rounded-xl bg-warn/10 border border-warn/25", className)}>
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-warn mt-0.5" />
+            <div>
+              <p className="font-medium text-warn">
+                Answer status: {answerTrustPresentation.label}
+              </p>
+              <p className="text-sm text-text-muted mt-1">
+                No answer could be generated from the retrieved evidence.
+              </p>
+              <p className="text-sm text-text-muted mt-1">
+                Refine the query, adjust sources, or include web sources before relying
+                on this search.
+              </p>
+            </div>
+          </div>
+        </div>
+      )
     }
 
     // Results but no generated answer
@@ -628,13 +703,31 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   }
 
   // Answer with citations
+  const answerSectionBorderClassName =
+    answerTrustPresentation.tone === "success" ? "border-primary/10" : "border-border"
+
   return (
-    <div className={cn("rounded-xl bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/20", className)}>
+    <div className={cn(getAnswerPanelClassName(answerTrustPresentation.tone), className)}>
       {/* Header */}
-      <div className="border-b border-primary/10 px-6 py-3">
+      <div className={cn("border-b px-6 py-3", answerSectionBorderClassName)}>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />
+          <Sparkles
+            className={cn(
+              "w-4 h-4",
+              answerTrustPresentation.tone === "success"
+                ? "text-primary"
+                : "text-text-muted"
+            )}
+          />
           <span className="font-medium text-sm">AI Answer</span>
+          <span
+            className={cn(
+              "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium",
+              getTrustBadgeClassName(answerTrustPresentation.tone)
+            )}
+          >
+            Answer status: {answerTrustPresentation.label}
+          </span>
           {isSearching && (
             <span className="text-xs text-text-muted">Streaming...</span>
           )}
@@ -750,7 +843,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         </div>
       </div>
       {showLowConfidenceRecovery ? (
-        <div className="border-b border-primary/10 px-6 py-4">
+        <div className={cn("border-b px-6 py-4", answerSectionBorderClassName)}>
           <LowQualityRecoveryBanner
             title={lowConfidenceRecovery?.title}
             description={lowConfidenceRecovery?.description}
@@ -913,7 +1006,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       </div>
 
       {/* Citation summary + feedback */}
-      <div className="border-t border-primary/10 bg-surface/35 px-6 py-3">
+      <div className={cn("border-t bg-surface/35 px-6 py-3", answerSectionBorderClassName)}>
         {citations.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-text-muted">Sources:</span>

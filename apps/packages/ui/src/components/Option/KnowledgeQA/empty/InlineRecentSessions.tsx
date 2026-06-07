@@ -2,6 +2,7 @@ import React from "react"
 import { Clock3, FileText, Sparkles } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { SearchHistoryItem } from "../types"
+import { getKnowledgeAnswerTrustLabel } from "../trustState"
 
 type InlineRecentSessionsProps = {
   items: SearchHistoryItem[]
@@ -61,6 +62,11 @@ export function InlineRecentSessions({
                   <Sparkles className="h-3 w-3" />
                 </span>
               )}
+              {item.trustState ? (
+                <span className="inline-flex min-w-0 truncate">
+                  {getKnowledgeAnswerTrustLabel(item.trustState)}
+                </span>
+              ) : null}
               <span className="inline-flex items-center gap-0.5">
                 <Clock3 className="h-3 w-3" />
                 {formatRelativeTime(item.timestamp)}

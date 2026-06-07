@@ -29,6 +29,15 @@ export type PinnedSourceFilters = {
 
 export type ThreadHydrationResult = boolean | "terminal"
 
+export type KnowledgeAnswerTrustState =
+  | "cited_answer"
+  | "uncited_degraded_answer"
+  | "no_answer_insufficient_evidence"
+  | "no_results"
+  | "failed_search"
+  | "unsynced_local_result"
+  | "unknown_trust"
+
 // Retrieved document with citation info
 export type RagResult = {
   id?: string
@@ -75,6 +84,7 @@ export type RagContextData = {
     metadata?: Record<string, unknown>
   }>
   generated_answer?: string
+  trust_state?: KnowledgeAnswerTrustState
   citations?: Array<{
     index?: number
     text: string
@@ -196,6 +206,7 @@ export type SearchHistoryItem = {
   preset?: RagPresetName
   settingsSnapshot?: Partial<RagSettings>
   keywords?: string[]
+  trustState?: KnowledgeAnswerTrustState
 }
 
 // Thread/conversation for Knowledge QA
@@ -229,6 +240,7 @@ export type KnowledgeQAState = {
   results: RagResult[]
   answer: string | null
   citations: CitationRef[]
+  answerTrustState: KnowledgeAnswerTrustState
   searchDetails: SearchRuntimeDetails | null
   error: string | null
   queryWarning: string | null
