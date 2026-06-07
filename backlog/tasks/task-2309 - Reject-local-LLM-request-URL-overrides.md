@@ -4,7 +4,7 @@ title: Reject local LLM request URL overrides
 status: Done
 assignee: []
 created_date: '2026-06-07 16:49'
-updated_date: '2026-06-07 17:06'
+updated_date: '2026-06-07 17:09'
 labels:
   - llm
   - providers
@@ -42,6 +42,8 @@ Implemented the local provider request URL override guard in chat_service before
 Alias hardening follow-up: provider names are canonicalized through the LLM adapter registry before the local-provider URL override guard runs, so local aliases such as llama-cpp and tabby_api are covered. Updated verification after this follow-up: focused Chat/LLM regression suite passed with 24 passed and 5 warnings; Bandit on touched Python files exited 0 with zero findings; git diff --check exited 0; reference scan across touched files found no absolute developer-machine paths or temporary report artifact names.
 
 Rebased PR branch on latest origin/dev and addressed Gemini review threads by allowing None in _resolve_chat_provider_name typing and matching the local override helper signatures to dict[str, Any]. Post-review verification: focused Chat/LLM regression suite passed with 24 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names.
+
+Addressed the actionable CodeRabbit docstring warning by adding docstrings to the new chat-service helper functions. Re-ran focused verification after the docstring follow-up: Chat/LLM regression suite passed with 24 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names. Remaining PR description warning requires the human-authored Change summary mandated by repository policy.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
