@@ -348,23 +348,22 @@ const fetchFullMediaTextById = async (mediaId: number): Promise<string | null> =
   }
 }
 
-const MAX_PINNED_SNIPPET_CHARS = 20_000
-const PINNED_SNIPPET_TRUNCATION_NOTICE =
-  "\n\n[Content truncated for pinned context.]"
+export const PINNED_MEDIA_CONTEXT_CHAR_CAP = 20_000
+export const PINNED_MEDIA_CONTEXT_TRUNCATION_NOTICE =
+  "[Truncated to 20,000 characters]"
 
 const limitPinnedSnippetForContext = (
   pinned: RagPinnedResult
 ): RagPinnedResult => {
-  if (pinned.snippet.length <= MAX_PINNED_SNIPPET_CHARS) return pinned
+  if (pinned.snippet.length <= PINNED_MEDIA_CONTEXT_CHAR_CAP) return pinned
+  const notice = `${PINNED_MEDIA_CONTEXT_TRUNCATION_NOTICE}\n\n`
   const sliceLength = Math.max(
     0,
-    MAX_PINNED_SNIPPET_CHARS - PINNED_SNIPPET_TRUNCATION_NOTICE.length
+    PINNED_MEDIA_CONTEXT_CHAR_CAP - notice.length
   )
   return {
     ...pinned,
-    snippet:
-      pinned.snippet.slice(0, sliceLength) +
-      PINNED_SNIPPET_TRUNCATION_NOTICE
+    snippet: notice + pinned.snippet.slice(0, sliceLength)
   }
 }
 

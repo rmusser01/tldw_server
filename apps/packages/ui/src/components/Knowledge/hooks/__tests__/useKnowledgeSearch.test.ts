@@ -26,6 +26,8 @@ import { useStoreMessageOption } from "@/store/option"
 import {
   extractContentFromMediaDetail,
   extractMediaId,
+  PINNED_MEDIA_CONTEXT_CHAR_CAP,
+  PINNED_MEDIA_CONTEXT_TRUNCATION_NOTICE,
   normalizeMediaSearchResults,
   toPinnedResult,
   useKnowledgeSearch,
@@ -33,7 +35,8 @@ import {
   type RagResult
 } from "../useKnowledgeSearch"
 
-const maxPinnedSnippetChars = 20_000
+const maxPinnedSnippetChars = PINNED_MEDIA_CONTEXT_CHAR_CAP
+const pinnedTruncationNotice = PINNED_MEDIA_CONTEXT_TRUNCATION_NOTICE
 
 describe("useKnowledgeSearch helpers", () => {
   beforeEach(() => {
@@ -387,9 +390,52 @@ describe("useKnowledgeSearch action paths", () => {
         useStoreMessageOption.getState().ragPinnedResults[0]?.snippet
       expect(snippet).toBeDefined()
       expect(snippet?.length).toBeLessThanOrEqual(maxPinnedSnippetChars)
-      expect(snippet).toContain("Content truncated")
+      expect(snippet?.startsWith(pinnedTruncationNotice)).toBe(true)
       expect(snippet).not.toBe(fullText)
     })
+  })
+
+  it("stores under-cap media-library pinned content without a truncation notice", async () => {
+    const fullText = "Under cap full media body content"
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: { text: fullText }
+    })
+    const { result } = createHook()
+
+    act(() => {
+      result.current.handlePin(mediaResult())
+    })
+
+    await waitFor(() => {
+      const snippet =
+        useStoreMessageOption.getState().ragPinnedResults[0]?.snippet
+      expect(snippet).toBe(fullText)
+      expect(snippet).not.toContain(pinnedTruncationNotice)
+    })
+  })
+
+  it("keeps long full media text for insert and copy even when pinned storage is capped", async () => {
+    const fullText = "B".repeat(maxPinnedSnippetChars + 200)
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: { text: fullText }
+    })
+    const { result, onInsert } = createHook()
+
+    act(() => {
+      result.current.handleInsert(mediaResult())
+    })
+
+    await waitFor(() => {
+      expect(onInsert).toHaveBeenCalledWith(expect.stringContaining(fullText))
+    })
+
+    await act(async () => {
+      await result.current.copyResult(mediaResult(), "markdown")
+    })
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining(fullText)
+    )
   })
 
   it("copies full media-library content as markdown", async () => {
