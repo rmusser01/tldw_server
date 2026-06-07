@@ -18,13 +18,24 @@ _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 WorkspaceProfile = Literal["research", "project"]
 WorkspaceKind = Literal["research_workspace", "project_workspace"]
 WorkspaceResolutionStatus = Literal["complete", "partial", "failed"]
+WorkspaceAttentionState = Literal[
+    "ready",
+    "setup_pending",
+    "working",
+    "needs_attention",
+    "blocked",
+    "archived",
+]
 WorkspaceProjectRootBackend = Literal["host_local", "sandbox_volume"]
 WorkspaceProjectRootState = Literal[
     "not_configured",
+    "provisioning",
     "attached",
+    "unavailable",
     "missing",
     "detached",
     "failed",
+    "cleanup_pending",
     "archived",
 ]
 
@@ -242,6 +253,7 @@ class WorkspaceFileInventory(BaseModel):
     indexed_file_count: int | None = None
     total_file_count: int | None = None
     updated_at: str | None = None
+    available: bool = False
 
 
 class WorkspaceProjectRoot(BaseModel):
@@ -269,6 +281,16 @@ class WorkspacePrimaryRootAttachRequest(BaseModel):
     replace_existing: StrictBool = False
     expected_workspace_version: int | None = Field(default=None, ge=1)
     strict_sandbox_validation: StrictBool = False
+
+
+class WorkspaceSandboxRootProvisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, max_length=120)
+    requested_runtime: str | None = Field(default=None, max_length=80)
+    root_id: str | None = Field(default=None, max_length=128)
+    replace_existing: StrictBool = False
+    expected_workspace_version: int | None = Field(default=None, ge=1)
 
 
 WorkspaceFileInventoryState = Literal[
@@ -365,6 +387,28 @@ class WorkspaceRuntimeBinding(BaseModel):
     management_surface: str | None = None
 
 
+WorkspaceOperationStatus = Literal[
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "conflicted",
+    "expired",
+]
+
+
+class WorkspaceOperationResponse(BaseModel):
+    operation_id: str
+    workspace_id: str
+    command: str
+    status: WorkspaceOperationStatus
+    started_at: str
+    updated_at: str
+    retryable: bool = False
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+    poll_href: str
+
+
 class WorkspaceRootResponse(WorkspaceProjectRoot):
     workspace_id: str | None = None
     is_primary: bool = True
@@ -377,6 +421,13 @@ class WorkspaceRootsResponse(BaseModel):
     workspace_profile: WorkspaceProfile = "research"
     primary_root: WorkspaceRootResponse | None = None
     roots: list[WorkspaceRootResponse] = Field(default_factory=list)
+
+
+class WorkspaceSandboxRootProvisionResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "project"
+    operation: WorkspaceOperationResponse
+    primary_root: WorkspaceRootResponse | None = None
 
 
 class WorkspaceCapabilitiesResponse(BaseModel):
@@ -432,6 +483,7 @@ class WorkspaceContextResponse(BaseModel):
     schema_version: int = 2
     generated_at: str
     workspace: WorkspaceResponse
+    attention_state: WorkspaceAttentionState = "needs_attention"
     resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
     project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
     sources: WorkspaceContextSources
@@ -439,6 +491,7 @@ class WorkspaceContextResponse(BaseModel):
     services: dict[str, WorkspaceCapabilityService]
     allowed_actions: dict[str, WorkspaceAllowedAction]
     active_jobs: list[WorkspaceSourceJobStatus] = Field(default_factory=list)
+    active_operations: list[WorkspaceOperationResponse] = Field(default_factory=list)
     partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
 
 

@@ -7,7 +7,7 @@ from pathlib import PurePath, PureWindowsPath
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
@@ -39,9 +39,12 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspacePatchRequest,
     WorkspacePrimaryRootAttachRequest,
     WorkspaceCapabilitiesResponse,
+    WorkspaceOperationResponse,
     WorkspaceResponse,
     WorkspaceRootResponse,
     WorkspaceRootsResponse,
+    WorkspaceSandboxRootProvisionRequest,
+    WorkspaceSandboxRootProvisionResponse,
     WorkspaceSourceCreateRequest,
     WorkspaceSourcePreviewResponse,
     WorkspaceSourceReorderRequest,
@@ -60,11 +63,14 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Sandbox.store import get_store as get_sandbox_store
+from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Workspaces.file_inventory_ignore import build_inventory_ignore_policy
 from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     WorkspaceFileInventoryEnqueueError,
     enqueue_workspace_file_inventory_scan_job,
 )
+from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
 from tldw_Server_API.app.core.Workspaces.source_jobs import (
     WORKSPACE_SOURCE_JOB_DOMAIN,
     WORKSPACE_SOURCE_JOB_QUEUE,
@@ -79,7 +85,14 @@ from tldw_Server_API.app.core.Workspaces.root_binding_service import (
     WorkspaceRootServiceError,
     attach_primary_workspace_root,
 )
-from tldw_Server_API.app.core.Workspaces.models import normalize_project_root_state
+from tldw_Server_API.app.core.Workspaces.operations import workspace_operation_response_payload
+from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
+    provision_and_attach_sandbox_root,
+)
+from tldw_Server_API.app.core.Workspaces.models import (
+    normalize_project_root_state,
+    workspace_file_inventory_available,
+)
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
     build_workspace_capability_projection,
@@ -92,6 +105,11 @@ from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateErro
 router = APIRouter()
 
 WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
+
+
+def get_workspace_sandbox_volume_service() -> SandboxWorkspaceVolumeService:
+    """Return the Sandbox-owned workspace-volume service for Workspace commands."""
+    return SandboxWorkspaceVolumeService(store=get_sandbox_store())
 
 
 def _ws_to_response(ws: dict) -> WorkspaceResponse:
@@ -166,6 +184,10 @@ def _workspace_roots_response(
         primary_root=_root_to_response(primary_root) if primary_root else None,
         roots=[_root_to_response(root) for root in roots],
     )
+
+
+def _operation_to_response(operation: dict[str, Any]) -> WorkspaceOperationResponse:
+    return WorkspaceOperationResponse(**workspace_operation_response_payload(operation))
 
 
 def _root_path_hint(root: dict[str, Any]) -> str | None:
@@ -468,25 +490,48 @@ def _workspace_primary_root_with_file_inventory_status(
     status_payload = db.get_workspace_file_inventory_status(workspace_id)
     enriched_root["file_inventory"] = _workspace_file_inventory_summary(status_payload)
     enriched_root["file_inventory_state"] = status_payload.get("state") or primary_root.get("file_inventory_state")
+    enriched_root["file_inventory"]["available"] = workspace_file_inventory_available(
+        project_root_state=primary_root.get("root_state") or primary_root.get("state"),
+        root_id=primary_root.get("root_id") or primary_root.get("id"),
+        backend=primary_root.get("backend"),
+        sandbox_mount_state=primary_root.get("sandbox_mount_state"),
+        inventory_state=enriched_root["file_inventory"]["state"],
+    )
     return enriched_root
 
 
 def _workspace_file_inventory_summary(source: dict[str, Any]) -> dict[str, Any]:
     raw_inventory = source.get("file_inventory")
     if isinstance(raw_inventory, dict):
+        inventory_state = raw_inventory.get("state") or source.get("file_inventory_state") or "not_started"
         return {
-            "state": raw_inventory.get("state") or source.get("file_inventory_state") or "not_started",
+            "state": inventory_state,
             "indexed_file_count": _non_negative_int(raw_inventory.get("indexed_file_count"), default=0),
             "total_file_count": _non_negative_int(raw_inventory.get("total_file_count"), default=0),
             "updated_at": str(raw_inventory["updated_at"]) if raw_inventory.get("updated_at") else None,
+            "available": workspace_file_inventory_available(
+                project_root_state=source.get("root_state") or source.get("state"),
+                root_id=source.get("root_id") or source.get("id"),
+                backend=source.get("backend"),
+                sandbox_mount_state=source.get("sandbox_mount_state"),
+                inventory_state=inventory_state,
+            ),
         }
 
     counts = source.get("counts") if isinstance(source.get("counts"), dict) else {}
+    inventory_state = source.get("file_inventory_state") or source.get("state") or "not_started"
     return {
-        "state": source.get("state") or source.get("file_inventory_state") or "not_started",
+        "state": inventory_state,
         "indexed_file_count": 0,
         "total_file_count": _non_negative_int(counts.get("files"), default=0),
         "updated_at": _workspace_file_inventory_updated_at(source),
+        "available": workspace_file_inventory_available(
+            project_root_state=source.get("root_state"),
+            root_id=source.get("root_id"),
+            backend=source.get("backend"),
+            sandbox_mount_state=source.get("sandbox_mount_state"),
+            inventory_state=inventory_state,
+        ),
     }
 
 
@@ -1042,6 +1087,10 @@ async def get_workspace_context(
     try:
         sources = db.list_workspace_sources(workspace_id)
         workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
+        active_operations = [
+            workspace_operation_response_payload(operation)
+            for operation in db.list_active_workspace_operations(workspace_id)
+        ]
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace context") from exc
 
@@ -1059,6 +1108,17 @@ async def get_workspace_context(
             workspace_id=workspace_id,
             user_id=getattr(current_user, "id", None),
         ),
+    )
+    core_context_payload = build_workspace_core_context(
+        workspace=workspace_projection,
+        primary_root=workspace_projection.get("primary_root") or workspace_projection.get("project_root"),
+        source_summary=status_payload.get("summary") or {},
+        service_capabilities={
+            "workspace_services": capability_payload.get("workspace_services") or {},
+            "allowed_actions": capability_payload.get("allowed_actions") or {},
+        },
+        partial_errors=capability_payload.get("resolution", {}).get("partial_errors") or [],
+        active_operations=active_operations,
     )
     statuses_by_id = {
         str(source_status.get("id")): source_status
@@ -1101,6 +1161,7 @@ async def get_workspace_context(
         schema_version=2,
         generated_at=_utc_now_iso(),
         workspace=_ws_to_response(workspace),
+        attention_state=str(core_context_payload.get("attention_state") or "needs_attention"),
         resolution=capability_payload.get("resolution") or {},
         project_root=capability_payload.get("project_root") or {},
         sources={
@@ -1111,6 +1172,7 @@ async def get_workspace_context(
         services=capability_payload.get("workspace_services") or {},
         allowed_actions=capability_payload.get("allowed_actions") or {},
         active_jobs=active_jobs,
+        active_operations=core_context_payload.get("active_operations") or [],
         partial_errors=partial_errors,
     )
 
@@ -1176,6 +1238,92 @@ async def attach_workspace_primary_root(
         ) from exc
 
     return _workspace_roots_response(workspace_id=workspace_id, workspace=workspace, roots=roots)
+
+
+@router.post(
+    "/{workspace_id}/roots/primary/sandbox-volume",
+    response_model=WorkspaceSandboxRootProvisionResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Provision and attach a sandbox-managed workspace root",
+)
+async def provision_workspace_primary_sandbox_root(
+    workspace_id: str,
+    body: WorkspaceSandboxRootProvisionRequest,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    sandbox_volume_service: SandboxWorkspaceVolumeService = Depends(get_workspace_sandbox_volume_service),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSandboxRootProvisionResponse:
+    """Provision a Sandbox-owned durable volume and attach it as the primary project root."""
+    key = str(idempotency_key or "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "workspace_idempotency_key_required",
+                "message": "Idempotency-Key header is required for sandbox root provisioning.",
+            },
+        )
+    try:
+        _require_workspace(db, workspace_id)
+        result = provision_and_attach_sandbox_root(
+            db=db,
+            sandbox_volume_service=sandbox_volume_service,
+            workspace_id=workspace_id,
+            user_id=str(getattr(current_user, "id", "")),
+            request=body,
+            idempotency_key=key,
+        )
+    except WorkspaceRootServiceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to provision workspace sandbox root",
+        ) from exc
+
+    response.status_code = result.http_status_code
+    return WorkspaceSandboxRootProvisionResponse(
+        workspace_id=result.workspace_id,
+        workspace_profile=result.workspace_profile,
+        operation=WorkspaceOperationResponse(**result.operation),
+        primary_root=_root_to_response(result.primary_root) if result.primary_root else None,
+    )
+
+
+@router.get(
+    "/{workspace_id}/operations/{operation_id}",
+    response_model=WorkspaceOperationResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace operation status",
+)
+async def get_workspace_operation_status(
+    workspace_id: str,
+    operation_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceOperationResponse:
+    """Return a Workspace operation envelope for polling command progress."""
+    _ = current_user
+    try:
+        _require_workspace(db, workspace_id)
+        operation = db.get_workspace_operation(workspace_id, operation_id)
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace operation") from exc
+    if operation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "workspace_operation_not_found", "message": "Workspace operation was not found."},
+        )
+    return _operation_to_response(operation)
 
 
 @router.post(

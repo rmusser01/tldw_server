@@ -15,6 +15,9 @@ def test_research_workspace_context_has_fail_closed_project_capabilities() -> No
     assert context["workspace_profile"] == "research"
     assert context["workspace_kind"] == "research_workspace"
     assert context["project_root"]["state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["attention_state"] == "ready"
+    assert context["active_operations"] == []
     assert context["resolution"]["status"] == "complete"
     assert context["allowed_actions"]["write_files"] == {
         "allowed": False,
@@ -72,8 +75,11 @@ def test_project_workspace_context_represents_sandbox_root() -> None:
             "indexed_file_count": 0,
             "total_file_count": 0,
             "updated_at": None,
+            "available": True,
         },
     }
+    assert context["attention_state"] == "ready"
+    assert context["active_operations"] == []
     assert context["allowed_actions"]["write_files"]["allowed"] is True
     assert context["allowed_actions"]["run_sandbox"]["allowed"] is True
     assert context["allowed_actions"]["run_mcp_tools"]["allowed"] is True
@@ -108,6 +114,9 @@ def test_sandbox_volume_root_fails_closed_until_mount_ready() -> None:
         "allowed": False,
         "reason_code": "sandbox_mount_not_configured",
     }
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["attention_state"] == "needs_attention"
+    assert context["active_operations"] == []
     assert context["allowed_actions"]["run_sandbox"] == {
         "allowed": False,
         "reason_code": "sandbox_mount_not_configured",
@@ -151,6 +160,80 @@ def test_context_resolution_becomes_partial_for_dependency_failures() -> None:
         "allowed": False,
         "reason_code": "dependency_resolution_partial",
     }
+
+
+def test_project_workspace_without_root_context_is_setup_pending() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root=None,
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[],
+    )
+
+    assert context["project_root"]["state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["attention_state"] == "setup_pending"
+    assert context["active_operations"] == []
+
+
+def test_project_workspace_unavailable_sandbox_root_needs_attention_or_blocks() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project"},
+        primary_root={
+            "root_id": "root-1",
+            "backend": "sandbox_volume",
+            "root_state": "attached",
+            "sandbox_volume_id": "volume-1",
+            "sandbox_mount_state": "unavailable",
+        },
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[],
+    )
+
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["attention_state"] in {"needs_attention", "blocked"}
+    assert context["active_operations"] == []
+
+
+def test_project_workspace_active_inventory_context_is_working() -> None:
+    for inventory_state in ("queued", "running"):
+        context = build_workspace_core_context(
+            workspace={"id": "ws-1", "workspace_profile": "project"},
+            primary_root={
+                "root_id": "root-1",
+                "backend": "host_local",
+                "root_state": "attached",
+                "file_inventory_state": inventory_state,
+            },
+            source_summary={},
+            service_capabilities={},
+            partial_errors=[],
+        )
+
+        assert context["project_root"]["file_inventory"]["available"] is True
+        assert context["attention_state"] == "working"
+        assert context["active_operations"] == []
+
+
+def test_archived_workspace_context_attention_state_overrides_everything() -> None:
+    context = build_workspace_core_context(
+        workspace={"id": "ws-1", "workspace_profile": "project", "archived": True},
+        primary_root={
+            "root_id": "root-1",
+            "backend": "sandbox_volume",
+            "root_state": "failed",
+            "sandbox_mount_state": "failed",
+            "file_inventory_state": "queued",
+        },
+        source_summary={},
+        service_capabilities={},
+        partial_errors=[],
+    )
+
+    assert context["attention_state"] == "archived"
+    assert context["active_operations"] == []
 
 
 def test_context_partial_errors_do_not_echo_upstream_messages() -> None:
@@ -241,6 +324,7 @@ def test_project_workspace_context_includes_file_inventory_summary_and_actions()
         "indexed_file_count": 0,
         "total_file_count": 12,
         "updated_at": "2026-06-03T12:00:00Z",
+        "available": True,
     }
     assert context["allowed_actions"]["scan_files"] == {
         "allowed": True,
@@ -270,6 +354,7 @@ def test_file_inventory_scan_fails_closed_when_inventory_disabled() -> None:
         partial_errors=[],
     )
 
+    assert context["project_root"]["file_inventory"]["available"] is False
     assert context["allowed_actions"]["scan_files"] == {
         "allowed": False,
         "reason_code": "file_inventory_disabled",
@@ -301,6 +386,8 @@ def test_failed_file_inventory_scan_remains_viewable_and_rescannable() -> None:
     )
 
     assert context["project_root"]["file_inventory"]["state"] == "failed"
+    assert context["project_root"]["file_inventory"]["available"] is True
+    assert context["attention_state"] == "needs_attention"
     assert context["allowed_actions"]["view_file_inventory"] == {
         "allowed": True,
         "reason_code": None,

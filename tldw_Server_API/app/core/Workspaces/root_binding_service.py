@@ -18,7 +18,17 @@ _DEFAULT_ROOT_ID = "primary"
 _ROOT_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SANDBOX_VOLUME_ID_RE = _ROOT_ID_RE
 _DISPLAY_NAME_MAX_LENGTH = 120
-_SANDBOX_VOLUME_STATES = frozenset({"ready", "not_configured", "unavailable", "failed"})
+_SandboxVolumeStateLiteral = Literal[
+    "provisioning",
+    "ready",
+    "not_configured",
+    "unavailable",
+    "failed",
+    "cleanup_pending",
+]
+_SANDBOX_VOLUME_STATES = frozenset(
+    {"provisioning", "ready", "not_configured", "unavailable", "failed", "cleanup_pending"}
+)
 
 
 class WorkspaceRootServiceError(Exception):
@@ -83,7 +93,7 @@ class WorkspaceRootAttachRequest:
 @dataclass(frozen=True)
 class SandboxVolumeBinding:
     sandbox_volume_id: str
-    state: Literal["ready", "not_configured", "unavailable", "failed"]
+    state: _SandboxVolumeStateLiteral
     display_name: str | None = None
     reason_code: str | None = None
 
@@ -91,7 +101,7 @@ class SandboxVolumeBinding:
 @dataclass(frozen=True)
 class SandboxInventoryMount:
     sandbox_volume_id: str
-    state: Literal["ready", "not_configured", "unavailable", "failed"]
+    state: _SandboxVolumeStateLiteral
     local_path: str | None = None
     reason_code: str | None = None
 

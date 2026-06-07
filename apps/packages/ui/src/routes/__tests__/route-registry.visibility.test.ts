@@ -58,6 +58,7 @@ const optionRegistryPaths = new Set([
   ...extractLiteralPaths(routeRegistrySource),
   "/repo2txt",
   "/chat-workspace",
+  "/workspaces",
   "/prototype-workspaces",
   "/document-workspace"
 ])

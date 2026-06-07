@@ -3,10 +3,14 @@ import {
   WORKSPACE_STORAGE_KEY
 } from "@/store/workspace-events"
 
+export { WORKSPACE_STORAGE_KEY }
+
 export const RESEARCH_WORKSPACE_INDEXEDDB_NAME = "tldw-workspace-storage"
 export const RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE = "workspace-chat-sessions"
 export const RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE =
   "workspace-artifact-payloads"
+export const RESEARCH_WORKSPACE_RECONCILIATION_MARKER_PREFIX =
+  "tldw:research-workspace:reconciliation:v1"
 
 export type ResearchWorkspaceLegacyStorageKind =
   | "local_storage"
@@ -86,6 +90,8 @@ export interface ResearchWorkspaceLegacyDeletionEligibility {
 }
 
 const workspaceSplitKeyPattern = /^tldw-workspace:workspace:([^:]+):(snapshot|chat)$/
+const workspaceReconciliationMarkerKeyPattern =
+  /^tldw:research-workspace:reconciliation:v1:(.+)$/
 
 const decodeWorkspaceId = (encodedWorkspaceId: string): string => {
   try {
@@ -245,6 +251,18 @@ const inventory = [
     authoritativeForMigration: false
   },
   {
+    id: "localStorage:tldw:research-workspace:reconciliation:v1:*",
+    kind: "local_storage",
+    keyPattern: "tldw:research-workspace:reconciliation:v1:<workspace_id>",
+    classification: "metadata",
+    deletionPolicy: "retain_local",
+    description:
+      "Local reconciliation marker linking a legacy Research Workspace record to canonical server Workspace metadata. It must not contain source, note, artifact, or chat payloads.",
+    contentClasses: [],
+    serverDestination: null,
+    authoritativeForMigration: false
+  },
+  {
     id: "localStorage:tldw:workspace:playground:telemetry",
     kind: "local_storage",
     key: "tldw:workspace:playground:telemetry",
@@ -354,6 +372,25 @@ const classifySplitWorkspaceKey = (
   })
 }
 
+const classifyReconciliationMarkerKey = (
+  key: string
+): ResearchWorkspaceLegacyStorageSurface | null => {
+  const match = workspaceReconciliationMarkerKeyPattern.exec(key)
+  if (!match) return null
+
+  const inventoryItem = inventory.find(
+    (item) =>
+      item.id === "localStorage:tldw:research-workspace:reconciliation:v1:*"
+  )
+  if (!inventoryItem) return null
+
+  return cloneInventoryItem(inventoryItem, {
+    id: `localStorage:${key}`,
+    key,
+    workspaceId: decodeWorkspaceId(match[1] || "")
+  })
+}
+
 const classifyIndexedDbStore = (
   databaseName: string,
   storeName: string
@@ -379,7 +416,10 @@ export const classifyResearchWorkspaceLegacyStorageSurface = (
     return cloneInventoryItem(exact, { key: input.key })
   }
 
-  return classifySplitWorkspaceKey(input.key)
+  return (
+    classifySplitWorkspaceKey(input.key) ??
+    classifyReconciliationMarkerKey(input.key)
+  )
 }
 
 const isUnknownWorkspaceLocalStorageKey = (key: string): boolean =>
