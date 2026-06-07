@@ -766,7 +766,7 @@ git commit -m "feat: add gateway tool-use reporting runtime wrapper"
 - Modify: `mcp_unified/gateway/config.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py`
 
-- [ ] **Step 1: Write failing CLI parser and command tests**
+- [x] **Step 1: Write failing CLI parser and command tests**
 
 ```python
 def test_gateway_cli_parses_tool_events_report():
@@ -796,7 +796,7 @@ def test_validate_config_includes_tool_use_reporting_payload(tmp_path, capsys):
     assert payload["tool_use_reporting"]["enabled"] is False
 ```
 
-- [ ] **Step 2: Add `tool-events` subcommands**
+- [x] **Step 2: Add `tool-events` subcommands**
 
 Implementation requirements:
 
@@ -822,7 +822,7 @@ Implementation requirements:
 - If reporting is disabled, return JSON error with `reason_code="tool_use_reporting_disabled"`.
 - If reporting is enabled with only an in-memory store, return JSON error with `reason_code="tool_use_reporting_persistent_store_required"` for CLI report/export/cleanup.
 
-- [ ] **Step 3: Include config validation payload**
+- [x] **Step 3: Include config validation payload**
 
 Add to `_validated_config_payload()`:
 
@@ -840,13 +840,13 @@ Add to `_validated_config_payload()`:
 }
 ```
 
-- [ ] **Step 4: Run focused CLI tests**
+- [x] **Step 4: Run focused CLI tests**
 
 Run: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mcp_unified/gateway/cli.py mcp_unified/gateway/config.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py

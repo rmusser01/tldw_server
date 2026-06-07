@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Coroutine, Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
@@ -18,6 +19,11 @@ from mcp_unified.profiles.presets import (
     get_builtin_preset,
     list_builtin_presets,
 )
+from mcp_unified.tool_use_reporting import (
+    ToolUseEventQuery,
+    ToolUseReportQuery,
+    ToolUseReportService,
+)
 
 from .config import (
     ExternalRegistryStorageConfigurationError,
@@ -25,8 +31,10 @@ from .config import (
     GatewayExternalRegistryStorageBundle,
     GatewayProfileBootstrapConfig,
     GatewayProfileStorageBundle,
+    GatewayToolUseReportingConfig,
     build_gateway_external_registry_storage,
     build_gateway_profile_storage,
+    build_gateway_tool_use_event_store,
     credential_grant_manager_from_storage,
     external_registry_manager_from_storage,
     gateway_config_snapshot_manager_from_storage,
@@ -65,6 +73,10 @@ _CredentialGrantOperation = Callable[
 ]
 _ConfigSnapshotOperation = Callable[
     [GatewayConfigSnapshotManager],
+    Coroutine[Any, Any, Mapping[str, Any]],
+]
+_ToolEventsOperation = Callable[
+    [Any, GatewayToolUseReportingConfig],
     Coroutine[Any, Any, Mapping[str, Any]],
 ]
 _RemoteRuntimeOperation = Callable[[RemoteGatewayAdminClient], dict[str, Any]]
@@ -501,6 +513,72 @@ def _build_parser() -> _JsonArgumentParser:
     _add_remote_runtime_arguments(runtime_update)
     runtime_update.set_defaults(handler=_handle_runtime_update)
 
+    tool_events = subparsers.add_parser(
+        "tool-events",
+        help="Inspect and maintain gateway tool-use reporting events.",
+    )
+    tool_events_subparsers = tool_events.add_subparsers(
+        dest="tool_events_command",
+        parser_class=_JsonArgumentParser,
+        required=True,
+    )
+
+    tool_events_report = tool_events_subparsers.add_parser(
+        "report",
+        help="Build an aggregate report from persisted tool-use events.",
+    )
+    _add_profile_config_argument(tool_events_report)
+    _add_tool_events_filter_arguments(tool_events_report)
+    tool_events_report.add_argument(
+        "--group-by",
+        choices=("profile", "tool_prompt", "model", "tool"),
+        default="profile",
+        help="Report grouping dimension.",
+    )
+    tool_events_report.add_argument(
+        "--group-limit",
+        type=int,
+        default=100,
+        help="Maximum number of groups to return.",
+    )
+    tool_events_report.set_defaults(handler=_handle_tool_events_report)
+
+    tool_events_export = tool_events_subparsers.add_parser(
+        "export",
+        help="Export persisted tool-use events.",
+    )
+    _add_profile_config_argument(tool_events_export)
+    _add_tool_events_filter_arguments(tool_events_export)
+    tool_events_export.add_argument(
+        "--format",
+        choices=("jsonl", "json"),
+        default="jsonl",
+        help="Export serialization format.",
+    )
+    tool_events_export.add_argument(
+        "--output",
+        type=Path,
+        help="Optional file path for the raw export payload.",
+    )
+    tool_events_export.set_defaults(handler=_handle_tool_events_export)
+
+    tool_events_cleanup = tool_events_subparsers.add_parser(
+        "cleanup",
+        help="Delete persisted tool-use events by retention policy.",
+    )
+    _add_profile_config_argument(tool_events_cleanup)
+    tool_events_cleanup.add_argument(
+        "--max-age-days",
+        type=int,
+        help="Delete events older than this many days.",
+    )
+    tool_events_cleanup.add_argument(
+        "--max-events",
+        type=int,
+        help="Keep only the newest N events.",
+    )
+    tool_events_cleanup.set_defaults(handler=_handle_tool_events_cleanup)
+
     get_default_profile = subparsers.add_parser(
         "get-default-profile",
         help="Show the active gateway default profile.",
@@ -532,6 +610,40 @@ def _add_profile_config_argument(parser: argparse.ArgumentParser) -> None:
             "Path to a JSON or TOML gateway config file. "
             "Falls back to MCP_UNIFIED_GATEWAY_CONFIG or MCP_GATEWAY_CONFIG."
         ),
+    )
+
+
+def _add_tool_events_filter_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add common report/export filters for tool-use event commands."""
+
+    parser.add_argument(
+        "--since",
+        help="Only include events newer than a relative duration such as 24h or 7d.",
+    )
+    parser.add_argument("--profile-id", help="Filter by profile id.")
+    parser.add_argument("--mode-id", help="Filter by mode id.")
+    parser.add_argument("--model-id", help="Filter by model id.")
+    parser.add_argument("--tool-prompt-id", help="Filter by tool prompt id.")
+    parser.add_argument("--requested-tool-name", help="Filter by requested tool name.")
+    parser.add_argument("--effective-tool-name", help="Filter by effective tool name.")
+    parser.add_argument(
+        "--status",
+        choices=(
+            "success",
+            "error",
+            "denied",
+            "approval_required",
+            "unavailable",
+            "invalid_params",
+            "rate_limited",
+        ),
+        help="Filter by event status.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Maximum number of events to scan or export.",
     )
 
 
@@ -825,6 +937,33 @@ def _handle_set_default_profile(args: argparse.Namespace) -> int:
         args,
         lambda manager: _set_default_profile_for_cli(manager, profile_id),
         require_persistent=True,
+    )
+
+
+def _handle_tool_events_report(args: argparse.Namespace) -> int:
+    """Build a tool-use event aggregate report."""
+
+    return _handle_tool_events_command(
+        args,
+        lambda store, _config: _tool_events_report_for_cli(store, args),
+    )
+
+
+def _handle_tool_events_export(args: argparse.Namespace) -> int:
+    """Export tool-use events from the configured reporting store."""
+
+    return _handle_tool_events_command(
+        args,
+        lambda store, _config: _tool_events_export_for_cli(store, args),
+    )
+
+
+def _handle_tool_events_cleanup(args: argparse.Namespace) -> int:
+    """Delete tool-use events according to configured retention criteria."""
+
+    return _handle_tool_events_command(
+        args,
+        lambda store, config: _tool_events_cleanup_for_cli(store, config, args),
     )
 
 
@@ -1227,6 +1366,156 @@ def _handle_config_snapshot_command(
             _run_async(_close_external_registry_bundle(external_bundle))
 
 
+def _handle_tool_events_command(
+    args: argparse.Namespace,
+    operation: _ToolEventsOperation,
+) -> int:
+    """Run one tool-use reporting command against a persistent event store."""
+
+    config_path = _config_path_from_args(args)
+    store: Any | None = None
+    try:
+        config = load_gateway_profile_bootstrap_config(config_path)
+        reporting = config.tool_use_reporting
+        if not reporting.enabled:
+            _emit_json(
+                {
+                    "error": "Gateway tool-use reporting is disabled",
+                    "ok": False,
+                    "reason_code": "tool_use_reporting_disabled",
+                },
+                sys.stderr,
+            )
+            return 1
+        if reporting.store.kind != "sqlite":
+            _emit_json(
+                {
+                    "error": (
+                        "Gateway tool-use reporting CLI requires a persistent "
+                        "SQLite event store"
+                    ),
+                    "ok": False,
+                    "reason_code": "tool_use_reporting_persistent_store_required",
+                },
+                sys.stderr,
+            )
+            return 1
+        store = build_gateway_tool_use_event_store(reporting.store)
+        payload = _run_async(operation(store, reporting))
+    except _CliArgumentError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _emit_json(
+            {
+                "error": str(exc),
+                "ok": False,
+                "path": str(config_path),
+            },
+            sys.stderr,
+        )
+        return 1
+    finally:
+        if store is not None:
+            _run_async(_close_tool_use_event_store(store))
+
+    _emit_json(dict(payload), sys.stdout)
+    return 0
+
+
+async def _tool_events_report_for_cli(
+    store: Any,
+    args: argparse.Namespace,
+) -> Mapping[str, Any]:
+    """Build a JSON-ready aggregate report payload."""
+
+    query = ToolUseReportQuery(
+        group_by=args.group_by,
+        event_limit=args.limit,
+        group_limit=args.group_limit,
+        **_tool_events_filter_kwargs(args),
+    )
+    report = await ToolUseReportService(store).build_report(query)
+    payload = report.model_dump(mode="json")
+    payload["group_by"] = args.group_by
+    payload["ok"] = True
+    return payload
+
+
+async def _tool_events_export_for_cli(
+    store: Any,
+    args: argparse.Namespace,
+) -> Mapping[str, Any]:
+    """Export events and return a JSON CLI envelope."""
+
+    query = ToolUseEventQuery(
+        limit=args.limit,
+        **_tool_events_filter_kwargs(args),
+    )
+    exported = await store.export_events(query, format=args.format)
+    output_path = args.output
+    if output_path is not None:
+        try:
+            output_path.write_text(exported, encoding="utf-8")
+        except OSError as exc:
+            raise _CliArgumentError(f"Unable to write tool event export: {exc}") from exc
+        return {
+            "format": args.format,
+            "ok": True,
+            "output": str(output_path),
+        }
+    return {
+        "events": _decode_tool_events_export(exported, format=args.format),
+        "format": args.format,
+        "ok": True,
+    }
+
+
+async def _tool_events_cleanup_for_cli(
+    store: Any,
+    config: GatewayToolUseReportingConfig,
+    args: argparse.Namespace,
+) -> Mapping[str, Any]:
+    """Delete events according to command-line or config retention criteria."""
+
+    max_age_days = args.max_age_days
+    if max_age_days is None:
+        max_age_days = config.retention_max_age_days
+    max_events = args.max_events
+    if max_events is None:
+        max_events = config.retention_max_events
+    if max_age_days is None and max_events is None:
+        raise _CliArgumentError(
+            "cleanup requires --max-age-days, --max-events, or config retention defaults"
+        )
+    if max_age_days is not None and max_age_days <= 0:
+        raise _CliArgumentError("max_age_days must be positive")
+    if max_events is not None and max_events <= 0:
+        raise _CliArgumentError("max_events must be positive")
+
+    deleted_older_than = 0
+    if max_age_days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        deleted_older_than = await store.delete_events_older_than(cutoff)
+
+    deleted_over_limit = 0
+    if max_events is not None:
+        deleted_over_limit = await store.delete_events_over_limit(max_events)
+
+    return {
+        "deleted_older_than": deleted_older_than,
+        "deleted_over_limit": deleted_over_limit,
+        "ok": True,
+    }
+
+
+async def _close_tool_use_event_store(store: Any) -> None:
+    """Close a tool-use event store when it exposes an async close hook."""
+
+    aclose = getattr(store, "aclose", None)
+    if callable(aclose):
+        await aclose()
+
+
 def _credential_grant_storage_unavailable_error(
     exc: Exception,
 ) -> GatewayCredentialGrantManagementError | None:
@@ -1452,6 +1741,73 @@ async def _close_external_registry_bundle(
     return {}
 
 
+def _tool_events_filter_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    """Build sanitized query kwargs for tool-use event filters."""
+
+    filters: dict[str, Any] = {}
+    for arg_name in (
+        "profile_id",
+        "mode_id",
+        "model_id",
+        "tool_prompt_id",
+        "requested_tool_name",
+        "effective_tool_name",
+        "status",
+    ):
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            filters[arg_name] = value
+    since_epoch_us = _relative_since_epoch_us(getattr(args, "since", None))
+    if since_epoch_us is not None:
+        filters["created_at_epoch_us_gte"] = since_epoch_us
+    return filters
+
+
+def _relative_since_epoch_us(value: str | None) -> int | None:
+    """Return a UTC epoch-microsecond lower bound for a relative duration."""
+
+    text = _optional_cli_text(value, field="since")
+    if text is None:
+        return None
+    unit = text[-1].lower()
+    amount_text = text[:-1]
+    if unit not in {"s", "m", "h", "d"} or not amount_text:
+        raise _CliArgumentError("since must use a relative duration like 24h or 7d")
+    try:
+        amount = int(amount_text)
+    except ValueError as exc:
+        raise _CliArgumentError("since duration amount must be an integer") from exc
+    if amount <= 0:
+        raise _CliArgumentError("since duration amount must be positive")
+
+    delta_by_unit = {
+        "s": timedelta(seconds=amount),
+        "m": timedelta(minutes=amount),
+        "h": timedelta(hours=amount),
+        "d": timedelta(days=amount),
+    }
+    cutoff = datetime.now(timezone.utc) - delta_by_unit[unit]
+    return _datetime_epoch_us(cutoff)
+
+
+def _datetime_epoch_us(value: datetime) -> int:
+    """Return integer microseconds since Unix epoch."""
+
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    normalized = value.astimezone(timezone.utc)
+    delta = normalized - epoch
+    return (((delta.days * 86_400) + delta.seconds) * 1_000_000) + delta.microseconds
+
+
+def _decode_tool_events_export(exported: str, *, format: str) -> list[Any]:
+    """Decode raw store export data into a JSON-envelope value."""
+
+    if format == "json":
+        payload = json.loads(exported)
+        return payload if isinstance(payload, list) else []
+    return [json.loads(line) for line in exported.splitlines() if line.strip()]
+
+
 def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Run an async profile-management operation from a sync CLI handler."""
 
@@ -1610,6 +1966,7 @@ def _validated_config_payload(
     """Build the JSON payload for a successfully validated config."""
 
     sqlite_path = config.store.sqlite_path
+    tool_event_store_path = config.tool_use_reporting.store.sqlite_path
     return {
         "default_preset_id": config.default_preset_id,
         "default_profile_id": config.default_profile_id,
@@ -1626,6 +1983,19 @@ def _validated_config_payload(
         "store": {
             "kind": config.store.kind,
             "sqlite_path": str(sqlite_path) if sqlite_path is not None else None,
+        },
+        "tool_use_reporting": {
+            "enabled": config.tool_use_reporting.enabled,
+            "retention_max_age_days": config.tool_use_reporting.retention_max_age_days,
+            "retention_max_events": config.tool_use_reporting.retention_max_events,
+            "store": {
+                "kind": config.tool_use_reporting.store.kind,
+                "sqlite_path": (
+                    str(tool_event_store_path)
+                    if tool_event_store_path is not None
+                    else None
+                ),
+            },
         },
     }
 

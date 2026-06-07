@@ -22,12 +22,14 @@ from mcp_unified.gateway.config import (
 from mcp_unified.gateway.profiles import GatewayProfileManager
 from mcp_unified.gateway.snapshots import GatewayConfigSnapshotManagementError
 from mcp_unified.profiles.models import MCPProfile
-from mcp_unified.profiles.presets import ProfilePreset
+from mcp_unified.profiles.presets import ProfilePreset, get_builtin_preset
 from mcp_unified.storage.models import (
     CredentialGrant,
     ExternalServerDefinition,
     ProfileAssignment,
 )
+from mcp_unified.tool_use_reporting import ToolUseEvent
+from mcp_unified.tool_use_reporting.sqlite import SQLiteToolUseEventStore
 
 try:
     import tomllib
@@ -89,6 +91,12 @@ def test_gateway_cli_validate_config_reports_success_json(
         "path": str(config_path),
         "profiles": 0,
         "store": {"kind": "memory", "sqlite_path": None},
+        "tool_use_reporting": {
+            "enabled": False,
+            "retention_max_age_days": None,
+            "retention_max_events": None,
+            "store": {"kind": "memory", "sqlite_path": None},
+        },
     }
 
 
@@ -150,6 +158,43 @@ def test_gateway_cli_process_policy_summary_handles_missing_policy() -> None:
         "configured": False,
         "default_cwd": False,
         "reject_shell_executables": False,
+    }
+
+
+def test_gateway_cli_validate_config_includes_tool_use_reporting_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Validate-config reports the tool-use reporting config without secrets."""
+
+    sqlite_path = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tool_use_reporting": {
+                    "enabled": True,
+                    "store": {
+                        "kind": "sqlite",
+                        "sqlite_path": str(sqlite_path),
+                    },
+                    "retention_max_age_days": 30,
+                    "retention_max_events": 1000,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["tool_use_reporting"] == {
+        "enabled": True,
+        "retention_max_age_days": 30,
+        "retention_max_events": 1000,
+        "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
     }
 
 
@@ -223,6 +268,30 @@ def test_gateway_cli_argument_errors_are_json(
     assert payload["ok"] is False
     assert "command" in payload["error"]
     assert "usage:" not in captured.err
+
+
+def test_gateway_cli_parses_tool_events_report() -> None:
+    """Parse nested tool-events report command arguments."""
+
+    parser = gateway_cli._build_parser()
+
+    args = parser.parse_args(
+        [
+            "tool-events",
+            "report",
+            "--config",
+            "gateway.toml",
+            "--group-by",
+            "profile",
+            "--since",
+            "24h",
+        ]
+    )
+
+    assert args.command == "tool-events"
+    assert args.tool_events_command == "report"
+    assert args.group_by == "profile"
+    assert args.since == "24h"
 
 
 def test_gateway_cli_list_presets_reports_builtin_summary(
@@ -340,7 +409,10 @@ def test_gateway_cli_show_preset_reports_full_builtin_profile(
     assert preset["version"] == profile["preset_version"]
     assert profile["id"] == "project-researcher"
     assert profile["name"] == "Project Researcher"
-    expected_timestamp = datetime(2026, 5, 27, tzinfo=timezone.utc)
+    expected_preset = get_builtin_preset("project-researcher")
+    expected_timestamp = datetime.fromisoformat(
+        expected_preset.version.replace(".", "-")
+    ).replace(tzinfo=timezone.utc)
     assert _parse_cli_timestamp(profile["created_at"]) == expected_timestamp
     assert _parse_cli_timestamp(profile["updated_at"]) == expected_timestamp
     assert policy["capabilities"] == ["code_search", "filesystem.read", "docs.read"]
@@ -722,7 +794,10 @@ def test_gateway_cli_duplicate_preset_persists_to_sqlite_store(
     assert captured.err == ""
     assert payload["ok"] is True
     assert payload["preset_id"] == "project-researcher"
-    assert payload["preset_version"] == "2026.05.27"
+    assert (
+        payload["preset_version"]
+        == get_builtin_preset("project-researcher").version
+    )
     assert payload["profile"]["id"] == "project-researcher"
     assert payload["profile"]["preset_id"] == "project-researcher"
     assert payload["store"] == {"kind": "sqlite", "persistent": True}
@@ -758,7 +833,10 @@ def test_gateway_cli_duplicate_preset_accepts_custom_id_and_name(
     assert exit_code == 0
     assert captured.err == ""
     assert payload["preset_id"] == "project-researcher"
-    assert payload["preset_version"] == "2026.05.27"
+    assert (
+        payload["preset_version"]
+        == get_builtin_preset("project-researcher").version
+    )
     assert payload["profile"]["id"] == "workspace-researcher"
     assert payload["profile"]["name"] == "Workspace Researcher"
     assert payload["profile"]["preset_id"] == "project-researcher"
@@ -1623,6 +1701,217 @@ def test_gateway_cli_export_config_writes_snapshot_file(
     assert [profile["id"] for profile in file_payload["profiles"]] == ["profile"]
 
 
+def test_gateway_cli_tool_events_report_rejects_disabled_reporting(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Tool event commands fail clearly when reporting is disabled."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"tool_use_reporting": {"enabled": False}},
+    )
+
+    exit_code = gateway_cli.main(
+        ["tool-events", "report", "--group-by", "profile", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "tool_use_reporting_disabled"
+
+
+def test_gateway_cli_tool_events_report_requires_persistent_reporting_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI report/export/cleanup require a persistent reporting store."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"tool_use_reporting": {"enabled": True, "store": {"kind": "memory"}}},
+    )
+
+    exit_code = gateway_cli.main(
+        ["tool-events", "report", "--group-by", "profile", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "tool_use_reporting_persistent_store_required"
+
+
+def test_gateway_cli_tool_events_report_reads_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Build an aggregate report from the configured SQLite event store."""
+
+    sqlite_path = tmp_path / "tool-events.sqlite3"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "tool_use_reporting": {
+                "enabled": True,
+                "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+            }
+        },
+    )
+    _seed_sqlite_tool_use_events(
+        sqlite_path,
+        [
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                profile_id="devops",
+                model_id="gpt-4.1",
+                status="success",
+                duration_ms=10,
+            ),
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                profile_id="devops",
+                model_id="gpt-4.1",
+                status="error",
+                reason_code="BackendFailure",
+                duration_ms=30,
+            ),
+        ],
+    )
+
+    exit_code = gateway_cli.main(
+        ["tool-events", "report", "--group-by", "profile", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["group_by"] == "profile"
+    assert payload["events_scanned"] == 2
+    assert payload["rows"][0]["group_key"] == "devops"
+    assert payload["rows"][0]["call_count"] == 2
+    assert payload["rows"][0]["tool_call_success_rate"] == 0.5
+
+
+def test_gateway_cli_tool_events_export_reads_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Export matching events as a deterministic JSON envelope."""
+
+    sqlite_path = tmp_path / "tool-events.sqlite3"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "tool_use_reporting": {
+                "enabled": True,
+                "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+            }
+        },
+    )
+    _seed_sqlite_tool_use_events(
+        sqlite_path,
+        [
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                profile_id="devops",
+                status="success",
+            )
+        ],
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "tool-events",
+            "export",
+            "--format",
+            "json",
+            "--profile-id",
+            "devops",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["format"] == "json"
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["profile_id"] == "devops"
+
+
+def test_gateway_cli_tool_events_cleanup_deletes_over_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Cleanup can enforce a max-events retention cap."""
+
+    sqlite_path = tmp_path / "tool-events.sqlite3"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "tool_use_reporting": {
+                "enabled": True,
+                "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+            }
+        },
+    )
+    _seed_sqlite_tool_use_events(
+        sqlite_path,
+        [
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                status="success",
+            ),
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.diff",
+                effective_tool_name="git.diff",
+                status="success",
+            ),
+        ],
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "tool-events",
+            "cleanup",
+            "--max-events",
+            "1",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "deleted_older_than": 0,
+        "deleted_over_limit": 1,
+        "ok": True,
+    }
+
+
 def test_gateway_cli_import_config_dry_run_reports_plan_without_mutation(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -2379,5 +2668,21 @@ def _seed_sqlite_credential_grant(
             )
         finally:
             await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_tool_use_events(
+    sqlite_path: Path,
+    events: list[ToolUseEvent],
+) -> None:
+    store = SQLiteToolUseEventStore(sqlite_path)
+
+    async def _seed() -> None:
+        try:
+            for event in events:
+                await store.append_event(event)
+        finally:
+            await store.aclose()
 
     asyncio.run(_seed())

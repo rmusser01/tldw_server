@@ -717,7 +717,7 @@ def build_gateway_tool_use_recorder(
     from mcp_unified.tool_use_reporting import StoreBackedToolUseRecorder
 
     return StoreBackedToolUseRecorder(
-        _build_tool_use_event_store(config.store),
+        build_gateway_tool_use_event_store(config.store),
         timeout_seconds=config.write_timeout_seconds,
     )
 
@@ -764,10 +764,13 @@ def _positive_optional_int(value: Any, *, field_name: str) -> int | None:
     return resolved_value
 
 
-def _build_tool_use_event_store(
-    store_config: GatewayToolUseReportingStoreConfig,
+def build_gateway_tool_use_event_store(
+    store_config: GatewayToolUseReportingStoreConfig | Mapping[str, Any],
 ) -> ToolUseEventStore:
     """Create the configured tool-use event store without importing SQLite early."""
+
+    if isinstance(store_config, Mapping):
+        store_config = GatewayToolUseReportingStoreConfig(**store_config)
 
     if store_config.kind == "memory":
         from mcp_unified.tool_use_reporting import InMemoryToolUseEventStore
@@ -1029,6 +1032,7 @@ __all__ = [
     "bootstrap_profile_gateway_from_config",
     "build_gateway_external_registry_storage",
     "build_gateway_profile_storage",
+    "build_gateway_tool_use_event_store",
     "build_gateway_tool_use_recorder",
     "credential_grant_manager_from_storage",
     "external_registry_manager_from_storage",

@@ -271,6 +271,8 @@ class ToolUseReportQuery(BaseModel):
     model_id: str | None = None
     tool_prompt_id: str | None = None
     status: ToolUseStatus | None = None
+    created_at_epoch_us_gte: int | None = None
+    created_at_epoch_us_lt: int | None = None
 
     @field_validator("event_limit", mode="before")
     @classmethod
@@ -333,6 +335,8 @@ class ToolUseReportQuery(BaseModel):
             model_id=self.model_id,
             tool_prompt_id=self.tool_prompt_id,
             status=self.status,
+            created_at_epoch_us_gte=self.created_at_epoch_us_gte,
+            created_at_epoch_us_lt=self.created_at_epoch_us_lt,
         )
 
 
