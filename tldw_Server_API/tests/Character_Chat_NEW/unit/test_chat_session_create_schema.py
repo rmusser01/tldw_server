@@ -46,9 +46,10 @@ def test_chat_session_create_preserves_explicit_persona_memory_mode(memory_mode)
 
 
 @pytest.mark.unit
-def test_chat_session_create_rejects_persona_memory_mode_for_character_chat():
+@pytest.mark.parametrize("memory_mode", ["read_only", "read_write"])
+def test_chat_session_create_rejects_persona_memory_mode_for_character_chat(memory_mode):
     with pytest.raises(ValidationError, match="persona_memory_mode is only valid for persona chats"):
-        ChatSessionCreate(character_id=7, persona_memory_mode="read_only")
+        ChatSessionCreate(character_id=7, persona_memory_mode=memory_mode)
 
 
 @pytest.mark.unit
