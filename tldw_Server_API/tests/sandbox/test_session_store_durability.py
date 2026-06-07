@@ -747,9 +747,11 @@ def test_get_snapshot_info_waits_for_cross_service_snapshot_create(monkeypatch, 
     assert "snapshot" not in info_result, "cross-service snapshot info should wait for in-progress create"
 
     release_snapshot.set()
-    create_thread.join(timeout=1.0)
-    info_thread.join(timeout=1.0)
+    create_thread.join(timeout=5.0)
+    info_thread.join(timeout=5.0)
 
+    assert not create_thread.is_alive(), "snapshot create did not finish after release"
+    assert not info_thread.is_alive(), "snapshot info did not finish after release"
     assert not create_errors
     assert not info_errors
     snapshot_info = info_result.get("snapshot")

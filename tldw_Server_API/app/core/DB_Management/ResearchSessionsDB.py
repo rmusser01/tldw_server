@@ -635,7 +635,7 @@ class ResearchSessionsDB:
             query += " AND status = ?"
             params.append(str(status))
         query += """
-                ORDER BY created_at DESC, id DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """
         params.extend([bounded_limit, bounded_offset])

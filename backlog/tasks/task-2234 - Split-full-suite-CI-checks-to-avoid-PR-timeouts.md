@@ -21,6 +21,7 @@ modified_files:
 - apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
 - apps/packages/ui/src/routes/option-setup.tsx
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
+- tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
 - tldw_Server_API/app/api/v1/endpoints/media/__init__.py
 - tldw_Server_API/app/api/v1/router_groups/content.py
@@ -76,6 +77,7 @@ modified_files:
 - tldw_Server_API/tests/Claims/test_claims_rebuild_health_persistence.py
 - tldw_Server_API/tests/Health/test_feature_health_endpoints.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py
+- tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
 - tldw_Server_API/tests/Audit/test_audit_pii_overrides.py
 - tldw_Server_API/tests/Audit/test_unified_audit_service.py
 - tldw_Server_API/tests/unit/test_sandbox_image_store.py
@@ -136,6 +138,7 @@ modified_files:
 - tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
 - tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_analytics_db_dev_reconciliation.py
+- tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
 - tldw_Server_API/tests/RAG/test_query_rewriting_loop.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
@@ -184,6 +187,9 @@ modified_files:
 - tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
 - tldw_Server_API/tests/sandbox/test_admin_details_resource_usage.py
 - tldw_Server_API/tests/sandbox/test_feature_discovery_flags.py
+- tldw_Server_API/tests/sandbox/test_lima_feature_discovery_capabilities.py
+- tldw_Server_API/tests/sandbox/test_session_store_durability.py
+- tldw_Server_API/tests/sandbox/test_warm_pool.py
 - tldw_Server_API/app/api/v1/endpoints/persona.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py
@@ -228,6 +234,8 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-07 follow-up for PR #2258 run 27092874483 checked unrelated queued/in-progress workflow pressure before pushing: the only unrelated active row found was a stale queued CodeQL run for PR #1985, and both normal cancel plus force-cancel returned GitHub HTTP 500. New completed failures from the current PR run were addressed locally: RAG path validation now rejects literal POSIX restricted paths before Windows path resolution can translate `/etc/...` to a drive path; Lima feature discovery expectations are platform-aware while keeping Windows/WSL fail-closed behavior; the Docker warm-pool test now expects hardened create flags; the cross-service snapshot info test waits for worker completion after lock release; the character integration module raises only its test DB init watchdog for slow Windows migrations; and research session listing now uses insertion order as the tie-breaker when created timestamps collide. Verification: exact failed tests passed locally (12 passed), broadened RAG/character/sandbox verification passed locally (66 passed), the research service file passed locally (38 passed), compileall passed for touched Python files, `git diff --check` passed, production Bandit reported zero findings/errors, and test-scope Bandit reported zero findings/errors with test-only assert/dummy-token skips.
+
 2026-06-07 current-head CI follow-up found `Wizard Tests (Coverage Gate)` failing before checkout/test execution because the Redis service container pulled `redis:8-alpine` from Docker Hub and hit three registry timeouts. The workflow service images now use `mirror.gcr.io/library/redis:8-alpine` in CI, e2e-required, and frontend-e2e-tiers, matching the existing mirrored Postgres service-image pattern and reducing Docker Hub dependency for required gates.
 
 2026-06-07 current-head recheck of run 27087928021 found `Full Suite shard (windows-latest / Python 3.12 / core-utils-tooling)` failing in `test_multi_user_entrypoint_fails_when_admin_bootstrap_fails`. The preceding Windows env-file literal-dollar tests passed, but the admin-bootstrap failure test relied on env-file loading while replacing `PYTHON_BIN` with a shell wrapper, so the intended `create_admin` branch was not reached on Git Bash and the test fell through to `uvicorn` without an app argument. The test now supplies the same multi-user/admin values through the Compose-style process environment, keeping the assertion focused on admin bootstrap failure while leaving env-file parsing to its dedicated tests.

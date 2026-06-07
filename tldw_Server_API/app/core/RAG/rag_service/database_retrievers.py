@@ -628,6 +628,11 @@ class BaseRetriever(ABC):
         if _RESIDUAL_ENCODED_PATH_CONTROL_RE.search(path):
             logger.warning(f"Residual encoded path-control sequence detected in: {path}")
             raise SuspiciousDatabasePathError()
+        normalized_input_path = path.replace("\\", "/")
+        if normalized_input_path.startswith("/"):
+            first_component = normalized_input_path.split("/", 2)[1].lower()
+            if first_component in {"etc", "proc", "sys", "dev", "boot", "root"}:
+                raise RestrictedDatabasePathError()
         if '..' in path:
             logger.warning(f"Path traversal attempt detected in: {path}")
             raise PathTraversalError()

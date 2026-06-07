@@ -211,9 +211,11 @@ class TestCreateIdleContainerUsesSleepInfinity:
 
         # Verify the docker create command
         create_cmd = mock_check_output.call_args[0][0]
-        assert create_cmd == [
-            "docker",
-            "create",
+        assert create_cmd[:2] == ["docker", "create"]
+        assert "--cap-drop=ALL" in create_cmd
+        assert "--read-only" in create_cmd
+        assert "--network=none" in create_cmd
+        assert create_cmd[-5:] == [
             "--entrypoint",
             "/bin/sh",
             "python:3.12-slim",
