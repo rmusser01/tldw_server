@@ -414,7 +414,13 @@ vi.mock("@/hooks/useMcpTools", () => ({
     healthState: "ready",
     discoveredTools: [],
     chatTools: [],
-    toolCounts: { enabled: 0, available: 0 },
+    toolCounts: {
+      discovered: 0,
+      executable: 0,
+      disabled: 0,
+      colliding: 0,
+      chatEnabled: 0
+    },
     tools: [],
     toolsLoading: false,
     catalogs: [],

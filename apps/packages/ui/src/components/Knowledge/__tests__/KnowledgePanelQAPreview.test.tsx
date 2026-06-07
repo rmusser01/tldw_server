@@ -23,8 +23,64 @@ vi.mock("react-i18next", () => ({
 
 vi.mock(
   "antd",
-  () => ({
-    Modal: Object.assign(
+  () => {
+    const ButtonComponent = ({
+      children,
+      disabled,
+      htmlType,
+      onClick,
+      title,
+      "aria-label": ariaLabel
+    }: any) => (
+      <button
+        type={htmlType === "submit" ? "submit" : "button"}
+        disabled={disabled}
+        onClick={onClick}
+        title={title}
+        aria-label={ariaLabel}
+      >
+        {children}
+      </button>
+    )
+
+    const InputComponent = React.forwardRef<HTMLInputElement, any>(
+      ({ value, onChange, onPressEnter, placeholder, disabled }, ref) => (
+        <input
+          ref={ref}
+          value={value ?? ""}
+          onChange={(event) => onChange?.(event)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onPressEnter?.(event)
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+      )
+    )
+    InputComponent.displayName = "MockAntdInput"
+
+    const SelectComponent = ({ value, options = [], onChange, disabled }: any) => (
+      <select
+        value={Array.isArray(value) ? value[0] ?? "" : value ?? ""}
+        onChange={(event) => onChange?.(event.target.value)}
+        disabled={disabled}
+      >
+        {Array.isArray(options)
+          ? options.map((option: any) => (
+              <option
+                key={String(option?.value)}
+                value={String(option?.value ?? "")}
+              >
+                {typeof option?.label === "string"
+                  ? option.label
+                  : String(option?.value ?? "")}
+              </option>
+            ))
+          : null}
+      </select>
+    )
+
+    const Modal = Object.assign(
       ({
         children,
         open,
@@ -45,7 +101,37 @@ vi.mock(
         ) : null,
       { confirm: vi.fn() }
     )
-  }),
+
+    return {
+      AutoComplete: InputComponent,
+      Button: ButtonComponent,
+      Checkbox: ({ children }: { children?: React.ReactNode }) => (
+        <label>{children}</label>
+      ),
+      Input: InputComponent,
+      InputNumber: InputComponent,
+      Modal,
+      Radio: {
+        Group: ({ children }: { children?: React.ReactNode }) => (
+          <div>{children}</div>
+        ),
+        Button: ButtonComponent
+      },
+      Select: SelectComponent,
+      Spin: ({ children }: { children?: React.ReactNode }) => (
+        <div>{children}</div>
+      ),
+      Switch: ({ checked, onChange, disabled }: any) => (
+        <input
+          type="checkbox"
+          checked={Boolean(checked)}
+          onChange={(event) => onChange?.(event.target.checked)}
+          disabled={disabled}
+        />
+      ),
+      Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
+    }
+  },
   { virtual: true }
 )
 

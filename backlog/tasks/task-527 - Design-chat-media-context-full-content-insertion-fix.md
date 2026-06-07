@@ -34,13 +34,13 @@ Investigate and specify a fix for /chat media context actions that can insert or
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented the frontend media-context fix. Media-library search results are origin-marked, pinned conversion preserves only contextOrigin, and full media content is fetched only for pinned results with mediaId plus contextOrigin === "media-library". Knowledge Search Insert/Ask/Pin/copy, File Search Attach/copy, and KnowledgePanel direct/confirmed/preview Ask now resolve full media text before formatting. Pin handling re-reads current pinned state after async resolution and guards pending media pins against Clear All races.
+Implemented the frontend media-context fix. Media-library search results are origin-marked, pinned conversion preserves only contextOrigin, and full media content is fetched only for pinned results with mediaId plus contextOrigin === "media-library". Knowledge Search Insert/Ask/Pin/copy, File Search Attach/copy, and KnowledgePanel direct/confirmed/preview Ask now resolve full media text before formatting. Pin handling re-reads current pinned state after async resolution and guards pending media pins against Clear All races. Test scaffolding was also updated so the targeted component suites can run in a hydrated dependency environment.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed /chat media-library context actions so media items use full content instead of title-only fallback snippets when full media detail content is available. Verified submit/raw-preview paths already consume ragPinnedResults through formatPinnedResults when file retrieval is off, so no submit-path code change was needed. Verification: Vitest Knowledge/File hook tests passed (19 tests); non-blocked Stage 3 subset passed (21 tests including raw preview). Known blocker: component suites importing antd fail in this clean worktree before assertions because the tracked apps/packages/ui/node_modules/antd symlink points to a missing .bun package path. Bandit is not applicable because the implementation touched TypeScript/TSX/docs only.
+Fixed /chat media-library context actions so media items use full content instead of title-only fallback snippets when full media detail content is available. Verified submit/raw-preview paths already consume ragPinnedResults through formatPinnedResults when file retrieval is off, so no submit-path code change was needed. Verification: targeted Vitest suite passed after temporarily relinking the tracked antd symlink to the installed local package path, then restoring it before commit: Knowledge hooks, File hooks, KnowledgePanel QA preview, Playground pinned fallback, and raw preview MCP tools; 5 test files, 26 tests. The branch leaves the tracked antd symlink unchanged. Bandit is not applicable because the implementation touched TypeScript/TSX/docs only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
