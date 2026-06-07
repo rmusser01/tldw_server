@@ -437,6 +437,45 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
     assert "external servers" in user_guide  # nosec B101
     assert "credential grants" in user_guide  # nosec B101
     assert "configuration snapshots" in user_guide  # nosec B101
+    assert "tool-events report --group-by profile" in user_guide  # nosec B101
+    assert "tool-events export --format jsonl --since 7d" in user_guide  # nosec B101
+    assert "tool-events cleanup --max-age-days 30 --max-events 100000" in user_guide  # nosec B101
+    assert "does not capture tool arguments" in user_guide  # nosec B101
+    assert "evaluator-labeled task outcomes" in user_guide  # nosec B101
+    assert "Tool-Use Reporting" in readme  # nosec B101
+
+
+def test_mcp_unified_reporting_imports_do_not_eagerly_load_db_adapters() -> None:
+    """Lightweight reporting imports must not require optional DB adapters."""
+
+    import_names = (
+        "mcp_unified.tool_use_reporting",
+        "mcp_unified.gateway.tool_use_reporting",
+        "mcp_unified.gateway.config",
+        "mcp_unified.gateway.cli",
+    )
+    script = (
+        "import importlib, sys\n"
+        f"for name in {import_names!r}:\n"
+        "    importlib.import_module(name)\n"
+        "forbidden = sorted(\n"
+        "    name for name in sys.modules\n"
+        "    if name == 'sqlalchemy'\n"
+        "    or name.startswith('sqlalchemy.')\n"
+        "    or name == 'sqlite3'\n"
+        "    or name == 'mcp_unified.tool_use_reporting.sqlite'\n"
+        ")\n"
+        "print('\\n'.join(forbidden))\n"
+        "raise SystemExit(1 if forbidden else 0)\n"
+    )
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr  # nosec B101
 
 
 def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
@@ -759,6 +798,11 @@ def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
     [
         ("mcp_unified.storage", ("mcp_unified.storage.sqlite", "sqlalchemy")),
         ("mcp_unified.federation", ("mcp_unified.storage.sqlite", "sqlalchemy")),
+        ("mcp_unified.tool_use_reporting", ("sqlalchemy",)),
+        ("mcp_unified.tool_use_reporting.recorder", ("sqlalchemy",)),
+        ("mcp_unified.tool_use_reporting.builders", ("sqlalchemy",)),
+        ("mcp_unified.tool_use_reporting.store", ("sqlalchemy",)),
+        ("mcp_unified.tool_use_reporting.reporting", ("sqlalchemy",)),
     ],
 )
 def test_package_imports_do_not_eagerly_load_sqlite_backend(

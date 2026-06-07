@@ -14,6 +14,7 @@ from mcp_unified.profiles.resolution import (
     build_effective_policy_result,
 )
 from mcp_unified.profiles.resolver import StoreBackedProfileResolver
+from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .tool_discovery import (
@@ -24,6 +25,10 @@ from .tool_discovery import (
 )
 
 EFFECTIVE_POLICY_METADATA_KEY = "_gateway_effective_policy"
+TOOL_USE_BRIDGE_TOOL_NAME_METADATA_KEY = "mcp_tool_use_bridge_tool_name"
+TOOL_USE_REQUESTED_TOOL_ID_METADATA_KEY = "mcp_tool_use_requested_tool_id"
+TOOL_USE_EFFECTIVE_TOOL_NAME_METADATA_KEY = "mcp_tool_use_effective_tool_name"
+TOOL_USE_SOURCE_KIND_METADATA_KEY = "mcp_tool_use_source_kind"
 _TOOL_DISCOVERY_CATEGORY = "tool_discovery"
 _TOOL_DISCOVERY_READ_CAPABILITY = "tool_discovery.read"
 _TOOL_DISCOVERY_CALL_CAPABILITY = "tool_discovery.call"
@@ -419,12 +424,22 @@ class ProfileAwareGatewayRuntime:
                     status="not_found",
                     tool_id=tool_id,
                 )
-            return await self._call_backend_tool_through_policy(
+            delegated_context = _context_with_bridge_tool_use_metadata(
+                context,
+                bridge_tool_name=name,
+                requested_tool_id=tool_id,
+                effective_tool_name=resolved_name.strip(),
+            )
+            result = await self._call_backend_tool_through_policy(
                 profile,
                 resolved_name.strip(),
                 delegated_arguments,
-                context,
+                delegated_context,
                 tool=resolution.get("tool"),
+            )
+            return _result_with_bridge_tool_use_metadata(
+                result,
+                _bridge_tool_use_metadata(delegated_context),
             )
 
         raise GatewayPolicyDenied(
@@ -765,6 +780,70 @@ def _context_with_effective_policy(
         user_id=context.user_id,
         metadata=metadata,
     )
+
+
+def _context_with_bridge_tool_use_metadata(
+    context: GatewayRequestContext,
+    *,
+    bridge_tool_name: str,
+    requested_tool_id: str,
+    effective_tool_name: str,
+) -> GatewayRequestContext:
+    """Return a context copy carrying safe bridge tool-use metadata."""
+
+    side_channel: dict[str, Any] = {TOOL_USE_SOURCE_KIND_METADATA_KEY: "bridge"}
+    for metadata_key, value in (
+        (TOOL_USE_BRIDGE_TOOL_NAME_METADATA_KEY, bridge_tool_name),
+        (TOOL_USE_REQUESTED_TOOL_ID_METADATA_KEY, requested_tool_id),
+        (TOOL_USE_EFFECTIVE_TOOL_NAME_METADATA_KEY, effective_tool_name),
+    ):
+        safe_value = sanitize_safe_id(value, field=metadata_key)
+        if safe_value is not None:
+            side_channel[metadata_key] = safe_value
+
+    metadata = dict(context.metadata or {})
+    metadata.update(side_channel)
+    return GatewayRequestContext(
+        request_id=context.request_id,
+        client_id=context.client_id,
+        user_id=context.user_id,
+        metadata=metadata,
+    )
+
+
+def _bridge_tool_use_metadata(context: GatewayRequestContext) -> dict[str, Any]:
+    """Return only bridge tool-use metadata from a context copy."""
+
+    bridge_keys = {
+        TOOL_USE_BRIDGE_TOOL_NAME_METADATA_KEY,
+        TOOL_USE_REQUESTED_TOOL_ID_METADATA_KEY,
+        TOOL_USE_EFFECTIVE_TOOL_NAME_METADATA_KEY,
+        TOOL_USE_SOURCE_KIND_METADATA_KEY,
+    }
+    return {
+        key: value
+        for key, value in context.metadata.items()
+        if key in bridge_keys
+    }
+
+
+def _result_with_bridge_tool_use_metadata(
+    result: dict[str, Any],
+    bridge_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a result copy with bridge metadata for outer reporting wrappers."""
+
+    if not bridge_metadata:
+        return result
+    copied = dict(result)
+    metadata = copied.get("metadata")
+    metadata_copy = dict(metadata) if isinstance(metadata, dict) else {}
+    tool_use = metadata_copy.get("mcp_tool_use")
+    tool_use_copy = dict(tool_use) if isinstance(tool_use, dict) else {}
+    tool_use_copy.update(bridge_metadata)
+    metadata_copy["mcp_tool_use"] = tool_use_copy
+    copied["metadata"] = metadata_copy
+    return copied
 
 
 def _json_safe_model(value: Any) -> Any:

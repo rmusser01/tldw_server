@@ -348,7 +348,109 @@ mcp-unified-gateway runtime-update search
 The CLI reads the admin key from `MCP_UNIFIED_GATEWAY_ADMIN_KEY`; it intentionally
 does not accept the secret value as a command-line argument.
 
-## 8. Troubleshooting
+## 8. Inspect Tool-Use Reporting
+
+Tool-use reporting is an optional metadata-only event stream for understanding
+how profiles, modes, models, and tool prompt ids are used. It is intended for
+operational review, prompt iteration, and later evaluator-labeled task outcomes.
+
+Reporting is disabled by default. Enable it in the gateway config with a
+persistent SQLite event store:
+
+```json
+{
+  "store": {
+    "kind": "sqlite",
+    "sqlite_path": "./mcp-gateway.db"
+  },
+  "default_preset_id": "project-researcher",
+  "tool_use_reporting": {
+    "enabled": true,
+    "store": {
+      "kind": "sqlite",
+      "sqlite_path": "./mcp-tool-events.db"
+    },
+    "write_timeout_seconds": 2.0,
+    "retention_max_age_days": 30,
+    "retention_max_events": 100000,
+    "export_default_limit": 1000,
+    "report_default_window": "24h"
+  }
+}
+```
+
+The report/export/cleanup CLI requires `tool_use_reporting.enabled=true` and
+`tool_use_reporting.store.kind=sqlite`. A memory reporting store is only useful
+for embedders and tests because it is process-local.
+
+Build a profile-level report:
+
+```bash
+mcp-unified-gateway tool-events report --group-by profile \
+  --config ./gateway.json
+```
+
+Common grouping dimensions are `profile`, `tool_prompt`, `model`, and `tool`.
+Reports include `events_scanned`, `event_limit`, `truncated`, call counts, tool
+call success rate, top sanitized reason codes, and p50/p95 duration values.
+
+Export recent events as JSON Lines:
+
+```bash
+mcp-unified-gateway tool-events export --format jsonl --since 7d \
+  --config ./gateway.json
+```
+
+Clean up events using explicit retention limits:
+
+```bash
+mcp-unified-gateway tool-events cleanup --max-age-days 30 --max-events 100000 \
+  --config ./gateway.json
+```
+
+If `--max-age-days` or `--max-events` is omitted, cleanup falls back to
+`tool_use_reporting.retention_max_age_days` and
+`tool_use_reporting.retention_max_events`.
+
+### What Reporting Captures
+
+Each event is one attempted MCP tool call. The stored metadata can include:
+
+- Runtime surface, execution origin, status, sanitized reason code, and duration.
+- Requested and effective tool names, module id, category, source kind, and
+  read/write flags.
+- Profile id, mode id, model id, tool prompt id, prompt version, prompt variant,
+  and action family.
+- Grant, approval, installation, runtime availability, path-filter, truncation,
+  idempotency replay, and nested-call indicators.
+- UTC timestamp and integer epoch microseconds for stable ordering.
+
+This lets operators compare, for example, whether one profile mode has a higher
+tool-call success rate, whether a model is repeatedly denied a tool, or whether
+a new tool prompt version changes latency or reason-code distribution.
+
+### What Reporting Does Not Capture
+
+The metadata-only recorder does not capture tool arguments, tool result payloads,
+secret values, raw exception text, conversation messages, files, screenshots, or
+browser/page contents. The `capture_ref` field is only a future-safe reference
+slot; this slice does not create or store raw captures.
+
+### Privacy, Retention, And Evaluations
+
+Store event databases alongside other operator-controlled gateway state and
+apply retention with `tool-events cleanup`. Short windows are usually enough for
+prompt and profile iteration. Exported event files should be treated as
+operational telemetry, reviewed before sharing, and deleted when no longer
+needed.
+
+Tool-use reporting complements operational metrics and traces. Metrics answer
+"how much" and traces explain a specific request path; reporting gives a bounded
+dimensioned event table for comparing profiles, models, modes, tools, and tool
+prompt ids. Future evaluator-labeled task outcomes should join to these
+metadata dimensions instead of requiring argument or payload capture.
+
+## 9. Troubleshooting
 
 `--config is required`
 

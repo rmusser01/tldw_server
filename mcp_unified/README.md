@@ -19,6 +19,8 @@ surface for early standalone gateway work.
 - Optional SQLite-backed stores for standalone gateway configuration.
 - External MCP server registry, runtime lifecycle, process policy, and transport
   helpers.
+- Metadata-only tool-use reporting for aggregate profile, model, tool, and
+  prompt-version analysis.
 - A package CLI, `mcp-unified-gateway`, for local config management and remote
   gateway runtime operations.
 
@@ -79,6 +81,12 @@ Validate a gateway config file:
 mcp-unified-gateway validate-config ./gateway.json
 ```
 
+Build an aggregate tool-use report when reporting is enabled:
+
+```bash
+mcp-unified-gateway tool-events report --group-by profile --config ./gateway.json
+```
+
 ## Minimal Gateway Config
 
 ```json
@@ -96,6 +104,39 @@ Save this as `gateway.json`, then use:
 ```bash
 mcp-unified-gateway validate-config ./gateway.json
 ```
+
+## Tool-Use Reporting
+
+Tool-use reporting is disabled by default. When enabled, the gateway records
+metadata about attempted tool calls so operators can compare how profiles,
+models, modes, and tool prompt ids perform over time. Reports expose aggregate
+counts, success rates, top reason codes, and latency percentiles.
+
+Reporting deliberately avoids tool arguments, tool result payloads, secret
+values, raw exception text, and conversation content. Use a SQLite reporting
+store for CLI reporting, export, and cleanup commands.
+
+```json
+{
+  "store": {
+    "kind": "sqlite",
+    "sqlite_path": "./mcp-gateway.db"
+  },
+  "default_preset_id": "project-researcher",
+  "tool_use_reporting": {
+    "enabled": true,
+    "store": {
+      "kind": "sqlite",
+      "sqlite_path": "./mcp-tool-events.db"
+    },
+    "retention_max_age_days": 30,
+    "retention_max_events": 100000
+  }
+}
+```
+
+See [USER_GUIDE.md](USER_GUIDE.md) for report, export, cleanup, privacy, and
+future evaluation workflow details.
 
 ## Documentation
 

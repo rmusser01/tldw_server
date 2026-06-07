@@ -14,7 +14,12 @@ from .config import (
     GatewayProfileBootstrapConfig,
     GatewayProfileStoreConfig,
     GatewayProfileStoreKind,
+    GatewayToolUseReportingConfig,
+    GatewayToolUseReportingStoreConfig,
+    GatewayToolUseReportingStoreKind,
     bootstrap_profile_gateway_from_config,
+    build_gateway_tool_use_event_store,
+    build_gateway_tool_use_recorder,
     credential_grant_manager_from_storage,
     load_gateway_profile_bootstrap_config,
 )
@@ -31,6 +36,7 @@ from .profiles import (
 )
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
+from .tool_use_reporting import ToolUseReportingGatewayRuntime
 
 if TYPE_CHECKING:
     from .admin_auth import GatewayAdminAuthConfig, GatewayAdminAuthError
@@ -64,9 +70,15 @@ __all__ = [
     "GatewayStdioServer",
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
+    "GatewayToolUseReportingConfig",
+    "GatewayToolUseReportingStoreConfig",
+    "GatewayToolUseReportingStoreKind",
+    "ToolUseReportingGatewayRuntime",
     "ProfileAwareGatewayRuntime",
     "bootstrap_profile_gateway",
     "bootstrap_profile_gateway_from_config",
+    "build_gateway_tool_use_event_store",
+    "build_gateway_tool_use_recorder",
     "build_profile_gateway_runtime",
     "create_gateway_app",
     "create_gateway_router",
