@@ -1,9 +1,10 @@
 # Security Secrets and Serialization Adoption Audit - 2026-06-07
 
 **Related task:** TASK-2312
+**Follow-up:** TASK-2313
 **Inventory row:** INV-029
 **Source candidate:** `tldw_Server_API/app/core/Security/README.md`
-**Disposition:** Keep inventory-only for now. The helpers are real and tested, but current adoption does not support one accepted ADR that claims repository-wide secret management or serialization policy.
+**Disposition:** Split before ADR backfill. TASK-2313 backfilled the AES-GCM JSON envelope portion as ADR-027; `SecretManager` adoption and restricted pickle compatibility remain inventory-only.
 
 ## Decision Candidate Under Review
 
@@ -27,12 +28,12 @@ ADR-019 now covers request-edge middleware and ADR-026 covers outbound egress/SS
 
 ## Disposition
 
-Do not create an accepted ADR for the remaining secrets/serialization portion of INV-029 in its current shape.
+Do not create one accepted ADR for the remaining secrets/serialization portion of INV-029 in its broad shape.
 
 The current evidence supports these narrower statements:
 
 - Security provides a `SecretManager` helper with source precedence, validation, cache metadata, health checks, and sanitized test coverage.
-- Security provides AES-GCM JSON envelope helpers that several Jobs, AuthNZ, External Sources, and Workflows paths use for optional or configured encrypted persistence.
+- Security provides AES-GCM JSON envelope helpers that several Jobs, AuthNZ, External Sources, and Workflows paths use for optional or configured encrypted persistence. TASK-2313 backfilled this bounded portion as ADR-027.
 - Security provides a restricted pickle loader used by bounded legacy compatibility paths in Web Scraping and Scheduler.
 
 The current evidence does not support these broader ADR claims:
@@ -43,10 +44,9 @@ The current evidence does not support these broader ADR claims:
 
 ## Recommended Next Action
 
-Keep INV-029 partially backfilled. ADR-019 covers request-edge middleware, ADR-026 covers outbound egress/SSRF, and this audit records why secrets/serialization remains inventory-only.
+Keep INV-029 partially backfilled. ADR-019 covers request-edge middleware, ADR-026 covers outbound egress/SSRF, ADR-027 covers AES-GCM JSON envelope helpers, and this audit records why `SecretManager` adoption plus restricted legacy pickle compatibility remain inventory-only.
 
 If the owner wants more ADR work here, split it into implementation-backed slices:
 
 1. SecretManager adoption slice: migrate or explicitly exempt direct secret reads before considering any "centralized secret lookup" ADR.
-2. Crypto envelope ADR slice: backfill only the shared AES-GCM JSON envelope primitive and known encrypted persistence consumers.
-3. Restricted legacy pickle ADR slice: backfill only the default-disabled legacy compatibility rule, or first consolidate the Embeddings cache local unpickler if one central helper is desired.
+2. Restricted legacy pickle ADR slice: backfill only the default-disabled legacy compatibility rule, or first consolidate the Embeddings cache local unpickler if one central helper is desired.
