@@ -33,6 +33,8 @@ import {
   type RagResult
 } from "../useKnowledgeSearch"
 
+const maxPinnedSnippetChars = 20_000
+
 describe("useKnowledgeSearch helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -342,6 +344,52 @@ describe("useKnowledgeSearch action paths", () => {
     })
     expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
     expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+  })
+
+  it("does not re-add a pending media pin after unpinning that item", async () => {
+    const item = mediaResult()
+    const pinnedId = toPinnedResult(item).id
+    const resolveDetail = deferredMediaDetails("Full media body content")
+    const { result } = createHook()
+
+    act(() => {
+      result.current.handlePin(item)
+    })
+
+    await waitFor(() => {
+      expect(tldwClient.getMediaDetails).toHaveBeenCalledTimes(1)
+    })
+
+    await act(async () => {
+      result.current.handleUnpin(pinnedId)
+      resolveDetail()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+  })
+
+  it("caps full media-library content stored for pinned context", async () => {
+    const fullText = "A".repeat(maxPinnedSnippetChars + 200)
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: { text: fullText }
+    })
+    const { result } = createHook()
+
+    act(() => {
+      result.current.handlePin(mediaResult())
+    })
+
+    await waitFor(() => {
+      const snippet =
+        useStoreMessageOption.getState().ragPinnedResults[0]?.snippet
+      expect(snippet).toBeDefined()
+      expect(snippet?.length).toBeLessThanOrEqual(maxPinnedSnippetChars)
+      expect(snippet).toContain("Content truncated")
+      expect(snippet).not.toBe(fullText)
+    })
   })
 
   it("copies full media-library content as markdown", async () => {

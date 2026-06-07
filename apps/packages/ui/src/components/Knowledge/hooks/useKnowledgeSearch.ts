@@ -348,6 +348,26 @@ const fetchFullMediaTextById = async (mediaId: number): Promise<string | null> =
   }
 }
 
+const MAX_PINNED_SNIPPET_CHARS = 20_000
+const PINNED_SNIPPET_TRUNCATION_NOTICE =
+  "\n\n[Content truncated for pinned context.]"
+
+const limitPinnedSnippetForContext = (
+  pinned: RagPinnedResult
+): RagPinnedResult => {
+  if (pinned.snippet.length <= MAX_PINNED_SNIPPET_CHARS) return pinned
+  const sliceLength = Math.max(
+    0,
+    MAX_PINNED_SNIPPET_CHARS - PINNED_SNIPPET_TRUNCATION_NOTICE.length
+  )
+  return {
+    ...pinned,
+    snippet:
+      pinned.snippet.slice(0, sliceLength) +
+      PINNED_SNIPPET_TRUNCATION_NOTICE
+  }
+}
+
 export const withFullMediaTextIfAvailable = async (
   pinned: RagPinnedResult
 ): Promise<RagPinnedResult> => {
@@ -441,7 +461,8 @@ export function useKnowledgeSearch({
   )
 
   const pinnedResults = ragPinnedResults || []
-  const clearPinsGenerationRef = React.useRef(0)
+  const nextPinTokenRef = React.useRef(0)
+  const pendingPinTokensRef = React.useRef(new Map<string, number>())
   const collectPinnedMediaIds = React.useCallback((items: RagPinnedResult[]) => {
     const ids = items
       .map((item) => item.mediaId)
@@ -604,36 +625,49 @@ export function useKnowledgeSearch({
     (item: RagResult) => {
       void (async () => {
         const pinned = toPinnedResult(item)
-        if (pinnedResults.some((result) => result.id === pinned.id)) return
-        const clearPinsGeneration = clearPinsGenerationRef.current
-        const resolvedPinned = await withFullMediaTextIfAvailable(pinned)
-        if (clearPinsGeneration !== clearPinsGenerationRef.current) return
+        const currentPinnedBefore =
+          useStoreMessageOption.getState().ragPinnedResults || []
+        if (currentPinnedBefore.some((result) => result.id === pinned.id)) {
+          return
+        }
+        const pinToken = nextPinTokenRef.current + 1
+        nextPinTokenRef.current = pinToken
+        pendingPinTokensRef.current.set(pinned.id, pinToken)
+        const resolvedPinned = limitPinnedSnippetForContext(
+          await withFullMediaTextIfAvailable(pinned)
+        )
+        if (pendingPinTokensRef.current.get(pinned.id) !== pinToken) return
         const currentPinned =
           useStoreMessageOption.getState().ragPinnedResults || []
         if (currentPinned.some((result) => result.id === resolvedPinned.id)) {
+          pendingPinTokensRef.current.delete(pinned.id)
           return
         }
         const nextPinned = [...currentPinned, resolvedPinned]
+        pendingPinTokensRef.current.delete(pinned.id)
         setRagPinnedResults(nextPinned)
         const mediaIds = collectPinnedMediaIds(nextPinned)
         setRagMediaIds(mediaIds.length > 0 ? mediaIds : null)
       })()
     },
-    [collectPinnedMediaIds, pinnedResults, setRagMediaIds, setRagPinnedResults]
+    [collectPinnedMediaIds, setRagMediaIds, setRagPinnedResults]
   )
 
   const handleUnpin = React.useCallback(
     (id: string) => {
-      const nextPinned = pinnedResults.filter((item) => item.id !== id)
+      pendingPinTokensRef.current.delete(id)
+      const currentPinned =
+        useStoreMessageOption.getState().ragPinnedResults || []
+      const nextPinned = currentPinned.filter((item) => item.id !== id)
       setRagPinnedResults(nextPinned)
       const mediaIds = collectPinnedMediaIds(nextPinned)
       setRagMediaIds(mediaIds.length > 0 ? mediaIds : null)
     },
-    [collectPinnedMediaIds, pinnedResults, setRagMediaIds, setRagPinnedResults]
+    [collectPinnedMediaIds, setRagMediaIds, setRagPinnedResults]
   )
 
   const handleClearPins = React.useCallback(() => {
-    clearPinsGenerationRef.current += 1
+    pendingPinTokensRef.current.clear()
     setRagPinnedResults([])
     setRagMediaIds(null)
   }, [setRagMediaIds, setRagPinnedResults])
