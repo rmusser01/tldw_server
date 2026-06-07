@@ -778,7 +778,9 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
         newline="\n",
     )
     python_wrapper.chmod(0o700)
-    env = _entrypoint_process_env(env_file, marker_dir)
+    # Keep this test focused on admin bootstrap failure; env-file parsing has
+    # dedicated coverage above and Git Bash path/env handling differs on Windows.
+    env = _compose_process_env(env_file, marker_dir)
     env["PYTHON_BIN"] = _shell_path(python_wrapper)
     env["TLDW_TEST_REAL_PYTHON"] = _shell_path(Path(sys.executable))
 
