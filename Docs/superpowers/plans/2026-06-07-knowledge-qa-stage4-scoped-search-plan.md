@@ -20,24 +20,22 @@
 
 ## Files
 
-- Modify: `apps/packages/ui/src/services/rag/unified-rag.ts`
+- Inspect: `apps/packages/ui/src/services/rag/unified-rag.ts`
 - Create: `apps/packages/ui/src/services/rag/__tests__/unified-rag.test.ts`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/context/KnowledgeContextBar.tsx`
-- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/context/CompactToolbar.tsx`
-- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/layout/KnowledgeQALayout.tsx`
+- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/SourceList.tsx`
 - Create: `apps/packages/ui/src/components/Option/KnowledgeQA/scopeValidation.ts`
 - Create: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/scopeValidation.test.ts`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeContextBar.profiles.test.tsx`
-- Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeContextBar.scalable-source-picker.test.tsx`
+- Verify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeContextBar.scalable-source-picker.test.tsx`
+- Verify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/CompactToolbar.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQALayout.behavior.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx`
-- Modify: `apps/tldw-frontend/e2e/ux-audit/knowledge-empty-recovery.spec.ts`
-- Modify: `apps/extension/tests/e2e/knowledge-empty-recovery.spec.ts`
 
 ## Task 1: Assert Scope Request Payload
 
-- [ ] **Step 1: Write failing request-builder test**
+- [x] **Step 1: Write failing request-builder test**
 
 Create `apps/packages/ui/src/services/rag/__tests__/unified-rag.test.ts` if it
 does not already exist, then assert:
@@ -67,13 +65,13 @@ bunx vitest run src/services/rag/__tests__/unified-rag.test.ts
 
 Expected: fail if test file or exact payload support is missing.
 
-- [ ] **Step 2: Update request builder**
+- [x] **Step 2: Update request builder**
 
-Modify `unified-rag.ts` so exact media and note filters are preserved when building RAG requests.
+Existing `buildRagSearchRequest` already preserved exact media and note filters in `options`; added tested coverage in the package's active `src/services/rag/__tests__` include path.
 
 ## Task 2: Validate Result Scope
 
-- [ ] **Step 1: Write failing scope validation tests**
+- [x] **Step 1: Write failing scope validation tests**
 
 Create `scopeValidation.test.ts`:
 
@@ -101,38 +99,38 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/scopeValidation.test
 
 Expected: fail because helper does not exist.
 
-- [ ] **Step 2: Implement `scopeValidation.ts`**
+- [x] **Step 2: Implement `scopeValidation.ts`**
 
 Keep it pure and small. It should allow:
 
-- selected local media/note ids
+- selected local media/note ids, including media content result types such as PDF/video/audio
 - web fallback sources only when web fallback is enabled and origin is `web_fallback`
 - explicit metadata reason such as `scope_broadened_by_workspace`
 
 ## Task 3: Wire Profiles And Compact Mode
 
-- [ ] **Step 1: Update profile tests**
+- [x] **Step 1: Update profile tests**
 
 Add assertions to `KnowledgeContextBar.profiles.test.tsx` that saving and restoring a profile preserves source categories, media ids, note ids, preset, web fallback, and provider/model fields.
 
-- [ ] **Step 2: Update compact parity tests**
+- [x] **Step 2: Update compact parity tests**
 
 Update `KnowledgeQALayout.behavior.test.tsx` so compact source controls expose exact counts and can restore saved profiles.
 
-- [ ] **Step 3: Implement minimal state wiring**
+- [x] **Step 3: Implement minimal state wiring**
 
-Modify `KnowledgeQAProvider.tsx`, `KnowledgeContextBar.tsx`, and `CompactToolbar.tsx` to preserve exact ids in profile save/restore and compact actions.
+Modify `KnowledgeQAProvider.tsx` and `KnowledgeContextBar.tsx` to preserve exact ids in profile save/restore. Existing compact actions route through the same callbacks; parity coverage verifies restore behavior without changing `CompactToolbar.tsx`.
 
 ## Task 4: Verify
 
-- [ ] **Step 1: Run focused Vitest**
+- [x] **Step 1: Run focused Vitest**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/services/rag/__tests__/unified-rag.test.ts src/components/Option/KnowledgeQA/__tests__/scopeValidation.test.ts src/components/Option/KnowledgeQA/__tests__/KnowledgeContextBar.profiles.test.tsx src/components/Option/KnowledgeQA/__tests__/KnowledgeQALayout.behavior.test.tsx src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx
 ```
 
-- [ ] **Step 2: Run WebUI and extension route-state checks**
+- [x] **Step 2: Run WebUI and extension route-state checks**
 
 ```bash
 cd apps/tldw-frontend
@@ -144,7 +142,9 @@ bunx playwright test tests/e2e/knowledge-empty-recovery.spec.ts --project=chromi
 
 Record any WXT blocker under TASK-2279.5 and TASK-2279.6.
 
-- [ ] **Step 3: Commit**
+Result: WebUI route-state check passed 2/2 outside the sandbox after the sandboxed run failed at `listen EPERM`. Extension route-state check built the production MV3 package, then failed 2/2 before page assertions with `Could not determine extension id from [no extension targets]`; recorded under TASK-2279.6 and still covered by TASK-2279.5. The extension launch-health sentinel passed because the known TASK-2279.5 launch failure remains marked with `test.fail`.
+
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/rag apps/packages/ui/src/components/Option/KnowledgeQA apps/tldw-frontend/e2e/ux-audit/knowledge-empty-recovery.spec.ts apps/extension/tests/e2e/knowledge-empty-recovery.spec.ts "backlog/tasks/task-2279.6 - Verify-Knowledge-QA-scoped-search-and-saved-profile-round-trip.md"

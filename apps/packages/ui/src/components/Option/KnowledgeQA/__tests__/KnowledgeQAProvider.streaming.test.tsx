@@ -343,6 +343,62 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(latestContext!.isSearching).toBe(false)
   })
 
+  it("removes out-of-scope local results without remapping surviving citation indexes", async () => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      throw new Error("stream endpoint unavailable")
+    })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "excluded-doc",
+          content: "Excluded evidence.",
+          metadata: { source_type: "media_db", source_id: "99" },
+          score: 0.92,
+        },
+        {
+          id: "allowed-doc",
+          content: "Allowed evidence.",
+          metadata: { source_type: "media_db", source_id: "42" },
+          score: 0.91,
+        },
+      ],
+      answer: "The excluded claim cites [1], while the scoped claim cites [2].",
+      metadata: {},
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-scope-validation")
+    })
+
+    act(() => {
+      latestContext!.updateSetting("sources", ["media_db"])
+      latestContext!.updateSetting("include_media_ids", [42])
+      latestContext!.updateSetting("enable_web_fallback", false)
+      latestContext!.setQuery("only selected source")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(latestContext!.results).toHaveLength(1)
+    expect(latestContext!.results[0].id).toBe("allowed-doc")
+    expect(latestContext!.results[0].metadata?.original_result_index).toBe(1)
+    expect(latestContext!.citations).toEqual([
+      expect.objectContaining({ index: 2, documentId: "allowed-doc" }),
+    ])
+    expect(latestContext!.queryWarning).toBe(
+      "Some returned sources were hidden because they were outside the selected source scope."
+    )
+  })
+
   it("surfaces query-length warning when a submitted query exceeds backend limits", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
       throw new Error("stream endpoint unavailable")

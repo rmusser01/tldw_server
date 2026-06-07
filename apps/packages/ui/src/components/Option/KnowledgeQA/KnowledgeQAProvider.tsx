@@ -60,6 +60,7 @@ import {
   isKnowledgeAnswerTrustState,
   normalizeKnowledgeAnswerTrust,
 } from "./trustState"
+import { validateKnowledgeResultScope } from "./scopeValidation"
 import {
   getEvidenceOrigin,
   getResultChunkId,
@@ -473,6 +474,14 @@ function parseCitations(answer: string, results: RagResult[]): CitationRef[] {
     documentId: results[index - 1]?.id || `doc_${index}`,
     excerpt: results[index - 1]?.content || results[index - 1]?.text,
   }))
+}
+
+function getOriginalResultIndex(result: RagResult, fallbackIndex: number): number {
+  const rawIndex = result.metadata?.original_result_index
+  if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) {
+    return fallbackIndex
+  }
+  return Math.max(0, Math.round(rawIndex))
 }
 
 function normalizeAnswerText(value: unknown): string | null {
@@ -2165,6 +2174,14 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           state.pinnedSourceFilters.noteIds
         ),
       }
+      const validateResultsForScope = (candidateResults: RagResult[]) =>
+        validateKnowledgeResultScope({
+          selectedSources: effectiveSettings.sources,
+          selectedMediaIds: effectiveSettings.include_media_ids,
+          selectedNoteIds: effectiveSettings.include_note_ids,
+          webFallbackEnabled: Boolean(effectiveSettings.enable_web_fallback),
+          results: candidateResults,
+        })
 
       let threadId = state.currentThreadId
       if (!threadId) {
@@ -2418,9 +2435,30 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         if (isStaleSearchRequest()) {
           return
         }
+        const originalResults = results
+        const scopeValidation = validateResultsForScope(originalResults)
+        if (scopeValidation.violations.length > 0) {
+          console.warn("Knowledge QA returned out-of-scope sources:", {
+            violations: scopeValidation.violations,
+          })
+          results = scopeValidation.acceptedResults
+          dispatch({
+            type: "SET_QUERY_WARNING",
+            payload:
+              "Some returned sources were hidden because they were outside the selected source scope.",
+          })
+        }
+
         // Parse citations from answer
         dispatch({ type: "SET_QUERY_STAGE", payload: "verifying" })
-        const citations = answer ? parseCitations(answer, results) : []
+        const visibleCitationIndexes = new Set(
+          results.map((result, index) => getOriginalResultIndex(result, index) + 1)
+        )
+        const citations = answer
+          ? parseCitations(answer, originalResults).filter((citation) =>
+              visibleCitationIndexes.has(citation.index)
+            )
+          : []
         const answerTrust = normalizeKnowledgeAnswerTrust({
           answer,
           results,

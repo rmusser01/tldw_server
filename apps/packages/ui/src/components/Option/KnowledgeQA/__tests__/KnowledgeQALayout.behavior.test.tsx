@@ -134,6 +134,17 @@ vi.mock("../context/KnowledgeContextBar", () => ({
         Toggle web fallback
       </button>
       <button type="button">Profiles</button>
+      <button
+        type="button"
+        onClick={() => {
+          onSourcesChange(["media_db", "notes"])
+          onIncludeMediaIdsChange([7])
+          onIncludeNoteIdsChange(["note-b"])
+          onPresetChange("fast")
+        }}
+      >
+        Load saved profile
+      </button>
       <button type="button" onClick={onOpenSettings}>
         Advanced settings
       </button>
@@ -444,6 +455,27 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Advanced settings" }))
     expect(state.setSettingsPanelOpen).toHaveBeenCalledWith(true)
+  })
+
+  it("restores saved profile scope from the compact source dialog", async () => {
+    renderLayout()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open compact sources" }))
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Source scope and profiles",
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Load saved profile" }))
+
+    expect(state.updateSetting).toHaveBeenCalledWith("sources", [
+      "media_db",
+      "notes",
+    ])
+    expect(state.updateSetting).toHaveBeenCalledWith("include_media_ids", [7])
+    expect(state.updateSetting).toHaveBeenCalledWith("include_note_ids", [
+      "note-b",
+    ])
+    expect(state.setPreset).toHaveBeenCalledWith("fast")
   })
 
   it("reopens the evidence rail for a new search after a manual close", async () => {
