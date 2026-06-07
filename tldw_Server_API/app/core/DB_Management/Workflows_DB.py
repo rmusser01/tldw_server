@@ -2090,7 +2090,8 @@ class WorkflowsDatabase:
 
     # ---------- Run control ----------
     def set_cancel_requested(self, run_id: str, cancel: bool = True) -> None:
-        params = (bool(cancel), run_id)
+        run_id_param = "" if run_id is None else str(run_id)
+        params = (bool(cancel), run_id_param)
         if self._using_backend():
             with self.backend.transaction() as conn:  # type: ignore[union-attr]
                 self._execute_backend(
@@ -2100,32 +2101,51 @@ class WorkflowsDatabase:
                 )
             return
 
+        conn = self._acquire_sqlite()
         try:
-            self._conn.execute("UPDATE workflow_runs SET cancel_requested = ? WHERE run_id = ?", params)
-            self._conn.commit()
+            conn.execute("UPDATE workflow_runs SET cancel_requested = ? WHERE run_id = ?", params)
+            conn.commit()
         except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower():
-                self._sqlite_retry_execute("UPDATE workflow_runs SET cancel_requested = ? WHERE run_id = ?", params)
-                self._sqlite_retry_commit()
-            else:
+            if "locked" not in str(e).lower():
                 raise
+            import time as _time
+
+            tries = 0
+            while True:
+                try:
+                    conn.execute("UPDATE workflow_runs SET cancel_requested = ? WHERE run_id = ?", params)
+                    conn.commit()
+                    break
+                except sqlite3.OperationalError as retry_error:
+                    if "locked" in str(retry_error).lower() and tries < 4:
+                        _time.sleep(0.05 * (2 ** tries))
+                        tries += 1
+                        continue
+                    raise
+        finally:
+            self._release_sqlite(conn)
 
     def is_cancel_requested(self, run_id: str) -> bool:
+        run_id_param = "" if run_id is None else str(run_id)
         if self._using_backend():
             with self.backend.transaction() as conn:  # type: ignore[union-attr]
                 result = self._execute_backend(
                     "SELECT cancel_requested FROM workflow_runs WHERE run_id = ?",
-                    (run_id,),
+                    (run_id_param,),
                     connection=conn,
                 )
             row = self._row_from_result(result)
             return bool(row[0]) if row else False
 
-        row = self._conn.cursor().execute(
-            "SELECT cancel_requested FROM workflow_runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
-        return bool(row[0]) if row else False
+        conn = self._acquire_sqlite()
+        try:
+            row = conn.cursor().execute(
+                "SELECT cancel_requested FROM workflow_runs WHERE run_id = ?",
+                (run_id_param,),
+            ).fetchone()
+            return bool(row[0]) if row else False
+        finally:
+            self._release_sqlite(conn)
 
     # ---------- Events ----------
     def append_event(

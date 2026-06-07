@@ -115,7 +115,10 @@ def test_dlq_replay_real_allowed(monkeypatch, admin_client):
     try:
         # Allow localhost and chosen port; do not block private; set signing secret
         monkeypatch.setenv('WORKFLOWS_EGRESS_BLOCK_PRIVATE', 'false')
+        monkeypatch.setenv('WORKFLOWS_EGRESS_ALLOWLIST', '127.0.0.1,localhost')
+        monkeypatch.delenv('WORKFLOWS_EGRESS_DENYLIST', raising=False)
         monkeypatch.setenv('WORKFLOWS_WEBHOOK_ALLOWLIST', '127.0.0.1')
+        monkeypatch.delenv('WORKFLOWS_WEBHOOK_DENYLIST', raising=False)
         monkeypatch.setenv('WORKFLOWS_EGRESS_ALLOWED_PORTS', f'80,443,{port}')
         monkeypatch.setenv('WORKFLOWS_WEBHOOK_SECRET', 'testsecret')
         # Seed DLQ row in same DB used by the app

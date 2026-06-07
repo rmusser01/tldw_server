@@ -5,6 +5,7 @@ import time
 from typing import Any, Dict
 
 import pytest
+from anyio import ClosedResourceError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -49,32 +50,37 @@ def test_ws_stdin_idle_timeout_emits_truncated_and_closes(ws_flush, monkeypatch)
         assert r.status_code == 200
         run_id = r.json()["id"]
 
-        with client.websocket_connect(f"/api/v1/sandbox/runs/{run_id}/stream") as ws:
-            # Do not send any stdin frames; wait for idle timeout
-            saw_idle_notice = False
-            closed_by_idle = False
-            deadline = time.time() + 3
-            while time.time() < deadline:
-                try:
-                    msg = ws.receive_json()
-                except Exception:
-                    # Closed by server due to idle timeout before frame delivery
-                    closed_by_idle = True
-                    break
-                if msg.get("type") == "heartbeat":
-                    continue
-                if msg.get("type") == "truncated" and msg.get("reason") == "stdin_idle":
-                    saw_idle_notice = True
-                    # Next receive should detect close soon
+        observed_idle_close = False
+        try:
+            with client.websocket_connect(f"/api/v1/sandbox/runs/{run_id}/stream") as ws:
+                # Do not send any stdin frames; wait for idle timeout
+                saw_idle_notice = False
+                closed_by_idle = False
+                deadline = time.time() + 3
+                while time.time() < deadline:
                     try:
-                        _ = ws.receive_json()
+                        msg = ws.receive_json()
                     except Exception:
+                        # Closed by server due to idle timeout before frame delivery
                         closed_by_idle = True
-                    break
-            assert saw_idle_notice or closed_by_idle, "Expected truncated(stdin_idle) or idle-close"
-            ws_flush(run_id)
-            # Connection is expected to be closed by server; ensure it does not hang
-            try:
-                ws.close()
-            except Exception:
-                _ = None
+                        break
+                    if msg.get("type") == "heartbeat":
+                        continue
+                    if msg.get("type") == "truncated" and msg.get("reason") == "stdin_idle":
+                        saw_idle_notice = True
+                        # Next receive should detect close soon
+                        try:
+                            _ = ws.receive_json()
+                        except Exception:
+                            closed_by_idle = True
+                        break
+                assert saw_idle_notice or closed_by_idle, "Expected truncated(stdin_idle) or idle-close"
+                observed_idle_close = True
+                ws_flush(run_id)
+                # Connection is expected to be closed by server; ensure it does not hang
+                try:
+                    ws.close()
+                except Exception:
+                    _ = None
+        except ClosedResourceError:
+            assert observed_idle_close, "WebSocket closed before stdin idle timeout was observed"

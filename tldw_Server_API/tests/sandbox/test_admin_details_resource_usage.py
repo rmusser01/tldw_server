@@ -5,16 +5,39 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+
+def _force_docker_preflight_available(monkeypatch) -> None:
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
 
 def _client(monkeypatch) -> TestClient:
-
-
-     # Speed up and stabilize sandbox WS behavior in tests
+    # Speed up and stabilize sandbox WS behavior in tests
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "true")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "false")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    _force_docker_preflight_available(monkeypatch)
     # Ensure sandbox routes are enabled
     existing_enable = os.environ.get("ROUTES_ENABLE", "")
     parts = [p.strip().lower() for p in existing_enable.split(",") if p.strip()]
@@ -29,16 +52,13 @@ def _client(monkeypatch) -> TestClient:
 
 
 def _admin_user_dep():
-
-
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
     return User(id=1, username="admin", roles=["admin"], is_admin=True)
 
 
 def test_admin_details_includes_resource_usage(monkeypatch) -> None:
-
-
-     # Override dependency for admin route using the app from TestClient
+    # Override dependency for admin route using the app from TestClient
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
     with _client(monkeypatch) as client:

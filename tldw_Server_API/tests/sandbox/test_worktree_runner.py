@@ -33,7 +33,17 @@ def test_repo(tmp_path: Path) -> str:
         stderr=subprocess.DEVNULL,
     )
     subprocess.check_call(
-        ["git", "commit", "--allow-empty", "-m", "init"],
+        [
+            "git",
+            "-c",
+            "user.email=sandbox-test@example.invalid",
+            "-c",
+            "user.name=Sandbox Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
         cwd=str(repo),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

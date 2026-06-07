@@ -1,4 +1,5 @@
 import contextlib
+import gc
 import os
 import shutil
 import sqlite3
@@ -11,17 +12,21 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import reset_manage
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+_TEMP_CLEANUP_ATTEMPTS = 50
+
+
 def _rmtree_retrying_transient_locks(path: str | Path) -> None:
-    for attempt in range(10):
+    for attempt in range(_TEMP_CLEANUP_ATTEMPTS):
         try:
             shutil.rmtree(path)
             return
         except FileNotFoundError:
             return
         except PermissionError:
-            if attempt == 9:
+            if attempt == _TEMP_CLEANUP_ATTEMPTS - 1:
                 raise
-            time.sleep(0.1)
+            gc.collect()
+            time.sleep(min(0.1 * (attempt + 1), 0.5))
 
 
 @contextmanager

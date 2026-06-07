@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RunStatus, RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 pytestmark = pytest.mark.unit
@@ -32,6 +33,26 @@ def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     if hasattr(app_settings, "SANDBOX_SNAPSHOT_PATH"):
         monkeypatch.setattr(app_settings, "SANDBOX_SNAPSHOT_PATH", snapshot_dir)
     clear_config_cache()
+
+
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
 
 
 def _wait_for_phase(
@@ -59,6 +80,7 @@ def test_background_execution_respects_max_concurrent_runs(
     monkeypatch.setenv("SANDBOX_MAX_CONCURRENT_RUNS", "1")
     monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     lock = threading.Lock()
     allow_first_finish = threading.Event()
@@ -147,6 +169,7 @@ def test_global_active_cap_enforced_across_service_instances(
     monkeypatch.setenv("SANDBOX_MAX_CONCURRENT_RUNS", "1")
     monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     lock = threading.Lock()
     allow_first_finish = threading.Event()
@@ -237,6 +260,7 @@ def test_per_user_active_cap_enforced_across_service_instances(
     monkeypatch.setenv("SANDBOX_ACTIVE_MAX_PER_USER", "1")
     monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     lock = threading.Lock()
     allow_first_finish = threading.Event()

@@ -7,17 +7,21 @@ from typing import Any, Dict
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
-
 
 def _client(monkeypatch) -> TestClient:
-
-
     monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
     # Disable real execution to keep run queued/non-terminal for cancel
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "false")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    existing_enable = os.environ.get("ROUTES_ENABLE", "")
+    parts = [p.strip().lower() for p in existing_enable.split(",") if p.strip()]
+    if "sandbox" not in parts:
+        parts.append("sandbox")
+    monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
+    from tldw_Server_API.app.main import app
+
     return TestClient(app)
 
 
