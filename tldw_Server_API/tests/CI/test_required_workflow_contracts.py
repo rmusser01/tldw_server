@@ -356,6 +356,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "admin-bundle" not in shard_names
         assert "admin-e2e" not in shard_names
         assert "ai-chromadb-chunking" not in shard_names
+        assert "auth-db" not in shard_names
         assert "ai-embeddings" not in shard_names
         assert "ai-embeddings-policy-v5" not in shard_names
         assert "chat-character-legacy" not in shard_names
@@ -406,6 +407,17 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "admin-users",
             "admin-watchlists-webhooks",
         }.issubset(shard_names)
+        auth_db_shards = {
+            "auth-core",
+            "auth-sqlite",
+            "auth-unit-a-l",
+            "auth-unit-m-z",
+            "chacha-core-stores",
+            "chacha-character-conversation",
+            "chacha-content-persona",
+            "db-privileges",
+        }
+        assert auth_db_shards.issubset(shard_names)
         assert {
             "ai-chromadb",
             "ai-chunking-code-json-xml",
@@ -646,6 +658,57 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             assert covered_nodeids == admin_test_functions_by_file[filename], (
                 f"{filename} admin node-id shard coverage mismatch"
             )
+
+        auth_db_dirs = (
+            "AuthNZ",
+            "AuthNZ_Postgres",
+            "AuthNZ_SQLite",
+            "AuthNZ_Unit",
+            "ChaChaNotesDB",
+            "DB",
+            "DB_Management",
+            "MediaDB2",
+            "PrivilegeCatalog",
+            "Privileges",
+        )
+        auth_db_roots = {
+            f"tldw_Server_API/tests/{dirname}/"
+            for dirname in auth_db_dirs
+        }
+        auth_db_files = {
+            str(path)
+            for dirname in auth_db_dirs
+            for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
+        }
+        covered_auth_db_files: dict[str, str] = {}
+        for shard_name in auth_db_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert any(
+                    pattern == root.rstrip("/") or pattern.startswith(root)
+                    for root in auth_db_roots
+                )
+                if Path(pattern).is_dir():
+                    prefix = f"{pattern.rstrip('/')}/"
+                    matches = {
+                        filename
+                        for filename in auth_db_files
+                        if filename.startswith(prefix)
+                    }
+                else:
+                    matches = {
+                        filename
+                        for filename in auth_db_files
+                        if fnmatch.fnmatch(filename, pattern)
+                    }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_auth_db_files, (
+                        f"{filename} matched both "
+                        f"{covered_auth_db_files[filename]} and {shard_name}"
+                    )
+                    covered_auth_db_files[filename] = shard_name
+
+        assert set(covered_auth_db_files) == auth_db_files
 
         chunking_shards = {
             "ai-chunking-code-json-xml",

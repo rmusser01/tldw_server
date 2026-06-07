@@ -589,13 +589,39 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-db
+          - name: auth-core
             paths: >-
               tldw_Server_API/tests/AuthNZ
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-sqlite
+            paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
-              tldw_Server_API/tests/AuthNZ_Unit
-              tldw_Server_API/tests/ChaChaNotesDB
+          - name: auth-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[a-l]*.py
+          - name: auth-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: chacha-core-stores
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+          - name: chacha-character-conversation
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_conversation_*.py
+          - name: chacha-content-persona
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          - name: db-privileges
+            paths: >-
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
@@ -1634,13 +1660,39 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-db
+          - name: auth-core
             paths: >-
               tldw_Server_API/tests/AuthNZ
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-sqlite
+            paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
-              tldw_Server_API/tests/AuthNZ_Unit
-              tldw_Server_API/tests/ChaChaNotesDB
+          - name: auth-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[a-l]*.py
+          - name: auth-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: chacha-core-stores
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+          - name: chacha-character-conversation
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_conversation_*.py
+          - name: chacha-content-persona
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          - name: db-privileges
+            paths: >-
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
@@ -2624,13 +2676,39 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-db
+          - name: auth-core
             paths: >-
               tldw_Server_API/tests/AuthNZ
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-sqlite
+            paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
-              tldw_Server_API/tests/AuthNZ_Unit
-              tldw_Server_API/tests/ChaChaNotesDB
+          - name: auth-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[a-l]*.py
+          - name: auth-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: chacha-core-stores
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+          - name: chacha-character-conversation
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_conversation_*.py
+          - name: chacha-content-persona
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          - name: db-privileges
+            paths: >-
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
@@ -3540,13 +3618,39 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-db
+          - name: auth-core
             paths: >-
               tldw_Server_API/tests/AuthNZ
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-sqlite
+            paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
-              tldw_Server_API/tests/AuthNZ_Unit
-              tldw_Server_API/tests/ChaChaNotesDB
+          - name: auth-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[a-l]*.py
+          - name: auth-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: chacha-core-stores
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+          - name: chacha-character-conversation
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_conversation_*.py
+          - name: chacha-content-persona
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          - name: db-privileges
+            paths: >-
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
@@ -4458,13 +4562,39 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-db
+          - name: auth-core
             paths: >-
               tldw_Server_API/tests/AuthNZ
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-sqlite
+            paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
-              tldw_Server_API/tests/AuthNZ_Unit
-              tldw_Server_API/tests/ChaChaNotesDB
+          - name: auth-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[a-l]*.py
+          - name: auth-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: chacha-core-stores
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+          - name: chacha-character-conversation
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_conversation_*.py
+          - name: chacha-content-persona
+            paths: >-
+              tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          - name: db-privileges
+            paths: >-
               tldw_Server_API/tests/DB
               tldw_Server_API/tests/DB_Management
               tldw_Server_API/tests/MediaDB2
