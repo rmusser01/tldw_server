@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,7 @@ class _FakeWorkspaceRootResolver:
 class _FilesystemRegistry:
     def __init__(self, module: FilesystemModule) -> None:
         self.module = module
-        self._tool_names = {"fs.list", "fs.read_text", "fs.write_text", "fs.stat", "fs.glob", "fs.grep"}
+        self._tool_names = {"fs.list", "fs.read", "fs.read_text", "fs.write_text", "fs.stat", "fs.glob", "fs.grep"}
 
     async def find_module_for_tool(self, tool_name: str):  # noqa: ANN001
         if tool_name in self._tool_names:
@@ -173,14 +174,21 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     tools = await mod.get_tools()
     by_name = {tool["name"]: tool for tool in tools}
 
-    assert {"fs.list", "fs.read_text", "fs.write_text"} <= set(by_name)  # nosec B101
+    assert {"fs.list", "fs.read", "fs.read_text", "fs.write_text"} <= set(by_name)  # nosec B101
 
-    for tool_name in ("fs.list", "fs.read_text", "fs.write_text"):
+    for tool_name in ("fs.list", "fs.read", "fs.read_text", "fs.write_text"):
         metadata = by_name[tool_name]["metadata"]
         assert metadata["uses_filesystem"] is True  # nosec B101
         assert metadata["path_boundable"] is True  # nosec B101
         assert metadata["path_argument_hints"] == ["path"]  # nosec B101
 
+    read_metadata = by_name["fs.read"]["metadata"]
+    assert read_metadata["readOnlyHint"] is True  # nosec B101
+    assert read_metadata["path_scope_action"] == "read"  # nosec B101
+    assert "filesystem.read" in read_metadata["capabilities"]  # nosec B101
+    assert read_metadata["eval"]["task_families"] == ["filesystem_read"]  # nosec B101
+    assert read_metadata["eval"]["expected_result_kind"] == "structured_filesystem_read"  # nosec B101
+    assert by_name["fs.read"]["inputSchema"]["additionalProperties"] is False  # nosec B101
     assert by_name["fs.write_text"]["metadata"]["category"] == "management"  # nosec B101
 
 
@@ -315,7 +323,182 @@ async def test_filesystem_list_read_and_write_text_within_workspace(tmp_path: Pa
     assert write_result["path"] == "docs/new.txt"  # nosec B101
     assert write_result["bytes_written"] == len(b"created by fs.write_text")  # nosec B101
     assert (docs_dir / "new.txt").read_text(encoding="utf-8") == "created by fs.write_text"  # nosec B101
-    assert len(resolver.calls) == 3  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_returns_content_hash_and_receipt(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    content = "alpha\nbeta\ngamma\n"
+    (docs_dir / "story.txt").write_text(content, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-read", user_id="1", metadata={})
+
+    result = await mod.execute_tool("fs.read", {"path": "docs/story.txt"}, context=context)
+
+    assert result["path"] == "docs/story.txt"  # nosec B101
+    assert result["content"] == content  # nosec B101
+    assert result["start_line"] == 1  # nosec B101
+    assert result["end_line"] == 3  # nosec B101
+    assert result["line_count_total"] == 3  # nosec B101
+    assert result["bytes_read"] == len(content.encode("utf-8"))  # nosec B101
+    assert result["bytes_total"] == len(content.encode("utf-8"))  # nosec B101
+    assert result["sha256"] == hashlib.sha256(content.encode("utf-8")).hexdigest()  # nosec B101
+    assert result["read_receipt"]  # nosec B101
+    assert result["newline_style"] == "lf"  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+    assert result["eval"] == {  # nosec B101
+        "tool_name": "fs.read",
+        "tool_prompt_id": "mcp.fs.read.v1",
+        "tool_prompt_version": "2026.06.04",
+        "action_family": "filesystem_read",
+        "result_kind": "structured_filesystem_read",
+        "path_filter_used": True,
+        "truncated": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_truncates_and_omits_receipt(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "long.txt").write_text("abcdef\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-read-truncated", user_id="1", metadata={})
+
+    result = await mod.execute_tool("fs.read", {"path": "long.txt", "max_bytes": 3}, context=context)
+
+    assert result["content"] == "abc"  # nosec B101
+    assert result["bytes_read"] == 3  # nosec B101
+    assert result["truncated"] is True  # nosec B101
+    assert result["truncation_reason"] == "max_bytes"  # nosec B101
+    assert "read_receipt" not in result  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+    assert result["eval"]["path_filter_used"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_can_include_line_numbers(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    content = "alpha\nbeta\ngamma\n"
+    (workspace_root / "story.txt").write_text(content, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-read-numbered", user_id="1", metadata={})
+
+    result = await mod.execute_tool(
+        "fs.read",
+        {"path": "story.txt", "start_line": 2, "max_lines": 2, "include_line_numbers": True},
+        context=context,
+    )
+
+    assert result["content"] == "2\tbeta\n3\tgamma\n"  # nosec B101
+    assert result["start_line"] == 2  # nosec B101
+    assert result["end_line"] == 3  # nosec B101
+    assert result["line_count_total"] == 3  # nosec B101
+    assert result["bytes_read"] == len("beta\ngamma\n".encode("utf-8"))  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_applies_configured_caps(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "story.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    byte_capped_mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={
+                "read_max_bytes": 4,
+                "read_receipt_secret": "unit-test-secret",
+            },
+        ),
+        workspace_root_resolver=resolver,
+    )
+    line_capped_mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={
+                "read_max_lines": 2,
+                "read_receipt_secret": "unit-test-secret",
+            },
+        ),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-read-capped", user_id="1", metadata={})
+
+    byte_capped = await byte_capped_mod.execute_tool("fs.read", {"path": "story.txt", "max_bytes": 100}, context=context)
+    line_capped = await line_capped_mod.execute_tool("fs.read", {"path": "story.txt", "max_lines": 100}, context=context)
+
+    assert byte_capped["content"] == "one\n"  # nosec B101
+    assert byte_capped["bytes_read"] == 4  # nosec B101
+    assert byte_capped["truncation_reason"] == "max_bytes"  # nosec B101
+    assert "read_receipt" not in byte_capped  # nosec B101
+    assert line_capped["content"] == "one\ntwo\n"  # nosec B101
+    assert line_capped["truncation_reason"] == "max_lines"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_rejects_binary_payload(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "blob.bin").write_bytes(b"abc\x00def")
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-read-binary", user_id="1", metadata={})
+
+    with pytest.raises(ValueError, match="binary content is not supported"):
+        await mod.execute_tool("fs.read", {"path": "blob.bin"}, context=context)
+    assert len(resolver.calls) == 1  # nosec B101
 
 
 @pytest.mark.asyncio

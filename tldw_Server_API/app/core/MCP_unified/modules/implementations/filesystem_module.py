@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import hashlib
 import os
 import re
 import stat as stat_module
@@ -28,7 +29,9 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
 )
 
+from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
+from .filesystem_receipts import ReadReceiptManager
 
 
 def _first_nonempty(*values: Any) -> str | None:
@@ -51,6 +54,10 @@ class FilesystemModule(BaseModule):
     ) -> None:
         super().__init__(config)
         self._workspace_root_resolver = workspace_root_resolver or McpHubWorkspaceRootResolver()
+        self._read_receipts = ReadReceiptManager(
+            secret=config.settings.get("read_receipt_secret"),
+            ttl_seconds=self._setting_positive_int("read_receipt_ttl_seconds", 1_800),
+        )
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Filesystem module: {self.name}")
@@ -104,6 +111,34 @@ class FilesystemModule(BaseModule):
             },
         )
         read_text_tool["inputSchema"]["additionalProperties"] = False
+
+        read_tool = create_tool_definition(
+            name="fs.read",
+            description="Read a bounded UTF-8 text file with hash metadata under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "start_line": {"type": "integer", "minimum": 1, "default": 1},
+                    "max_lines": {"type": "integer", "minimum": 1},
+                    "max_bytes": {"type": "integer", "minimum": 1},
+                    "include_line_numbers": {"type": "boolean", "default": False},
+                    "include_receipt": {"type": "boolean", "default": True},
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                "path_scope_action": "read",
+                "eval": {
+                    "task_families": ["filesystem_read"],
+                    "expected_result_kind": "structured_filesystem_read",
+                },
+                **shared_path_metadata,
+            },
+        )
+        read_tool["inputSchema"]["additionalProperties"] = False
 
         write_text_tool = create_tool_definition(
             name="fs.write_text",
@@ -204,7 +239,7 @@ class FilesystemModule(BaseModule):
         )
         grep_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_text_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
+        return [list_tool, read_tool, read_text_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -228,6 +263,50 @@ class FilesystemModule(BaseModule):
                 "path": self._to_workspace_relative_path(workspace_root, target),
                 "text": read_result["text"],
             }
+
+        if tool_name == "fs.read":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            rel_path = self._to_workspace_relative_path(workspace_root, target)
+            read_result = await asyncio.to_thread(
+                self._read_file,
+                target,
+                start_line=int(args.get("start_line", 1)),
+                max_lines=self._bounded_positive_int(
+                    args.get("max_lines"),
+                    self._setting_positive_int("read_default_max_lines", 2_000),
+                    maximum=self._setting_positive_int("read_max_lines", 20_000),
+                ),
+                max_bytes=self._bounded_positive_int(
+                    args.get("max_bytes"),
+                    self._setting_positive_int("read_default_max_bytes", self._max_read_bytes()),
+                    maximum=self._setting_positive_int("read_max_bytes", self._max_read_bytes()),
+                ),
+                hash_max_file_bytes=self._setting_positive_int("read_hash_max_file_bytes", 5_000_000),
+                include_line_numbers=bool(args.get("include_line_numbers", False)),
+            )
+            result = {"path": rel_path, **read_result}
+            if (
+                bool(args.get("include_receipt", True))
+                and not result.get("truncated")
+                and isinstance(result.get("sha256"), str)
+            ):
+                result["read_receipt"] = self._read_receipts.issue(
+                    path=rel_path,
+                    sha256=str(result["sha256"]),
+                    size=int(result.get("bytes_total") or 0),
+                    workspace_id=self._context_metadata_value(context, "workspace_id"),
+                    session_id=_first_nonempty(getattr(context, "session_id", None), self._context_metadata_value(context, "session_id")),
+                )
+            result["eval"] = build_execution_eval_metadata(
+                tool_name="fs.read",
+                tool_prompt_id="mcp.fs.read.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_read",
+                result_kind="structured_filesystem_read",
+                path_filter_used=True,
+                truncated=bool(result.get("truncated", False)),
+            )
+            return result
 
         if tool_name == "fs.write_text":
             target = self._resolve_workspace_path(workspace_root, str(args.get("path")))
@@ -371,6 +450,30 @@ class FilesystemModule(BaseModule):
             path = arguments.get("path")
             if not isinstance(path, str) or not path.strip():
                 raise ValueError("path is required")
+            return
+
+        if tool_name == "fs.read":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "start_line",
+                    "max_lines",
+                    "max_bytes",
+                    "include_line_numbers",
+                    "include_receipt",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_positive_int_argument(arguments, "start_line")
+            self._validate_positive_int_argument(arguments, "max_lines")
+            self._validate_positive_int_argument(arguments, "max_bytes")
+            self._validate_bool_argument(arguments, "include_line_numbers")
+            self._validate_bool_argument(arguments, "include_receipt")
             return
 
         if tool_name == "fs.write_text":
@@ -540,6 +643,13 @@ class FilesystemModule(BaseModule):
         return Path(workspace_root_raw).expanduser().resolve(strict=False)
 
     @staticmethod
+    def _context_metadata_value(context: Any | None, key: str) -> str | None:
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        return _first_nonempty(metadata.get(key))
+
+    @staticmethod
     def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
         candidate = Path(raw_path).expanduser()
         if not candidate.is_absolute():
@@ -570,12 +680,16 @@ class FilesystemModule(BaseModule):
         return resolved
 
     @staticmethod
-    def _bounded_positive_int(value: Any, default: int) -> int:
+    def _bounded_positive_int(value: Any, default: int, *, maximum: int | None = None) -> int:
         if value is None:
-            return max(1, int(default))
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise ValueError("limit must be a positive integer")
-        return value
+            limit = max(1, int(default))
+        else:
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError("limit must be a positive integer")
+            limit = value
+        if maximum is not None:
+            limit = min(limit, max(1, int(maximum)))
+        return limit
 
     @staticmethod
     def _normalize_portable_pattern(pattern: str) -> str:
@@ -1025,6 +1139,99 @@ class FilesystemModule(BaseModule):
             return candidate.name
         rel_text = relative.as_posix()
         return rel_text if rel_text not in {"", "."} else "."
+
+    @staticmethod
+    def _read_file(
+        target: Path,
+        *,
+        start_line: int,
+        max_lines: int,
+        max_bytes: int,
+        hash_max_file_bytes: int,
+        include_line_numbers: bool,
+    ) -> dict[str, Any]:
+        if target.is_symlink():
+            raise ValueError(f"path is not a regular file: {target}")
+        if not target.exists():
+            raise FileNotFoundError(f"path not found: {target}")
+        if not target.is_file():
+            raise ValueError(f"path is not a file: {target}")
+
+        file_size = target.stat(follow_symlinks=False).st_size
+        can_hash = file_size <= hash_max_file_bytes
+        if can_hash:
+            payload = target.read_bytes()
+            output_payload = payload[:max_bytes]
+        else:
+            with target.open("rb") as handle:
+                output_payload = handle.read(max_bytes)
+            payload = output_payload
+        if b"\x00" in payload:
+            raise ValueError("binary content is not supported by fs.read")
+
+        byte_truncated = file_size > len(output_payload)
+        if can_hash:
+            full_text = FilesystemModule._decode_utf8_text(payload, allow_prefix=False)
+        else:
+            full_text = None
+        text = FilesystemModule._decode_utf8_text(output_payload, allow_prefix=byte_truncated)
+        newline_style = FilesystemModule._detect_newline_style(output_payload)
+        all_lines = text.splitlines(keepends=True)
+        line_count_total = len((full_text if full_text is not None else text).splitlines())
+        start_index = max(0, start_line - 1)
+        selected_lines = all_lines[start_index : start_index + max_lines]
+        line_truncated = start_index + max_lines < len(all_lines)
+        selected_content = "".join(selected_lines)
+        content = FilesystemModule._numbered_lines(selected_lines, start_line) if include_line_numbers else selected_content
+        end_line = start_line + len(selected_lines) - 1 if selected_lines else start_line - 1
+
+        result: dict[str, Any] = {
+            "content": content,
+            "start_line": start_line,
+            "end_line": end_line,
+            "line_count_total": line_count_total,
+            "bytes_read": len(selected_content.encode("utf-8")),
+            "bytes_total": file_size,
+            "newline_style": newline_style,
+            "truncated": bool(byte_truncated or line_truncated),
+        }
+        if byte_truncated:
+            result["truncation_reason"] = "max_bytes"
+        elif line_truncated:
+            result["truncation_reason"] = "max_lines"
+        if can_hash:
+            result["sha256"] = hashlib.sha256(payload).hexdigest()
+        else:
+            result["hash_omitted_reason"] = "hash_omitted_file_too_large"
+        return result
+
+    @staticmethod
+    def _decode_utf8_text(payload: bytes, *, allow_prefix: bool) -> str:
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if allow_prefix and exc.reason == "unexpected end of data" and exc.start > 0:
+                return payload[: exc.start].decode("utf-8")
+            raise ValueError("binary content is not supported by fs.read") from exc
+
+    @staticmethod
+    def _numbered_lines(lines: list[str], start_line: int) -> str:
+        return "".join(f"{line_number}\t{line}" for line_number, line in enumerate(lines, start=start_line))
+
+    @staticmethod
+    def _detect_newline_style(payload: bytes) -> str:
+        crlf = payload.count(b"\r\n")
+        without_crlf = payload.replace(b"\r\n", b"")
+        lf = without_crlf.count(b"\n")
+        cr = without_crlf.count(b"\r")
+        styles = sum(1 for count in (crlf, lf, cr) if count > 0)
+        if styles > 1:
+            return "mixed"
+        if crlf:
+            return "crlf"
+        if cr:
+            return "cr"
+        return "lf"
 
     @staticmethod
     def _read_text_file(target: Path, max_read_bytes: int) -> dict[str, Any]:
