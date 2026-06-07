@@ -1858,7 +1858,12 @@ class UnifiedRAGResponse(BaseModel):
             "metadata": {
                 "sources_searched": ["media_db", "notes"],
                 "documents_retrieved": 10,
-                "cache_hit": False
+                "cache_hit": False,
+                "knowledge_trust": {
+                    "state": "cited_answer",
+                    "reason_codes": [],
+                    "evidence_origin": "local_library",
+                },
             },
             "timings": {
                 "query_expansion": 0.05,
@@ -1868,6 +1873,8 @@ class UnifiedRAGResponse(BaseModel):
             },
             "citations": [
                 {
+                    "index": 1,
+                    "document_id": "doc1",
                     "text": "Machine learning is a subset of artificial intelligence",
                     "source": "ML Introduction",
                     "confidence": 0.95,

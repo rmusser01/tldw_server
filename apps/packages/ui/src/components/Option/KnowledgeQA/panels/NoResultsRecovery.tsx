@@ -9,8 +9,10 @@ import type {
   KnowledgeSourceHealth,
   KnowledgeSourceHealthState,
   KnowledgeSourceStatus,
+  KnowledgeTrustReasonCode,
 } from "../types"
 import { getSourceHealthStatusLabel } from "../sourceHealth"
+import { getKnowledgeTrustReasonMessages } from "../trustState"
 
 type NoResultsRecoveryProps = {
   onBroadenScope?: () => void
@@ -23,6 +25,7 @@ type NoResultsRecoveryProps = {
   selectedSources?: RagSource[]
   sourceHealth?: KnowledgeSourceHealthState
   sourceStatus?: Record<string, KnowledgeSourceStatus>
+  trustReasonCodes?: KnowledgeTrustReasonCode[]
   showNearestMatchesAvailable?: boolean
 }
 
@@ -37,6 +40,7 @@ export function NoResultsRecovery({
   selectedSources = [],
   sourceHealth,
   sourceStatus,
+  trustReasonCodes = [],
   showNearestMatchesAvailable = false,
 }: NoResultsRecoveryProps) {
   const { t } = useTranslation("knowledge")
@@ -64,6 +68,10 @@ export function NoResultsRecovery({
   const canEnableWebFallback = webAvailable && !webEnabled
   const shouldOfferNearestMatches =
     hasNearestMatches || showNearestMatchesAvailable
+  const trustReasonMessages = React.useMemo(
+    () => getKnowledgeTrustReasonMessages(trustReasonCodes),
+    [trustReasonCodes]
+  )
 
   return (
     <div className="rounded-xl border border-border bg-surface p-6">
@@ -114,6 +122,18 @@ export function NoResultsRecovery({
                     {status.count > 0 ? ` (${status.count} found)` : ""}
                     {status.reason ? `, ${status.reason.replaceAll("_", " ")}` : ""}
                   </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {trustReasonMessages.length > 0 ? (
+            <div className="mt-3 rounded-md border border-border/80 bg-surface2/50 px-3 py-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Recovery reasons
+              </h3>
+              <ul className="mt-1 space-y-1 text-xs text-text-muted">
+                {trustReasonMessages.map((message) => (
+                  <li key={message}>{message}</li>
                 ))}
               </ul>
             </div>

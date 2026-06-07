@@ -7,6 +7,7 @@ from typing import Any
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
 
 from .result_model import RAGResult
+from .trust_contracts import classify_knowledge_answer_trust
 
 EVIDENCE_METADATA_KEYS = (
     "source_id",
@@ -95,6 +96,21 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _web_fallback_used(metadata: dict[str, Any], documents: list[dict[str, Any]]) -> bool:
+    web_fallback_metadata = metadata.get("web_fallback")
+    if isinstance(web_fallback_metadata, dict) and any(
+        bool(web_fallback_metadata.get(key)) for key in ("triggered", "used")
+    ):
+        return True
+    if bool(metadata.get("web_fallback_used")):
+        return True
+    return any(
+        document.get("metadata", {}).get("evidence_origin") == "web_fallback"
+        or document.get("evidence_origin") == "web_fallback"
+        for document in documents
+    )
+
+
 def rag_result_from_unified_search_result(result: Any) -> RAGResult:
     """Adapt unified pipeline results into the core result contract."""
     metadata = _result_field(result, "metadata", None) or {}
@@ -144,9 +160,21 @@ def rag_result_from_unified_search_result(result: Any) -> RAGResult:
 
 def rag_result_to_response(result: RAGResult) -> UnifiedRAGResponse:
     """Convert the core result contract into the declared API response."""
-    metadata = result.metadata or {}
+    metadata = dict(result.metadata or {})
+    documents = _normalize_documents(result.documents)
+    trust = classify_knowledge_answer_trust(
+        answer=result.generated_answer,
+        documents=documents,
+        citations=result.citations or result.chunk_citations,
+        web_fallback_used=_web_fallback_used(metadata, documents),
+    )
+    metadata["knowledge_trust"] = {
+        "state": trust["state"],
+        "reason_codes": trust["reason_codes"],
+        "evidence_origin": trust["evidence_origin"],
+    }
     return UnifiedRAGResponse(
-        documents=_normalize_documents(result.documents),
+        documents=documents,
         query=result.query,
         expanded_queries=result.expanded_queries,
         metadata=metadata,

@@ -22,6 +22,7 @@ import { buildAnswerTrustSummary } from "./trustSummary"
 import type { KnowledgeSourceHealth } from "./types"
 import {
   getKnowledgeAnswerTrustPresentation,
+  getKnowledgeTrustReasonMessages,
   type KnowledgeTrustTone,
 } from "./trustState"
 
@@ -172,6 +173,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   const {
     answer,
     answerTrustState = "unknown_trust",
+    answerTrustReasonCodes = [],
     citations,
     isSearching,
     error,
@@ -226,6 +228,10 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   const answerTrustPresentation = useMemo(
     () => getKnowledgeAnswerTrustPresentation(answerTrustState),
     [answerTrustState]
+  )
+  const answerTrustReasonMessages = useMemo(
+    () => getKnowledgeTrustReasonMessages(answerTrustReasonCodes),
+    [answerTrustReasonCodes]
   )
   const answerSessionKey = useMemo(
     () =>
@@ -286,6 +292,16 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   )
   const lowConfidenceRecovery = useMemo(() => {
     if (!normalizedAnswer || results.length === 0) return null
+
+    if (answerTrustReasonMessages.length > 0) {
+      return {
+        title:
+          answerTrustState === "no_answer_insufficient_evidence"
+            ? "Insufficient evidence"
+            : "Answer needs review",
+        description: answerTrustReasonMessages.join(" "),
+      }
+    }
 
     if (answerTrustState === "unknown_trust") {
       return {
@@ -351,6 +367,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     return null
   }, [
     answerTrustState,
+    answerTrustReasonMessages,
     citations.length,
     faithfulnessDescriptor?.label,
     groundingCoverage?.percent,
@@ -838,6 +855,9 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           className="mt-3 flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-surface2/60 px-3 py-2 text-xs text-text-muted"
         >
           {answerTrustSummaryLines.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+          {answerTrustReasonMessages.map((line) => (
             <span key={line}>{line}</span>
           ))}
         </div>

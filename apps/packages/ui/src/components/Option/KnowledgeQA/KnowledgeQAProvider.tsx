@@ -25,6 +25,9 @@ import type {
   KnowledgeQAThread,
   CitationRef,
   KnowledgeAnswerTrustState,
+  KnowledgeTrustMetadata,
+  KnowledgeTrustReasonCode,
+  EvidenceOrigin,
   SearchRuntimeDetails,
   KnowledgeSourceStatus,
   KnowledgeSourceHealthState,
@@ -105,6 +108,8 @@ const initialState: KnowledgeQAState = {
   answer: null,
   citations: [],
   answerTrustState: "unknown_trust",
+  answerTrustReasonCodes: [],
+  answerEvidenceOrigin: null,
   searchDetails: null,
   error: null,
   queryWarning: null,
@@ -142,6 +147,8 @@ type ResultsPayload = {
   answer: string | null
   citations: CitationRef[]
   answerTrustState: KnowledgeAnswerTrustState
+  answerTrustReasonCodes?: KnowledgeTrustReasonCode[]
+  answerEvidenceOrigin?: EvidenceOrigin | null
 }
 
 function sliceMessagesForBranch(
@@ -233,6 +240,8 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
+        answerTrustReasonCodes: action.payload.answerTrustReasonCodes ?? [],
+        answerEvidenceOrigin: action.payload.answerEvidenceOrigin ?? null,
         hasSearched: true,
         isSearching: false,
         queryStage: "complete",
@@ -244,6 +253,8 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
+        answerTrustReasonCodes: action.payload.answerTrustReasonCodes ?? [],
+        answerEvidenceOrigin: action.payload.answerEvidenceOrigin ?? null,
         hasSearched: true,
         isSearching: true,
       }
@@ -254,6 +265,8 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         ...state,
         error: action.payload,
         answerTrustState: action.payload ? "failed_search" : state.answerTrustState,
+        answerTrustReasonCodes: action.payload ? [] : state.answerTrustReasonCodes,
+        answerEvidenceOrigin: action.payload ? null : state.answerEvidenceOrigin,
         hasSearched: true,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
@@ -265,6 +278,8 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answer: null,
         citations: [],
         answerTrustState: "unknown_trust",
+        answerTrustReasonCodes: [],
+        answerEvidenceOrigin: null,
         searchDetails: null,
         error: null,
         queryWarning: null,
@@ -583,6 +598,8 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   results: RagResult[]
   citations: CitationRef[]
   answerTrustState: KnowledgeAnswerTrustState
+  answerTrustReasonCodes: KnowledgeTrustReasonCode[]
+  answerEvidenceOrigin: EvidenceOrigin | null
   answerPreview?: string
   sourcesCount: number
   settingsSnapshot?: Partial<RagSettings> | null
@@ -606,6 +623,8 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
       results: [],
       citations: [],
       answerTrustState: "unknown_trust",
+      answerTrustReasonCodes: [],
+      answerEvidenceOrigin: null,
       sourcesCount: 0,
       settingsSnapshot: null,
     }
@@ -620,14 +639,31 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   const storedTrustState = isKnowledgeAnswerTrustState(ragContext?.trust_state)
     ? ragContext.trust_state
     : null
-  const answerTrustState =
-    storedTrustState ??
-    normalizeKnowledgeAnswerTrust({
-      answer,
-      results,
-      citations,
-      hasRequiredMetadata: false,
-    }).state
+  const storedReasonCodes = Array.isArray(ragContext?.trust_reason_codes)
+    ? ragContext.trust_reason_codes.filter(
+        (value): value is KnowledgeTrustReasonCode => typeof value === "string"
+      )
+    : []
+  const storedEvidenceOrigin =
+    ragContext?.trust_evidence_origin === "local_library" ||
+    ragContext?.trust_evidence_origin === "web_fallback" ||
+    ragContext?.trust_evidence_origin === "mixed" ||
+    ragContext?.trust_evidence_origin === "unknown_origin"
+      ? ragContext.trust_evidence_origin
+      : null
+  const normalizedTrust =
+    storedTrustState != null
+      ? {
+          state: storedTrustState,
+          reasonCodes: storedReasonCodes,
+          evidenceOrigin: storedEvidenceOrigin ?? "unknown_origin",
+        }
+      : normalizeKnowledgeAnswerTrust({
+          answer,
+          results,
+          citations,
+          hasRequiredMetadata: false,
+        })
   const queryFromContext =
     typeof ragContext?.search_query === "string" &&
     ragContext.search_query.trim().length > 0
@@ -640,7 +676,12 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     answer,
     results,
     citations,
-    answerTrustState,
+    answerTrustState: normalizedTrust.state,
+    answerTrustReasonCodes: normalizedTrust.reasonCodes,
+    answerEvidenceOrigin:
+      normalizedTrust.evidenceOrigin === "unknown_origin"
+        ? storedEvidenceOrigin
+        : normalizedTrust.evidenceOrigin,
     answerPreview: truncateAnswerPreview(answer),
     sourcesCount: results.length,
     settingsSnapshot: normalizeRestorableSettingsSnapshot(ragContext?.settings_snapshot),
@@ -690,6 +731,15 @@ function extractRagResponse(response: any): {
     metadata.feedback_id = response.feedback_id
   }
   return { results, answer, expandedQueries, metadata }
+}
+
+function extractKnowledgeTrustMetadata(
+  metadata: Record<string, unknown>
+): KnowledgeTrustMetadata | null {
+  const rawTrust = metadata.knowledge_trust
+  return rawTrust && typeof rawTrust === "object" && !Array.isArray(rawTrust)
+    ? (rawTrust as KnowledgeTrustMetadata)
+    : null
 }
 
 function mapStreamingContextsToResults(contexts: any[]): RagResult[] {
@@ -1876,7 +1926,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       results: RagResult[],
       answer: string | null,
       settings: RagSettings,
-      answerTrustState: KnowledgeAnswerTrustState
+      answerTrustState: KnowledgeAnswerTrustState,
+      answerTrustReasonCodes: KnowledgeTrustReasonCode[],
+      answerEvidenceOrigin: EvidenceOrigin | null
     ): RagContextData => ({
       search_query: question,
       search_mode: settings.search_mode,
@@ -1897,6 +1949,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       })),
       generated_answer: answer || undefined,
       trust_state: answerTrustState,
+      trust_reason_codes: answerTrustReasonCodes,
+      trust_evidence_origin: answerEvidenceOrigin ?? undefined,
+      knowledge_trust: {
+        state: answerTrustState,
+        reasonCodes: answerTrustReasonCodes,
+        evidenceOrigin: answerEvidenceOrigin ?? "unknown_origin",
+      },
       timestamp: new Date().toISOString(),
     }),
     []
@@ -2002,6 +2061,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         let answer: string | null = null
         let usedStreaming = false
         let resolvedSearchDetails: SearchRuntimeDetails | null = null
+        let backendTrust: KnowledgeTrustMetadata | null = null
 
         if (
           canAttemptStreaming &&
@@ -2053,7 +2113,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 const partialCitations = partialAnswer
                   ? parseCitations(partialAnswer, streamResults)
                   : []
-                const partialTrustState = normalizeKnowledgeAnswerTrust({
+                const partialTrust = normalizeKnowledgeAnswerTrust({
                   answer: partialAnswer,
                   results: streamResults,
                   citations: partialCitations,
@@ -2070,7 +2130,12 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                     results: streamResults,
                     answer: partialAnswer,
                     citations: partialCitations,
-                    answerTrustState: partialTrustState,
+                    answerTrustState: partialTrust.state,
+                    answerTrustReasonCodes: partialTrust.reasonCodes,
+                    answerEvidenceOrigin:
+                      partialTrust.evidenceOrigin === "unknown_origin"
+                        ? null
+                        : partialTrust.evidenceOrigin,
                   },
                 })
                 receivedStreamEvent = true
@@ -2087,7 +2152,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 const partialCitations = partialAnswer
                   ? parseCitations(partialAnswer, streamResults)
                   : []
-                const partialTrustState = normalizeKnowledgeAnswerTrust({
+                const partialTrust = normalizeKnowledgeAnswerTrust({
                   answer: partialAnswer,
                   results: streamResults,
                   citations: partialCitations,
@@ -2104,7 +2169,12 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                     results: streamResults,
                     answer: partialAnswer,
                     citations: partialCitations,
-                    answerTrustState: partialTrustState,
+                    answerTrustState: partialTrust.state,
+                    answerTrustReasonCodes: partialTrust.reasonCodes,
+                    answerEvidenceOrigin:
+                      partialTrust.evidenceOrigin === "unknown_origin"
+                        ? null
+                        : partialTrust.evidenceOrigin,
                   },
                 })
                 receivedStreamEvent = true
@@ -2163,6 +2233,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           const extracted = extractRagResponse(response)
           results = extracted.results
           answer = extracted.answer
+          backendTrust = extractKnowledgeTrustMetadata(extracted.metadata)
           if (answer) {
             dispatch({ type: "SET_QUERY_STAGE", payload: "generating" })
           }
@@ -2179,18 +2250,32 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         // Parse citations from answer
         dispatch({ type: "SET_QUERY_STAGE", payload: "verifying" })
         const citations = answer ? parseCitations(answer, results) : []
-        const answerTrustState = normalizeKnowledgeAnswerTrust({
+        const answerTrust = normalizeKnowledgeAnswerTrust({
           answer,
           results,
           citations,
+          backendTrust,
           hasRequiredMetadata: true,
           syncFailed: isThreadSyncFailed(),
           weakEvidence: hasWeakEvidence(results, effectiveSettings.strip_min_relevance),
-        }).state
+        })
+        const answerTrustState = answerTrust.state
+        const answerTrustReasonCodes = answerTrust.reasonCodes
+        const answerEvidenceOrigin =
+          answerTrust.evidenceOrigin === "unknown_origin"
+            ? null
+            : answerTrust.evidenceOrigin
 
         dispatch({
           type: "SET_RESULTS",
-          payload: { results, answer, citations, answerTrustState },
+          payload: {
+            results,
+            answer,
+            citations,
+            answerTrustState,
+            answerTrustReasonCodes,
+            answerEvidenceOrigin,
+          },
         })
         dispatch({ type: "SET_SEARCH_DETAILS", payload: resolvedSearchDetails })
         dispatch({
@@ -2211,7 +2296,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           results,
           answer,
           effectiveSettings,
-          answerTrustState
+          answerTrustState,
+          answerTrustReasonCodes,
+          answerEvidenceOrigin
         )
 
         if (answer && threadId) {
@@ -2464,6 +2551,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             answer: hydration.answer,
             citations: hydration.citations,
             answerTrustState: hydration.answerTrustState,
+            answerTrustReasonCodes: hydration.answerTrustReasonCodes,
+            answerEvidenceOrigin: hydration.answerEvidenceOrigin,
           },
         })
       } else {
@@ -2559,6 +2648,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               answer: hydration.answer,
               citations: hydration.citations,
               answerTrustState: hydration.answerTrustState,
+              answerTrustReasonCodes: hydration.answerTrustReasonCodes,
+              answerEvidenceOrigin: hydration.answerEvidenceOrigin,
             },
           })
         } else {
@@ -2712,6 +2803,10 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             answerTrustState: isLocalThreadId(branchThreadId)
               ? "unsynced_local_result"
               : hydration.answerTrustState,
+            answerTrustReasonCodes: isLocalThreadId(branchThreadId)
+              ? []
+              : hydration.answerTrustReasonCodes,
+            answerEvidenceOrigin: hydration.answerEvidenceOrigin,
           },
         })
       } else {

@@ -1,4 +1,11 @@
-import type { CitationRef, KnowledgeAnswerTrustState, RagResult } from "./types"
+import type {
+  CitationRef,
+  EvidenceOrigin,
+  KnowledgeAnswerTrustState,
+  KnowledgeTrustMetadata,
+  KnowledgeTrustReasonCode,
+  RagResult,
+} from "./types"
 
 export const KNOWLEDGE_ANSWER_TRUST_STATES: KnowledgeAnswerTrustState[] = [
   "cited_answer",
@@ -14,6 +21,7 @@ export type KnowledgeTrustInput = {
   answer: string | null
   results: RagResult[]
   citations: CitationRef[]
+  backendTrust?: KnowledgeTrustMetadata | null
   hasRequiredMetadata?: boolean
   transportFailed?: boolean
   syncFailed?: boolean
@@ -22,6 +30,8 @@ export type KnowledgeTrustInput = {
 
 export type KnowledgeTrustResult = {
   state: KnowledgeAnswerTrustState
+  reasonCodes: KnowledgeTrustReasonCode[]
+  evidenceOrigin: EvidenceOrigin
 }
 
 export type KnowledgeTrustTone = "success" | "warning" | "danger" | "muted"
@@ -70,23 +80,86 @@ const TRUST_PRESENTATION: Record<KnowledgeAnswerTrustState, KnowledgeTrustPresen
   },
 }
 
+const TRUST_REASON_MESSAGES: Record<string, string> = {
+  missing_citations:
+    "Generated answer is missing citations that map to returned sources.",
+  citation_source_not_returned:
+    "Generated citations do not map to returned sources.",
+  missing_inspectable_evidence:
+    "Cited sources do not include inspectable excerpts.",
+  low_relevance:
+    "Retrieved matches are below the relevance threshold.",
+  web_fallback_used:
+    "Web fallback contributed evidence to this answer.",
+  no_evidence:
+    "No searchable evidence was returned.",
+  unclassified:
+    "Answer trust could not be classified from the available metadata.",
+}
+
+function normalizeEvidenceOrigin(value: unknown): EvidenceOrigin {
+  return value === "local_library" ||
+    value === "web_fallback" ||
+    value === "mixed" ||
+    value === "unknown_origin"
+    ? value
+    : "unknown_origin"
+}
+
+function normalizeReasonCodes(value: unknown): KnowledgeTrustReasonCode[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+}
+
+function normalizeBackendTrust(
+  backendTrust: KnowledgeTrustMetadata | null | undefined
+): KnowledgeTrustResult | null {
+  if (!backendTrust || !isKnowledgeAnswerTrustState(backendTrust.state)) {
+    return null
+  }
+  return {
+    state: backendTrust.state,
+    reasonCodes: normalizeReasonCodes(
+      backendTrust.reasonCodes ?? backendTrust.reason_codes
+    ),
+    evidenceOrigin: normalizeEvidenceOrigin(
+      backendTrust.evidenceOrigin ?? backendTrust.evidence_origin
+    ),
+  }
+}
+
+function trustResult(
+  state: KnowledgeAnswerTrustState,
+  reasonCodes: KnowledgeTrustReasonCode[] = [],
+  evidenceOrigin: EvidenceOrigin = "unknown_origin"
+): KnowledgeTrustResult {
+  return { state, reasonCodes, evidenceOrigin }
+}
+
 export function normalizeKnowledgeAnswerTrust(
   input: KnowledgeTrustInput
 ): KnowledgeTrustResult {
-  if (input.transportFailed) return { state: "failed_search" }
-  if (input.syncFailed) return { state: "unsynced_local_result" }
-  if (!input.hasRequiredMetadata) return { state: "unknown_trust" }
-  if (input.results.length === 0) return { state: "no_results" }
+  if (input.transportFailed) return trustResult("failed_search")
+  if (input.syncFailed) return trustResult("unsynced_local_result")
+
+  const backendTrust = normalizeBackendTrust(input.backendTrust)
+  if (backendTrust) return backendTrust
+
+  if (!input.hasRequiredMetadata) return trustResult("unknown_trust")
+  if (input.results.length === 0) {
+    return trustResult("no_results", ["no_evidence"], "local_library")
+  }
   if (input.weakEvidence && !input.answer) {
-    return { state: "no_answer_insufficient_evidence" }
+    return trustResult("no_answer_insufficient_evidence", ["low_relevance"])
   }
   if (input.answer && input.citations.length === 0) {
-    return { state: "uncited_degraded_answer" }
+    return trustResult("uncited_degraded_answer", ["missing_citations"])
   }
   if (input.answer && input.citations.length > 0) {
-    return { state: "cited_answer" }
+    return trustResult("cited_answer")
   }
-  return { state: "unknown_trust" }
+  return trustResult("unknown_trust", ["unclassified"])
 }
 
 export function isKnowledgeAnswerTrustState(
@@ -108,4 +181,19 @@ export function getKnowledgeAnswerTrustLabel(
   state: KnowledgeAnswerTrustState
 ): string {
   return getKnowledgeAnswerTrustPresentation(state).label
+}
+
+export function getKnowledgeTrustReasonMessage(
+  reasonCode: KnowledgeTrustReasonCode
+): string | null {
+  return TRUST_REASON_MESSAGES[reasonCode] ?? null
+}
+
+export function getKnowledgeTrustReasonMessages(
+  reasonCodes: KnowledgeTrustReasonCode[]
+): string[] {
+  const messages = reasonCodes
+    .map(getKnowledgeTrustReasonMessage)
+    .filter((message): message is string => Boolean(message))
+  return Array.from(new Set(messages))
 }

@@ -177,6 +177,7 @@ export function KnowledgeQALayout({
   const setEvidenceRailTab = knowledgeQa.setEvidenceRailTab ?? (() => undefined)
   const lastSearchScope = knowledgeQa.lastSearchScope ?? null
   const searchDetails = knowledgeQa.searchDetails ?? null
+  const answerTrustReasonCodes = knowledgeQa.answerTrustReasonCodes ?? []
   const pinnedSourceFilters = knowledgeQa.pinnedSourceFilters ?? {
     mediaIds: [],
     noteIds: [],
@@ -661,6 +662,7 @@ export function KnowledgeQALayout({
                       selectedSources={settings.sources}
                       sourceHealth={sourceHealth}
                       sourceStatus={searchDetails?.sourceStatus}
+                      trustReasonCodes={answerTrustReasonCodes}
                     />
                   </React.Suspense>
                 ) : null}

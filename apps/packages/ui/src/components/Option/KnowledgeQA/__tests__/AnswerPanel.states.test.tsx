@@ -104,6 +104,8 @@ const createSettings = (): AnswerPanelTestSettings => ({
 const state = {
   answer: null as string | null,
   answerTrustState: "cited_answer" as KnowledgeAnswerTrustState,
+  answerTrustReasonCodes: [] as string[],
+  answerEvidenceOrigin: null as string | null,
   citations: [] as Array<{ index: number }>,
   isSearching: false,
   error: null as string | null,
@@ -167,6 +169,8 @@ vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
     answer: state.answer,
     answerTrustState: state.answerTrustState,
+    answerTrustReasonCodes: state.answerTrustReasonCodes,
+    answerEvidenceOrigin: state.answerEvidenceOrigin,
     citations: state.citations,
     isSearching: state.isSearching,
     error: state.error,
@@ -192,6 +196,8 @@ describe("AnswerPanel state guardrails", () => {
     vi.clearAllMocks()
     state.answer = null
     state.answerTrustState = "cited_answer"
+    state.answerTrustReasonCodes = []
+    state.answerEvidenceOrigin = null
     state.citations = []
     state.isSearching = false
     state.error = null
@@ -424,6 +430,36 @@ describe("AnswerPanel state guardrails", () => {
       screen.getByText("No answer could be generated from the retrieved evidence.")
     ).toBeInTheDocument()
     expect(screen.queryByText(/Enable answer generation/i)).not.toBeInTheDocument()
+  })
+
+  it("explains missing inspectable evidence from backend trust reasons", () => {
+    state.answerTrustState = "no_answer_insufficient_evidence"
+    state.answerTrustReasonCodes = ["missing_inspectable_evidence"]
+    state.answer = "Claim with a citation [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(
+      screen.getAllByText(/Cited sources do not include inspectable excerpts/i).length
+    ).toBeGreaterThan(0)
+  })
+
+  it("explains low relevance and web fallback trust reasons", () => {
+    state.answerTrustState = "uncited_degraded_answer"
+    state.answerTrustReasonCodes = ["low_relevance", "web_fallback_used"]
+    state.answer = "Claim without a citation."
+    state.results = [{ id: "r1", score: 0.1, metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(
+      screen.getAllByText(/Retrieved matches are below the relevance threshold/i).length
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/Web fallback contributed evidence to this answer/i).length
+    ).toBeGreaterThan(0)
   })
 
   it("treats missing selected source-health entries as caveats", () => {

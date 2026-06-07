@@ -10,6 +10,8 @@
 
 **Backlog Task:** TASK-2279.4
 
+**Status:** Complete on 2026-06-07. Backend trust classification, response metadata, frontend normalization, and reason-code recovery copy implemented and verified. Inline `[N]` answer markers are structurally mapped to returned source positions when a separate citation array is absent. No flashcard, deck, spaced repetition, or study-set behavior was added.
+
 ---
 
 ## Boundaries
@@ -34,7 +36,7 @@
 
 ## Task 1: Add Backend Trust Contract Tests
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `test_knowledge_trust_contracts.py`:
 
@@ -72,13 +74,13 @@ python -m pytest tldw_Server_API/tests/RAG/test_knowledge_trust_contracts.py -v
 
 Expected: fail because trust classifier does not exist.
 
-- [ ] **Step 2: Add web fallback origin test**
+- [x] **Step 2: Add web fallback origin test**
 
 Assert a response with `web_fallback_used=True` returns `evidence_origin="web_fallback"` or `mixed` and never labels external evidence as local library evidence.
 
 ## Task 2: Implement Backend Trust Classifier
 
-- [ ] **Step 1: Create `trust_contracts.py`**
+- [x] **Step 1: Create `trust_contracts.py`**
 
 Implement a small deterministic classifier:
 
@@ -97,7 +99,7 @@ def classify_knowledge_answer_trust(*, answer, documents, citations, web_fallbac
 
 Keep helper functions private and deterministic.
 
-- [ ] **Step 2: Attach trust metadata in response mapping**
+- [x] **Step 2: Attach trust metadata in response mapping**
 
 Modify `response_mapping.py` to add metadata such as:
 
@@ -111,48 +113,48 @@ metadata["knowledge_trust"] = {
 
 Do not remove existing fields.
 
-- [ ] **Step 3: Update schema examples**
+- [x] **Step 3: Update schema examples**
 
 In `UnifiedRAGResponse`, document `metadata.knowledge_trust`.
 
 ## Task 3: Mirror Trust Metadata In Frontend
 
-- [ ] **Step 1: Extend `trustState.ts` tests**
+- [x] **Step 1: Extend `trustState.ts` tests**
 
 Add tests that backend `metadata.knowledge_trust.state` takes precedence over local heuristic classification when present, except transport failure and extension sync failure still win.
 
-- [ ] **Step 2: Parse backend trust metadata**
+- [x] **Step 2: Parse backend trust metadata**
 
 Update `KnowledgeQAProvider.tsx` and `trustState.ts` to read the backend trust metadata from RAG responses.
 
-- [ ] **Step 3: Render weak-evidence reasons**
+- [x] **Step 3: Render weak-evidence reasons**
 
 Update `AnswerPanel.tsx` and `NoResultsRecovery.tsx` so `missing_citations`, `missing_inspectable_evidence`, `low_relevance`, and `web_fallback_used` have visible but concise recovery copy.
 
 ## Task 4: Verify
 
-- [ ] **Step 1: Run backend tests**
+- [x] **Step 1: Run backend tests**
 
 ```bash
 source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/RAG/test_knowledge_trust_contracts.py tldw_Server_API/tests/RAG/test_knowledge_evidence_materialization.py -v
 ```
 
-- [ ] **Step 2: Run frontend tests**
+- [x] **Step 2: Run frontend tests**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/KnowledgeQA/__tests__/trustState.test.ts src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx src/components/Option/KnowledgeQA/__tests__/NoResultsRecovery.source-status.test.tsx
 ```
 
-- [ ] **Step 3: Run Bandit**
+- [x] **Step 3: Run Bandit**
 
 ```bash
 source .venv/bin/activate
 python -m bandit -r tldw_Server_API/app/core/RAG/rag_service/trust_contracts.py tldw_Server_API/app/core/RAG/rag_service/response_mapping.py -f json -o /tmp/bandit_knowledge_qa_trust.json
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RAG/rag_service/trust_contracts.py tldw_Server_API/app/core/RAG/rag_service/response_mapping.py tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/tests/RAG/test_knowledge_trust_contracts.py apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2279.4 - Enforce-Knowledge-QA-citation-validity-and-abstention.md"

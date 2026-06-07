@@ -192,6 +192,13 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
         },
       ],
       generated_answer: "Grounded answer [1]",
+      metadata: {
+        knowledge_trust: {
+          state: "no_answer_insufficient_evidence",
+          reason_codes: ["missing_inspectable_evidence"],
+          evidence_origin: "local_library",
+        },
+      },
     })
     fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path.includes("/rag-context")) {
@@ -227,6 +234,16 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     })
 
     await waitFor(() => expect(persistedRagContextBody).not.toBeNull())
+    expect(latestContext!.answerTrustState).toBe("no_answer_insufficient_evidence")
+    expect(latestContext!.answerTrustReasonCodes).toEqual([
+      "missing_inspectable_evidence",
+    ])
+    expect(latestContext!.answerEvidenceOrigin).toBe("local_library")
+    expect(persistedRagContextBody!.rag_context).toMatchObject({
+      trust_state: "no_answer_insufficient_evidence",
+      trust_reason_codes: ["missing_inspectable_evidence"],
+      trust_evidence_origin: "local_library",
+    })
     const [document] = persistedRagContextBody!.rag_context.retrieved_documents
     expect(document).toMatchObject({
       id: "media:42:chunk:7",

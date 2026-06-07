@@ -38,12 +38,30 @@ export type KnowledgeAnswerTrustState =
   | "unsynced_local_result"
   | "unknown_trust"
 
+export type KnowledgeTrustReasonCode =
+  | "missing_citations"
+  | "missing_inspectable_evidence"
+  | "citation_source_not_returned"
+  | "low_relevance"
+  | "web_fallback_used"
+  | "no_evidence"
+  | "unclassified"
+  | string
+
 // Retrieved document with citation info
 export type EvidenceOrigin =
   | "local_library"
   | "web_fallback"
   | "mixed"
   | "unknown_origin"
+
+export type KnowledgeTrustMetadata = {
+  state?: KnowledgeAnswerTrustState
+  reasonCodes?: KnowledgeTrustReasonCode[]
+  reason_codes?: KnowledgeTrustReasonCode[]
+  evidenceOrigin?: EvidenceOrigin
+  evidence_origin?: EvidenceOrigin
+}
 
 export type RagResult = {
   id?: string
@@ -101,6 +119,9 @@ export type RagContextData = {
   }>
   generated_answer?: string
   trust_state?: KnowledgeAnswerTrustState
+  trust_reason_codes?: KnowledgeTrustReasonCode[]
+  trust_evidence_origin?: EvidenceOrigin
+  knowledge_trust?: KnowledgeTrustMetadata
   citations?: Array<{
     index?: number
     text: string
@@ -257,6 +278,8 @@ export type KnowledgeQAState = {
   answer: string | null
   citations: CitationRef[]
   answerTrustState: KnowledgeAnswerTrustState
+  answerTrustReasonCodes: KnowledgeTrustReasonCode[]
+  answerEvidenceOrigin: EvidenceOrigin | null
   searchDetails: SearchRuntimeDetails | null
   error: string | null
   queryWarning: string | null
