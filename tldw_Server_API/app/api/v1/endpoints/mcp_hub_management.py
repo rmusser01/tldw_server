@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -27,8 +28,10 @@ from tldw_Server_API.app.api.v1.schemas.mcp_hub_schemas import (
     CapabilityAdapterMappingResponse,
     CapabilityAdapterMappingUpdateRequest,
     CredentialBindingResponse,
-    EffectivePolicyResponse,
     EffectiveExternalAccessResponse,
+    EffectivePermissionPreviewRequest,
+    EffectivePermissionPreviewResponse,
+    EffectivePolicyResponse,
     ExternalSecretSetRequest,
     ExternalSecretSetResponse,
     ExternalServerDiscoveryRefreshRequest,
@@ -120,6 +123,10 @@ from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service i
 )
 from tldw_Server_API.app.services.mcp_credential_broker_service import (
     McpCredentialBrokerService,
+)
+from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+    McpHubPathEnforcementService,
+    get_mcp_hub_path_enforcement_service,
 )
 from tldw_Server_API.app.services.mcp_hub_policy_resolver import McpHubPolicyResolver, get_mcp_hub_policy_resolver
 from tldw_Server_API.app.services.mcp_hub_service import (
@@ -215,6 +222,11 @@ async def get_mcp_hub_capability_adapter_service() -> McpHubCapabilityAdapterSer
 async def get_mcp_hub_policy_resolver_dep() -> McpHubPolicyResolver:
     """Resolve MCP Hub policy resolver for effective policy previews."""
     return await get_mcp_hub_policy_resolver()
+
+
+async def get_mcp_hub_path_enforcement_service_dep() -> McpHubPathEnforcementService:
+    """Resolve MCP Hub path enforcement service for effective permission previews."""
+    return await get_mcp_hub_path_enforcement_service()
 
 
 async def get_mcp_hub_tool_registry_dep() -> McpHubToolRegistryService:
@@ -3455,6 +3467,44 @@ async def get_effective_policy(
         user_id=principal.user_id,
         metadata=metadata,
     )
+
+
+@router.post("/effective-permission-preview", response_model=EffectivePermissionPreviewResponse)
+async def preview_effective_permission(
+    payload: EffectivePermissionPreviewRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    resolver: McpHubPolicyResolver = Depends(get_mcp_hub_policy_resolver_dep),
+    path_enforcer: McpHubPathEnforcementService = Depends(get_mcp_hub_path_enforcement_service_dep),
+) -> EffectivePermissionPreviewResponse:
+    """Explain the effective path permission for a candidate tool call without exposing absolute paths."""
+    if principal.user_id is None:
+        raise HTTPException(status_code=403, detail="Authenticated user required")
+
+    metadata: dict[str, Any] = {"mcp_policy_context_enabled": True}
+    for key in ("persona_id", "group_id", "workspace_id", "cwd"):
+        value = getattr(payload, key)
+        if value:
+            metadata[key] = value
+    if payload.org_id is not None:
+        metadata["org_id"] = payload.org_id
+    if payload.team_id is not None:
+        metadata["team_id"] = payload.team_id
+
+    effective_policy = await resolver.resolve_for_context(
+        user_id=principal.user_id,
+        metadata=metadata,
+    )
+    preview = await path_enforcer.preview_effective_path_permission(
+        effective_policy=effective_policy,
+        context=SimpleNamespace(
+            user_id=principal.user_id,
+            metadata=metadata,
+        ),
+        tool_name=payload.tool_name,
+        action=payload.action,
+        path=payload.path,
+    )
+    return EffectivePermissionPreviewResponse.model_validate(preview)
 
 
 @router.get("/acp-profiles", response_model=list[ACPProfileResponse])

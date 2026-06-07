@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 
 
@@ -374,6 +373,57 @@ async def test_path_grants_allow_candidate_action_and_report_safe_decision() -> 
         }
     ]
     assert "/tmp/mcp-hub-path-enforcer" not in repr(result["path_decisions"])
+
+
+@pytest.mark.asyncio
+async def test_effective_permission_preview_returns_redacted_path_grant_decision() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "selected_assignment_id": 11,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read", "edit", "write"]},
+                ],
+            },
+            "sources": [
+                {
+                    "assignment_id": 11,
+                    "target_type": "persona",
+                    "target_id": "researcher",
+                    "owner_scope_type": "user",
+                    "owner_scope_id": 7,
+                    "profile_id": 5,
+                }
+            ],
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.write",
+        action="write",
+        path="documents/story.md",
+    )
+
+    assert result["tool_name"] == "fs.write"
+    assert result["requested_action"] == "write"
+    assert result["normalized_path"] == "documents/story.md"
+    assert result["outcome"] == "allow"
+    assert result["within_scope"] is True
+    assert result["reason_code"] is None
+    assert result["selected_assignment_id"] == 11
+    assert result["profile_id"] == 5
+    assert result["grant_source"] == "path_grants"
+    assert result["grant_outcome"] == "allowed"
+    assert result["matched_grant_prefix"] == "documents"
+    assert result["matched_grant_effect"] == "allow"
+    assert result["redacted"] is True
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result)
 
 
 @pytest.mark.asyncio
