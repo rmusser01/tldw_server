@@ -81,6 +81,60 @@ def test_evaluate_profile_tool_decision_allowed_tool_allows() -> None:
     assert decision.call_state == "callable"
 
 
+def test_evaluate_profile_tool_decision_allowed_capability_allows() -> None:
+    profile = MCPProfile(
+        id="capability-reader",
+        name="Capability Reader",
+        policy_document=ProfilePolicy(capabilities=["fs.read"]),
+    )
+
+    decision = evaluate_profile_tool_decision(
+        profile,
+        "fs.read",
+        capability="fs.read",
+    )
+
+    assert decision.outcome == "allow"
+    assert decision.reason_code == "capability_allowed"
+
+
+def test_evaluate_profile_tool_decision_missing_capability_denies() -> None:
+    profile = MCPProfile(
+        id="empty",
+        name="Empty",
+        policy_document=ProfilePolicy(capabilities=[]),
+    )
+
+    decision = evaluate_profile_tool_decision(
+        profile,
+        "fs.read",
+        capability="fs.read",
+    )
+
+    assert decision.outcome == "deny"
+    assert decision.reason_code == "tool_not_allowed"
+
+
+def test_evaluate_profile_tool_decision_denied_capability_does_not_allow() -> None:
+    profile = MCPProfile(
+        id="denied-capability",
+        name="Denied Capability",
+        policy_document=ProfilePolicy(
+            capabilities=["fs.write"],
+            denied_capabilities=["fs.write"],
+        ),
+    )
+
+    decision = evaluate_profile_tool_decision(
+        profile,
+        "fs.write",
+        capability="fs.write",
+    )
+
+    assert decision.outcome == "deny"
+    assert decision.reason_code == "tool_not_allowed"
+
+
 def test_evaluate_profile_tool_decision_structured_ask_rule_requires_approval() -> None:
     profile = MCPProfile(
         id="default-ask",

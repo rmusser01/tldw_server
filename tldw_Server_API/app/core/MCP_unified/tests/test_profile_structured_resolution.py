@@ -425,6 +425,50 @@ def test_effective_policy_preserves_capability_not_allowed_after_allowed_tool_de
     assert result.decision.outcome == "allow"
 
 
+def test_effective_policy_capability_only_missing_grant_attaches_deny_decision() -> None:
+    profile = MCPProfile(
+        id="capability-only-missing",
+        name="Capability Only Missing",
+        policy_document=ProfilePolicy(),
+    )
+
+    result = profile_resolution.build_effective_policy_result(
+        profile,
+        tool_name="filesystem.write",
+        capability="filesystem.write",
+    )
+
+    assert result.status == "denied"
+    assert result.reason_code == "capability_not_allowed"
+    assert result.policy is None
+    assert result.decision is not None
+    assert result.decision.outcome == "deny"
+
+
+def test_effective_policy_capability_only_denied_grant_attaches_deny_decision() -> None:
+    profile = MCPProfile(
+        id="capability-only-denied",
+        name="Capability Only Denied",
+        policy_document=ProfilePolicy(
+            capabilities=["filesystem.write"],
+            denied_capabilities=["filesystem.write"],
+        ),
+    )
+
+    result = profile_resolution.build_effective_policy_result(
+        profile,
+        assignment_binding={"workspace_id": "workspace-1"},
+        tool_name="filesystem.write",
+        capability="filesystem.write",
+    )
+
+    assert result.status == "denied"
+    assert result.reason_code == "capability_denied"
+    assert result.policy is None
+    assert result.decision is not None
+    assert result.decision.outcome == "deny"
+
+
 def test_effective_policy_defaults_to_deny_for_unlisted_tool_execution() -> None:
     profile = MCPProfile(
         id="empty",

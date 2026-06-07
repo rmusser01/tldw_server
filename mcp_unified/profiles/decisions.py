@@ -236,7 +236,14 @@ def evaluate_profile_tool_decision(
         )
 
     allowed_tools = list(policy_document.allowed_tools or [])
-    if not allowed_tools and capability is not None:
+    capabilities = list(policy_document.capabilities or [])
+    denied_capabilities = list(policy_document.denied_capabilities or [])
+    if (
+        not allowed_tools
+        and capability is not None
+        and capability in capabilities
+        and capability not in denied_capabilities
+    ):
         return PolicyDecision(
             outcome="allow",
             reason_code="capability_allowed",

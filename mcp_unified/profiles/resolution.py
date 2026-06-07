@@ -119,7 +119,11 @@ def build_effective_policy_result(
             tool_name,
             capability=capability,
         )
-        if decision.outcome == "deny":
+        if decision.outcome == "deny" and not _should_continue_capability_checks(
+            decision,
+            allowed_tools=allowed_tools,
+            capability=capability,
+        ):
             return EffectivePolicyResult(
                 status="denied",
                 reason_code=decision.reason_code,
@@ -225,6 +229,21 @@ def _has_workspace_binding_value(value: Any) -> bool:
     if isinstance(value, list):
         return any(_has_workspace_binding_value(item) for item in value)
     return bool(value)
+
+
+def _should_continue_capability_checks(
+    decision: PolicyDecision,
+    *,
+    allowed_tools: list[str],
+    capability: str | None,
+) -> bool:
+    """Return whether an unmatched capability-only tool decision needs capability checks."""
+    return (
+        decision.reason_code == "tool_not_allowed"
+        and not decision.matched_rules
+        and not allowed_tools
+        and capability is not None
+    )
 
 
 def _capability_allowed(capability: str, capabilities: list[str]) -> bool:
