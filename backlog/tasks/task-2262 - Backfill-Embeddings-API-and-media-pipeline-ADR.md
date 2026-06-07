@@ -46,10 +46,6 @@ Created ADR-022 and updated ADR index, INV-032 inventory/default disposition, an
 Backfilled INV-032 as ADR-022 for the bounded Embeddings API and media pipeline decision. The ADR captures OpenAI-compatible request/response semantics, provider resolution and allowlist safeguards, optional adapter-registry routing with legacy fallback, endpoint cache/batching/circuit-breaker reliability controls, and Jobs-root/Redis-stage media pipeline ownership, with billing/accounting, local provider URL policy, vector-store backend evolution, broader cache architecture, and legacy Jobs worker removal left as separate decisions. Updated the ADR index, inventory disposition, and Embeddings README backlink. Verification passed for diff hygiene, scoped references, and the focused Embeddings pytest suite; Bandit is not applicable for the docs-only touched scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
