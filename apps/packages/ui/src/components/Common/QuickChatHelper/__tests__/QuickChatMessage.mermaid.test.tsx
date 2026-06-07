@@ -53,6 +53,7 @@ describe("QuickChatMessage Mermaid rendering gates", () => {
         enableMermaidDiagrams: true
       })
     )
+    expect(markdownCalls[0]?.enableMermaidArtifactActions).not.toBe(true)
   })
 
   it("does not enable Mermaid while an assistant message is streaming", async () => {

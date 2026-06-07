@@ -10,6 +10,10 @@ const mermaidMock = vi.hoisted(() => ({
     svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Generated</text></svg>'
   } as MermaidRenderState
 }))
+const artifactsStoreMock = vi.hoisted(() => ({
+  openArtifact: vi.fn(),
+  isPinned: false
+}))
 
 vi.mock("../Mermaid", async () => {
   const ReactModule = await import("react")
@@ -52,6 +56,10 @@ vi.mock("antd", () => ({
   Tooltip: ({ children }: any) => <>{children}</>
 }))
 
+vi.mock("@/store/artifacts", () => ({
+  useArtifactsStore: () => artifactsStoreMock
+}))
+
 describe("MermaidDiagramBlock", () => {
   const source = "graph TD\n  A-->B"
   let writeText: ReturnType<typeof vi.fn>
@@ -61,6 +69,8 @@ describe("MermaidDiagramBlock", () => {
   let blobParts: BlobPart[] | undefined
 
   beforeEach(() => {
+    artifactsStoreMock.openArtifact.mockClear()
+    artifactsStoreMock.isPinned = false
     mermaidMock.renderState = {
       status: "success",
       svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Generated</text></svg>'
@@ -211,6 +221,74 @@ describe("MermaidDiagramBlock", () => {
       expect(headerId).toBeTruthy()
       expect(document.getElementById(headerId || "")).toBeInTheDocument()
     })
+  })
+
+  it("does not show the artifact action by default", () => {
+    render(<MermaidDiagramBlock blockIndex={0} source={source} />)
+
+    expect(
+      screen.queryByRole("button", { name: "View Mermaid diagram" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("opens a diagram artifact when the artifact action is enabled", () => {
+    render(
+      <MermaidDiagramBlock
+        artifactContextId="assistant-message-123"
+        blockIndex={2}
+        enableArtifactAction
+        source={source}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Mermaid diagram" })
+    )
+
+    expect(artifactsStoreMock.openArtifact).toHaveBeenCalledTimes(1)
+    const artifact = artifactsStoreMock.openArtifact.mock.calls[0]?.[0]
+    expect(artifact).toEqual(
+      expect.objectContaining({
+        content: source,
+        kind: "diagram",
+        language: "mermaid",
+        lineCount: 2,
+        title: "Mermaid diagram 3"
+      })
+    )
+    expect(artifact.id).toContain("assistant-message-123")
+    expect(
+      document.getElementById(`artifact-origin-${artifact.id}`)
+    ).toBeInTheDocument()
+  })
+
+  it("includes artifact context in repeated diagram origin ids", () => {
+    render(
+      <>
+        <MermaidDiagramBlock
+          artifactContextId="assistant-a"
+          blockIndex={0}
+          enableArtifactAction
+          source={source}
+        />
+        <MermaidDiagramBlock
+          artifactContextId="assistant-b"
+          blockIndex={0}
+          enableArtifactAction
+          source={source}
+        />
+      </>
+    )
+
+    const origins = Array.from(document.querySelectorAll("[data-artifact-origin]"))
+    const originIds = origins.map((origin) =>
+      origin.getAttribute("data-artifact-origin")
+    )
+
+    expect(originIds).toHaveLength(2)
+    expect(new Set(originIds).size).toBe(2)
+    expect(originIds[0]).toContain("assistant-a")
+    expect(originIds[1]).toContain("assistant-b")
   })
 
   it("opens the Mermaid preview dialog with the generated SVG", async () => {

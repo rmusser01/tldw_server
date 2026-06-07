@@ -40,6 +40,14 @@ const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
 const MAX_PREVIEW_SOURCES = 5
 
+const hashString = (input: string) => {
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
+  }
+  return hash.toString(36)
+}
+
 interface CompactMessageProps {
   message: string
   isBot: boolean
@@ -146,6 +154,12 @@ export function CompactMessage({
   const isProMode = uiMode === "pro"
   const isActiveStreamingMessage =
     Boolean(isStreaming) && currentMessageIndex === totalMessages - 1
+  const enableAssistantMermaidDiagrams =
+    isBot && renderMermaidDiagrams !== false && !isActiveStreamingMessage
+  const mermaidArtifactContextId = useMemo(
+    () => `compact-message-${currentMessageIndex}-${hashString(message)}`,
+    [currentMessageIndex, message]
+  )
   const actionBarVisibility = isProMode
     ? "opacity-100"
     : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
@@ -523,11 +537,9 @@ export function CompactMessage({
                         message={block.content}
                         searchQuery={searchQuery}
                         codeBlockVariant="github"
-                        enableMermaidDiagrams={
-                          isBot &&
-                          renderMermaidDiagrams !== false &&
-                          !isActiveStreamingMessage
-                        }
+                        artifactContextId={mermaidArtifactContextId}
+                        enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
+                        enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                       />
                     )
                   })}

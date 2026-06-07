@@ -133,6 +133,8 @@ export function Markdown({
   richTextModeOverride,
   headingAnchorIds,
   enableMermaidDiagrams = false,
+  enableMermaidArtifactActions = false,
+  artifactContextId,
 }: {
   message: string
   className?: string
@@ -142,6 +144,8 @@ export function Markdown({
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
   enableMermaidDiagrams?: boolean
+  enableMermaidArtifactActions?: boolean
+  artifactContextId?: string
 }) {
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [codeTheme] = useStorage("codeTheme", "auto")
@@ -379,7 +383,12 @@ export function Markdown({
             ) {
               closedMermaidFenceCursorRef.current = closedMermaidFenceIndex + 1
               return (
-                <MermaidDiagramBlock source={value} blockIndex={blockIndex} />
+                <MermaidDiagramBlock
+                  artifactContextId={artifactContextId}
+                  blockIndex={blockIndex}
+                  enableArtifactAction={enableMermaidArtifactActions}
+                  source={value}
+                />
               )
             }
 

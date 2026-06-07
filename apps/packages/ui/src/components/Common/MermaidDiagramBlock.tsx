@@ -3,6 +3,7 @@ import {
   CopyCheckIcon,
   CopyIcon,
   DownloadIcon,
+  ExpandIcon,
   EyeIcon,
   WorkflowIcon
 } from "lucide-react"
@@ -16,11 +17,28 @@ import React, {
 } from "react"
 import Mermaid, { type MermaidRenderState } from "./Mermaid"
 import { MermaidPreviewDialog } from "./MermaidPreviewDialog"
+import { useArtifactsStore } from "@/store/artifacts"
 
 export type MermaidDiagramBlockProps = {
   source: string
   blockIndex?: number
+  artifactContextId?: string
+  enableArtifactAction?: boolean
 }
+
+const hashString = (input: string) => {
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
+  }
+  return hash.toString(36)
+}
+
+const sanitizeArtifactIdPart = (value: string) =>
+  value
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "local"
 
 const downloadSvg = (svg: string, blockIndex?: number) => {
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" })
@@ -37,7 +55,9 @@ const downloadSvg = (svg: string, blockIndex?: number) => {
 
 export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   source,
-  blockIndex
+  blockIndex,
+  artifactContextId,
+  enableArtifactAction = false
 }) => {
   const [renderStatus, setRenderStatus] =
     useState<MermaidRenderState["status"]>("idle")
@@ -47,6 +67,7 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   const [previousSource, setPreviousSource] = useState(source)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const componentId = useId()
+  const { openArtifact } = useArtifactsStore()
   const hasGeneratedSvg = Boolean(generatedSvg)
   const isRenderError = renderStatus === "error"
 
@@ -102,6 +123,37 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
     downloadSvg(generatedSvg, blockIndex)
   }, [blockIndex, generatedSvg])
 
+  const artifactId = useMemo(() => {
+    const fallbackContextId = `local-${componentId.replace(/:/g, "")}`
+    const contextId = sanitizeArtifactIdPart(
+      artifactContextId || fallbackContextId
+    )
+    const blockPart =
+      typeof blockIndex === "number" ? `block-${blockIndex}` : "block"
+    return `mermaid-${contextId}-${blockPart}-${hashString(source)}`
+  }, [artifactContextId, blockIndex, componentId, source])
+
+  const artifactLineCount = useMemo(
+    () => (source ? source.split(/\r\n?|\n/).length : 0),
+    [source]
+  )
+
+  const artifactTitle =
+    typeof blockIndex === "number"
+      ? `Mermaid diagram ${blockIndex + 1}`
+      : "Mermaid diagram"
+
+  const handleOpenArtifact = useCallback(() => {
+    openArtifact({
+      id: artifactId,
+      title: artifactTitle,
+      content: source,
+      language: "mermaid",
+      kind: "diagram",
+      lineCount: artifactLineCount
+    })
+  }, [artifactId, artifactLineCount, artifactTitle, openArtifact, source])
+
   const headerId = useMemo(() => {
     const safeComponentId = componentId.replace(/:/g, "")
     if (typeof blockIndex === "number") {
@@ -112,7 +164,11 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
 
   return (
     <>
-      <div className="not-prose">
+      <div
+        id={enableArtifactAction ? `artifact-origin-${artifactId}` : undefined}
+        data-artifact-origin={enableArtifactAction ? artifactId : undefined}
+        className="not-prose"
+      >
         <div
           aria-labelledby={headerId}
           className="my-4 overflow-hidden rounded-xl border border-border bg-surface"
@@ -128,6 +184,18 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
               </span>
             </div>
             <div className="flex items-center gap-1">
+              {enableArtifactAction && (
+                <Tooltip title="View diagram">
+                  <button
+                    type="button"
+                    aria-label="View Mermaid diagram"
+                    onClick={handleOpenArtifact}
+                    className="inline-flex size-8 items-center justify-center rounded text-text-muted hover:bg-surface hover:text-text"
+                  >
+                    <ExpandIcon className="size-4" />
+                  </button>
+                </Tooltip>
+              )}
               <Tooltip title="Open Mermaid preview">
                 <button
                   type="button"

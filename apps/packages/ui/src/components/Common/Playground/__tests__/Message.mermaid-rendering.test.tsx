@@ -307,6 +307,26 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
 
     expect(markdownCalls[0]).toEqual(
       expect.objectContaining({
+        enableMermaidArtifactActions: true,
+        enableMermaidDiagrams: true
+      })
+    )
+  })
+
+  it("uses the saved assistant message id as the Mermaid artifact context", async () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        messageId="assistant-message-123"
+      />
+    )
+
+    await screen.findByTestId("mock-markdown")
+
+    expect(markdownCalls[0]).toEqual(
+      expect.objectContaining({
+        artifactContextId: "assistant-message-123",
+        enableMermaidArtifactActions: true,
         enableMermaidDiagrams: true
       })
     )
@@ -335,6 +355,7 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
 
     expect(markdownCalls[0]).toEqual(
       expect.objectContaining({
+        enableMermaidArtifactActions: true,
         enableMermaidDiagrams: true
       })
     )
@@ -385,6 +406,7 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
         enableMermaidDiagrams: true
       })
     )
+    expect(markdownCalls[0]?.enableMermaidArtifactActions).not.toBe(true)
   })
 
   it("keeps Mermaid disabled while reasoning is actively streaming", async () => {
@@ -421,6 +443,7 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
 
     expect(markdownCalls[0]).toEqual(
       expect.objectContaining({
+        enableMermaidArtifactActions: true,
         enableMermaidDiagrams: true
       })
     )
