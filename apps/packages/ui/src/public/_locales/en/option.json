@@ -1272,7 +1272,7 @@
     "message": "this note"
   },
   "notesSearch_taskActivitySummary": {
-    "message": "{{actor}} via {{tool}} changed {{count}} in {{note}}."
+    "message": "{{actor}} via {{tool}} changed {{countLabel}} in {{note}}."
   },
   "notesSearch_taskActivityInspect": {
     "message": "Inspect"
