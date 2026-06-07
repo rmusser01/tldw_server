@@ -107,6 +107,8 @@ const buildChatSettingsState = () => ({
   setAutoCopyResponseToClipboard: vi.fn(),
   useMarkdownForUserMessage: false,
   setUseMarkdownForUserMessage: vi.fn(),
+  renderMermaidDiagrams: true,
+  setRenderMermaidDiagrams: vi.fn(),
   chatRichTextMode: "safe_markdown" as const,
   setChatRichTextMode: vi.fn(),
   chatRichTextStylePreset: "default" as const,
@@ -324,6 +326,25 @@ describe("ChatSettings background image controls", () => {
     expect(screen.getAllByText("SillyTavern-compatible").length).toBeGreaterThan(0)
     expect(screen.getByText("Rich text element styles")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Reset rich text styles" })).toBeInTheDocument()
+  })
+
+  it("renders and updates the Mermaid diagram setting", () => {
+    const setRenderMermaidDiagrams = vi.fn()
+    useChatSettingsMock.mockReturnValue({
+      ...buildChatSettingsState(),
+      renderMermaidDiagrams: true,
+      setRenderMermaidDiagrams
+    })
+
+    render(<ChatSettings />)
+
+    const toggle = screen.getByRole("switch", {
+      name: "Render Mermaid diagrams"
+    })
+    expect(toggle).toBeChecked()
+
+    fireEvent.click(toggle)
+    expect(setRenderMermaidDiagrams).toHaveBeenCalledWith(false)
   })
 
   it("updates quick chat docs scope settings", () => {

@@ -13,6 +13,8 @@ import type { ChatErrorPayload } from "@/utils/chat-error-message"
 import type { ImageGenerationRequestSnapshot } from "@/utils/image-generation-chat"
 import type { DynamicUISurface } from "@/types/dynamic-ui"
 import type { MessageMetadataExtra } from "@/store/option/types"
+import { useStorage } from "@plasmohq/storage/hook"
+import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -156,6 +158,12 @@ export const MessageContent = React.memo(function MessageContent(
     onRegenerateImage,
     onDeleteImage,
   } = props
+  const [renderMermaidDiagrams] = useStorage(
+    "renderMermaidDiagrams",
+    DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
+  )
+  const enableAssistantMermaidDiagrams =
+    isBot && renderMermaidDiagrams !== false && !isStreaming
   const dynamicUIEnvelope = normalizeDynamicUIEnvelope(metadataExtra?.dynamic_ui)
   const resolvedDynamicUISurface = dynamicUISurface ?? "artifact"
 
@@ -214,6 +222,7 @@ export const MessageContent = React.memo(function MessageContent(
                   className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                   searchQuery={searchQuery}
                   codeBlockVariant="compact"
+                  enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                 />
               </React.Suspense>
             ) : (
@@ -232,6 +241,7 @@ export const MessageContent = React.memo(function MessageContent(
                         markdownBaseClasses={MARKDOWN_BASE_CLASSES}
                         searchQuery={searchQuery}
                         t={t}
+                        enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                       />
                     )
                   }
@@ -250,6 +260,7 @@ export const MessageContent = React.memo(function MessageContent(
                         className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                         searchQuery={searchQuery}
                         codeBlockVariant="github"
+                        enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                       />
                     </React.Suspense>
                   )

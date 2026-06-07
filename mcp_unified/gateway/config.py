@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         GatewayExternalRuntimeManager,
     )
     from mcp_unified.storage.models import ExternalServerDefinition
+    from mcp_unified.tool_use_reporting import ToolUseEventStore, ToolUseRecorder
 
 try:  # pragma: no cover - Python <3.11 fallback is exercised only on older runtimes.
     import tomllib as _tomllib
@@ -53,6 +54,7 @@ except ModuleNotFoundError:  # pragma: no cover - defensive for unsupported runt
 GatewayConfigFormat = Literal["json", "toml"]
 GatewayExternalRuntimeFactoryKind = Literal["stdio"]
 GatewayProfileStoreKind = Literal["memory", "sqlite"]
+GatewayToolUseReportingStoreKind = Literal["memory", "sqlite"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +120,111 @@ class GatewayProfileStoreConfig:
                 raise ValueError("sqlite_path is required for sqlite profile store")
             if not str(self.sqlite_path).strip():
                 raise ValueError("sqlite_path cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayToolUseReportingStoreConfig:
+    """Tool-use event-store selection for standalone gateway reporting."""
+
+    kind: GatewayToolUseReportingStoreKind = "memory"
+    sqlite_path: str | Path | None = None
+
+    def __post_init__(self) -> None:
+        """Validate and normalize the configured tool-use event store kind."""
+
+        normalized_kind = str(self.kind).strip().lower()
+        if normalized_kind not in {"memory", "sqlite"}:
+            raise ValueError(
+                f"Unsupported gateway tool-use reporting store kind: {self.kind!r}"
+            )
+        object.__setattr__(
+            self,
+            "kind",
+            cast(GatewayToolUseReportingStoreKind, normalized_kind),
+        )
+        if normalized_kind == "sqlite" and self.sqlite_path is not None:
+            if not str(self.sqlite_path).strip():
+                raise ValueError("tool-use reporting sqlite_path cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayToolUseReportingConfig:
+    """Tool-use reporting bootstrap settings for standalone gateways.
+
+    The memory store is process-local for tests and embedders. Standalone
+    report, export, and cleanup commands require a configured SQLite store.
+    """
+
+    enabled: bool = False
+    store: GatewayToolUseReportingStoreConfig | Mapping[str, Any] = field(
+        default_factory=GatewayToolUseReportingStoreConfig
+    )
+    write_timeout_seconds: float | None = 2.0
+    retention_max_age_days: int | None = None
+    retention_max_events: int | None = None
+    export_default_limit: int = 1000
+    report_default_window: str = "24h"
+
+    def __post_init__(self) -> None:
+        """Normalize nested config and validate bounded reporting defaults."""
+
+        if not isinstance(self.enabled, bool):
+            raise ValueError("tool_use_reporting.enabled must be a boolean")
+        store = self.store
+        if isinstance(store, Mapping):
+            store = GatewayToolUseReportingStoreConfig(**store)
+        elif not isinstance(store, GatewayToolUseReportingStoreConfig):
+            raise TypeError(
+                "tool_use_reporting.store must be a "
+                "GatewayToolUseReportingStoreConfig or mapping"
+            )
+        if self.enabled and store.kind == "sqlite" and store.sqlite_path is None:
+            raise ValueError(
+                "sqlite_path is required for sqlite tool-use reporting store"
+            )
+
+        write_timeout = self.write_timeout_seconds
+        if write_timeout is not None:
+            try:
+                write_timeout = float(write_timeout)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "tool_use_reporting.write_timeout_seconds must be numeric or null"
+                ) from exc
+            if write_timeout < 0:
+                raise ValueError(
+                    "tool_use_reporting.write_timeout_seconds must be non-negative"
+                )
+
+        export_limit = int(self.export_default_limit)
+        if export_limit <= 0:
+            raise ValueError("tool_use_reporting.export_default_limit must be positive")
+
+        object.__setattr__(self, "store", store)
+        object.__setattr__(self, "write_timeout_seconds", write_timeout)
+        object.__setattr__(self, "export_default_limit", export_limit)
+        object.__setattr__(
+            self,
+            "retention_max_age_days",
+            _positive_optional_int(
+                self.retention_max_age_days,
+                field_name="tool_use_reporting.retention_max_age_days",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "retention_max_events",
+            _positive_optional_int(
+                self.retention_max_events,
+                field_name="tool_use_reporting.retention_max_events",
+            ),
+        )
+        report_window = str(self.report_default_window).strip()
+        if not report_window:
+            raise ValueError(
+                "tool_use_reporting.report_default_window must be non-blank"
+            )
+        object.__setattr__(self, "report_default_window", report_window)
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +300,9 @@ class GatewayProfileBootstrapConfig:
     admin_auth: GatewayAdminAuthBootstrapConfig | Mapping[str, Any] = field(
         default_factory=GatewayAdminAuthBootstrapConfig
     )
+    tool_use_reporting: GatewayToolUseReportingConfig | Mapping[str, Any] = field(
+        default_factory=GatewayToolUseReportingConfig
+    )
 
     def __post_init__(self) -> None:
         """Normalize nested config values into copy-isolated profile data."""
@@ -225,9 +335,19 @@ class GatewayProfileBootstrapConfig:
                 "admin_auth must be a GatewayAdminAuthBootstrapConfig or mapping"
             )
 
+        tool_use_reporting = self.tool_use_reporting
+        if isinstance(tool_use_reporting, Mapping):
+            tool_use_reporting = GatewayToolUseReportingConfig(**tool_use_reporting)
+        elif not isinstance(tool_use_reporting, GatewayToolUseReportingConfig):
+            raise TypeError(
+                "tool_use_reporting must be a "
+                "GatewayToolUseReportingConfig or mapping"
+            )
+
         object.__setattr__(self, "store", store)
         object.__setattr__(self, "external_runtime", external_runtime)
         object.__setattr__(self, "admin_auth", admin_auth)
+        object.__setattr__(self, "tool_use_reporting", tool_use_reporting)
         object.__setattr__(
             self,
             "profiles",
@@ -329,7 +449,7 @@ async def bootstrap_profile_gateway_from_config(
             installer=external_installer,
         )
 
-    return await bootstrap_profile_gateway(
+    bootstrap = await bootstrap_profile_gateway(
         backend,
         profile_store=storage.profile_store,
         assignment_store=storage.assignment_store,
@@ -343,6 +463,10 @@ async def bootstrap_profile_gateway_from_config(
         external_runtime_lifecycle=resolved_config.external_runtime.lifecycle_config(),
         credential_grant_manager=credential_grant_manager,
         admin_auth=resolved_config.admin_auth.runtime_config(),
+    )
+    return _wrap_bootstrap_tool_use_reporting(
+        bootstrap,
+        resolved_config.tool_use_reporting,
     )
 
 
@@ -583,6 +707,41 @@ def gateway_config_snapshot_manager_from_storage(
     )
 
 
+def build_gateway_tool_use_recorder(
+    config: GatewayToolUseReportingConfig | Mapping[str, Any],
+) -> ToolUseRecorder:
+    """Build the configured gateway tool-use recorder."""
+
+    if isinstance(config, Mapping):
+        config = GatewayToolUseReportingConfig(**config)
+    from mcp_unified.tool_use_reporting import StoreBackedToolUseRecorder
+
+    return StoreBackedToolUseRecorder(
+        build_gateway_tool_use_event_store(config.store),
+        timeout_seconds=config.write_timeout_seconds,
+    )
+
+
+def _wrap_bootstrap_tool_use_reporting(
+    bootstrap: GatewayProfileBootstrap,
+    config: GatewayToolUseReportingConfig,
+) -> GatewayProfileBootstrap:
+    """Wrap the runtime when gateway tool-use reporting is enabled."""
+
+    if not config.enabled:
+        return bootstrap
+    from .tool_use_reporting import ToolUseReportingGatewayRuntime
+
+    return replace(
+        bootstrap,
+        runtime=ToolUseReportingGatewayRuntime(
+            bootstrap.runtime,
+            recorder=build_gateway_tool_use_recorder(config),
+            write_timeout_seconds=config.write_timeout_seconds,
+        ),
+    )
+
+
 def _metadata_for_store_config(
     store_config: GatewayProfileStoreConfig,
 ) -> GatewayProfileStoreMetadata:
@@ -591,6 +750,43 @@ def _metadata_for_store_config(
     return GatewayProfileStoreMetadata(
         kind=store_config.kind,
         persistent=store_config.kind == "sqlite",
+    )
+
+
+def _positive_optional_int(value: Any, *, field_name: str) -> int | None:
+    """Return a positive optional integer config value."""
+
+    if value is None:
+        return None
+    resolved_value = int(value)
+    if resolved_value <= 0:
+        raise ValueError(f"{field_name} must be positive when set")
+    return resolved_value
+
+
+def build_gateway_tool_use_event_store(
+    store_config: GatewayToolUseReportingStoreConfig | Mapping[str, Any],
+) -> ToolUseEventStore:
+    """Create the configured tool-use event store without importing SQLite early."""
+
+    if isinstance(store_config, Mapping):
+        store_config = GatewayToolUseReportingStoreConfig(**store_config)
+
+    if store_config.kind == "memory":
+        from mcp_unified.tool_use_reporting import InMemoryToolUseEventStore
+
+        return InMemoryToolUseEventStore()
+    if store_config.kind == "sqlite":
+        from mcp_unified.tool_use_reporting.sqlite import SQLiteToolUseEventStore
+
+        sqlite_path = store_config.sqlite_path
+        if sqlite_path is None:
+            raise ValueError(
+                "sqlite_path is required for sqlite tool-use reporting store"
+            )
+        return SQLiteToolUseEventStore(sqlite_path)
+    raise ValueError(
+        f"Unsupported gateway tool-use reporting store kind: {store_config.kind!r}"
     )
 
 
@@ -830,9 +1026,14 @@ __all__ = [
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
     "GatewayProfileStorageBundle",
+    "GatewayToolUseReportingConfig",
+    "GatewayToolUseReportingStoreConfig",
+    "GatewayToolUseReportingStoreKind",
     "bootstrap_profile_gateway_from_config",
     "build_gateway_external_registry_storage",
     "build_gateway_profile_storage",
+    "build_gateway_tool_use_event_store",
+    "build_gateway_tool_use_recorder",
     "credential_grant_manager_from_storage",
     "external_registry_manager_from_storage",
     "external_runtime_manager_from_storage",

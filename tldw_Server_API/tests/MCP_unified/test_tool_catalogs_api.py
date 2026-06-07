@@ -142,6 +142,7 @@ def test_tool_catalogs_flow():
     # Start app
     from fastapi.testclient import TestClient
     from tldw_Server_API.app.main import app
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
     # Disable HTTP security guard for this test (IP allowlist/mTLS)
     try:
@@ -149,6 +150,7 @@ def test_tool_catalogs_flow():
         app.dependency_overrides[_ehs] = lambda: None
     except Exception:
         _ = None
+    reset_lifecycle_state(app)
     client = TestClient(app)
 
     # Prepare single-user row so role assignments don't fail silently

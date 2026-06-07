@@ -350,6 +350,37 @@ Tool results include the serving module:
 
 See `Docs/MCP/Unified/Modules.md` for a complete guide.
 
+## Tool Observability And Evaluation Metadata
+
+MCP Unified attaches a shared, non-sensitive evaluation contract across the tool
+surface so operators can compare tool prompt variants, profile grants, model
+tool-use quality, and external-server behavior without scraping raw tool output.
+
+Tool definitions include `metadata.eval` with:
+
+- `tool_prompt_id`: stable identifier, defaulting to `mcp.<tool-name>.v1`
+- `tool_prompt_version`: version of the built-in or operator-supplied tool prompt
+- `task_families`: coarse evaluation category derived from explicit metadata or tool name
+- `expected_result_kind`: expected structured result family
+- `success_signals`: safe rubric hints such as `avoided_mutation`
+- `prompt_variant`: `builtin`, `alias`, `external_federated`, or an operator variant
+
+Execution responses include top-level `eval` metadata. Structured JSON tool
+results that do not already provide their own `eval` block also receive an
+embedded copy. These fields are intentionally limited to scalar values such as
+tool name, prompt id/version, action family, result kind, optional profile id,
+truncation/path-filter flags, reason code, and duration. They must not contain
+raw arguments, raw file contents, diffs, secrets, absolute local paths, or user
+email addresses. Profile IDs are accepted only as short safe labels using
+letters, numbers, `_`, `.`, or `-`; unsafe values are omitted.
+
+Module authors should use `create_tool_definition()` for new tools. It merges
+safe explicit `metadata.eval` fields over inferred defaults and drops unknown or
+non-string scalar fields.
+Manual descriptors and federated external tools are normalized at catalog and
+protocol boundaries so standalone gateway and hosted MCP callers see the same
+contract.
+
 ## Git Read-Only Inspection Module
 
 The optional native Git inspection module is enabled only when explicitly
@@ -378,8 +409,7 @@ Git responses are intentionally privacy- and safety-bounded. Ignored files are
 excluded from status output; author emails are omitted from log and blame
 output; and external diff/textconv processing is disabled for diff reads.
 Responses are bounded by tool limits and include non-sensitive evaluation
-metadata for observability. Follow-up `TASK-2256` covers MCP-wide adoption of
-that eval metadata contract for all tools, not only Git.
+metadata through the shared MCP tool observability contract.
 
 ## 🧭 Phase-1 Virtual CLI Runtime
 

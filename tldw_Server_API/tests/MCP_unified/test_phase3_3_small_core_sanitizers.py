@@ -274,9 +274,7 @@ async def test_protocol_metadata_probe_log_omits_raw_exception_message() -> None
 
 
 @pytest.mark.asyncio
-async def test_protocol_tool_execution_failure_log_omits_raw_exception_and_traceback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_protocol_tool_execution_failure_log_omits_raw_exception_and_traceback() -> None:
     from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
         build_default_runtime_dependencies,
     )
