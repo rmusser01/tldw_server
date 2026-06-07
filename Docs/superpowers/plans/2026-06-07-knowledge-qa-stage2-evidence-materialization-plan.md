@@ -10,6 +10,8 @@
 
 **Backlog Task:** TASK-2279.3
 
+**Status:** Complete on 2026-06-07. Backend and frontend evidence materialization implemented and verified. No flashcard, deck, spaced repetition, or study-set behavior was added.
+
 ---
 
 ## Boundaries
@@ -21,7 +23,7 @@
 ## Files
 
 - Modify: `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`
-- Modify: `tldw_Server_API/app/core/RAG/rag_service/result_model.py`
+- No change required after inspection: `tldw_Server_API/app/core/RAG/rag_service/result_model.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/response_mapping.py`
 - Create: `tldw_Server_API/tests/RAG/test_knowledge_evidence_materialization.py`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/types.ts`
@@ -36,7 +38,7 @@
 
 ## Task 1: Add Backend Evidence Contract Tests
 
-- [ ] **Step 1: Write failing response mapper tests**
+- [x] **Step 1: Write failing response mapper tests**
 
 Create `test_knowledge_evidence_materialization.py`:
 
@@ -79,13 +81,13 @@ python -m pytest tldw_Server_API/tests/RAG/test_knowledge_evidence_materializati
 
 Expected: fail until mapping preserves all fields or handles non-dict document shapes consistently.
 
-- [ ] **Step 2: Add unavailable reason test**
+- [x] **Step 2: Add unavailable reason test**
 
 Add a test where `content` is empty and metadata contains `unavailable_reason="deleted_or_unavailable"`. Expected response still includes the unavailable reason.
 
 ## Task 2: Extend Backend Mapping Safely
 
-- [ ] **Step 1: Update schema examples**
+- [x] **Step 1: Update schema examples**
 
 In `rag_schemas_unified.py`, update `UnifiedRAGResponse` examples to show documents with:
 
@@ -96,11 +98,11 @@ In `rag_schemas_unified.py`, update `UnifiedRAGResponse` examples to show docume
 - `metadata.source_status`
 - `metadata.unavailable_reason`
 
-- [ ] **Step 2: Normalize evidence fields**
+- [x] **Step 2: Normalize evidence fields**
 
 In `response_mapping.py`, keep `_normalize_documents()` backwards compatible but ensure dict, attr, and wrapped `.document` shapes preserve evidence metadata.
 
-- [ ] **Step 3: Run backend tests**
+- [x] **Step 3: Run backend tests**
 
 ```bash
 source .venv/bin/activate
@@ -111,7 +113,7 @@ Expected: all tests pass.
 
 ## Task 3: Add Frontend Evidence Types And Rendering
 
-- [ ] **Step 1: Write failing frontend tests**
+- [x] **Step 1: Write failing frontend tests**
 
 Update `SourceCard.behavior.test.tsx` and `SourceList.viewer.test.tsx` to assert:
 
@@ -129,7 +131,7 @@ bunx vitest run src/components/Option/KnowledgeQA/__tests__/SourceCard.behavior.
 
 Expected: fail before UI support.
 
-- [ ] **Step 2: Extend `RagResult`**
+- [x] **Step 2: Extend `RagResult`**
 
 Modify `types.ts`:
 
@@ -147,7 +149,7 @@ export type RagResult = {
 }
 ```
 
-- [ ] **Step 3: Render evidence details**
+- [x] **Step 3: Render evidence details**
 
 Update `SourceCard.tsx`, `SourceList.tsx`, `SourceViewerModal.tsx`, `EvidenceRail.tsx`, and `SearchDetailsPanel.tsx` to prefer:
 
@@ -159,14 +161,14 @@ Never render only `Full source content is unavailable` when an excerpt or reason
 
 ## Task 4: Verify
 
-- [ ] **Step 1: Run focused frontend tests**
+- [x] **Step 1: Run focused frontend tests**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/KnowledgeQA/__tests__/SourceCard.behavior.test.tsx src/components/Option/KnowledgeQA/__tests__/SourceList.viewer.test.tsx src/components/Option/KnowledgeQA/__tests__/SearchDetailsPanel.test.tsx
 ```
 
-- [ ] **Step 2: Run backend Bandit on touched paths**
+- [x] **Step 2: Run backend Bandit on touched paths**
 
 ```bash
 source .venv/bin/activate
@@ -175,7 +177,7 @@ python -m bandit -r tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tl
 
 Expected: no new findings in touched code.
 
-- [ ] **Step 3: Run diff hygiene and commit**
+- [x] **Step 3: Run diff hygiene and commit**
 
 ```bash
 git diff --check -- tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/app/core/RAG/rag_service apps/packages/ui/src/components/Option/KnowledgeQA

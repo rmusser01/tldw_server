@@ -56,6 +56,14 @@ import {
   isKnowledgeAnswerTrustState,
   normalizeKnowledgeAnswerTrust,
 } from "./trustState"
+import {
+  getEvidenceOrigin,
+  getResultChunkId,
+  getResultEvidenceText,
+  getResultSourceId,
+  getResultSourceStatus,
+  getResultUnavailableReason,
+} from "./sourceListUtils"
 
 const LOCAL_THREAD_PREFIX = "local-"
 const DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
@@ -487,11 +495,50 @@ function mapRagContextDocumentsToResults(
 
   return retrievedDocuments.map((document, index) => {
     const doc = document as Record<string, unknown>
+    const metadata =
+      doc?.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)
+        ? (doc.metadata as Record<string, unknown>)
+        : {}
+    const sourceId =
+      typeof doc?.source_id === "string"
+        ? doc.source_id
+        : typeof metadata.source_id === "string"
+          ? metadata.source_id
+          : undefined
+    const chunkId =
+      typeof doc?.chunk_id === "string"
+        ? doc.chunk_id
+        : typeof metadata.chunk_id === "string"
+          ? metadata.chunk_id
+          : undefined
+    const evidenceOrigin =
+      typeof doc?.evidence_origin === "string"
+        ? doc.evidence_origin
+        : typeof metadata.evidence_origin === "string"
+          ? metadata.evidence_origin
+          : undefined
+    const sourceStatus =
+      typeof doc?.source_status === "string"
+        ? doc.source_status
+        : typeof metadata.source_status === "string"
+          ? metadata.source_status
+          : undefined
+    const unavailableReason =
+      typeof doc?.unavailable_reason === "string"
+        ? doc.unavailable_reason
+        : typeof metadata.unavailable_reason === "string"
+          ? metadata.unavailable_reason
+          : undefined
     return {
       id:
         typeof doc?.id === "string" && doc.id.length > 0
           ? doc.id
           : `doc-${index + 1}`,
+      sourceId,
+      chunkId,
+      evidenceOrigin,
+      sourceStatus,
+      unavailableReason,
       score: typeof doc?.score === "number" ? doc.score : undefined,
       content:
         typeof doc?.excerpt === "string"
@@ -506,6 +553,7 @@ function mapRagContextDocumentsToResults(
             ? doc.text
             : undefined,
       metadata: {
+        ...metadata,
         title:
           typeof doc?.title === "string" ? doc.title : `Source ${index + 1}`,
         source:
@@ -514,17 +562,16 @@ function mapRagContextDocumentsToResults(
             : typeof doc?.source_type === "string"
               ? doc.source_type
               : undefined,
+        source_id: sourceId,
         source_type:
           typeof doc?.source_type === "string" ? doc.source_type : undefined,
-        chunk_id: typeof doc?.chunk_id === "string" ? doc.chunk_id : undefined,
+        chunk_id: chunkId,
+        evidence_origin: evidenceOrigin,
+        source_status: sourceStatus,
+        unavailable_reason: unavailableReason,
         url: typeof doc?.url === "string" ? doc.url : undefined,
         page_number:
           typeof doc?.page_number === "number" ? doc.page_number : undefined,
-        ...(doc?.metadata &&
-        typeof doc.metadata === "object" &&
-        !Array.isArray(doc.metadata)
-          ? (doc.metadata as Record<string, unknown>)
-          : {}),
       },
     } as RagResult
   })
@@ -1836,11 +1883,15 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       settings_snapshot: createRestorableSettingsSnapshot(settings),
       retrieved_documents: results.map((r) => ({
         id: r.id,
-        source_type: r.metadata?.source_type,
+        source_id: getResultSourceId(r) ?? undefined,
+        source_type: r.sourceType || r.metadata?.source_type,
         title: r.metadata?.title,
         score: r.score,
-        chunk_id: r.metadata?.chunk_id,
-        excerpt: r.content || r.text || r.chunk,
+        chunk_id: getResultChunkId(r) ?? undefined,
+        excerpt: getResultEvidenceText(r) || undefined,
+        evidence_origin: getEvidenceOrigin(r),
+        source_status: getResultSourceStatus(r) ?? undefined,
+        unavailable_reason: getResultUnavailableReason(r) ?? undefined,
         url: r.metadata?.url,
         page_number: r.metadata?.page_number,
       })),

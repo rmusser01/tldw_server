@@ -1841,7 +1841,16 @@ class UnifiedRAGResponse(BaseModel):
                     "id": "doc1",
                     "content": "Machine learning is a subset of artificial intelligence...",
                     "score": 0.95,
-                    "metadata": {"source": "media_db", "title": "ML Introduction"}
+                    "metadata": {
+                        "source": "media_db",
+                        "source_id": "42",
+                        "source_type": "media_db",
+                        "chunk_id": "chunk-7",
+                        "evidence_origin": "local_library",
+                        "source_status": "searched",
+                        "unavailable_reason": None,
+                        "title": "ML Introduction",
+                    },
                 }
             ],
             "query": "What is machine learning?",

@@ -12,6 +12,8 @@ import {
   formatChunkPosition,
   formatSourceDate,
   getFreshnessDescriptor,
+  getResultChunkId,
+  getResultSourceId,
   getRelevanceDescriptor,
   getSourceTypeLabel,
   normalizeSourceType,
@@ -147,6 +149,25 @@ describe("sourceListUtils", () => {
     expect(formatChunkPosition("chunk-7")).toBe("Section 7")
     expect(formatChunkPosition("128")).toBe("Section 128")
     expect(formatChunkPosition("doc-aabbcc-uuid")).toBeNull()
+  })
+
+  it("resolves stable source and chunk identifiers from top-level and metadata values", () => {
+    expect(
+      getResultSourceId({
+        metadata: { media_id: 42 },
+      })
+    ).toBe("42")
+    expect(
+      getResultChunkId({
+        metadata: { chunk_id: 7 },
+      })
+    ).toBe("7")
+    expect(
+      getResultSourceId({
+        sourceId: "note-9",
+        metadata: { source_id: "stale-id" },
+      })
+    ).toBe("note-9")
   })
 
   it("produces relevance descriptor levels with color semantics", () => {

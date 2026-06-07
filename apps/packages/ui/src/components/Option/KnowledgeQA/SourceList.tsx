@@ -20,6 +20,8 @@ import {
   filterItemsByDateRange,
   filterItemsByKeyword,
   filterItemsBySourceType,
+  getResultChunkId,
+  getResultSourceId,
   getSourceContentFacetLabel,
   getSourceTypeLabel,
   sortSourceItems,
@@ -154,6 +156,14 @@ function persistSourceListFilters(
 }
 
 function getResultFeedbackKey(result: RagResult, index: number): string {
+  const sourceId = getResultSourceId(result)
+  const chunkId = getResultChunkId(result)
+  if (sourceId && chunkId) {
+    return `${sourceId}:${chunkId}`
+  }
+  if (sourceId) {
+    return sourceId
+  }
   if (typeof result.id === "string" && result.id.length > 0) {
     return result.id
   }
@@ -210,6 +220,8 @@ function resolvePinnedSourceTarget(result: RagResult): PinnedSourceTarget {
     return {
       mediaId: null,
       noteId:
+        parseNoteId(result.sourceId) ??
+        parseNoteId(metadata.source_id) ??
         parseNoteId(metadata.note_id) ??
         parseNoteId(metadata.id) ??
         parseNoteId(result.id),
@@ -218,6 +230,8 @@ function resolvePinnedSourceTarget(result: RagResult): PinnedSourceTarget {
 
   return {
     mediaId:
+      parseMediaId(result.sourceId) ??
+      parseMediaId(metadata.source_id) ??
       parseMediaId(metadata.media_id) ??
       parseMediaId(metadata.id) ??
       parseMediaId(result.id),
@@ -613,11 +627,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     async (result: RagResult, resultIndex: number, thumb: "up" | "down") => {
       const requestSessionKey = answerSessionKey
       const sourceKey = getResultFeedbackKey(result, resultIndex)
-      const chunkId =
-        typeof result.metadata?.chunk_id === "string" &&
-        result.metadata.chunk_id.length > 0
-          ? result.metadata.chunk_id
-          : undefined
+      const chunkId = getResultChunkId(result) ?? undefined
 
       setFeedbackBySource((previous) => ({
         ...previous,

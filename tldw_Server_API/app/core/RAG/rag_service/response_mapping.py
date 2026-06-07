@@ -8,6 +8,17 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRes
 
 from .result_model import RAGResult
 
+EVIDENCE_METADATA_KEYS = (
+    "source_id",
+    "source_type",
+    "chunk_id",
+    "evidence_origin",
+    "source_status",
+    "unavailable_reason",
+)
+
+EVIDENCE_TEXT_KEYS = ("content", "excerpt", "text", "chunk")
+
 
 def _result_field(result: Any, key: str, default: Any = None) -> Any:
     """Read a top-level field from attr-based or dict-shaped result objects."""
@@ -49,7 +60,14 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for doc in documents or []:
         doc_id = _extract_field(doc, "id")
-        content = _extract_field(doc, "content")
+        content = next(
+            (
+                value
+                for value in (_extract_field(doc, key) for key in EVIDENCE_TEXT_KEYS)
+                if isinstance(value, str) and value.strip()
+            ),
+            _extract_field(doc, "content"),
+        )
         metadata = _extract_field(doc, "metadata", {}) or {}
         score = _extract_field(doc, "score", 0.0)
 
@@ -58,6 +76,13 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
                 metadata = dict(metadata)
             except (TypeError, ValueError):
                 metadata = {"value": str(metadata)}
+        else:
+            metadata = dict(metadata)
+
+        for key in EVIDENCE_METADATA_KEYS:
+            value = _extract_field(doc, key)
+            if value is not None and metadata.get(key) is None:
+                metadata[key] = value
 
         normalized.append(
             {

@@ -160,6 +160,87 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(warningCalls).toHaveLength(1)
   })
 
+  it("persists materialized evidence identifiers in RAG context", async () => {
+    let persistedRagContextBody: Record<string, any> | null = null
+    searchCharactersMock.mockResolvedValue([
+      { id: 7, name: "Helpful AI Assistant" },
+    ])
+    addChatMessageMock
+      .mockResolvedValueOnce({ id: "msg-user-1" })
+      .mockResolvedValueOnce({ id: "msg-assistant-1" })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "media:42:chunk:7",
+          excerpt: "Visible matched excerpt.",
+          sourceId: "42",
+          sourceType: "media_db",
+          chunkId: "7",
+          evidenceOrigin: "local_library",
+          sourceStatus: "searched",
+          unavailableReason: null,
+          metadata: {
+            title: "Grounded source",
+            source_type: "media_db",
+            source_id: "42",
+            chunk_id: "7",
+            evidence_origin: "local_library",
+            source_status: "searched",
+            unavailable_reason: null,
+          },
+          score: 0.91,
+        },
+      ],
+      generated_answer: "Grounded answer [1]",
+    })
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.includes("/rag-context")) {
+        persistedRagContextBody = JSON.parse(String(init?.body || "{}"))
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+          text: async () => "",
+        }
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => [],
+        text: async () => "",
+      }
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+
+    act(() => {
+      latestContext!.setQuery("materialized evidence")
+    })
+    act(() => {
+      void latestContext!.search()
+    })
+
+    await waitFor(() => expect(persistedRagContextBody).not.toBeNull())
+    const [document] = persistedRagContextBody!.rag_context.retrieved_documents
+    expect(document).toMatchObject({
+      id: "media:42:chunk:7",
+      source_id: "42",
+      source_type: "media_db",
+      chunk_id: "7",
+      excerpt: "Visible matched excerpt.",
+      evidence_origin: "local_library",
+      source_status: "searched",
+      score: 0.91,
+    })
+    expect(document).not.toHaveProperty("unavailable_reason")
+  })
+
   it("starts a fresh topic with cleared visible state", async () => {
     fetchWithAuthMock.mockImplementation(async (path: string) => {
       if (path.includes("/remote-thread/")) {

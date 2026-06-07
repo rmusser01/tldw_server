@@ -91,7 +91,7 @@ function EvidenceRailContent({
           resultsCount > 0 ? (
             <>
               <p className="mb-2 text-xs text-text-muted">
-                Use each source card to copy citations, copy excerpts, or open supported sources.
+                Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links.
               </p>
               <SourceList layout="rail" />
             </>

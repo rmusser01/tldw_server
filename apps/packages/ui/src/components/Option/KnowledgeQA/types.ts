@@ -39,11 +39,23 @@ export type KnowledgeAnswerTrustState =
   | "unknown_trust"
 
 // Retrieved document with citation info
+export type EvidenceOrigin =
+  | "local_library"
+  | "web_fallback"
+  | "mixed"
+  | "unknown_origin"
+
 export type RagResult = {
   id?: string
   content?: string
   text?: string
   chunk?: string
+  sourceId?: string
+  sourceType?: string
+  chunkId?: string
+  evidenceOrigin?: EvidenceOrigin
+  sourceStatus?: string
+  unavailableReason?: string | null
   metadata?: {
     title?: string
     source?: string
@@ -73,11 +85,15 @@ export type RagContextData = {
   settings_snapshot?: Partial<RagSettings>
   retrieved_documents: Array<{
     id?: string
+    source_id?: string
     source_type?: string
     title?: string
     score?: number
     chunk_id?: string
     excerpt?: string
+    evidence_origin?: EvidenceOrigin
+    source_status?: string
+    unavailable_reason?: string | null
     url?: string
     page_number?: number
     line_range?: [number, number]
