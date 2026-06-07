@@ -1,5 +1,7 @@
 # DeepSeek OCR Backend (Transformers)
 
+ADR coverage: The implemented, still-governing backend decision from this design is backfilled by `Docs/ADR/024-deepseek-ocr-local-transformers-backend.md`. See that ADR for the accepted scope and caveats.
+
 ## Summary
 Add a DeepSeek-OCR backend that runs local HuggingFace Transformers inference on image bytes and plugs into the OCR registry. The backend will follow the upstream `model.infer(...)` API and expose lightweight config via env vars.
 
