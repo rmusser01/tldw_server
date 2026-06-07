@@ -32,7 +32,7 @@
 
 ## Task 1: Build Seeded Fixture Data
 
-- [ ] **Step 1: Write fixture contract**
+- [x] **Step 1: Write fixture contract**
 
 Create `knowledge_qa_uat_fixtures.py` with constants:
 
@@ -43,7 +43,7 @@ SCOPED_EXCLUDED_PHRASE = "Excluded distractor should not appear"
 NO_MATCH_QUERY = "What does the library say about nonexistent basalt telemetry?"
 ```
 
-- [ ] **Step 2: Add seeding helper**
+- [x] **Step 2: Add seeding helper**
 
 Create `Helper_Scripts/seed_knowledge_qa_uat.py` that:
 
@@ -53,7 +53,7 @@ Create `Helper_Scripts/seed_knowledge_qa_uat.py` that:
 - creates one note source for exact-note scoped search
 - records created ids to a JSON fixture manifest
 
-- [ ] **Step 3: Add smoke test for fixture constants**
+- [x] **Step 3: Add smoke test for fixture constants**
 
 Add a small Pytest in `tldw_Server_API/tests/RAG/test_knowledge_qa_uat_fixtures.py` to ensure fixture strings are distinct and deterministic.
 
@@ -68,11 +68,11 @@ Expected: pass after helper exists.
 
 ## Task 2: Add WebUI Live Backend Test
 
-- [ ] **Step 1: Create live fixture helper**
+- [x] **Step 1: Create live fixture helper**
 
 Create `apps/tldw-frontend/e2e/fixtures/knowledge-qa-live.ts` to read the fixture manifest path from an environment variable such as `TLDW_KNOWLEDGE_QA_FIXTURE_MANIFEST`.
 
-- [ ] **Step 2: Write failing WebUI live test**
+- [x] **Step 2: Write failing WebUI live test**
 
 Create `knowledge-qa-live-backend.spec.ts` with tests:
 
@@ -93,11 +93,11 @@ Expected before seeding/running backend: fail with clear precondition error, not
 
 ## Task 3: Add Extension Live Backend Test
 
-- [ ] **Step 1: Add harness health precheck**
+- [x] **Step 1: Add harness health precheck**
 
 In `apps/extension/tests/e2e/knowledge-qa-live-backend.spec.ts`, first assert the built extension launches `options.html#/knowledge`.
 
-- [ ] **Step 2: Add live extension workflows**
+- [x] **Step 2: Add live extension workflows**
 
 Mirror WebUI live workflows where feasible:
 
@@ -119,17 +119,17 @@ Expected: browser tests execute, or WXT blocker is recorded as release-blocking.
 
 ## Task 4: Update Release Docs
 
-- [ ] **Step 1: Update UAT checklist**
+- [x] **Step 1: Update UAT checklist**
 
 Add commands, fixture preconditions, expected screenshots/traces, and skip/blocker rules to `Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md`.
 
-- [ ] **Step 2: Update user guide if visible behavior changed**
+- [x] **Step 2: Update user guide if visible behavior changed**
 
 Update `Docs/User_Guides/WebUI_Extension/Knowledge_QA_Guide.md` for trust labels, web fallback origin labels, and unsupported export behavior.
 
 ## Task 5: Verify
 
-- [ ] **Step 1: Run backend fixture tests**
+- [x] **Step 1: Run backend fixture tests**
 
 ```bash
 source .venv/bin/activate
@@ -137,15 +137,15 @@ python -m pytest tldw_Server_API/tests/RAG/test_knowledge_qa_uat_fixtures.py -v
 python -m bandit -r Helper_Scripts/seed_knowledge_qa_uat.py tldw_Server_API/tests/RAG/knowledge_qa_uat_fixtures.py -f json -o /tmp/bandit_knowledge_qa_uat.json
 ```
 
-- [ ] **Step 2: Run WebUI live test against a launched backend**
+- [x] **Step 2: Run WebUI live test against a launched backend**
 
 Record exact backend command, frontend URL, fixture manifest, console errors, and network failures.
 
-- [ ] **Step 3: Run extension live test or record blocker**
+- [x] **Step 3: Run extension live test or record blocker**
 
 If WXT build stalls, capture the command, timeout, and owner in `TASK-2279.8`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Helper_Scripts/seed_knowledge_qa_uat.py tldw_Server_API/tests/RAG apps/tldw-frontend/e2e apps/extension/tests/e2e Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md Docs/User_Guides/WebUI_Extension/Knowledge_QA_Guide.md "backlog/tasks/task-2279.8 - Add-Knowledge-QA-live-UAT-fixtures-and-release-gates.md"

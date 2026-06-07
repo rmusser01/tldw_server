@@ -281,6 +281,81 @@ cd apps/packages/ui
 bunx vitest run src/components/Option/KnowledgeQA/__tests__/ExportDialog.a11y.test.tsx src/components/Option/KnowledgeQA/__tests__/errorMessages.test.ts
 ```
 
+## Script 8: Live Seeded Backend Release Gate
+
+Preconditions:
+
+- Backend is launched and reachable.
+- Single-user API key or test credentials are available.
+- Deterministic Knowledge QA UAT sources have been seeded through the public API.
+- The generated fixture manifest path is exported as `TLDW_KNOWLEDGE_QA_FIXTURE_MANIFEST`.
+- A configured answer model can generate grounded answers for the seeded cited query.
+
+Seed command:
+
+```bash
+source .venv/bin/activate
+python Helper_Scripts/seed_knowledge_qa_uat.py \
+  --server-url http://127.0.0.1:8000 \
+  --api-key "$TLDW_E2E_API_KEY" \
+  --manifest /tmp/knowledge-qa-uat.json
+```
+
+Dry-run manifest check:
+
+```bash
+source .venv/bin/activate
+python Helper_Scripts/seed_knowledge_qa_uat.py --dry-run --manifest /tmp/knowledge-qa-uat.json
+```
+
+The dry-run manifest is only for schema verification. Browser live UAT must use a manifest with non-null seeded source IDs.
+
+WebUI live gate:
+
+```bash
+cd apps/tldw-frontend
+TLDW_WEB_AUTOSTART=false \
+TLDW_WEB_URL=http://127.0.0.1:3000 \
+TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
+TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" \
+TLDW_KNOWLEDGE_QA_FIXTURE_MANIFEST=/tmp/knowledge-qa-uat.json \
+bunx playwright test e2e/ux-audit/knowledge-qa-live-backend.spec.ts --project=chromium --reporter=line
+```
+
+Extension live gate:
+
+```bash
+cd apps/extension
+TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
+TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" \
+TLDW_KNOWLEDGE_QA_FIXTURE_MANIFEST=/tmp/knowledge-qa-uat.json \
+bunx playwright test tests/e2e/knowledge-qa-live-backend.spec.ts --project=chromium-extension --reporter=line
+```
+
+Expected result:
+
+- Missing manifest, null source IDs, missing API key, offline backend, failed health check, no runnable answer model, or extension launch failure blocks the release gate.
+- Cited query returns the known answer phrase, inline citations, and inspectable seeded evidence.
+- No-match query shows no-results recovery and does not invent an answer.
+- Exact note scope sends selected note IDs and hides the seeded distractor phrase.
+- Markdown export includes trust/evidence labels, source titles, answer text, and citations.
+- Web fallback remains disabled in default seeded UAT and is labeled if separately enabled.
+
+Pass/fail criteria:
+
+- Pass only if WebUI and extension browser phases actually run against seeded backend data.
+- Fail if a test is skipped, the backend was not launched, the manifest is dry-run-only, or extension `options.html#/knowledge` did not launch.
+- Fail if evidence is not inspectable, citations are missing, excluded source text appears, or export omits trust/evidence context.
+
+Required artifacts:
+
+- Exact backend launch command.
+- Exact seed command and manifest path.
+- WebUI and extension Playwright command output.
+- Console/page-error/request-failure attachments for failed WebUI tests.
+- Extension WXT build output and runtime failure notes for failed extension tests.
+- Screenshots or traces for any manual investigation.
+
 ## Consolidated Regression Commands
 
 Shared Knowledge QA UI:
@@ -345,6 +420,7 @@ Extension runtime E2E is not a soft skip. If the WXT build or runtime harness ca
 ## Current Known Blockers
 
 - Extension E2E can be blocked by the WXT production build stalling before browser tests start. When that happens, record the build stall as an environment/build blocker and do not claim extension runtime behavior was verified.
+- Extension E2E can also be blocked after build when Chromium exposes no extension targets or headed launch times out before `options.html#/knowledge` loads. Record the exact launch command, mode, timeout, and screenshot; do not downgrade this to a skip.
 - Package-wide TypeScript checks may be blocked by existing baseline errors outside the Knowledge QA slice. Prefer targeted Knowledge QA Vitest and Playwright checks for this release gate unless the baseline is fixed.
 
 ## Release Sign-Off
