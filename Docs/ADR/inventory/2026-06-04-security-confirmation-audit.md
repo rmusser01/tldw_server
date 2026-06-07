@@ -1,10 +1,10 @@
 # Security Confirmation Audit - 2026-06-04
 
 **Related task:** TASK-2247
-**Follow-up:** TASK-2248, TASK-2311, TASK-2312
+**Follow-up:** TASK-2248, TASK-2311, TASK-2312, TASK-2313
 **Inventory row:** INV-029
 **Source candidate:** `tldw_Server_API/app/core/Security/README.md`
-**Disposition:** Current governing, but too broad for one accepted ADR. Request-edge middleware is backfilled by ADR-019; outbound egress/SSRF policy is backfilled by ADR-026; secrets/serialization adoption was audited in TASK-2312 and remains inventory-only until narrower implementation-backed slices exist.
+**Disposition:** Current governing, but too broad for one accepted ADR. Request-edge middleware is backfilled by ADR-019; outbound egress/SSRF policy is backfilled by ADR-026; Security AES-GCM JSON envelopes are backfilled by ADR-027; remaining `SecretManager` adoption and restricted pickle policy stay inventory-only until narrower implementation-backed slices exist.
 
 ## Decision Candidate Under Review
 
@@ -32,7 +32,7 @@ The candidate describes current governing conventions, but it combines multiple 
 - Do not create one broad "Security module" ADR that claims all security-sensitive behavior is centrally enforced. The module centralizes helpers and middleware, but feature modules still need to call egress helpers for outbound work.
 - Egress is a strong candidate for its own ADR, but the accepted claim should be "outbound integrations must use the central egress policy helpers" plus the current policy defaults. It should not claim universal historical coverage for every existing network path.
 - Request-edge middleware is a separate strong candidate: normal startup installs setup guard/CSP and security headers, and request ID plus drain gate are always installed. It should explicitly carry the test-mode skip, `ENABLE_SECURITY_HEADERS`, HSTS opt-in, and setup CSP relaxed/eval caveats.
-- Secret management and safe serialization should not be bundled into a broad ADR. TASK-2312 confirms helper availability and bounded crypto/restricted-pickle adoption, but not repository-wide `SecretManager` adoption or universal serialization coverage.
+- Secret management and safe serialization should not be bundled into a broad ADR. TASK-2312 confirms helper availability and bounded crypto/restricted-pickle adoption, but not repository-wide `SecretManager` adoption or universal serialization coverage. ADR-027 records only the AES-GCM JSON envelope portion.
 - Setup CSP intentionally allows inline scripts and allows eval by default unless `TLDW_SETUP_NO_EVAL` is truthy. Do not write an ADR that says setup CSP is strict.
 
 ## Backfill Results
@@ -43,6 +43,7 @@ Bounded ADR follow-ups:
 
 1. Request-edge Security middleware ADR via TASK-2248: ADR-019 covers startup-installed request ID, drain gate, setup access/CSP, and security headers with path-specific CSP and production-default header enablement.
 2. Outbound egress/SSRF policy ADR via TASK-2311: ADR-026 covers the rule that outbound integrations must use central `egress.py`/`url_validation.py` helpers, which enforce scheme, host, port, allow/deny, environment profile, tenant webhook, DNS, and private/reserved-address checks.
-3. Secrets/serialization adoption audit via TASK-2312: `Docs/ADR/inventory/2026-06-07-security-secrets-serialization-adoption-audit.md` keeps the slice inventory-only for now. Future ADRs should split SecretManager adoption, AES-GCM JSON envelope policy, and restricted legacy pickle compatibility instead of creating one broad Security ADR.
+3. Secrets/serialization adoption audit via TASK-2312: `Docs/ADR/inventory/2026-06-07-security-secrets-serialization-adoption-audit.md` explains why the slice must remain split.
+4. AES-GCM JSON envelope ADR via TASK-2313: ADR-027 covers Security crypto envelope helpers and known configured encrypted-persistence consumers. Future ADRs should split `SecretManager` adoption and restricted legacy pickle compatibility instead of creating one broad Security ADR.
 
 Update INV-029 to record TASK-2247 confirmation and keep ADR creation split by boundary.
