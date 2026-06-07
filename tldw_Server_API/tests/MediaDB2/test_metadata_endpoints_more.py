@@ -3,6 +3,8 @@ import json
 import os
 import sys
 import types
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -22,7 +24,10 @@ sys.modules.setdefault('dill', dill_stub)
 def _auth_headers():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
-    key = get_settings().SINGLE_USER_API_KEY or os.getenv("SINGLE_USER_API_KEY", "test-api-key-12345")
+    key = get_settings().SINGLE_USER_API_KEY or os.getenv(
+        "SINGLE_USER_API_KEY",
+        "test-api-key-12345",
+    )
     return {"X-API-KEY": key}
 
 
@@ -46,7 +51,15 @@ class _FakeDB:
         return _Tx()
     def get_connection(self):
         return _FakeConn()
-    def search_by_safe_metadata(self, filters=None, match_all=True, page=1, per_page=20, group_by_media=True, **kwargs):
+    def search_by_safe_metadata(
+        self,
+        filters=None,
+        match_all=True,
+        page=1,
+        per_page=20,
+        group_by_media=True,
+        **kwargs,
+    ):
         self.last_filters = filters
         self.last_search_kwargs = {
             "match_all": match_all,
@@ -58,92 +71,157 @@ class _FakeDB:
         return [], 0
 
 
+_MISSING_OVERRIDE = object()
+
+
+def _metadata_search_db_dependency_calls(app: Any) -> set[Callable[..., object]]:
+    calls: set[Callable[..., object]] = set()
+    for route in app.routes:
+        if getattr(route, "path", None) != "/api/v1/media/metadata-search":
+            continue
+        dependant = getattr(route, "dependant", None)
+        for dep in getattr(dependant, "dependencies", []):
+            call = getattr(dep, "call", None)
+            if (
+                callable(call)
+                and (
+                    getattr(dep, "name", None) == "db"
+                    or getattr(call, "__name__", "") == "get_media_db_for_user"
+                )
+            ):
+                calls.add(call)
+    return calls
+
+
+def _override_metadata_search_db(
+    app: Any,
+    fake_db: _FakeDB,
+) -> dict[Callable[..., object], object]:
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+    from tldw_Server_API.app.api.v1.endpoints.media import listing
+
+    dependency_calls = {
+        get_media_db_for_user,
+        listing.get_media_db_for_user,
+        *_metadata_search_db_dependency_calls(app),
+    }
+    assert dependency_calls
+
+    previous = {
+        call: app.dependency_overrides.get(call, _MISSING_OVERRIDE)
+        for call in dependency_calls
+    }
+
+    def _override_db() -> _FakeDB:
+        return fake_db
+
+    for call in dependency_calls:
+        app.dependency_overrides[call] = _override_db
+    return previous
+
+
+def _restore_dependency_overrides(
+    app: Any,
+    previous: dict[Callable[..., object], object],
+) -> None:
+    for call, override in previous.items():
+        if override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(call, None)
+        else:
+            app.dependency_overrides[call] = override
+
+
 @pytest.mark.asyncio
 async def test_metadata_search_normalizes_doi(monkeypatch):
-    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.main import app
 
     fake_db = _FakeDB()
-    app.dependency_overrides[get_media_db_for_user] = lambda: fake_db
+    previous_overrides = _override_metadata_search_db(app, fake_db)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-        headers=_auth_headers(),
-    ) as client:
-        r = await client.get(
-            "/api/v1/media/metadata-search",
-            params={"field": "doi", "op": "eq", "value": "10.1234/ABC-123"},
-        )
-        assert r.status_code == 200
-        assert fake_db.last_filters and fake_db.last_filters[0]["value"] == "10.1234/ABC-123"
-
-    app.dependency_overrides.pop(get_media_db_for_user, None)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers=_auth_headers(),
+        ) as client:
+            r = await client.get(
+                "/api/v1/media/metadata-search",
+                params={"field": "doi", "op": "eq", "value": "10.1234/ABC-123"},
+            )
+            assert r.status_code == 200
+            assert (
+                fake_db.last_filters
+                and fake_db.last_filters[0]["value"] == "10.1234/ABC-123"
+            )
+    finally:
+        _restore_dependency_overrides(app, previous_overrides)
 
 
 @pytest.mark.asyncio
 async def test_metadata_search_invalid_doi_returns_400(monkeypatch):
-    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.main import app
 
     fake_db = _FakeDB()
-    app.dependency_overrides[get_media_db_for_user] = lambda: fake_db
+    previous_overrides = _override_metadata_search_db(app, fake_db)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-        headers=_auth_headers(),
-    ) as client:
-        r = await client.get(
-            "/api/v1/media/metadata-search",
-            params={"field": "doi", "op": "eq", "value": "bad"},
-        )
-        assert r.status_code == 400
-
-    app.dependency_overrides.pop(get_media_db_for_user, None)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers=_auth_headers(),
+        ) as client:
+            r = await client.get(
+                "/api/v1/media/metadata-search",
+                params={"field": "doi", "op": "eq", "value": "bad"},
+            )
+            assert r.status_code == 400
+    finally:
+        _restore_dependency_overrides(app, previous_overrides)
 
 
 @pytest.mark.asyncio
 async def test_metadata_search_forwards_standard_constraints(monkeypatch):
-    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.main import app
 
     fake_db = _FakeDB()
-    app.dependency_overrides[get_media_db_for_user] = lambda: fake_db
+    previous_overrides = _override_metadata_search_db(app, fake_db)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-        headers=_auth_headers(),
-    ) as client:
-        r = await client.get(
-            "/api/v1/media/metadata-search",
-            params={
-                "filters": json.dumps([{"field": "doi", "op": "eq", "value": "10.1000/xyz"}]),
-                "match_mode": "all",
-                "group_by_media": True,
-                "page": 2,
-                "per_page": 10,
-                "q": "nature medicine",
-                "media_types": "document,pdf",
-                "must_have": "biology,review",
-                "must_not_have": "private",
-                "date_start": "2026-01-01T00:00:00.000Z",
-                "date_end": "2026-01-31T23:59:59.999Z",
-                "sort_by": "date_desc",
-            },
-        )
-        assert r.status_code == 200
-        assert fake_db.last_search_kwargs is not None
-        assert fake_db.last_search_kwargs.get("text_query") == "nature medicine"
-        assert fake_db.last_search_kwargs.get("media_types") == ["document", "pdf"]
-        assert fake_db.last_search_kwargs.get("must_have_keywords") == ["biology", "review"]
-        assert fake_db.last_search_kwargs.get("must_not_have_keywords") == ["private"]
-        assert fake_db.last_search_kwargs.get("date_start") == "2026-01-01T00:00:00.000Z"
-        assert fake_db.last_search_kwargs.get("date_end") == "2026-01-31T23:59:59.999Z"
-        assert fake_db.last_search_kwargs.get("sort_by") == "date_desc"
-
-    app.dependency_overrides.pop(get_media_db_for_user, None)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers=_auth_headers(),
+        ) as client:
+            r = await client.get(
+                "/api/v1/media/metadata-search",
+                params={
+                    "filters": json.dumps(
+                        [{"field": "doi", "op": "eq", "value": "10.1000/xyz"}]
+                    ),
+                    "match_mode": "all",
+                    "group_by_media": True,
+                    "page": 2,
+                    "per_page": 10,
+                    "q": "nature medicine",
+                    "media_types": "document,pdf",
+                    "must_have": "biology,review",
+                    "must_not_have": "private",
+                    "date_start": "2026-01-01T00:00:00.000Z",
+                    "date_end": "2026-01-31T23:59:59.999Z",
+                    "sort_by": "date_desc",
+                },
+            )
+            assert r.status_code == 200
+            assert fake_db.last_search_kwargs is not None
+            assert fake_db.last_search_kwargs.get("text_query") == "nature medicine"
+            assert fake_db.last_search_kwargs.get("media_types") == ["document", "pdf"]
+            assert fake_db.last_search_kwargs.get("must_have_keywords") == ["biology", "review"]
+            assert fake_db.last_search_kwargs.get("must_not_have_keywords") == ["private"]
+            assert fake_db.last_search_kwargs.get("date_start") == "2026-01-01T00:00:00.000Z"
+            assert fake_db.last_search_kwargs.get("date_end") == "2026-01-31T23:59:59.999Z"
+            assert fake_db.last_search_kwargs.get("sort_by") == "date_desc"
+    finally:
+        _restore_dependency_overrides(app, previous_overrides)
 
 
 @pytest.mark.asyncio
