@@ -441,6 +441,7 @@ export function useKnowledgeSearch({
   )
 
   const pinnedResults = ragPinnedResults || []
+  const clearPinsGenerationRef = React.useRef(0)
   const collectPinnedMediaIds = React.useCallback((items: RagPinnedResult[]) => {
     const ids = items
       .map((item) => item.mediaId)
@@ -556,7 +557,10 @@ export function useKnowledgeSearch({
         return
       }
       try {
-        await navigator.clipboard.writeText(formatRagResult(pinned, format))
+        const resolvedPinned = await withFullMediaTextIfAvailable(pinned)
+        await navigator.clipboard.writeText(
+          formatRagResult(resolvedPinned, format)
+        )
       } catch (error) {
         console.error("Failed to copy knowledge result to clipboard:", error)
       }
@@ -577,10 +581,15 @@ export function useKnowledgeSearch({
 
   const handleAsk = React.useCallback(
     (item: RagResult) => {
-      const pinned = toPinnedResult(item)
-      // Note: Modal.confirm would need to be handled at the component level
-      // For now, we directly call onAsk
-      onAsk(formatRagResult(pinned, "markdown"), { ignorePinnedResults: true })
+      void (async () => {
+        const pinned = toPinnedResult(item)
+        const resolvedPinned = await withFullMediaTextIfAvailable(pinned)
+        // Note: Modal.confirm would need to be handled at the component level
+        // For now, we directly call onAsk
+        onAsk(formatRagResult(resolvedPinned, "markdown"), {
+          ignorePinnedResults: true
+        })
+      })()
     },
     [onAsk]
   )
@@ -593,12 +602,22 @@ export function useKnowledgeSearch({
 
   const handlePin = React.useCallback(
     (item: RagResult) => {
-      const pinned = toPinnedResult(item)
-      if (pinnedResults.some((result) => result.id === pinned.id)) return
-      const nextPinned = [...pinnedResults, pinned]
-      setRagPinnedResults(nextPinned)
-      const mediaIds = collectPinnedMediaIds(nextPinned)
-      setRagMediaIds(mediaIds.length > 0 ? mediaIds : null)
+      void (async () => {
+        const pinned = toPinnedResult(item)
+        if (pinnedResults.some((result) => result.id === pinned.id)) return
+        const clearPinsGeneration = clearPinsGenerationRef.current
+        const resolvedPinned = await withFullMediaTextIfAvailable(pinned)
+        if (clearPinsGeneration !== clearPinsGenerationRef.current) return
+        const currentPinned =
+          useStoreMessageOption.getState().ragPinnedResults || []
+        if (currentPinned.some((result) => result.id === resolvedPinned.id)) {
+          return
+        }
+        const nextPinned = [...currentPinned, resolvedPinned]
+        setRagPinnedResults(nextPinned)
+        const mediaIds = collectPinnedMediaIds(nextPinned)
+        setRagMediaIds(mediaIds.length > 0 ? mediaIds : null)
+      })()
     },
     [collectPinnedMediaIds, pinnedResults, setRagMediaIds, setRagPinnedResults]
   )
@@ -614,6 +633,7 @@ export function useKnowledgeSearch({
   )
 
   const handleClearPins = React.useCallback(() => {
+    clearPinsGenerationRef.current += 1
     setRagPinnedResults([])
     setRagMediaIds(null)
   }, [setRagMediaIds, setRagPinnedResults])

@@ -1,4 +1,6 @@
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -8,13 +10,25 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key
+  })
+}))
+
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: () => [false, vi.fn()] as const
+}))
+
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { useStoreMessageOption } from "@/store/option"
 
 import {
   extractContentFromMediaDetail,
   extractMediaId,
   normalizeMediaSearchResults,
   toPinnedResult,
+  useKnowledgeSearch,
   withFullMediaTextIfAvailable,
   type RagResult
 } from "../useKnowledgeSearch"
@@ -169,5 +183,215 @@ describe("useKnowledgeSearch helpers", () => {
     })
 
     expect(emptyContent.snippet).toBe("Library item: Quarterly Report")
+  })
+})
+
+describe("useKnowledgeSearch action paths", () => {
+  const baseSettings = {
+    ...DEFAULT_RAG_SETTINGS
+  }
+
+  const mediaResult = (overrides?: { id?: number; title?: string }) =>
+    normalizeMediaSearchResults({
+      items: [
+        {
+          id: overrides?.id ?? 42,
+          title: overrides?.title ?? "Quarterly Report",
+          type: "pdf",
+          url: `/api/v1/media/${overrides?.id ?? 42}`
+        }
+      ]
+    })[0]
+
+  const chunkResult = (): RagResult => ({
+    content: "Retrieved chunk only",
+    metadata: {
+      media_id: 42,
+      title: "Chunk Title",
+      type: "pdf"
+    }
+  })
+
+  const createHook = () => {
+    const applySettings = vi.fn()
+    const onInsert = vi.fn()
+    const onAsk = vi.fn()
+
+    const hook = renderHook(() =>
+      useKnowledgeSearch({
+        resolvedQuery: "quarterly report",
+        draftSettings: baseSettings,
+        applySettings,
+        onInsert,
+        onAsk
+      })
+    )
+
+    return { ...hook, applySettings, onInsert, onAsk }
+  }
+
+  const deferredMediaDetails = (text: string) => {
+    let resolveDetail: () => void = () => {}
+    const pending = new Promise((resolve) => {
+      resolveDetail = () => resolve({ content: { text } })
+    })
+    vi.mocked(tldwClient.getMediaDetails).mockReturnValue(
+      pending as ReturnType<typeof tldwClient.getMediaDetails>
+    )
+    return resolveDetail
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(tldwClient.initialize).mockResolvedValue(undefined)
+    useStoreMessageOption.setState({
+      ragPinnedResults: [],
+      ragMediaIds: null
+    })
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn()
+      }
+    })
+  })
+
+  it("asks with full media-library content and ignores pinned results", async () => {
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: { text: "Full media body content" }
+    })
+    const { result, onAsk } = createHook()
+
+    act(() => {
+      result.current.handleAsk(mediaResult())
+    })
+
+    await waitFor(() => {
+      expect(onAsk).toHaveBeenCalledWith(
+        expect.stringContaining("Full media body content"),
+        { ignorePinnedResults: true }
+      )
+    })
+  })
+
+  it("pins full media-library content and preserves media id scoping", async () => {
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: { text: "Full media body content" }
+    })
+    const { result } = createHook()
+
+    act(() => {
+      result.current.handlePin(mediaResult())
+    })
+
+    await waitFor(() => {
+      expect(useStoreMessageOption.getState().ragPinnedResults[0]?.snippet).toBe(
+        "Full media body content"
+      )
+    })
+    expect(useStoreMessageOption.getState().ragMediaIds).toEqual([42])
+  })
+
+  it("preserves separate media pins resolved from overlapping requests", async () => {
+    vi.mocked(tldwClient.getMediaDetails)
+      .mockResolvedValueOnce({ content: { text: "Full first content" } })
+      .mockResolvedValueOnce({ content: { text: "Full second content" } })
+    const { result } = createHook()
+
+    act(() => {
+      result.current.handlePin(mediaResult({ id: 42, title: "First Report" }))
+      result.current.handlePin(mediaResult({ id: 43, title: "Second Report" }))
+    })
+
+    await waitFor(() => {
+      expect(useStoreMessageOption.getState().ragPinnedResults).toHaveLength(2)
+    })
+    expect(useStoreMessageOption.getState().ragPinnedResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mediaId: 42,
+          snippet: "Full first content"
+        }),
+        expect.objectContaining({
+          mediaId: 43,
+          snippet: "Full second content"
+        })
+      ])
+    )
+    expect(useStoreMessageOption.getState().ragMediaIds).toEqual([42, 43])
+  })
+
+  it("does not re-add a pending media pin after clear all", async () => {
+    const resolveDetail = deferredMediaDetails("Full media body content")
+    const { result } = createHook()
+
+    act(() => {
+      result.current.handlePin(mediaResult())
+    })
+
+    await waitFor(() => {
+      expect(tldwClient.getMediaDetails).toHaveBeenCalledTimes(1)
+    })
+    expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
+
+    await act(async () => {
+      result.current.handleClearPins()
+      resolveDetail()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+  })
+
+  it("copies full media-library content as markdown", async () => {
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: { text: "Full media body content" }
+    })
+    const { result } = createHook()
+
+    await act(async () => {
+      await result.current.copyResult(mediaResult(), "markdown")
+    })
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining("Full media body content")
+    )
+  })
+
+  it("keeps chunk-scoped media results unexpanded for ask, pin, and copy", async () => {
+    const { result, onAsk } = createHook()
+
+    act(() => {
+      result.current.handleAsk(chunkResult())
+    })
+
+    await waitFor(() => {
+      expect(onAsk).toHaveBeenCalledWith(
+        expect.stringContaining("Retrieved chunk only"),
+        { ignorePinnedResults: true }
+      )
+    })
+    expect(tldwClient.getMediaDetails).not.toHaveBeenCalled()
+
+    act(() => {
+      result.current.handlePin(chunkResult())
+    })
+
+    await waitFor(() => {
+      expect(useStoreMessageOption.getState().ragPinnedResults[0]?.snippet).toBe(
+        "Retrieved chunk only"
+      )
+    })
+    expect(tldwClient.getMediaDetails).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await result.current.copyResult(chunkResult(), "markdown")
+    })
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining("Retrieved chunk only")
+    )
+    expect(tldwClient.getMediaDetails).not.toHaveBeenCalled()
   })
 })

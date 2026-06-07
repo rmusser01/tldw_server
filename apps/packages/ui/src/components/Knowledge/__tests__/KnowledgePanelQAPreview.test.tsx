@@ -1,19 +1,53 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { KnowledgePanel } from "../KnowledgePanel"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockUseKnowledgeSettings = vi.fn()
 const mockUseKnowledgeSearch = vi.fn()
 const mockUseFileSearch = vi.fn()
 const mockUseQASearch = vi.fn()
 const mockWithFullMediaTextIfAvailable = vi.fn()
+let KnowledgePanel: typeof import("../KnowledgePanel").KnowledgePanel
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
   })
 }))
+
+vi.mock(
+  "antd",
+  () => ({
+    Modal: Object.assign(
+      ({
+        children,
+        open,
+        title
+      }: {
+        children?: React.ReactNode
+        open?: boolean
+        title?: React.ReactNode
+      }) =>
+        open ? (
+          <div
+            role="dialog"
+            aria-label={typeof title === "string" ? title : undefined}
+          >
+            {title ? <h2>{title}</h2> : null}
+            {children}
+          </div>
+        ) : null,
+      { confirm: vi.fn() }
+    )
+  }),
+  { virtual: true }
+)
 
 vi.mock("../hooks", () => {
   const toPinnedResult = (item: any) => ({
@@ -76,6 +110,10 @@ describe("KnowledgePanel QA chunk preview", () => {
     metadata: { title: "QA Doc Title", source: "qa-source" },
     score: 0.8
   }
+
+  beforeAll(async () => {
+    ;({ KnowledgePanel } = await import("../KnowledgePanel"))
+  })
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -213,5 +251,40 @@ describe("KnowledgePanel QA chunk preview", () => {
         { ignorePinnedResults: true }
       )
     })
+  })
+
+  it("resolves shared preview modal context before Ask", async () => {
+    const onAsk = vi.fn()
+    mockWithFullMediaTextIfAvailable.mockResolvedValueOnce({
+      id: "pin-doc-1",
+      title: "QA Doc Title",
+      snippet: "Resolved preview context"
+    })
+
+    render(
+      <KnowledgePanel
+        open
+        showToggle={false}
+        onInsert={vi.fn()}
+        onAsk={onAsk}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ask" }))
+
+    await waitFor(() => {
+      expect(onAsk).toHaveBeenCalledWith(
+        expect.stringContaining("Resolved preview context"),
+        { ignorePinnedResults: true }
+      )
+    })
+    expect(mockWithFullMediaTextIfAvailable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "QA Doc Title",
+        snippet: "Chunk preview text"
+      })
+    )
   })
 })

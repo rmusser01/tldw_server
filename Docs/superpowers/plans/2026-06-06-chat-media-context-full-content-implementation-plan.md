@@ -45,7 +45,7 @@
 
 **Tests:** `useKnowledgeSearch.test.ts`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Add failing helper tests for origin propagation and guarded fetching
 
@@ -265,7 +265,7 @@ git commit -m "fix: gate chat media context expansion by origin"
 
 **Tests:** `useKnowledgeSearch.test.ts`, `useFileSearch.test.ts`, `KnowledgePanelQAPreview.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 3: Add failing action-path tests
 

@@ -197,6 +197,18 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
     [handlePreview]
   )
 
+  const askWithResolvedContext = React.useCallback(
+    (pinned: RagPinnedResult) => {
+      void (async () => {
+        const resolved = await withFullMediaTextIfAvailable(pinned)
+        onAsk(formatRagResult(resolved, "markdown"), {
+          ignorePinnedResults: true
+        })
+      })()
+    },
+    [onAsk]
+  )
+
   // Discard staged settings on close
   const previousOpen = React.useRef(isOpen)
   React.useEffect(() => {
@@ -219,16 +231,13 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
           ),
           okText: t("common:continue", "Continue"),
           cancelText: t("common:cancel", "Cancel"),
-          onOk: () =>
-            onAsk(formatRagResult(pinned, "markdown"), {
-              ignorePinnedResults: true
-            })
+          onOk: () => askWithResolvedContext(pinned)
         })
         return
       }
-      onAsk(formatRagResult(pinned, "markdown"), { ignorePinnedResults: true })
+      askWithResolvedContext(pinned)
     },
-    [onAsk, search.pinnedResults.length, t]
+    [askWithResolvedContext, search.pinnedResults.length, t]
   )
 
   // Context item count for badge (image + tabs + files + pinned results)
@@ -502,9 +511,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
                 </button>
                 <button
                   onClick={() => {
-                    onAsk(formatRagResult(previewItem, "markdown"), {
-                      ignorePinnedResults: true
-                    })
+                    askWithResolvedContext(previewItem)
                     setPreviewItem(null)
                   }}
                   className="px-3 py-1.5 text-sm bg-surface2 text-text rounded hover:bg-surface3"
