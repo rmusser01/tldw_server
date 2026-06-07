@@ -21,7 +21,7 @@ _PATH_GRANT_EFFECTS = frozenset({"allow", "deny"})
 _SUPPORTED_PATH_ARGUMENT_HINTS = frozenset(
     {"path", "file_path", "target_path", "cwd", "paths", "file_paths", "files[].path"}
 )
-_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:")
 _PREVIEW_TOOL_METADATA = {
     "uses_filesystem": True,
     "path_boundable": True,

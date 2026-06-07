@@ -535,6 +535,8 @@ class EffectivePolicyResponse(BaseModel):
 
 
 class EffectivePermissionPreviewRequest(BaseModel):
+    """Request a redacted effective permission preview for a path-scoped MCP tool call."""
+
     model_config = ConfigDict(extra="forbid")
 
     tool_name: str = Field(..., min_length=1, max_length=255)
@@ -549,6 +551,8 @@ class EffectivePermissionPreviewRequest(BaseModel):
 
 
 class EffectivePermissionPreviewResponse(BaseModel):
+    """Redacted explanation of the effective path policy decision for an MCP tool call."""
+
     tool_name: str
     requested_action: PathPermissionAction
     requested_path: str

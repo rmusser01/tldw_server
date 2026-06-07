@@ -44,7 +44,7 @@ Implemented the MCP Hub effective permission preview surface for path-scoped too
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded: `python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_api.py` -> 57 passed
+- [x] #2 Tests or verification recorded: `python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_policy_api.py` -> 59 passed
 - [x] #3 Documentation updated when relevant: schema and route tests cover this API-surface slice
 - [x] #4 Bandit run for touched code: `python -m bandit -r <touched production files> -f json -o /tmp/bandit_mcp_effective_permission_preview.json` -> 0 findings
 - [x] #5 Final summary added

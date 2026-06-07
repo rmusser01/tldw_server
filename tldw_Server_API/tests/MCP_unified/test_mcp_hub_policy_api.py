@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -729,9 +730,9 @@ class _FakePolicyResolver:
 
 class _FakePathPermissionPreviewService:
     def __init__(self) -> None:
-        self.calls: list[dict] = []
+        self.calls: list[dict[str, Any]] = []
 
-    async def preview_effective_path_permission(self, **kwargs):
+    async def preview_effective_path_permission(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(dict(kwargs))
         return {
             "tool_name": kwargs["tool_name"],
@@ -1551,7 +1552,8 @@ def test_preview_effective_permission_returns_redacted_path_decision() -> None:
     assert preview_service.calls[0]["context"].metadata["workspace_id"] == "workspace-alpha"
 
 
-def test_preview_effective_permission_redacts_rejected_absolute_path() -> None:
+@pytest.mark.parametrize("raw_path", ["/tmp/secrets.txt", "C:secrets.txt", "C:/secrets.txt"])
+def test_preview_effective_permission_redacts_rejected_non_workspace_path(raw_path: str) -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
     )
@@ -1573,7 +1575,7 @@ def test_preview_effective_permission_redacts_rejected_absolute_path() -> None:
                 "workspace_id": "workspace-alpha",
                 "tool_name": "fs.read",
                 "action": "read",
-                "path": "/tmp/secrets.txt",
+                "path": raw_path,
             },
         )
 
@@ -1582,7 +1584,7 @@ def test_preview_effective_permission_redacts_rejected_absolute_path() -> None:
     assert payload["outcome"] == "deny"
     assert payload["reason_code"] == "path_must_be_workspace_relative"
     assert payload["requested_path"] == "<redacted>"
-    assert "/tmp/secrets.txt" not in repr(payload)
+    assert raw_path not in repr(payload)
 
 
 def test_list_policy_assignments_includes_override_summary_fields() -> None:
