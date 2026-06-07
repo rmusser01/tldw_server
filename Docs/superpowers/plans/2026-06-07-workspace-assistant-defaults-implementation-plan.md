@@ -215,9 +215,15 @@ def _serialize_workspace_assistant_defaults_json(cls, value: Any) -> str | None:
         stripped = value.strip()
         if not stripped:
             return None
-        json.loads(stripped)
-        return stripped
-    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        try:
+            json.loads(stripped)
+            return stripped
+        except (json.JSONDecodeError, ValueError):
+            return None
+    try:
+        return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return None
 
 
 @classmethod
