@@ -166,12 +166,8 @@ def build_effective_policy_result(
             resource_constraints=(policy_document.resource_constraints or {}).copy(),
             approval_policy=(profile.approval_policy or {}).copy(),
             path_scopes=[scope.copy() for scope in (profile.path_scopes or [])],
-            external_server_grants=[
-                grant.copy() for grant in (profile.external_server_grants or [])
-            ],
-            credential_grants=[
-                grant.copy() for grant in (profile.credential_grants or [])
-            ],
+            external_server_grants=[grant.copy() for grant in (profile.external_server_grants or [])],
+            credential_grants=[grant.copy() for grant in (profile.credential_grants or [])],
         ),
         decision=decision,
         provenance=provenance,
@@ -187,8 +183,7 @@ def _requires_workspace_binding(profile: MCPProfile) -> bool:
 
     capabilities = policy_document.capabilities or []
     if any(
-        any(token in str(capability).lower() for token in ("write", "mutate", "delete"))
-        for capability in capabilities
+        any(token in str(capability).lower() for token in ("write", "mutate", "delete")) for capability in capabilities
     ):
         return True
 
@@ -214,10 +209,7 @@ def _mapping_has_workspace_binding(mapping: dict[str, Any] | None) -> bool:
     """Return whether a mapping carries a recognized non-empty workspace binding."""
     if not mapping:
         return False
-    return any(
-        _has_workspace_binding_value(mapping.get(key))
-        for key in _WORKSPACE_BINDING_KEYS
-    )
+    return any(_has_workspace_binding_value(mapping.get(key)) for key in _WORKSPACE_BINDING_KEYS)
 
 
 def _has_workspace_binding_value(value: Any) -> bool:

@@ -87,9 +87,7 @@ async def test_profile_result_preserves_explicit_empty_profile_id() -> None:
 async def test_profile_result_reports_store_unavailable_with_reason_code() -> None:
     class UnavailableStore:
         async def get_profile(self, profile_id: str) -> MCPProfile | None:
-            raise ProfileStoreUnavailableError(
-                f"profile store unavailable: {profile_id}"
-            )
+            raise ProfileStoreUnavailableError(f"profile store unavailable: {profile_id}")
 
         async def list_profiles(self) -> list[MCPProfile]:
             raise ProfileStoreUnavailableError("profile store unavailable")
@@ -98,9 +96,7 @@ async def test_profile_result_reports_store_unavailable_with_reason_code() -> No
             raise ProfileStoreUnavailableError("profile store unavailable")
 
         async def delete_profile(self, profile_id: str) -> bool:
-            raise ProfileStoreUnavailableError(
-                f"profile store unavailable: {profile_id}"
-            )
+            raise ProfileStoreUnavailableError(f"profile store unavailable: {profile_id}")
 
     resolver = StoreBackedProfileResolver(UnavailableStore(), default_profile_id="default")
 
