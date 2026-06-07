@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
 
 class _FakePathScopeService:
     def __init__(self, result: dict) -> None:
@@ -12,6 +14,29 @@ class _FakePathScopeService:
 
     async def resolve_for_context(self, *, effective_policy, context):  # noqa: ANN001
         return dict(self.result)
+
+
+def _workspace_scope() -> dict:
+    return {
+        "enabled": True,
+        "path_scope_mode": "workspace_root",
+        "path_scope_enforcement": "approval_required_when_unenforceable",
+        "workspace_root": "/tmp/mcp-hub-path-enforcer/project",
+        "cwd": "/tmp/mcp-hub-path-enforcer/project",
+        "reason": None,
+    }
+
+
+def _filesystem_tool_def(*, action: str = "read") -> dict:
+    return {
+        "name": f"fs.{action}",
+        "metadata": {
+            "uses_filesystem": True,
+            "path_boundable": True,
+            "path_argument_hints": ["path"],
+            "path_scope_action": action,
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -283,3 +308,124 @@ async def test_path_enforcement_allows_candidate_within_scope_and_allowlist_root
         "normalized_paths": [expected_path],
         "path_allowlist_prefixes": ["src"],
     }
+
+
+@pytest.mark.asyncio
+async def test_path_grants_allow_candidate_action_and_report_safe_decision() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read", "edit", "write"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.write",
+        tool_args={"path": "ignored-by-derived-candidates.md"},
+        tool_def=_filesystem_tool_def(action="write"),
+        path_scope_candidates=[
+            PathScopeCandidate(path="documents/story.md", action="write", source="module"),
+        ],
+    )
+
+    assert result["within_scope"] is True
+    assert result["reason"] is None
+    assert result["path_decisions"] == [
+        {
+            "requested_action": "write",
+            "normalized_path": "documents/story.md",
+            "grant_outcome": "allowed",
+            "grant_source": "path_grants",
+            "matched_grant_prefix": "documents",
+            "matched_grant_effect": "allow",
+            "reason_code": None,
+            "redacted": True,
+        }
+    ]
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result["path_decisions"])
+
+
+@pytest.mark.asyncio
+async def test_path_grants_deny_overrides_broader_allow_grant() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read", "edit", "write"]},
+                    {"prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny"},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.patch",
+        tool_args={"diff": "not-inspected-here"},
+        tool_def=_filesystem_tool_def(action="edit"),
+        path_scope_candidates=[
+            PathScopeCandidate(path="documents/private/secret.md", action="edit", source="module"),
+        ],
+    )
+
+    assert result["within_scope"] is False
+    assert result["reason"] == "path_action_denied"
+    assert result["force_approval"] is True
+    assert result["path_decisions"] == [
+        {
+            "requested_action": "edit",
+            "normalized_path": "documents/private/secret.md",
+            "grant_outcome": "denied",
+            "grant_source": "path_grants",
+            "matched_grant_prefix": "documents/private",
+            "matched_grant_effect": "deny",
+            "reason_code": "path_action_denied",
+            "redacted": True,
+        }
+    ]
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_path_grants_are_authoritative_when_legacy_allowlist_also_present() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_allowlist_prefixes": ["documents"],
+                "path_grants": [
+                    {"prefix": "downloads", "actions": ["read"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.write",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="write"),
+    )
+
+    assert result["within_scope"] is False
+    assert result["reason"] == "path_action_not_granted"
+    assert result["path_decisions"][0]["normalized_path"] == "documents/story.md"
+    assert result["path_decisions"][0]["grant_source"] == "path_grants"

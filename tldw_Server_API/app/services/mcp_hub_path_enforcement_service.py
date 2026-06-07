@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 from tldw_Server_API.app.services.mcp_hub_multi_root_path_service import (
@@ -14,6 +16,8 @@ from tldw_Server_API.app.services.mcp_hub_path_scope_service import McpHubPathSc
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import McpHubWorkspaceRootResolver
 
 _FILESYSTEM_CAPABILITIES = frozenset({"filesystem.read", "filesystem.write", "filesystem.delete"})
+_PATH_GRANT_ACTIONS = frozenset({"read", "edit", "write"})
+_PATH_GRANT_EFFECTS = frozenset({"allow", "deny"})
 _SUPPORTED_PATH_ARGUMENT_HINTS = frozenset(
     {"path", "file_path", "target_path", "cwd", "paths", "file_paths", "files[].path"}
 )
@@ -117,6 +121,33 @@ def _policy_allowlist_prefixes(effective_policy: dict[str, Any] | None) -> list[
     return sorted(out)
 
 
+def _policy_path_grants(effective_policy: dict[str, Any] | None) -> list[dict[str, Any]]:
+    policy_document = _as_dict((effective_policy or {}).get("policy_document"))
+    raw_grants = policy_document.get("path_grants")
+    if not isinstance(raw_grants, Iterable) or isinstance(raw_grants, (str, bytes, bytearray, dict)):
+        return []
+    grants: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...], str]] = set()
+    for raw_grant in raw_grants:
+        if not isinstance(raw_grant, Mapping):
+            continue
+        prefix = _normalize_allowlist_prefix(raw_grant.get("prefix", raw_grant.get("path")))
+        if not prefix:
+            continue
+        actions = sorted({action for action in _as_str_list(raw_grant.get("actions")) if action in _PATH_GRANT_ACTIONS})
+        if not actions:
+            continue
+        effect = str(raw_grant.get("effect") or "allow").strip().lower()
+        if effect not in _PATH_GRANT_EFFECTS:
+            continue
+        key = (prefix, tuple(actions), effect)
+        if key in seen:
+            continue
+        seen.add(key)
+        grants.append({"prefix": prefix, "actions": actions, "effect": effect})
+    return sorted(grants, key=lambda grant: (str(grant["prefix"]), str(grant["effect"])))
+
+
 def _allowlist_roots(*, workspace_root: Path, allowlist_prefixes: list[str]) -> list[Path]:
     return [(workspace_root / prefix).resolve(strict=False) for prefix in allowlist_prefixes]
 
@@ -173,6 +204,66 @@ def _extract_candidate_paths(tool_args: Any, hints: list[str]) -> list[str]:
     return _unique(out)
 
 
+def _path_scope_action(metadata: dict[str, Any]) -> str:
+    action = str(metadata.get("path_scope_action") or "").strip().lower()
+    if action in _PATH_GRANT_ACTIONS:
+        return action
+    for flag_name in ("write_capable", "is_write", "mutates_state"):
+        if _as_bool(metadata.get(flag_name)) is True:
+            return "write"
+    return "read"
+
+
+def _relative_path_for_decision(root: Path, candidate: Path) -> str | None:
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return None
+    text = relative.as_posix()
+    return text if text not in {"", "."} else "."
+
+
+def _grant_prefix_matches(relative_path: str, prefix: str) -> bool:
+    return relative_path == prefix or relative_path.startswith(f"{prefix}/")
+
+
+def _path_grant_decision(
+    *,
+    relative_path: str,
+    action: str,
+    path_grants: list[dict[str, Any]],
+) -> dict[str, Any]:
+    matches = [
+        grant for grant in path_grants
+        if action in set(grant.get("actions") or [])
+        and _grant_prefix_matches(relative_path, str(grant.get("prefix") or ""))
+    ]
+    deny_matches = [grant for grant in matches if grant.get("effect") == "deny"]
+    allow_matches = [grant for grant in matches if grant.get("effect") == "allow"]
+    selected: dict[str, Any] | None = None
+    outcome = "not_granted"
+    reason_code: str | None = "path_action_not_granted"
+    if deny_matches:
+        selected = max(deny_matches, key=lambda grant: len(str(grant.get("prefix") or "")))
+        outcome = "denied"
+        reason_code = "path_action_denied"
+    elif allow_matches:
+        selected = max(allow_matches, key=lambda grant: len(str(grant.get("prefix") or "")))
+        outcome = "allowed"
+        reason_code = None
+
+    return {
+        "requested_action": action,
+        "normalized_path": relative_path,
+        "grant_outcome": outcome,
+        "grant_source": "path_grants",
+        "matched_grant_prefix": str((selected or {}).get("prefix") or "") or None,
+        "matched_grant_effect": str((selected or {}).get("effect") or "") or None,
+        "reason_code": reason_code,
+        "redacted": True,
+    }
+
+
 class McpHubPathEnforcementService:
     """Evaluate path-scoped MCP Hub policy for a concrete tool call."""
 
@@ -192,6 +283,7 @@ class McpHubPathEnforcementService:
         tool_name: str,
         tool_args: Any,
         tool_def: dict[str, Any] | None,
+        path_scope_candidates: list[PathScopeCandidate] | None = None,
     ) -> dict[str, Any]:
         if self._path_scope_service is None:
             raise RuntimeError("McpHubPathEnforcementService requires an explicit path_scope_service")
@@ -244,8 +336,15 @@ class McpHubPathEnforcementService:
         if not _path_boundable(metadata):
             return self._blocked_result(scope=scope, reason="tool_not_path_boundable")
 
-        hints = _path_argument_hints(metadata)
-        raw_paths = _extract_candidate_paths(tool_args, hints)
+        inferred_action = _path_scope_action(metadata)
+        candidate_actions: list[str] = []
+        if path_scope_candidates:
+            raw_paths = [candidate.path for candidate in path_scope_candidates]
+            candidate_actions = [candidate.action for candidate in path_scope_candidates]
+        else:
+            hints = _path_argument_hints(metadata)
+            raw_paths = _extract_candidate_paths(tool_args, hints)
+            candidate_actions = [inferred_action for _raw_path in raw_paths]
         if not raw_paths:
             return self._blocked_result(scope=scope, reason="path_unresolvable")
 
@@ -256,6 +355,7 @@ class McpHubPathEnforcementService:
         workspace_root = Path(workspace_root_text).expanduser().resolve(strict=False)
         base_path = Path(str(scope.get("cwd") or workspace_root)).expanduser().resolve(strict=False)
         path_allowlist_prefixes = _policy_allowlist_prefixes(effective_policy)
+        path_grants = _policy_path_grants(effective_policy)
         is_multi_root_candidate = (
             str(scope.get("path_scope_mode") or "").strip() == "workspace_root"
             and len(allowed_workspace_ids) > 1
@@ -294,6 +394,7 @@ class McpHubPathEnforcementService:
                 multi_root_result.get("resolved_workspace_roots_by_id") or {}
             )
             for normalized_text in normalized_paths:
+                path_index = normalized_paths.index(normalized_text)
                 matched_workspace_id = str(path_workspace_map.get(normalized_text) or "").strip()
                 matched_root_text = str(resolved_workspace_roots_by_id.get(matched_workspace_id) or "").strip()
                 if not matched_root_text:
@@ -336,7 +437,50 @@ class McpHubPathEnforcementService:
                         workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),
                         path_workspace_map=path_workspace_map,
                     )
+                if path_grants:
+                    relative_path = _relative_path_for_decision(matched_root, normalized)
+                    if relative_path is None:
+                        return self._blocked_result(
+                            scope=scope,
+                            reason="path_outside_workspace_scope",
+                            normalized_paths=normalized_paths,
+                            path_allowlist_prefixes=path_allowlist_prefixes,
+                            allowed_workspace_ids=allowed_workspace_ids,
+                            workspace_bundle_ids=list(multi_root_result.get("workspace_bundle_ids") or []),
+                            workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),
+                            path_workspace_map=path_workspace_map,
+                        )
+                    action = candidate_actions[path_index] if path_index < len(candidate_actions) else inferred_action
+                    decision = _path_grant_decision(
+                        relative_path=relative_path,
+                        action=action,
+                        path_grants=path_grants,
+                    )
+                    if decision["grant_outcome"] != "allowed":
+                        return self._grant_blocked_result(
+                            scope=scope,
+                            reason=str(decision.get("reason_code") or "path_action_not_granted"),
+                            path_decisions=[decision],
+                        )
             result["normalized_paths"] = normalized_paths
+            if path_grants:
+                path_decisions = []
+                for path_index, normalized_text in enumerate(normalized_paths):
+                    matched_workspace_id = str(path_workspace_map.get(normalized_text) or "").strip()
+                    matched_root_text = str(resolved_workspace_roots_by_id.get(matched_workspace_id) or "").strip()
+                    matched_root = Path(matched_root_text).expanduser().resolve(strict=False)
+                    relative_path = _relative_path_for_decision(matched_root, Path(normalized_text).expanduser().resolve(strict=False))
+                    if relative_path is None:
+                        continue
+                    action = candidate_actions[path_index] if path_index < len(candidate_actions) else inferred_action
+                    path_decisions.append(
+                        _path_grant_decision(
+                            relative_path=relative_path,
+                            action=action,
+                            path_grants=path_grants,
+                        )
+                    )
+                result["path_decisions"] = path_decisions
             result["scope_payload"] = self._scope_payload(
                 scope=scope,
                 normalized_paths=normalized_paths,
@@ -354,7 +498,9 @@ class McpHubPathEnforcementService:
         )
 
         normalized_paths: list[str] = []
+        path_decisions: list[dict[str, Any]] = []
         for raw_path in raw_paths:
+            path_index = len(normalized_paths)
             normalized = _normalize_candidate_path(raw_path, base_path=base_path)
             normalized_paths.append(str(normalized))
             if not _is_within(workspace_root, normalized):
@@ -370,6 +516,28 @@ class McpHubPathEnforcementService:
                     normalized_paths=normalized_paths,
                     path_allowlist_prefixes=path_allowlist_prefixes,
                 )
+            if path_grants:
+                relative_path = _relative_path_for_decision(workspace_root, normalized)
+                if relative_path is None:
+                    return self._blocked_result(
+                        scope=scope,
+                        reason="path_outside_workspace_scope",
+                        normalized_paths=normalized_paths,
+                    )
+                action = candidate_actions[path_index] if path_index < len(candidate_actions) else inferred_action
+                decision = _path_grant_decision(
+                    relative_path=relative_path,
+                    action=action,
+                    path_grants=path_grants,
+                )
+                path_decisions.append(decision)
+                if decision["grant_outcome"] != "allowed":
+                    return self._grant_blocked_result(
+                        scope=scope,
+                        reason=str(decision.get("reason_code") or "path_action_not_granted"),
+                        path_decisions=list(path_decisions),
+                    )
+                continue
             if allowlist_roots and not any(_is_within(root, normalized) for root in allowlist_roots):
                 return self._blocked_result(
                     scope=scope,
@@ -379,10 +547,13 @@ class McpHubPathEnforcementService:
                 )
 
         result["normalized_paths"] = normalized_paths
+        if path_decisions:
+            result["path_decisions"] = list(path_decisions)
         result["scope_payload"] = self._scope_payload(
             scope=scope,
             normalized_paths=normalized_paths,
             path_allowlist_prefixes=path_allowlist_prefixes,
+            path_decisions=path_decisions,
         )
         return result
 
@@ -393,6 +564,7 @@ class McpHubPathEnforcementService:
         normalized_paths: list[str] | None = None,
         reason: str | None = None,
         path_allowlist_prefixes: list[str] | None = None,
+        path_decisions: list[dict[str, Any]] | None = None,
         allowed_workspace_ids: list[str] | None = None,
         workspace_bundle_ids: list[str] | None = None,
         workspace_bundle_roots: list[str] | None = None,
@@ -412,6 +584,8 @@ class McpHubPathEnforcementService:
             payload["normalized_paths"] = list(normalized_paths)
         if path_allowlist_prefixes:
             payload["path_allowlist_prefixes"] = list(path_allowlist_prefixes)
+        if path_decisions:
+            payload["path_decisions"] = [dict(decision) for decision in path_decisions]
         if allowed_workspace_ids:
             payload["allowed_workspace_ids"] = list(allowed_workspace_ids)
         if workspace_bundle_ids:
@@ -426,6 +600,21 @@ class McpHubPathEnforcementService:
             }
         if reason:
             payload["reason"] = reason
+        return {key: value for key, value in payload.items() if value not in (None, "", [])}
+
+    @staticmethod
+    def _safe_grant_scope_payload(
+        *,
+        scope: dict[str, Any],
+        reason: str,
+        path_decisions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload = {
+            "path_scope_mode": str(scope.get("path_scope_mode") or "none").strip() or "none",
+            "workspace_id": str(scope.get("workspace_id") or "").strip() or None,
+            "reason": reason,
+            "path_decisions": [dict(decision) for decision in path_decisions],
+        }
         return {key: value for key, value in payload.items() if value not in (None, "", [])}
 
     def _blocked_result(
@@ -456,6 +645,28 @@ class McpHubPathEnforcementService:
                 workspace_bundle_ids=workspace_bundle_ids,
                 workspace_bundle_roots=workspace_bundle_roots,
                 path_workspace_map=path_workspace_map,
+            ),
+        }
+
+    def _grant_blocked_result(
+        self,
+        *,
+        scope: dict[str, Any],
+        reason: str,
+        path_decisions: list[dict[str, Any]],
+        force_approval: bool = True,
+    ) -> dict[str, Any]:
+        return {
+            "enabled": bool(scope.get("enabled")),
+            "within_scope": False,
+            "reason": reason,
+            "force_approval": force_approval,
+            "normalized_paths": [],
+            "path_decisions": [dict(decision) for decision in path_decisions],
+            "scope_payload": self._safe_grant_scope_payload(
+                scope=scope,
+                reason=reason,
+                path_decisions=path_decisions,
             ),
         }
 
