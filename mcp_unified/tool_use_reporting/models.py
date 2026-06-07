@@ -31,6 +31,13 @@ ToolUseStatus = Literal[
     "rate_limited",
 ]
 SourceKind = Literal["local", "external", "federated", "bridge"]
+ToolUseEventExportFormat = Literal["json", "jsonl"]
+ToolUseReportGroupBy = Literal["profile", "tool_prompt", "model", "tool"]
+
+MAX_EVENT_QUERY_LIMIT = 10_000
+MAX_REPORT_EVENT_LIMIT = 5_000
+MAX_REPORT_GROUP_LIMIT = 500
+MAX_REPORT_REASON_CODE_LIMIT = 25
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -199,3 +206,155 @@ class ToolUseEvent(BaseModel):
                 self.requested_tool_name,
             )
         return self
+
+
+class ToolUseEventQuery(BaseModel):
+    """Bounded query filters for metadata-only tool-use events."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    limit: int = MAX_EVENT_QUERY_LIMIT
+    cursor: str | None = None
+    runtime_surface: RuntimeSurface | None = None
+    requested_tool_name: str | None = None
+    effective_tool_name: str | None = None
+    profile_id: str | None = None
+    mode_id: str | None = None
+    model_id: str | None = None
+    tool_prompt_id: str | None = None
+    status: ToolUseStatus | None = None
+    created_at_epoch_us_gte: int | None = None
+    created_at_epoch_us_lt: int | None = None
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _clamp_limit(cls, value: Any) -> int:
+        """Clamp query limits to a bounded, positive range."""
+
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            return MAX_EVENT_QUERY_LIMIT
+        return min(max(1, limit), MAX_EVENT_QUERY_LIMIT)
+
+    @field_validator(
+        "cursor",
+        "requested_tool_name",
+        "effective_tool_name",
+        "profile_id",
+        "mode_id",
+        "model_id",
+        "tool_prompt_id",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_query_ids(cls, value: Any, info: Any) -> str | None:
+        """Sanitize optional query dimensions."""
+
+        return _safe_optional_id(value, field=str(info.field_name))
+
+
+class ToolUseReportQuery(BaseModel):
+    """Bounded aggregate report request for tool-use events."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    group_by: ToolUseReportGroupBy
+    event_limit: int = 1_000
+    group_limit: int = 100
+    top_reason_code_limit: int = 5
+    runtime_surface: RuntimeSurface | None = None
+    requested_tool_name: str | None = None
+    effective_tool_name: str | None = None
+    profile_id: str | None = None
+    mode_id: str | None = None
+    model_id: str | None = None
+    tool_prompt_id: str | None = None
+    status: ToolUseStatus | None = None
+
+    @field_validator("event_limit", mode="before")
+    @classmethod
+    def _clamp_event_limit(cls, value: Any) -> int:
+        """Clamp report scan limits."""
+
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            return 1_000
+        return min(max(1, limit), MAX_REPORT_EVENT_LIMIT)
+
+    @field_validator("group_limit", mode="before")
+    @classmethod
+    def _clamp_group_limit(cls, value: Any) -> int:
+        """Clamp report group limits."""
+
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            return 100
+        return min(max(1, limit), MAX_REPORT_GROUP_LIMIT)
+
+    @field_validator("top_reason_code_limit", mode="before")
+    @classmethod
+    def _clamp_reason_code_limit(cls, value: Any) -> int:
+        """Clamp report reason-code limits."""
+
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            return 5
+        return min(max(1, limit), MAX_REPORT_REASON_CODE_LIMIT)
+
+    @field_validator(
+        "requested_tool_name",
+        "effective_tool_name",
+        "profile_id",
+        "mode_id",
+        "model_id",
+        "tool_prompt_id",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_report_ids(cls, value: Any, info: Any) -> str | None:
+        """Sanitize optional report filters."""
+
+        return _safe_optional_id(value, field=str(info.field_name))
+
+    def to_event_query(self, *, limit: int) -> ToolUseEventQuery:
+        """Convert report filters to an event query."""
+
+        return ToolUseEventQuery(
+            limit=limit,
+            runtime_surface=self.runtime_surface,
+            requested_tool_name=self.requested_tool_name,
+            effective_tool_name=self.effective_tool_name,
+            profile_id=self.profile_id,
+            mode_id=self.mode_id,
+            model_id=self.model_id,
+            tool_prompt_id=self.tool_prompt_id,
+            status=self.status,
+        )
+
+
+class ToolUseReportRow(BaseModel):
+    """One aggregate report row for a bounded event set."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    group_key: str
+    call_count: int
+    tool_call_success_rate: float
+    top_reason_codes: list[dict[str, int | str]] = Field(default_factory=list)
+    p50_duration_ms: float | None = None
+    p95_duration_ms: float | None = None
+
+
+class ToolUseReport(BaseModel):
+    """Aggregate report payload with bounded disclosure metadata."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    rows: list[ToolUseReportRow] = Field(default_factory=list)
+    events_scanned: int
+    event_limit: int
+    truncated: bool

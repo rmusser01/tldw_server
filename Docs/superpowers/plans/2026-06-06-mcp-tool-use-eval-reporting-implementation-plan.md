@@ -294,7 +294,7 @@ git commit -m "feat: add MCP tool-use reporting recorder contract"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_store.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 
-- [ ] **Step 1: Write failing in-memory and SQLite store contract tests**
+- [x] **Step 1: Write failing in-memory and SQLite store contract tests**
 
 ```python
 from datetime import datetime, timezone, timedelta
@@ -332,7 +332,7 @@ async def test_store_queries_events_by_epoch_newest_first(tmp_path, store_factor
     assert [row.event_id for row in rows] == [newer.event_id, older.event_id]
 ```
 
-- [ ] **Step 2: Implement store protocol and in-memory store**
+- [x] **Step 2: Implement store protocol and in-memory store**
 
 Implementation requirements:
 
@@ -344,7 +344,7 @@ Implementation requirements:
 - Query filters mirror the spec filters and always apply a maximum limit.
 - In-memory store returns copy-isolated Pydantic models.
 
-- [ ] **Step 3: Implement SQLAlchemy-backed SQLite store**
+- [x] **Step 3: Implement SQLAlchemy-backed SQLite store**
 
 Implementation requirements:
 
@@ -357,7 +357,7 @@ Implementation requirements:
 - Provide `close()` and `aclose()`.
 - Use bounded limits and cursor pagination. A cursor can be an opaque string encoding `(created_at_epoch_us, event_id)`.
 
-- [ ] **Step 4: Write failing report aggregation tests**
+- [x] **Step 4: Write failing report aggregation tests**
 
 ```python
 from mcp_unified.tool_use_reporting.reporting import ToolUseReportService
@@ -409,7 +409,7 @@ async def test_report_discloses_when_event_limit_truncates_aggregates():
     assert report.truncated is True
 ```
 
-- [ ] **Step 5: Implement report service**
+- [x] **Step 5: Implement report service**
 
 Implementation requirements:
 
@@ -420,7 +420,7 @@ Implementation requirements:
 - Include `events_scanned`, `event_limit`, and `truncated` on the report payload. Set `truncated=true` whenever the query hit the event limit before exhausting the filtered window.
 - Return JSON-serializable Pydantic models.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -433,7 +433,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add mcp_unified/tool_use_reporting tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_store.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py

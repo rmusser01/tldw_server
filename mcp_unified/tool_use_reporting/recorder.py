@@ -8,6 +8,7 @@ from typing import Protocol
 from loguru import logger
 
 from mcp_unified.tool_use_reporting.models import ToolUseEvent
+from mcp_unified.tool_use_reporting.store import ToolUseEventStore
 
 
 class ToolUseRecorder(Protocol):
@@ -15,13 +16,6 @@ class ToolUseRecorder(Protocol):
 
     async def record_tool_use(self, event: ToolUseEvent) -> None:
         """Persist or forward one metadata-only tool-use event."""
-
-
-class ToolUseEventStore(Protocol):
-    """Minimal async store capability needed by the store-backed recorder."""
-
-    async def append_event(self, event: ToolUseEvent) -> None:
-        """Append one immutable tool-use event."""
 
 
 class NoopToolUseRecorder:
