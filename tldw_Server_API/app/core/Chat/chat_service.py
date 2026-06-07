@@ -1708,7 +1708,7 @@ def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str 
         validate_base_url_override,
     )
 
-    allowlist = resolve_byok_base_url_allowlist()
+    allowlist = _resolve_chat_provider_allowlist(resolve_byok_base_url_allowlist())
     if provider_key not in allowlist:
         raise ChatBadRequestError(
             provider=provider_key or None,
@@ -1731,19 +1731,6 @@ def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str 
         raise ChatBadRequestError(provider=provider_key or None, message=str(exc)) from exc
 
 
-_LOCAL_CHAT_PROVIDERS = {
-    "local-llm",
-    "llama.cpp",
-    "kobold",
-    "ooba",
-    "tabbyapi",
-    "vllm",
-    "ollama",
-    "aphrodite",
-    "mlx",
-}
-
-
 def _resolve_chat_provider_name(provider: str | None) -> str:
     """Return the canonical chat provider key used for adapter dispatch."""
     provider_key = (provider or "").strip().lower()
@@ -1753,6 +1740,22 @@ def _resolve_chat_provider_name(provider: str | None) -> str:
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 
     return get_registry().resolve_provider_name(provider_key)
+
+
+def _resolve_chat_provider_allowlist(providers: set[str]) -> set[str]:
+    """Canonicalize provider names and aliases used in BYOK allowlists."""
+    return {
+        resolved
+        for provider in providers
+        if (resolved := _resolve_chat_provider_name(provider))
+    }
+
+
+def _is_local_chat_provider(provider: str | None) -> bool:
+    """Return whether a chat provider name or alias resolves to a local adapter."""
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+
+    return get_registry().is_local_provider_name(provider)
 
 
 def _find_local_request_url_override_keys(chat_args: dict[str, Any]) -> list[str]:
@@ -1767,7 +1770,7 @@ def _find_local_request_url_override_keys(chat_args: dict[str, Any]) -> list[str
 def _reject_local_request_url_overrides(provider: str, chat_args: dict[str, Any]) -> None:
     """Reject request-level endpoint URL overrides for local chat providers."""
     provider_key = (provider or "").strip().lower()
-    if provider_key not in _LOCAL_CHAT_PROVIDERS:
+    if not _is_local_chat_provider(provider_key):
         return
 
     override_keys = _find_local_request_url_override_keys(chat_args)
@@ -1802,15 +1805,16 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
 
     _reject_local_request_url_overrides(provider, chat_args)
+    is_local_provider = _is_local_chat_provider(provider)
 
     explicit_app_config = chat_args.get("app_config")
     app_config = explicit_app_config if explicit_app_config is not None else (
-        None if provider in _LOCAL_CHAT_PROVIDERS else ensure_app_config(None)
+        None if is_local_provider else ensure_app_config(None)
     )
     model = chat_args.get("model")
     if model is None and app_config is not None:
         model = resolve_provider_model(provider, app_config)
-    if not model and provider not in _LOCAL_CHAT_PROVIDERS:
+    if not model and not is_local_provider:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
 
     api_key = chat_args.get("api_key") or resolve_provider_api_key_from_config(provider, app_config)

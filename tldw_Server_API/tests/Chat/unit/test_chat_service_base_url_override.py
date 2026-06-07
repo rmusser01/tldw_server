@@ -27,6 +27,24 @@ def test_base_url_override_allowed(monkeypatch):
     assert request["base_url"] == "https://example.com/v1"  # nosec B101
 
 
+def test_base_url_override_allowlist_accepts_provider_alias(monkeypatch):
+    monkeypatch.setattr(byok_helpers, "resolve_byok_base_url_allowlist", lambda: {"oai"})
+    monkeypatch.setattr(byok_helpers, "validate_base_url_override", lambda value: value)
+    args = _base_args()
+    args.update(
+        {
+            "api_provider": "oai",
+            "base_url": "https://example.com/v1",
+            "trusted_base_url_override": True,
+        }
+    )
+
+    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+
+    assert provider == "openai"  # nosec B101
+    assert request["base_url"] == "https://example.com/v1"  # nosec B101
+
+
 def test_base_url_override_rejected_when_untrusted(monkeypatch):
     monkeypatch.setattr(byok_helpers, "resolve_byok_base_url_allowlist", lambda: {"openai"})
     args = _base_args()

@@ -4,7 +4,7 @@ title: Reject local LLM request URL overrides
 status: Done
 assignee: []
 created_date: '2026-06-07 16:49'
-updated_date: '2026-06-07 17:09'
+updated_date: '2026-06-07 17:14'
 labels:
   - llm
   - providers
@@ -44,6 +44,8 @@ Alias hardening follow-up: provider names are canonicalized through the LLM adap
 Rebased PR branch on latest origin/dev and addressed Gemini review threads by allowing None in _resolve_chat_provider_name typing and matching the local override helper signatures to dict[str, Any]. Post-review verification: focused Chat/LLM regression suite passed with 24 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names.
 
 Addressed the actionable CodeRabbit docstring warning by adding docstrings to the new chat-service helper functions. Re-ran focused verification after the docstring follow-up: Chat/LLM regression suite passed with 24 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names. Remaining PR description warning requires the human-authored Change summary mandated by repository policy.
+
+Addressed the remaining actionable Qodo review threads: BYOK base_url allowlist entries are now canonicalized through the chat provider alias resolver, and local-provider detection now uses a registry-owned local provider predicate instead of a duplicated chat_service set. Added regression coverage for allowlisting the OpenAI alias oai. Verification after these changes: focused Chat/LLM regression suite passed with 25 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
