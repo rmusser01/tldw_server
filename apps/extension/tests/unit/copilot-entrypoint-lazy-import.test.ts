@@ -11,6 +11,9 @@ describe("copilot content entrypoint", () => {
   test("keeps shared popup implementation behind runtime import", () => {
     const source = readFileSync(entrypointPath, "utf8")
 
+    expect(source).toContain(
+      'import { defineContentScript } from "wxt/utils/define-content-script"'
+    )
     expect(source).toContain("defineContentScript")
     expect(source).toMatch(
       /import\(\s*["']@tldw\/ui\/entries\/copilot-popup\.content["']\s*\)/
