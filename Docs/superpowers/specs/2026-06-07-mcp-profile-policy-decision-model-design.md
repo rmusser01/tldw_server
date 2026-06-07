@@ -96,6 +96,22 @@ A local review pass found and incorporated four important clarifications:
   intentionally exposes them. Large external catalogs should still use
   progressive disclosure rather than dumping all askable tools into context.
 
+A second review pass added implementation-critical clarifications:
+
+- `ask` must not be represented only as `canExecute=false`, because current
+  virtual CLI catalog filtering treats `canExecute=false` as hidden. Askable
+  tools need explicit approval metadata while remaining callable into the
+  approval path.
+- Sandbox/process assertions can downgrade `allow` to `ask` or `deny`, so they
+  must run before final approval routing.
+- Hooks need explicit denied-call semantics: blocking hooks do not run to
+  loosen already-denied calls; managed observer hooks may receive redacted deny
+  events for audit.
+- Gitignore-style path policies compile to a flat matcher IR, not to enumerated
+  filesystem paths.
+- Command policy should use argv-token matchers rather than shell-string
+  matchers.
+
 ## Core Decision Contract
 
 The shared decision result should have exactly three outcomes:
@@ -111,6 +127,7 @@ The shared decision result should have exactly three outcomes:
   "matched_rules": [],
   "requires_approval": false,
   "visibility": "hidden",
+  "call_state": "blocked",
   "explainable": true
 }
 ```
@@ -124,6 +141,25 @@ Outcomes:
 - `allow`: the policy layer has no objection. This is not sufficient if a
   sandbox, credential grant, path rule, hook, or runtime preflight later denies
   the call.
+
+Catalog and call-state fields are derived from the outcome plus profile
+visibility rules:
+
+- `visibility`: one of `hidden`, `direct`, `deferred`, or `debug_only`.
+- `call_state`: one of `blocked`, `approval_required`, or `callable`.
+- `requires_approval`: `true` only when `call_state="approval_required"`.
+
+Compatibility rule for existing `tools/list` payloads:
+
+- `deny` should normally omit the tool from model-facing catalogs. If a debug
+  surface includes it, `canExecute=false` is appropriate.
+- `ask` should not rely on `canExecute=false` when the tool must remain visible.
+  Use `canExecute=true` plus `requiresApproval=true` and
+  `decision.outcome="ask"` so existing call paths can route into approval.
+- `allow` uses `canExecute=true` and `requiresApproval=false`.
+
+This avoids hiding askable tools from adapters such as the current virtual CLI,
+which filters out tools where `canExecute` is false.
 
 Precedence is always:
 
@@ -188,14 +224,20 @@ Tool-call preparation should produce an ordered policy trace:
 1. Normalize subject identifiers: tool name, external MCP server/tool name,
    path candidates, domains, command invocations, and credential slots.
 2. Resolve the effective profile and session policy.
-3. Evaluate explicit deny rules.
-4. Evaluate allow/ask rules by subject type.
-5. Evaluate path, domain, credential, external MCP, and process constraints.
-6. Run pre-tool hooks that are allowed for this deployment.
-7. Re-run validation and derived candidate extraction if a hook rewrites input.
-8. Evaluate runtime approval based on the final `ask` decision.
-9. Check sandbox/process assertions for tools that spawn or delegate work.
-10. Produce a final decision plus redacted explanation metadata.
+3. Validate schema and derive path/command/external candidates needed for
+   policy evaluation.
+4. Evaluate server-wide disabled-tool settings and explicit deny rules.
+5. If the call is already denied, skip blocking hooks and route only redacted
+   observer/audit hooks that are configured for deny events.
+6. Evaluate allow/ask rules by subject type.
+7. Evaluate path, domain, credential, external MCP, and process constraints.
+8. Run blocking pre-tool hooks that are allowed for this deployment.
+9. If a hook rewrites input, re-run schema validation, candidate extraction,
+   explicit deny checks, and scoped policy checks.
+10. Check sandbox/process assertions for tools that spawn or delegate work.
+11. Merge all decisions, applying `deny > ask > allow`.
+12. Evaluate runtime approval if the final call state is `approval_required`.
+13. Produce a final decision plus redacted explanation metadata.
 
 Rules should be deterministic and stable. The policy trace should record enough
 detail to explain a decision without storing raw file content, raw diffs,
@@ -243,9 +285,9 @@ New policy documents may add a structured rule list:
     {"pattern": "fs.write", "outcome": "deny"}
   ],
   "command_rules": [
-    {"pattern": "git status", "outcome": "allow"},
-    {"pattern": "git *", "outcome": "ask"},
-    {"pattern": "rm *", "outcome": "deny"}
+    {"argv": ["git", "status"], "outcome": "allow"},
+    {"argv": ["git", "*"], "outcome": "ask"},
+    {"argv": ["rm", "*"], "outcome": "deny"}
   ],
   "mcp_rules": [
     {"pattern": "mcp__github", "outcome": "ask"},
@@ -261,8 +303,9 @@ New policy documents may add a structured rule list:
 from execution:
 
 - `deny`: hidden from normal model catalog and tool search.
-- `ask`: visible with `canExecute=false` or `requiresApproval=true`, depending
-  on the existing response contract for the surface.
+- `ask`: visible only when directly granted or explicitly promoted, with
+  `requiresApproval=true`, `decision.outcome="ask"`, and a call path that
+  routes into approval.
 - `allow`: visible and executable if all other constraints pass.
 
 Default visibility rule:
@@ -274,6 +317,12 @@ Default visibility rule:
   and
 - denied tools stay hidden outside admin/debug views.
 
+Existing clients that only understand `canExecute` need a compatibility rule:
+`canExecute=false` means hidden/blocked, not "askable". Askable direct tools
+should keep `canExecute=true` and add approval metadata. Newer clients should
+prefer `decision.outcome` and `call_state` over inferring behavior from
+`canExecute` alone.
+
 Admin/debug surfaces may include hidden denied tools when requested, but only
 with explanation metadata and without sensitive tool arguments.
 
@@ -283,9 +332,10 @@ requires approval.
 
 ## Path Rule Semantics
 
-The executable runtime should continue consuming a flat effective grant list,
-but the authored policy layer should support richer patterns that compile into
-flat rules.
+The executable runtime should continue consuming a flat effective grant list or
+matcher list, but the authored policy layer should support richer patterns that
+compile into a flat matcher IR. The compiler must not expand `**` patterns into
+filesystem enumerations.
 
 Recommended authored shape:
 
@@ -314,12 +364,27 @@ Pattern rules:
   trusted workspace-root resolver into a workspace-relative path.
 - Matching is segment-aware and must not let `docs` match `docs-private`.
 
+Compiled matcher IR should preserve:
+
+- normalized pattern;
+- action set;
+- outcome;
+- source profile/policy id;
+- anchor mode;
+- case-folding mode for the target platform;
+- original authored pattern for explanations; and
+- validation warnings, if any.
+
 Symlink rules:
 
 - For reads and writes, evaluate both the symlink path as requested and the
   resolved target path.
 - Allow only if both paths are allowed for the requested action.
 - Deny if either path matches a deny rule.
+- Deny if the target cannot be resolved safely.
+- Deny if the resolved target leaves the trusted workspace/root set.
+- Normal explain payloads may include only redacted or workspace-relative
+  symlink target summaries, never absolute host target paths.
 - Mutating tools should continue rejecting symlink targets unless a future
   design adds a tightly scoped symlink-follow mode.
 
@@ -330,6 +395,15 @@ External MCP tools should have normalized names that are safe to match:
 - `mcp__server` means the server as a subject, for lifecycle/discovery grants.
 - `mcp__server__*` means every exposed tool for that server.
 - `mcp__server__tool` means one concrete external tool.
+
+Canonicalization:
+
+- server ids and tool ids are lowercased for matching;
+- spaces and non-identifier separators normalize to `_`;
+- repeated separators collapse to one `_`;
+- literal `__` in upstream ids is escaped before joining server/tool segments;
+- collisions fail closed and require an explicit admin alias; and
+- the original upstream display name is preserved only for UI/explain output.
 
 Rules:
 
@@ -390,6 +464,16 @@ Hooks may tighten policy but cannot bypass:
 A blocking hook failure should be configurable as fail-closed by default for
 managed hooks and fail-open only for explicitly non-critical observer hooks.
 
+Denied-call behavior:
+
+- Blocking hooks do not run to reconsider calls already denied by explicit
+  policy, server-wide disablement, or path/credential/external grants.
+- Managed observer hooks may receive redacted deny events for audit and
+  metrics, but their output cannot change the final decision.
+- Hook rewrites create a new candidate set and restart scoped evaluation; the
+  original and rewritten candidates should both be represented in explain
+  metadata using redacted summaries.
+
 ## Shell Alias And Virtual CLI Hardening
 
 The existing `run` module exposes `run`, `bash`, and `shell` as governed virtual
@@ -411,7 +495,7 @@ Rules:
 
 Legacy `Bash(...)` pattern rules:
 
-- `Bash(git *)` means command subject pattern `git *` for governed
+- `Bash(git *)` compiles to command argv pattern `["git", "*"]` for governed
   `run`/`bash`/`shell` aliases.
 - The pattern applies to one parsed command invocation, not the whole raw
   command string.
@@ -444,6 +528,38 @@ Dedicated tools should be preferred for:
 - deployment actions.
 
 Shell-style string matching is too fragile for these behaviors.
+
+Command matcher grammar:
+
+- Match parsed argv tokens, not raw command strings.
+- `*` matches one argv token, not arbitrary text.
+- `**` is not supported for commands in the first slice.
+- Quoted tokens are compared after parsing and normalization.
+- Environment assignment syntax, command substitution, shell functions,
+  redirection, heredocs, glob expansion, variable expansion, and subshells are
+  rejected unless a future parser explicitly models them.
+
+## Canonical Risk Classes
+
+Permission modes should use canonical risk classes from tool metadata rather
+than free-form labels.
+
+| Risk class | Typical tools | Default posture |
+| --- | --- | --- |
+| `read` | `fs.read`, search/list/describe tools | allow in most modes |
+| `bounded_edit` | `fs.patch` on existing files with preimage checks | ask by default, allow in `accept-edits` with path grants |
+| `whole_write` | `fs.write`, file create/replace | ask or deny unless explicitly granted |
+| `destructive` | delete, purge, reset, revoke, deploy rollback | deny unless explicitly granted |
+| `process` | test runners, package commands, external process launch | ask unless sandboxed and explicitly granted |
+| `network_read` | web fetch/search, remote metadata reads | ask or allow based on provider configuration |
+| `network_write` | issue creation, API mutation, CI/deploy actions | ask or deny unless explicitly granted |
+| `credentialed` | calls using stored credential grants | ask unless the grant and profile explicitly allow |
+| `browser_control` | CDP navigation, clicking, form entry | ask unless scoped to inspection/read-only |
+| `memory_write` | Graphiti/memory mutation tools | ask or deny unless role explicitly owns memory writes |
+| `admin` | profile, grant, server, secret, snapshot mutation | deny outside admin profiles |
+
+Tools may carry multiple risk classes. The most restrictive resulting decision
+wins.
 
 ## Sandbox Semantics
 
@@ -556,6 +672,8 @@ dedicated tool exists.
 ### Slice 1: Decision Core And Explain Contract
 
 - Add package-level decision dataclasses/Pydantic models.
+- Include `outcome`, `visibility`, `call_state`, `requires_approval`,
+  `matched_rules`, and redaction metadata in the core response schema.
 - Compile existing profile fields into decision rules.
 - Add `deny > ask > allow` merge tests.
 - Add explain response schema and a package-local simulation API.
@@ -566,13 +684,18 @@ dedicated tool exists.
 - Add `permission_mode` handling.
 - Update tool listing/search/category surfaces to hide denied tools and mark
   ask-scoped tools.
+- Preserve visible askable tools with `canExecute=true`,
+  `requiresApproval=true`, and `decision.outcome="ask"` so existing adapters do
+  not hide them accidentally.
 - Add regression coverage for `locked/dontAsk` converting ask to deny.
 
 ### Slice 3: Path Pattern Compiler
 
-- Add authored gitignore-style path patterns that compile to flat grants.
+- Add authored gitignore-style path patterns that compile to flat matcher IR.
 - Preserve current flat grants as executable runtime input.
 - Add Windows normalization and symlink double-evaluation tests.
+- Add tests for unresolved symlinks, out-of-workspace symlink targets, and
+  redacted explain payloads.
 
 ### Slice 4: External MCP Wildcard Grants
 
@@ -580,29 +703,35 @@ dedicated tool exists.
 - Keep server install/start, credential use, and tool execution as separate
   subjects.
 - Add deny-over-wildcard-allow tests.
+- Add canonicalization and collision tests for server/tool ids containing
+  spaces, case differences, separators, and literal `__`.
 
 ### Slice 5: Shell Alias Hardening
 
 - Extend parser/preflight tests for command chains and wrappers.
+- Replace command-string matching with argv-token policy rules.
 - Add conservative wrapper modeling for `timeout`, `time`, and `nice` only if
   their grammars are small enough to validate.
 - Deny or recommend dedicated tools for high-risk wrappers and package runners.
+- Add regression tests for `Bash(git *)` matching `git status` but not
+  `git status && rm -rf build`.
 
 ### Slice 6: Hooks Enforcement Integration
 
 - Make hook outputs use the shared decision model.
 - Ensure hook `allow` cannot bypass explicit denies.
 - Include hook outcomes in explain and tool-use reporting.
+- Add denied-call observer hook behavior and fail-closed managed hook tests.
 
 ## Open Questions
 
-1. Should `ask` tools be included in the model's normal tool list with
-   `requiresApproval=true`, or should they only appear through tool search and
-   category disclosure?
+1. Which direct profile tools should be promoted as visible askable tools versus
+   deferred behind category/search disclosure?
 2. Should the first explain API live in the standalone package CLI only, or also
    expose a FastAPI admin route in the same PR?
-3. Should permission modes be profile-only, session-only, or allow session
-   overrides that can only tighten the profile mode?
+3. Where should tightening-only session overrides be stored and audited:
+   request metadata, session records, profile assignments, or ACP session
+   state?
 4. How much shell wrapper support is worth shipping before dedicated git/test
    and package-manager tools make most wrappers unnecessary?
 
