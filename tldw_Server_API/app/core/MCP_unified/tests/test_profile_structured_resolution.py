@@ -378,6 +378,52 @@ def test_effective_policy_allows_tool_execution_with_explicit_allowed_tool() -> 
     assert result.decision.outcome == "allow"
 
 
+def test_effective_policy_ignores_unrelated_invalid_legacy_bash_pattern_for_tool_resolution() -> None:
+    profile = MCPProfile(
+        id="tool-mapped",
+        name="Tool Mapped",
+        policy_document=ProfilePolicy(
+            allowed_tools=["filesystem.read", "Bash(*)"],
+        ),
+    )
+
+    result = profile_resolution.build_effective_policy_result(
+        profile,
+        tool_name="filesystem.read",
+    )
+
+    assert result.status == "resolved"
+    assert result.reason_code == "resolved"
+    assert result.policy is not None
+    assert result.decision is not None
+    assert result.decision.outcome == "allow"
+
+
+def test_effective_policy_ignores_unrelated_invalid_structured_rules_for_tool_resolution() -> None:
+    profile = MCPProfile(
+        id="tool-mapped",
+        name="Tool Mapped",
+        policy_document=ProfilePolicy.model_validate(
+            {
+                "allowed_tools": ["filesystem.read"],
+                "command_rules": [{"pattern": "git status", "outcome": "allow"}],
+                "mcp_rules": [{"outcome": "deny"}],
+            }
+        ),
+    )
+
+    result = profile_resolution.build_effective_policy_result(
+        profile,
+        tool_name="filesystem.read",
+    )
+
+    assert result.status == "resolved"
+    assert result.reason_code == "resolved"
+    assert result.policy is not None
+    assert result.decision is not None
+    assert result.decision.outcome == "allow"
+
+
 def test_effective_policy_preserves_capability_denial_after_allowed_tool_decision() -> None:
     profile = MCPProfile(
         id="capability-denied",

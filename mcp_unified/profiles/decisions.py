@@ -150,7 +150,17 @@ def merge_policy_decisions(
 def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRule]:
     """Compile legacy and structured profile policy rules into typed records."""
 
-    rules = compile_profile_tool_policy_rules(policy_document)
+    rules = _compile_legacy_tool_rules(
+        policy_document,
+        include_legacy_bash=True,
+    )
+    rules.extend(
+        _compile_structured_rules(
+            policy_document,
+            field_name="tool_rules",
+            rule_type="tool",
+        )
+    )
     rules.extend(
         _compile_structured_rules(
             policy_document,
@@ -171,24 +181,10 @@ def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRul
 def compile_profile_tool_policy_rules(policy_document: Any) -> list[PolicyDecisionRule]:
     """Compile only legacy and structured tool policy rules."""
 
-    rules: list[PolicyDecisionRule] = []
-    for pattern in _as_sequence(_policy_value(policy_document, "denied_tools")):
-        rules.append(
-            _compile_legacy_tool_pattern(
-                pattern,
-                outcome="deny",
-                source="denied_tools",
-            )
-        )
-    for pattern in _as_sequence(_policy_value(policy_document, "allowed_tools")):
-        rules.append(
-            _compile_legacy_tool_pattern(
-                pattern,
-                outcome="allow",
-                source="allowed_tools",
-            )
-        )
-
+    rules = _compile_legacy_tool_rules(
+        policy_document,
+        include_legacy_bash=False,
+    )
     rules.extend(
         _compile_structured_rules(
             policy_document,
@@ -196,6 +192,35 @@ def compile_profile_tool_policy_rules(policy_document: Any) -> list[PolicyDecisi
             rule_type="tool",
         )
     )
+    return rules
+
+
+def _compile_legacy_tool_rules(
+    policy_document: Any,
+    *,
+    include_legacy_bash: bool,
+) -> list[PolicyDecisionRule]:
+    """Compile legacy allowed and denied fields with optional Bash rule support."""
+
+    rules: list[PolicyDecisionRule] = []
+    for pattern in _as_sequence(_policy_value(policy_document, "denied_tools")):
+        rule = _compile_legacy_tool_pattern(
+            pattern,
+            outcome="deny",
+            source="denied_tools",
+            include_legacy_bash=include_legacy_bash,
+        )
+        if rule is not None:
+            rules.append(rule)
+    for pattern in _as_sequence(_policy_value(policy_document, "allowed_tools")):
+        rule = _compile_legacy_tool_pattern(
+            pattern,
+            outcome="allow",
+            source="allowed_tools",
+            include_legacy_bash=include_legacy_bash,
+        )
+        if rule is not None:
+            rules.append(rule)
     return rules
 
 
@@ -269,7 +294,8 @@ def _compile_legacy_tool_pattern(
     *,
     outcome: PolicyDecisionOutcome,
     source: str,
-) -> PolicyDecisionRule:
+    include_legacy_bash: bool,
+) -> PolicyDecisionRule | None:
     """Compile one legacy allowed or denied tool pattern."""
 
     if not isinstance(pattern, str):
@@ -277,6 +303,8 @@ def _compile_legacy_tool_pattern(
     if not pattern.strip():
         raise ValueError("legacy tool policy patterns cannot be empty")
     if pattern.startswith("Bash(") and pattern.endswith(")"):
+        if not include_legacy_bash:
+            return None
         return _compile_bash_pattern(
             pattern[len("Bash(") : -1],
             outcome=outcome,

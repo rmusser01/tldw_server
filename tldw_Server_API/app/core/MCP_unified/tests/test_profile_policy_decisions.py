@@ -127,6 +127,19 @@ def test_evaluate_profile_tool_decision_ignores_unrelated_invalid_mcp_rules() ->
     assert decision.reason_code == "tool_allowed"
 
 
+def test_evaluate_profile_tool_decision_ignores_unrelated_invalid_legacy_bash_pattern() -> None:
+    profile = MCPProfile(
+        id="reader",
+        name="Reader",
+        policy_document=ProfilePolicy(allowed_tools=["fs.read", "Bash(*)"]),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.read")
+
+    assert decision.outcome == "allow"
+    assert decision.reason_code == "tool_allowed"
+
+
 def test_evaluate_profile_tool_decision_requires_exact_tool_rule_pattern() -> None:
     profile = MCPProfile(
         id="wildcard-like",
