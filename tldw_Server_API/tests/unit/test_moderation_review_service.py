@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
+from tldw_Server_API.app.core.DB_Management import Moderation_Review_DB as review_db
 from tldw_Server_API.app.core.Moderation.review_service import ModerationReviewService
 from tldw_Server_API.app.core.Moderation.review_store import ModerationReviewStore
 
@@ -39,9 +42,18 @@ def _record(service: ModerationReviewService, *, key: str = "key-1", action: str
 
 
 @pytest.mark.unit
-def test_review_service_maps_decisions_to_statuses_and_uses_actor_from_call(tmp_path):
+def test_review_service_maps_decisions_to_statuses_and_uses_actor_from_call(tmp_path, monkeypatch):
     service = _service(tmp_path)
     item = _record(service)
+    audit_ids = iter(
+        [
+            uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            uuid.UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        ]
+    )
+    monkeypatch.setattr(review_db.uuid, "uuid4", lambda: next(audit_ids))
+    monkeypatch.setattr(review_db, "_utc_now", lambda: "2999-01-01T00:00:00Z")
 
     response = service.record_decision(
         item["id"],

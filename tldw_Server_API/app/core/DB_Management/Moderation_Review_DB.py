@@ -663,7 +663,7 @@ class ModerationReviewStore:
                 f"""
                 SELECT * FROM moderation_review_audit_events
                 {where}
-                ORDER BY created_at DESC, id DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,  # nosec B608
                 tuple(params + [safe_limit + 1, offset]),
