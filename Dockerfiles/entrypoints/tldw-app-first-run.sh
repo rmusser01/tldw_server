@@ -156,7 +156,7 @@ has_existing_auth_state() {
 }
 
 count_existing_byok_payloads() {
-  python - <<'PY'
+  "$PYTHON_BIN" - <<'PY'
 import os
 import sqlite3
 import sys
@@ -393,7 +393,7 @@ if [ "$RUN_AUTH_INIT_ON_START" != "0" ] && [ "$should_run_auth_init" = "1" ]; th
   # --- Standard AuthNZ initialization (single_user and multi_user) ---
   if [ ! -f "$AUTH_MARKER_FILE" ]; then
     echo "[entrypoint] Running first-use auth initialization..."
-    if python -m tldw_Server_API.app.core.AuthNZ.initialize --non-interactive 2>&1; then
+    if "$PYTHON_BIN" -m tldw_Server_API.app.core.AuthNZ.initialize --non-interactive 2>&1; then
       touch "$AUTH_MARKER_FILE"
       echo "[entrypoint] Auth initialization complete."
     else
@@ -418,7 +418,7 @@ if [ "$RUN_AUTH_INIT_ON_START" != "0" ] && [ "$should_run_auth_init" = "1" ]; th
     if [ -n "${ADMIN_USERNAME:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
       echo "[first-run] Creating initial admin user: $ADMIN_USERNAME"
       # Idempotent: exits 0 if user already exists
-      python -m tldw_Server_API.app.core.AuthNZ.create_admin \
+      "$PYTHON_BIN" -m tldw_Server_API.app.core.AuthNZ.create_admin \
         --username "$ADMIN_USERNAME" \
         --password "$ADMIN_PASSWORD" \
         ${ADMIN_EMAIL:+--email "$ADMIN_EMAIL"} \
@@ -429,7 +429,7 @@ if [ "$RUN_AUTH_INIT_ON_START" != "0" ] && [ "$should_run_auth_init" = "1" ]; th
     else
       # Check whether users exist; fail separately if account state cannot be verified.
       probe_err="$(mktemp)"
-      if has_users=$(python -c "
+      if has_users=$("$PYTHON_BIN" -c "
 import asyncio, sys
 async def check():
     try:

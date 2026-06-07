@@ -758,11 +758,16 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
         "\n".join(
             (
                 "#!/bin/sh",
+                'real_python="${TLDW_TEST_REAL_PYTHON:-}"',
+                'if [ -z "$real_python" ]; then',
+                '  echo "[test-wrapper] TLDW_TEST_REAL_PYTHON is required" >&2',
+                "  exit 127",
+                "fi",
                 'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.create_admin" ]; then',
                 '  echo "[test-wrapper] create_admin failed" >&2',
                 "  exit 42",
                 "fi",
-                f'exec "{sys.executable}" "$@"',
+                'exec "$real_python" "$@"',
             )
         )
         + "\n",
@@ -771,7 +776,8 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
     )
     python_wrapper.chmod(0o700)
     env = _entrypoint_process_env(env_file, marker_dir)
-    env["PATH"] = f"{wrapper_dir}{os.pathsep}{env['PATH']}"
+    env["PYTHON_BIN"] = _shell_path(python_wrapper)
+    env["TLDW_TEST_REAL_PYTHON"] = _shell_path(Path(sys.executable))
 
     result = subprocess.run(  # nosec B603
         _entrypoint_command("uvicorn"),
