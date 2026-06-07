@@ -3,7 +3,7 @@
 **Related task:** TASK-2232
 **Inventory row:** INV-027
 **Source candidate:** `tldw_Server_API/app/core/LLM_Calls/README.md`
-**Disposition:** Code/doc alignment completed by TASK-2309; ready for bounded ADR backfill in TASK-2310.
+**Disposition:** Backfilled by `Docs/ADR/025-llm-provider-adapter-routing-and-overrides.md` via TASK-2310.
 
 ## Decision Candidate Under Review
 
@@ -11,7 +11,7 @@ INV-027 summarized the LLM provider integration convention as:
 
 > LLM calls route through adapter registry, normalize OpenAI-compatible responses/SSE, allow trusted base URL overrides only for allowlisted providers, and reject request-level local provider URL overrides.
 
-TASK-2232 confirmed the first three claims as current ADR source material and found that the final local URL override claim was contradicted by the then-current Chat request-building and local adapter path. TASK-2309 aligned that final claim by rejecting request-level local endpoint URL overrides before adapter dispatch, so the candidate is now ready for bounded ADR backfill.
+TASK-2232 confirmed the first three claims as current ADR source material and found that the final local URL override claim was contradicted by the then-current Chat request-building and local adapter path. TASK-2309 aligned that final claim by rejecting request-level local endpoint URL overrides before adapter dispatch. TASK-2310 then backfilled the bounded accepted decision as ADR-025.
 
 ## Confirmed Evidence
 
@@ -35,6 +35,6 @@ TASK-2309 resolves this for the Chat adapter-request path by adding a local-prov
 
 Remaining caveat: local adapters still accept config-derived URL values internally. The accepted ADR should describe request-level rejection at the Chat adapter-request boundary, not claim local helper functions can never receive endpoint URLs from trusted config paths.
 
-## Recommended Next Action
+## Backfill Result
 
-Create the bounded ADR in TASK-2310 covering registry routing, OpenAI-compatible response/SSE normalization, strict local payload filtering, trusted allowlisted `base_url` overrides, and request-level local endpoint URL rejection.
+ADR-025 covers registry routing, OpenAI-compatible response/SSE normalization, strict local payload filtering, trusted allowlisted `base_url` overrides, and request-level local endpoint URL rejection. Keep this audit as the evidence and caveat record for boundary-specific enforcement, config-derived local adapter URLs, and provider-specific response preservation as an extension.
