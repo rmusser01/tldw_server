@@ -10,6 +10,8 @@ untrusted URLs or sensitive configuration.
 
 - Architecture decision: `Docs/ADR/019-security-request-edge-middleware.md`
   covers the request-edge middleware portion of this module.
+- Architecture decision: `Docs/ADR/026-security-outbound-egress-and-ssrf-policy.md`
+  covers the outbound egress/SSRF policy portion of this module.
 - Egress/SSRF controls: `egress.py` and `url_validation.py`.
 - HTTP and request middlewares: `middleware.py`, `request_id_middleware.py`,
   `setup_access_guard.py`, `setup_csp.py`, and `drain_gate_middleware.py`.
