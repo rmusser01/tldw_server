@@ -14,6 +14,8 @@ untrusted URLs or sensitive configuration.
   covers the outbound egress/SSRF policy portion of this module.
 - Architecture decision: `Docs/ADR/027-security-aes-gcm-json-envelope-helpers.md`
   covers the shared AES-GCM JSON envelope helper portion of this module.
+- Architecture decision: `Docs/ADR/028-security-restricted-legacy-pickle-compatibility.md`
+  covers the restricted legacy pickle compatibility helper portion of this module.
 - Egress/SSRF controls: `egress.py` and `url_validation.py`.
 - HTTP and request middlewares: `middleware.py`, `request_id_middleware.py`,
   `setup_access_guard.py`, `setup_csp.py`, and `drain_gate_middleware.py`.
