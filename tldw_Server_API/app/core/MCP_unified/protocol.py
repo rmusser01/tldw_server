@@ -34,6 +34,13 @@ except ImportError:  # Fallback for v1
 
 from loguru import logger
 
+from mcp_unified.tool_use_reporting.builders import (
+    classify_tool_use_exception,
+    extract_safe_context_dimensions,
+)
+from mcp_unified.tool_use_reporting.models import ToolUseEvent, ToolUseStatus
+from mcp_unified.tool_use_reporting.recorder import record_tool_use_safely
+
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
@@ -611,6 +618,129 @@ class MCPProtocol:
     def telemetry(self) -> TelemetryProvider:
         """Return the injected telemetry provider."""
         return self.dependencies.telemetry_provider
+
+    def _should_record_tool_use(self, context: RequestContext) -> bool:
+        """Return whether this protocol path should record tool-use metadata."""
+        metadata = getattr(context, "metadata", {})
+        if not isinstance(metadata, dict):
+            return True
+        return metadata.get("mcp_tool_use_observed") is not True
+
+    async def _record_tool_use_event(self, event: ToolUseEvent) -> None:
+        """Record a tool-use event through the configured recorder."""
+        await record_tool_use_safely(self._tool_use_recorder, event)
+
+    def _safe_tool_use_name(self, value: Any) -> str:
+        """Return a safe tool name or the unknown sentinel."""
+        if isinstance(value, str) and self._tool_name_re.match(value):
+            return value
+        return "unknown"
+
+    @staticmethod
+    def _tool_use_duration_ms(start_ts: float) -> float:
+        """Return elapsed milliseconds from a monotonic-ish wall clock sample."""
+        return max(0.0, (time.time() - start_ts) * 1000.0)
+
+    @staticmethod
+    def _tool_use_execution_origin_for_failure(status: ToolUseStatus) -> str:
+        """Return execution-origin metadata for a failed tool path."""
+        if status == "unavailable":
+            return "unavailable"
+        return "failed_before_execution"
+
+    @staticmethod
+    def _tool_use_eval_metadata(
+        *,
+        payload: dict[str, Any] | None = None,
+        tool_def: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Extract safe eval metadata from response payload or tool definition."""
+        if isinstance(payload, dict) and isinstance(payload.get("eval"), dict):
+            return dict(payload["eval"])
+        metadata = (tool_def or {}).get("metadata") if isinstance(tool_def, dict) else None
+        if isinstance(metadata, dict) and isinstance(metadata.get("eval"), dict):
+            return dict(metadata["eval"])
+        return {}
+
+    @staticmethod
+    def _tool_use_category(tool_def: dict[str, Any] | None) -> str | None:
+        """Return the metadata category from a tool definition when present."""
+        metadata = (tool_def or {}).get("metadata") if isinstance(tool_def, dict) else None
+        if not isinstance(metadata, dict):
+            return None
+        category = metadata.get("category")
+        return str(category) if isinstance(category, str) and category.strip() else None
+
+    def _build_tool_use_event(
+        self,
+        *,
+        context: RequestContext,
+        requested_tool_name: Any,
+        status: ToolUseStatus,
+        execution_origin: str,
+        duration_ms: float,
+        effective_tool_name: Any | None = None,
+        module_id: str | None = None,
+        tool_def: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        is_write: bool | None = None,
+        reason_code: str | None = None,
+        idempotency_replay: bool = False,
+    ) -> ToolUseEvent:
+        """Build a metadata-only tool-use event."""
+        metadata = getattr(context, "metadata", {})
+        dimensions = extract_safe_context_dimensions(metadata if isinstance(metadata, dict) else None)
+        eval_metadata = self._tool_use_eval_metadata(payload=payload, tool_def=tool_def)
+        safe_requested_name = self._safe_tool_use_name(requested_tool_name)
+        safe_effective_name = self._safe_tool_use_name(effective_tool_name or safe_requested_name)
+        return ToolUseEvent(
+            runtime_surface="protocol",
+            execution_origin=execution_origin,  # type: ignore[arg-type]
+            requested_tool_name=safe_requested_name,
+            effective_tool_name=safe_effective_name,
+            module_id=module_id,
+            category=self._tool_use_category(tool_def),
+            read_only=(not is_write) if is_write is not None else None,
+            is_write=is_write,
+            source_kind="local",
+            status=status,
+            reason_code=reason_code,
+            duration_ms=duration_ms,
+            idempotency_replay=idempotency_replay,
+            tool_prompt_id=eval_metadata.get("tool_prompt_id"),
+            tool_prompt_version=eval_metadata.get("tool_prompt_version"),
+            prompt_variant=eval_metadata.get("prompt_variant"),
+            action_family=eval_metadata.get("action_family"),
+            result_kind=eval_metadata.get("result_kind") or eval_metadata.get("expected_result_kind"),
+            path_filter_used=eval_metadata.get("path_filter_used"),
+            truncated=eval_metadata.get("truncated"),
+            **dimensions,
+        )
+
+    async def _record_process_request_tool_use_failure(
+        self,
+        *,
+        request: MCPRequest,
+        context: RequestContext,
+        status: ToolUseStatus,
+        reason_code: str,
+        start_ts: float,
+        requested_tool_name: Any = None,
+    ) -> None:
+        """Record a tools/call failure that occurs before handler dispatch."""
+        if request.method != "tools/call" or not self._should_record_tool_use(context):
+            return
+        params = request.params if isinstance(request.params, dict) else {}
+        requested = requested_tool_name if requested_tool_name is not None else params.get("name")
+        event = self._build_tool_use_event(
+            context=context,
+            requested_tool_name=requested,
+            status=status,
+            execution_origin=self._tool_use_execution_origin_for_failure(status),
+            duration_ms=self._tool_use_duration_ms(start_ts),
+            reason_code=reason_code,
+        )
+        await self._record_tool_use_event(event)
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
         if not user_id:
@@ -1335,6 +1465,14 @@ class MCPProtocol:
                     _p = request.params or {}
                     _name = _p.get("name") if isinstance(_p, dict) else None
                     if not _name:
+                        await self._record_process_request_tool_use_failure(
+                            request=request,
+                            context=context,
+                            status="invalid_params",
+                            reason_code="tool_name_required",
+                            start_ts=start_ts,
+                            requested_tool_name=_name,
+                        )
                         return self._error_response(
                             ErrorCode.INVALID_PARAMS,
                             "Tool name is required",
@@ -1342,6 +1480,14 @@ class MCPProtocol:
                         )
                     if not isinstance(_name, str):
                         # Non-string name → invalid params
+                        await self._record_process_request_tool_use_failure(
+                            request=request,
+                            context=context,
+                            status="invalid_params",
+                            reason_code="invalid_tool_name",
+                            start_ts=start_ts,
+                            requested_tool_name=_name,
+                        )
                         return self._error_response(
                             ErrorCode.INVALID_PARAMS,
                             "Invalid tool name",
@@ -1349,6 +1495,14 @@ class MCPProtocol:
                         )
                     if not self._tool_name_re.match(_name):
                         # Regex violation treated as internal error per legacy expectation
+                        await self._record_process_request_tool_use_failure(
+                            request=request,
+                            context=context,
+                            status="invalid_params",
+                            reason_code="invalid_tool_name",
+                            start_ts=start_ts,
+                            requested_tool_name=_name,
+                        )
                         return self._error_response(
                             ErrorCode.INTERNAL_ERROR,
                             "Invalid tool name",
@@ -1356,6 +1510,13 @@ class MCPProtocol:
                         )
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 # Uniformly surface as INVALID_PARAMS for caller clarity
+                await self._record_process_request_tool_use_failure(
+                    request=request,
+                    context=context,
+                    status="invalid_params",
+                    reason_code="invalid_tool_name",
+                    start_ts=start_ts,
+                )
                 return self._error_response(ErrorCode.INVALID_PARAMS, "Invalid tool name", request.id)
 
             # Find handler
@@ -1384,6 +1545,13 @@ class MCPProtocol:
                 except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                     hint_data = None
 
+                await self._record_process_request_tool_use_failure(
+                    request=request,
+                    context=context,
+                    status="denied",
+                    reason_code="permission_denied",
+                    start_ts=start_ts,
+                )
                 return self._error_response(
                     ErrorCode.AUTHORIZATION_ERROR,
                     "Insufficient permissions",
@@ -1444,6 +1612,14 @@ class MCPProtocol:
                 self.metrics.record_rate_limit_hit(key_type=key_type)
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 pass
+            if isinstance(request, MCPRequest):
+                await self._record_process_request_tool_use_failure(
+                    request=request,
+                    context=context,
+                    status="rate_limited",
+                    reason_code="rate_limited",
+                    start_ts=start_ts,
+                )
             raise
         except InvalidParamsException as ive:
             # Notification: do not return a response
@@ -2292,7 +2468,22 @@ class MCPProtocol:
         context: RequestContext
     ) -> dict[str, Any]:
         """Execute a tool."""
-        prepared = await self.prepare_tool_call(params=params, context=context)
+        start_ts = time.time()
+        try:
+            prepared = await self.prepare_tool_call(params=params, context=context)
+        except Exception as exc:
+            if self._should_record_tool_use(context):
+                status, reason_code = classify_tool_use_exception(exc)
+                event = self._build_tool_use_event(
+                    context=context,
+                    requested_tool_name=params.get("name") if isinstance(params, dict) else None,
+                    status=status,
+                    execution_origin="failed_before_execution",
+                    duration_ms=self._tool_use_duration_ms(start_ts),
+                    reason_code=reason_code,
+                )
+                await self._record_tool_use_event(event)
+            raise
         return await self.execute_prepared_tool_call(prepared)
 
     async def prepare_tool_call(
@@ -2536,6 +2727,33 @@ class MCPProtocol:
         idempotency_cache_key = prepared.idempotency_cache_key
         args_hash = prepared.arguments_hash
         context = prepared.context
+        execution_start_ts = time.time()
+
+        async def _record_prepared_event(
+            *,
+            status: ToolUseStatus,
+            execution_origin: str,
+            reason_code: str | None = None,
+            payload: dict[str, Any] | None = None,
+            idempotency_replay: bool = False,
+        ) -> None:
+            if not self._should_record_tool_use(context):
+                return
+            event = self._build_tool_use_event(
+                context=context,
+                requested_tool_name=tool_name,
+                effective_tool_name=tool_name,
+                status=status,
+                execution_origin=execution_origin,
+                duration_ms=self._tool_use_duration_ms(execution_start_ts),
+                module_id=module_id or getattr(module, "name", None),
+                tool_def=tool_def if isinstance(tool_def, dict) else None,
+                payload=payload,
+                is_write=is_write,
+                reason_code=reason_code,
+                idempotency_replay=idempotency_replay,
+            )
+            await self._record_tool_use_event(event)
 
         async def _execute_tool_call() -> dict[str, Any]:
             # Optional per-tool/category rate limits (ingestion vs read)
@@ -2707,38 +2925,68 @@ class MCPProtocol:
                 raise
 
         if is_write and idempotency_cache_key:
-            cfg = get_config()
-            ttl = max(1, int(getattr(cfg, "idempotency_ttl_seconds", 300)))
-            max_size = max(1, int(getattr(cfg, "idempotency_cache_size", 512)))
-            if args_hash is None:
-                raise InvalidParamsException("Unable to fingerprint tool arguments for idempotency")
-            arguments_bound = await self._idempotency.bind_arguments(
-                idempotency_cache_key,
-                args_hash,
-                ttl=ttl,
-                max_size=max_size,
-            )
-            if not arguments_bound:
-                raise InvalidParamsException("Idempotency key was already used with different arguments")
-            module_timeout = int(getattr(getattr(module, "config", None), "timeout_seconds", cfg.module_timeout))
-            lock_ttl = max(ttl, module_timeout * 2)
-            payload, from_cache = await self._idempotency.run(
-                idempotency_cache_key,
-                _execute_tool_call,
-                ttl=ttl,
-                max_size=max_size,
-                lock_ttl=lock_ttl,
-            )
             try:
-                if from_cache:
-                    self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
-                else:
-                    self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                pass
+                cfg = get_config()
+                ttl = max(1, int(getattr(cfg, "idempotency_ttl_seconds", 300)))
+                max_size = max(1, int(getattr(cfg, "idempotency_cache_size", 512)))
+                if args_hash is None:
+                    raise InvalidParamsException("Unable to fingerprint tool arguments for idempotency")
+                arguments_bound = await self._idempotency.bind_arguments(
+                    idempotency_cache_key,
+                    args_hash,
+                    ttl=ttl,
+                    max_size=max_size,
+                )
+                if not arguments_bound:
+                    raise InvalidParamsException("Idempotency key was already used with different arguments")
+                module_timeout = int(getattr(getattr(module, "config", None), "timeout_seconds", cfg.module_timeout))
+                lock_ttl = max(ttl, module_timeout * 2)
+                payload, from_cache = await self._idempotency.run(
+                    idempotency_cache_key,
+                    _execute_tool_call,
+                    ttl=ttl,
+                    max_size=max_size,
+                    lock_ttl=lock_ttl,
+                )
+                try:
+                    if from_cache:
+                        self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
+                    else:
+                        self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
+                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+                    pass
+            except Exception as exc:
+                status, reason_code = classify_tool_use_exception(exc)
+                await _record_prepared_event(
+                    status=status,
+                    execution_origin="failed_before_execution" if status != "error" else "executed",
+                    reason_code=reason_code,
+                )
+                raise
+            await _record_prepared_event(
+                status="success",
+                execution_origin="cached" if from_cache else "executed",
+                payload=payload if isinstance(payload, dict) else None,
+                idempotency_replay=from_cache,
+            )
             return payload
 
-        return await _execute_tool_call()
+        try:
+            payload = await _execute_tool_call()
+        except Exception as exc:
+            status, reason_code = classify_tool_use_exception(exc)
+            await _record_prepared_event(
+                status=status,
+                execution_origin="failed_before_execution" if status in {"invalid_params", "rate_limited"} else "executed",
+                reason_code=reason_code,
+            )
+            raise
+        await _record_prepared_event(
+            status="success",
+            execution_origin="executed",
+            payload=payload if isinstance(payload, dict) else None,
+        )
+        return payload
 
     # -------------------------
     # Idempotency cache helpers

@@ -27,6 +27,7 @@ from mcp_unified.tool_use_reporting.recorder import (
     StoreBackedToolUseRecorder,
     ToolUseEventStore,
     ToolUseRecorder,
+    record_tool_use_safely,
 )
 from mcp_unified.tool_use_reporting.sanitization import (
     sanitize_reason_code,
@@ -64,6 +65,7 @@ __all__ = [
     "ToolUseStatus",
     "decode_event_cursor",
     "encode_event_cursor",
+    "record_tool_use_safely",
     "sanitize_reason_code",
     "sanitize_safe_id",
 ]

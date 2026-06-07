@@ -55,3 +55,26 @@ class StoreBackedToolUseRecorder:
                 "MCP tool-use recorder failed; event dropped. error_class={}",
                 exc.__class__.__name__,
             )
+
+
+async def record_tool_use_safely(
+    recorder: ToolUseRecorder,
+    event: ToolUseEvent,
+    *,
+    timeout_seconds: float | None = 2.0,
+) -> None:
+    """Record an event without allowing recorder failure to affect tool behavior."""
+
+    try:
+        if timeout_seconds is None:
+            await recorder.record_tool_use(event)
+            return
+        await asyncio.wait_for(
+            recorder.record_tool_use(event),
+            timeout=timeout_seconds,
+        )
+    except Exception as exc:
+        logger.warning(
+            "MCP tool-use recorder failed; event dropped. error_class={}",
+            exc.__class__.__name__,
+        )

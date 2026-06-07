@@ -448,7 +448,7 @@ git commit -m "feat: add MCP tool-use reporting stores"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py`
 
-- [ ] **Step 1: Write failing protocol success and denial tests**
+- [x] **Step 1: Write failing protocol success and denial tests**
 
 Use existing protocol test helpers from `test_tool_observability.py` and `support.py`.
 
@@ -508,7 +508,7 @@ async def test_protocol_records_early_process_request_tool_name_error(protocol_w
     assert event.execution_origin == "failed_before_execution"
 ```
 
-- [ ] **Step 2: Add recorder helper methods to `MCPProtocol`**
+- [x] **Step 2: Add recorder helper methods to `MCPProtocol`**
 
 Implementation requirements:
 
@@ -518,7 +518,7 @@ Implementation requirements:
 - Add `_record_process_request_tool_use_failure(...)` or an equivalent helper for `process_request()` paths that return JSON-RPC errors before `_handle_tools_call()` is invoked.
 - Do not change existing audit events, metrics, or tool response shape.
 
-- [ ] **Step 3: Instrument `process_request()` for early `tools/call` failures**
+- [x] **Step 3: Instrument `process_request()` for early `tools/call` failures**
 
 Implementation requirements:
 
@@ -531,7 +531,7 @@ Implementation requirements:
 - Do not record non-`tools/call` method failures in this slice.
 - Reuse the same safe context extraction and recorder timeout helper.
 
-- [ ] **Step 4: Instrument `_handle_tools_call()` for preparation failures**
+- [x] **Step 4: Instrument `_handle_tools_call()` for preparation failures**
 
 Implementation requirements:
 
@@ -545,7 +545,7 @@ Implementation requirements:
   - duration
 - Await recorder, then re-raise the original exception.
 
-- [ ] **Step 5: Instrument `execute_prepared_tool_call()` for success, execution errors, and idempotency**
+- [x] **Step 5: Instrument `execute_prepared_tool_call()` for success, execution errors, and idempotency**
 
 Implementation requirements:
 
@@ -557,7 +557,7 @@ Implementation requirements:
 - If `bind_arguments()` or argument fingerprint checks fail, record an invalid params event and re-raise.
 - Preserve existing metrics for idempotency hit/miss.
 
-- [ ] **Step 6: Add tests for recorder failure and idempotency replay**
+- [x] **Step 6: Add tests for recorder failure and idempotency replay**
 
 ```python
 async def test_protocol_recorder_failure_does_not_change_tool_response(protocol_with_failing_recorder):
@@ -583,7 +583,7 @@ async def test_protocol_records_idempotency_replay(protocol_with_recorder):
     assert recorder.events[-1].idempotency_replay is True
 ```
 
-- [ ] **Step 7: Run focused protocol tests**
+- [x] **Step 7: Run focused protocol tests**
 
 Run:
 
@@ -597,7 +597,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
