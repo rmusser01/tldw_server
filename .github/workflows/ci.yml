@@ -616,8 +616,18 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
           - name: ai-chunking-templates
             paths: >-
-              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestDatabaseOperations
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
+              tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-templates-api
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
+          - name: ai-chunking-templates-integration
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestIntegration
           - name: ai-chunking-code-json-xml
             paths: >-
               tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
@@ -1391,7 +1401,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -1401,7 +1411,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -1651,8 +1661,18 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
           - name: ai-chunking-templates
             paths: >-
-              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestDatabaseOperations
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
+              tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-templates-api
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
+          - name: ai-chunking-templates-integration
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestIntegration
           - name: ai-chunking-code-json-xml
             paths: >-
               tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
@@ -2370,7 +2390,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -2380,7 +2400,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2631,8 +2651,18 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
           - name: ai-chunking-templates
             paths: >-
-              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestDatabaseOperations
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
+              tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-templates-api
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
+          - name: ai-chunking-templates-integration
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestIntegration
           - name: ai-chunking-code-json-xml
             paths: >-
               tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
@@ -3277,7 +3307,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -3287,7 +3317,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -3537,8 +3567,18 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
           - name: ai-chunking-templates
             paths: >-
-              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestDatabaseOperations
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
+              tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-templates-api
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
+          - name: ai-chunking-templates-integration
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestIntegration
           - name: ai-chunking-code-json-xml
             paths: >-
               tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
@@ -4183,7 +4223,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -4193,7 +4233,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -4445,8 +4485,18 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_template_endpoint_errors.py
           - name: ai-chunking-templates
             paths: >-
-              tldw_Server_API/tests/Chunking/test_chunking_templates*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestDatabaseOperations
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
+              tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+          - name: ai-chunking-templates-api
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
+          - name: ai-chunking-templates-integration
+            paths: >-
+              tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestIntegration
           - name: ai-chunking-code-json-xml
             paths: >-
               tldw_Server_API/tests/Chunking/test_code_chunking_regressions.py
@@ -5091,7 +5141,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -5101,7 +5151,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-templates' || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
+        if: ${{ matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-code-json-xml' || matrix.shard.name == 'ai-chunking-semantic-security' || matrix.shard.name == 'ai-embeddings-core' || matrix.shard.name == 'ai-embeddings-dlq-config' || matrix.shard.name == 'ai-embeddings-jobs-runtime' || matrix.shard.name == 'ai-embeddings-policy' || matrix.shard.name == 'ai-embeddings-v5-core' || matrix.shard.name == 'ai-embeddings-v5-integration' || matrix.shard.name == 'ai-embeddings-hyde-ledger' || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'ai-embeddings-observability' || matrix.shard.name == 'vector-stores' || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch' }}
         continue-on-error: true
         shell: bash
         run: |

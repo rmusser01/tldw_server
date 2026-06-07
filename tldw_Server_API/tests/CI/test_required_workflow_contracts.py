@@ -23,7 +23,38 @@ def _python_test_function_names(path: str) -> set[str]:
         for node in ast.walk(tree)
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
         and node.name.startswith("test")
+        and not _is_pytest_fixture(node)
     }
+
+
+def _is_pytest_fixture(node: ast.AsyncFunctionDef | ast.FunctionDef) -> bool:
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name) and target.id == "fixture":
+            return True
+        if isinstance(target, ast.Attribute) and target.attr == "fixture":
+            return True
+    return False
+
+
+def _python_test_node_ids(path: str) -> set[str]:
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    node_ids: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            if node.name.startswith("test") and not _is_pytest_fixture(node):
+                node_ids.add(node.name)
+            continue
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for child in node.body:
+            if (
+                isinstance(child, (ast.AsyncFunctionDef, ast.FunctionDef))
+                and child.name.startswith("test")
+                and not _is_pytest_fixture(child)
+            ):
+                node_ids.add(f"{node.name}::{child.name}")
+    return node_ids
 
 
 def _assert_ffmpeg_portaudio_setup(path: str, job_name: str) -> None:
@@ -621,29 +652,65 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "ai-chunking-core",
             "ai-chunking-semantic-security",
             "ai-chunking-templates",
+            "ai-chunking-templates-api",
+            "ai-chunking-templates-integration",
         }
         chunking_files = {
             str(path)
             for path in Path("tldw_Server_API/tests/Chunking").glob("**/test*.py")
         }
+        chunking_test_nodeids_by_file = {
+            filename: _python_test_node_ids(filename)
+            for filename in chunking_files
+        }
         covered_chunking_files: dict[str, str] = {}
+        covered_chunking_nodeids_by_file: dict[str, set[str]] = {}
         for shard_name in chunking_shards:
             for pattern in shard_path_sets[shard_name]:
+                file_pattern = pattern.split("::", 1)[0]
                 assert pattern.startswith("tldw_Server_API/tests/Chunking/")
                 matches = {
                     filename
                     for filename in chunking_files
-                    if fnmatch.fnmatch(filename, pattern)
+                    if fnmatch.fnmatch(filename, file_pattern)
                 }
                 assert matches, f"{shard_name} pattern matched no files: {pattern}"
-                for filename in matches:
-                    assert filename not in covered_chunking_files, (
-                        f"{filename} matched both "
-                        f"{covered_chunking_files[filename]} and {shard_name}"
+                if "::" in pattern:
+                    assert len(matches) == 1, (
+                        f"{shard_name} node id must target one file: {pattern}"
                     )
-                    covered_chunking_files[filename] = shard_name
+                    node_id = pattern.split("::", 1)[1]
+                    filename = next(iter(matches))
+                    matched_nodeids = {
+                        known_nodeid
+                        for known_nodeid in chunking_test_nodeids_by_file[filename]
+                        if known_nodeid == node_id or known_nodeid.startswith(f"{node_id}::")
+                    }
+                    assert matched_nodeids, (
+                        f"{shard_name} references missing chunking test node id: {pattern}"
+                    )
+                    already_covered = (
+                        covered_chunking_nodeids_by_file.setdefault(filename, set())
+                        & matched_nodeids
+                    )
+                    assert not already_covered, (
+                        f"{filename} node ids matched multiple chunking shards: "
+                        f"{sorted(already_covered)}"
+                    )
+                    covered_chunking_nodeids_by_file[filename].update(matched_nodeids)
+                for filename in matches:
+                    if "::" not in pattern:
+                        assert filename not in covered_chunking_files, (
+                            f"{filename} matched both "
+                            f"{covered_chunking_files[filename]} and {shard_name}"
+                        )
+                    covered_chunking_files.setdefault(filename, shard_name)
 
         assert set(covered_chunking_files) == chunking_files
+        for filename, covered_nodeids in covered_chunking_nodeids_by_file.items():
+            assert covered_nodeids == chunking_test_nodeids_by_file[filename], (
+                f"{filename} chunking node-id shard coverage mismatch"
+            )
 
         embedding_shards = {
             "ai-embeddings-core",
