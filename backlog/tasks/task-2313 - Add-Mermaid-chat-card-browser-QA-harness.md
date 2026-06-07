@@ -17,7 +17,6 @@ modified_files:
 - apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts
 - apps/tldw-frontend/pages/_app.tsx
 - apps/packages/ui/src/routes/route-metadata.ts
-- apps/tldw-frontend/e2e/smoke/page-inventory.ts
 ---
 
 ## Description
@@ -33,7 +32,12 @@ Add a stable browser QA harness for Mermaid chat/card rendering so assistant-fac
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Spec review follow-up applied before implementation planning:
 
+- Route governance now classifies the debug route in `route-metadata.ts` only and keeps it out of `page-inventory.ts`.
+- Playwright coverage must assert `server-readiness-recovery` and `first-run-gate-overlay` are absent.
+- Invalid Mermaid assertions should use the existing `Unable to render Mermaid diagram.` fallback text plus raw source.
+- Harness fixture sections should provide stable wrapper `data-testid` selectors instead of requiring new component-level test ids in `MermaidDiagramBlock`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

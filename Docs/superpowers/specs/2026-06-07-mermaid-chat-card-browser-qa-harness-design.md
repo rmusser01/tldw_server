@@ -35,12 +35,13 @@ The page is debug-only by path. It should not be added to normal navigation.
 
 ## Route Governance
 
-Add the route to the existing internal-QA route inventories:
+Add the route to the existing route metadata registry:
 
 - `apps/packages/ui/src/routes/route-metadata.ts`
-- `apps/tldw-frontend/e2e/smoke/page-inventory.ts`
 
-The route metadata entry should use `surface: "internal_qa_debug"` and `smoke: "exclude"` so broad route governance understands that this is an intentional debug page, not a product route. The page inventory entry should be skipped with a clear reason because this route has its own focused Playwright smoke test.
+The route metadata entry should use `surface: "internal_qa_debug"` and `smoke: "exclude"` so broad route governance understands that this is an intentional debug page, not a product route.
+
+Do not add the new route to `apps/tldw-frontend/e2e/smoke/page-inventory.ts`. Route-contract coverage expects smoke-excluded metadata routes to stay out of the broad page inventory. This route has its own focused Playwright smoke test instead.
 
 ## Gate Bypass
 
@@ -80,7 +81,7 @@ The route should include these sections:
 4. Invalid Mermaid fallback
    - Uses `Markdown` with `enableMermaidDiagrams`.
    - Contains invalid Mermaid source.
-   - Expected result: local error/fallback source is visible and the rest of the page remains usable.
+   - Expected result: the existing local fallback text `Unable to render Mermaid diagram.` is visible, the raw source remains visible, and the rest of the page remains usable.
 
 5. Graphviz/DOT fallback
    - Uses a `dot` or `graphviz` fenced code block.
@@ -98,14 +99,15 @@ The smoke test should:
 
 - navigate to `/__debug__/mermaid-chat-cards`;
 - assert the harness root is visible;
+- assert `server-readiness-recovery` and `first-run-gate-overlay` are absent, proving the route is not blocked by the same gates that blocked the previous browser closeout;
 - assert assistant Mermaid produces a Mermaid diagram block;
 - assert user-message fixture retains raw Mermaid source and has no nested Mermaid diagram block;
 - assert setting-off fixture renders a code block/source fallback;
-- assert invalid Mermaid fixture shows local fallback text/source without breaking the page;
+- assert invalid Mermaid fixture shows `Unable to render Mermaid diagram.` plus source text without breaking the page;
 - assert Graphviz/DOT fixture remains code;
 - assert artifact-style fixture renders a Mermaid diagram block and action controls.
 
-The test should use stable `data-testid` selectors and avoid pixel-perfect assertions.
+The route should wrap each fixture in a stable section test id, such as `mermaid-harness-assistant`, `mermaid-harness-user`, `mermaid-harness-disabled`, `mermaid-harness-invalid`, `mermaid-harness-graphviz`, and `mermaid-harness-artifact`. Tests should query inside those sections and use roles/button labels for real `MermaidDiagramBlock` controls instead of depending on generated SVG internals. Do not add component-level test ids to `MermaidDiagramBlock` unless the harness cannot otherwise assert the real behavior.
 
 ## Error Handling
 
@@ -127,10 +129,11 @@ The harness is not a product surface, but the rendered components should still p
 ## Acceptance Criteria
 
 - `/__debug__/mermaid-chat-cards` loads without backend readiness or first-run setup.
+- The route does not show `server-readiness-recovery` or `first-run-gate-overlay`.
 - The route uses real `Markdown` and `MermaidDiagramBlock` components.
 - Assistant Mermaid, user-message unchanged, setting-off fallback, invalid fallback, Graphviz/DOT fallback, and artifact-style block are all represented.
 - Playwright smoke coverage verifies the fixture states with stable selectors.
-- Route metadata and page inventory classify the page as internal QA/debug rather than normal navigation.
+- Route metadata classifies the page as internal QA/debug with `smoke: "exclude"`, and the page is not added to the broad smoke page inventory.
 - Existing focused Mermaid unit tests still pass.
 - Frontend compile passes.
 - No app source behavior changes outside debug-route gating and QA harness code.
