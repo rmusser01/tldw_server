@@ -1,16 +1,10 @@
-import React, { useRef, useState } from "react"
+import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button, Input, Table as AntTable, message } from "antd"
-import {
-  Plus,
-  Save,
-  Search,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react"
+import { Plus, Save, Search } from "lucide-react"
 
+import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
-import Mermaid from "@/components/Common/Mermaid"
 import type { GeneratedArtifact } from "@/types/workspace"
 
 import {
@@ -34,38 +28,13 @@ import { buildProposalDeepResearchVerificationSections } from "./proposal-deep-r
 const MAX_DISPLAYED_UNRESOLVED_QUESTIONS = 3
 
 export const MindMapArtifactViewer: React.FC<{
-  title: string
   content: string
-}> = ({ title, content }) => {
-  const [zoom, setZoom] = useState(1)
-  const containerRef = useRef<HTMLDivElement | null>(null)
+}> = ({ content }) => {
   const mermaidCode = React.useMemo(() => extractMermaidCode(content), [content])
   const canRenderMermaid = React.useMemo(
     () => isLikelyMermaidDiagram(mermaidCode),
     [mermaidCode]
   )
-
-  const handleExportSvg = () => {
-    const svg = containerRef.current?.querySelector("svg")
-    if (!svg) return
-    const svgBlob = new Blob([svg.outerHTML], {
-      type: "image/svg+xml;charset=utf-8"
-    })
-    downloadBlobFile(svgBlob, `${title || "mind-map"}.svg`)
-  }
-
-  const handleExportPng = async () => {
-    if (!containerRef.current) return
-    const html2canvas = (await import("html2canvas")).default
-    const canvas = await html2canvas(containerRef.current, {
-      backgroundColor: "#ffffff",
-      scale: 2
-    })
-    canvas.toBlob((blob) => {
-      if (!blob) return
-      downloadBlobFile(blob, `${title || "mind-map"}.png`)
-    }, "image/png")
-  }
 
   if (!canRenderMermaid) {
     return (
@@ -81,47 +50,8 @@ export const MindMapArtifactViewer: React.FC<{
   }
 
   return (
-    <div className="flex max-h-[70vh] flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="small"
-          icon={<ZoomOut className="h-3.5 w-3.5" />}
-          onClick={() => setZoom((prev) => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
-        >
-          Zoom out
-        </Button>
-        <span className="text-xs text-text-muted">{Math.round(zoom * 100)}%</span>
-        <Button
-          size="small"
-          icon={<ZoomIn className="h-3.5 w-3.5" />}
-          onClick={() => setZoom((prev) => Math.min(2.5, Number((prev + 0.1).toFixed(2))))}
-        >
-          Zoom in
-        </Button>
-        <Button size="small" onClick={() => setZoom(1)}>
-          Reset
-        </Button>
-        <Button size="small" onClick={handleExportSvg}>
-          Export SVG
-        </Button>
-        <Button size="small" onClick={() => void handleExportPng()}>
-          Export PNG
-        </Button>
-      </div>
-
-      <div className="rounded border border-border bg-surface2/40 p-2 text-xs text-text-muted">
-        Scroll to pan the diagram when zoomed in.
-      </div>
-
-      <div className="max-h-[56vh] overflow-auto rounded border border-border bg-surface p-4">
-        <div
-          ref={containerRef}
-          style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
-          className="inline-block min-w-full"
-        >
-          <Mermaid code={mermaidCode} />
-        </div>
-      </div>
+    <div className="max-h-[70vh] overflow-y-auto">
+      <MermaidDiagramBlock source={mermaidCode} enableArtifactAction={false} />
     </div>
   )
 }

@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
-const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
-  () => ({
-    mockScheduleWorkspaceUndoAction: vi.fn(),
-    mockUndoWorkspaceAction: vi.fn()
-  })
-)
+const {
+  mockScheduleWorkspaceUndoAction,
+  mockUndoWorkspaceAction,
+  mockMermaidDiagramBlock
+} = vi.hoisted(() => ({
+  mockScheduleWorkspaceUndoAction: vi.fn(),
+  mockUndoWorkspaceAction: vi.fn(),
+  mockMermaidDiagramBlock: vi.fn()
+}))
 
 const {
   mockGenerateQuiz,
@@ -284,6 +287,29 @@ vi.mock("@/store/workspace", () => ({
 
 vi.mock("@/components/Common/Mermaid", () => ({
   default: ({ code }: { code: string }) => <div data-testid="mermaid">{code}</div>
+}))
+
+vi.mock("@/components/Common/MermaidDiagramBlock", () => ({
+  MermaidDiagramBlock: (props: {
+    source: string
+    enableArtifactAction?: boolean
+  }) => {
+    mockMermaidDiagramBlock(props)
+
+    return (
+      <section data-testid="research-shared-mermaid-block">
+        <div role="img" aria-label="Mock research Mermaid diagram">
+          {props.source}
+        </div>
+        {props.enableArtifactAction ? (
+          <button type="button">View Mermaid diagram</button>
+        ) : null}
+        <button type="button">Open Mermaid preview</button>
+        <button type="button">Copy Mermaid source</button>
+        <button type="button">Download Mermaid SVG</button>
+      </section>
+    )
+  }
 }))
 
 vi.mock("../undo-manager", () => ({
@@ -749,12 +775,38 @@ describe("StudioPane Stage 2 workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
-    expect(await screen.findByTestId("mermaid")).toHaveTextContent(
+    expect(
+      await screen.findByTestId("research-shared-mermaid-block")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "Mock research Mermaid diagram" })
+    ).toHaveTextContent(
       /mindmap\s+root\(\(Workspace\)\)\s+Findings/
     )
+    expect(mockMermaidDiagramBlock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.stringContaining("mindmap"),
+        enableArtifactAction: false
+      })
+    )
     expect(
-      await screen.findByRole("button", { name: "Export SVG" })
+      screen.getByRole("button", { name: "Open Mermaid preview" })
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Copy Mermaid source" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Download Mermaid SVG" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View Mermaid diagram" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Export SVG" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Export PNG" })
+    ).not.toBeInTheDocument()
   })
 
   it("falls back to raw content for non-mermaid mind map output", async () => {
