@@ -108,16 +108,16 @@ extension, history, and export do not diverge:
    `failed_search`.
 2. Extension search success with thread/message persistence failure becomes
    `unsynced_local_result`, even if local answer content is visible.
-3. No evidence from selected local sources, and no enabled web-fallback
+3. Older or partial payloads missing required trust metadata become
+   `unknown_trust`, never inferred grounded success.
+4. No evidence from selected local sources, and no enabled web-fallback
    evidence, becomes `no_results`.
-4. Evidence that is present but empty, too weak, unavailable, filtered, deleted,
+5. Evidence that is present but empty, too weak, unavailable, filtered, deleted,
    or permission-limited becomes `no_answer_insufficient_evidence` unless the
    backend intentionally returns a degraded answer.
-5. Answer text with no valid citations becomes `uncited_degraded_answer`.
-6. Answer text with valid citations and inspectable evidence becomes
+6. Answer text with no valid citations becomes `uncited_degraded_answer`.
+7. Answer text with valid citations and inspectable evidence becomes
    `cited_answer`.
-7. Older or partial payloads missing required trust metadata become
-   `unknown_trust`, never inferred grounded success.
 
 ### Citation Validity Contract
 
@@ -218,6 +218,7 @@ Exports, recent sessions, and history entries must preserve trust state:
 
 - Cited and grounded.
 - Degraded or uncited.
+- Unknown trust or backwards-compatible payload.
 - No results.
 - Failed.
 - Unsynced.
@@ -336,8 +337,9 @@ Acceptance criteria:
 - Extension console errors that affect the workflow have visible UI
   equivalents.
 - Extension signoff requires a runtime E2E harness that launches the options
-  route, or the remaining harness blocker must be recorded as a release-blocking
-  extension verification gap.
+  route. If the WXT/runtime blocker remains, it must be recorded as a
+  release-blocking extension verification gap and extension signoff cannot be
+  treated as passed.
 
 ### Stage 4: Scoped Search Reliability
 
@@ -523,26 +525,30 @@ The remediation series is not complete until:
 - Web fallback origin is preserved and labeled anywhere the answer, evidence,
   history, or export is shown.
 - Extension setup, reachability, and sync failures have visible recovery states.
-- Extension runtime E2E is either passing or explicitly release-blocked with a
-  tracked WXT/harness owner.
+- Extension runtime E2E passes for the options route and Knowledge QA workflow.
+  If WXT or the runtime harness still blocks browser launch, the remediation
+  series is release-blocked with a tracked owner, command, timeout, and failure
+  artifact.
 - Export and history retain trust status.
-- WebUI and extension live-backend UAT scripts pass with deterministic fixture
-  data.
+- WebUI live-backend UAT passes with deterministic fixture data, and extension
+  live-backend UAT passes after the runtime harness health gate is green.
 - `/knowledge` remains separate from flashcards and study workflows.
 
 ## Implementation Planning Notes
 
-The next implementation-planning step should create reviewable child tasks or PR
-slices from the stages above. Suggested task names:
+The implementation-planning step created reviewable child tasks and plan files
+from the stages above. Continuation should start from these task slices and keep
+each Backlog record current as implementation proceeds:
 
-- Reconcile Knowledge QA follow-on trust baseline.
-- Define Knowledge QA trust taxonomy and safe response handling.
-- Materialize Knowledge QA evidence excerpts and source previews.
-- Enforce Knowledge QA citation validity and abstention.
-- Harden Knowledge QA extension setup and sync reliability.
-- Verify Knowledge QA scoped search and saved profile round-trip.
-- Propagate Knowledge QA trust status into export and history.
-- Add Knowledge QA live UAT fixtures and release gates.
+- `TASK-2278.1`: Reconcile Knowledge QA follow-on trust baseline.
+- `TASK-2278.2`: Define Knowledge QA trust taxonomy and safe response handling.
+- `TASK-2278.3`: Materialize Knowledge QA evidence excerpts and source previews.
+- `TASK-2278.4`: Enforce Knowledge QA citation validity and abstention.
+- `TASK-2278.5`: Harden Knowledge QA extension setup and sync reliability.
+- `TASK-2278.6`: Verify Knowledge QA scoped search and saved profile round-trip.
+- `TASK-2278.7`: Propagate Knowledge QA trust status into export and history.
+- `TASK-2278.8`: Add Knowledge QA live UAT fixtures and release gates.
+- `TASK-2278.9`: Plan non-blocking Knowledge QA evidence workflow improvements.
 
 Each implementation plan should include:
 
