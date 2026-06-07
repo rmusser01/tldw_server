@@ -83,4 +83,30 @@ describe("ExpertSettings accessibility", () => {
     await user.keyboard(" ")
     expect(queryEnhancementToggle).toHaveAttribute("aria-expanded", "false")
   })
+
+  it("filters All Options and reports when no keys match", () => {
+    render(<ExpertSettings />)
+
+    fireEvent.click(screen.getByRole("button", { name: /All Options/i }))
+    fireEvent.change(screen.getByLabelText(/Filter option keys/i), {
+      target: { value: "definitely_no_matching_rag_key" },
+    })
+
+    expect(screen.getByText("No option keys match this filter.")).toBeInTheDocument()
+  })
+
+  it("updates boolean controls from the All Options editor", () => {
+    render(<ExpertSettings />)
+
+    fireEvent.click(screen.getByRole("button", { name: /All Options/i }))
+    fireEvent.change(screen.getByLabelText(/Filter option keys/i), {
+      target: { value: "enable_generation" },
+    })
+    fireEvent.click(screen.getByRole("switch", { name: "enable_generation" }))
+
+    expect(state.updateSetting).toHaveBeenCalledWith(
+      "enable_generation",
+      !DEFAULT_RAG_SETTINGS.enable_generation
+    )
+  })
 })

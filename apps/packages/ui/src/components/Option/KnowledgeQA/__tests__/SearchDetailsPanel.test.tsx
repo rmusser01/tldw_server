@@ -95,4 +95,32 @@ describe("SearchDetailsPanel", () => {
       screen.getByText(/\(41% • -21 pts vs weakest included\) — Below threshold/i)
     ).toBeInTheDocument()
   })
+
+  it("explains missing retrieval telemetry without rendering N/A rows", () => {
+    state.searchDetails = {
+      expandedQueries: [],
+      rerankingEnabled: false,
+      rerankingStrategy: null,
+      averageRelevance: null,
+      webFallbackEnabled: false,
+      webFallbackTriggered: false,
+      webFallbackEngine: null,
+      documentsConsidered: null,
+      chunksConsidered: null,
+      documentsReturned: null,
+      candidatesConsidered: null,
+      candidatesReturned: null,
+      candidatesRejected: null,
+      retrievalLatencyMs: null,
+      alsoConsidered: [],
+      whyTheseSources: null,
+    }
+
+    render(<SearchDetailsPanel />)
+
+    expect(screen.getByText("No query expansion terms were reported.")).toBeInTheDocument()
+    expect(screen.getByText("No retrieval counts were reported for this search.")).toBeInTheDocument()
+    expect(screen.getByText("No closest-miss candidates were reported.")).toBeInTheDocument()
+    expect(screen.queryByText("N/A")).not.toBeInTheDocument()
+  })
 })
