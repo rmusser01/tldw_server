@@ -7,6 +7,8 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .models import MCPProfile
+
 PolicyDecisionOutcome = Literal["deny", "ask", "allow"]
 PolicyDecisionVisibility = Literal["hidden", "direct", "deferred", "debug_only"]
 PolicyDecisionCallState = Literal["blocked", "approval_required", "callable"]
@@ -190,6 +192,64 @@ def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRul
     return rules
 
 
+def evaluate_profile_tool_decision(
+    profile: MCPProfile,
+    tool_name: str,
+    *,
+    capability: str | None = None,
+) -> PolicyDecision:
+    """Evaluate one tool name against profile policy decision rules."""
+
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ValueError("tool_name cannot be blank")
+
+    subject = PolicyDecisionSubject(type="tool", normalized=tool_name)
+    policy_document = profile.policy_document
+    decisions: list[PolicyDecision] = []
+    for rule in compile_profile_policy_rules(policy_document):
+        if rule.rule_type != "tool" or rule.pattern != tool_name:
+            continue
+
+        reason_code = _tool_rule_reason_code(rule)
+        decisions.append(
+            PolicyDecision(
+                outcome=rule.outcome,
+                reason_code=reason_code,
+                subject=subject,
+                matched_rules=[
+                    PolicyMatchedRule(
+                        source=rule.source,
+                        rule_type=rule.rule_type,
+                        pattern=rule.pattern,
+                        outcome=rule.outcome,
+                        reason_code=reason_code,
+                    )
+                ],
+            )
+        )
+
+    if decisions:
+        return merge_policy_decisions(
+            decisions,
+            subject=subject,
+            default_reason_code="tool_not_allowed",
+        )
+
+    allowed_tools = list(policy_document.allowed_tools or [])
+    if not allowed_tools and capability is not None:
+        return PolicyDecision(
+            outcome="allow",
+            reason_code="capability_allowed",
+            subject=subject,
+        )
+
+    return PolicyDecision(
+        outcome="deny",
+        reason_code="tool_not_allowed",
+        subject=subject,
+    )
+
+
 def _compile_legacy_tool_pattern(
     pattern: Any,
     *,
@@ -305,6 +365,18 @@ def _compile_structured_rules(
             )
         )
     return rules
+
+
+def _tool_rule_reason_code(rule: PolicyDecisionRule) -> str:
+    """Return the default runtime reason code for a matched tool rule."""
+
+    if rule.reason_code is not None:
+        return rule.reason_code
+    if rule.outcome == "ask":
+        return "approval_required"
+    if rule.outcome == "allow":
+        return "tool_allowed"
+    return "tool_denied"
 
 
 def _compile_structured_rule(

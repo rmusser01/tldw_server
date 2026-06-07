@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .decisions import PolicyDecision, evaluate_profile_tool_decision
 from .models import MCPProfile
 
 _WORKSPACE_BINDING_KEYS = (
@@ -64,6 +65,7 @@ class EffectivePolicyResult(BaseModel):
     status: EffectivePolicyStatus
     reason_code: str
     policy: EffectivePolicy | None = None
+    decision: PolicyDecision | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -110,17 +112,25 @@ def build_effective_policy_result(
     capabilities = list(policy_document.capabilities or [])
     denied_capabilities = list(policy_document.denied_capabilities or [])
 
+    decision: PolicyDecision | None = None
     if tool_name is not None:
-        if tool_name in denied_tools:
+        decision = evaluate_profile_tool_decision(
+            profile,
+            tool_name,
+            capability=capability,
+        )
+        if decision.outcome == "deny":
             return EffectivePolicyResult(
                 status="denied",
-                reason_code="tool_denied",
+                reason_code=decision.reason_code,
+                decision=decision,
                 provenance={**provenance, "tool_name": tool_name},
             )
-        if not _tool_allowed(tool_name, allowed_tools, capability):
+        if decision.outcome == "ask":
             return EffectivePolicyResult(
-                status="denied",
-                reason_code="tool_not_allowed",
+                status="approval_required",
+                reason_code=decision.reason_code,
+                decision=decision,
                 provenance={**provenance, "tool_name": tool_name},
             )
 
@@ -129,12 +139,14 @@ def build_effective_policy_result(
             return EffectivePolicyResult(
                 status="denied",
                 reason_code="capability_denied",
+                decision=decision,
                 provenance={**provenance, "capability": capability},
             )
         if not _capability_allowed(capability, capabilities):
             return EffectivePolicyResult(
                 status="denied",
                 reason_code="capability_not_allowed",
+                decision=decision,
                 provenance={**provenance, "capability": capability},
             )
 
@@ -157,6 +169,7 @@ def build_effective_policy_result(
                 grant.copy() for grant in (profile.credential_grants or [])
             ],
         ),
+        decision=decision,
         provenance=provenance,
     )
 
@@ -212,17 +225,6 @@ def _has_workspace_binding_value(value: Any) -> bool:
     if isinstance(value, list):
         return any(_has_workspace_binding_value(item) for item in value)
     return bool(value)
-
-
-def _tool_allowed(
-    tool_name: str,
-    allowed_tools: list[str],
-    capability: str | None,
-) -> bool:
-    """Return whether a requested tool is allowed by explicit profile policy."""
-    if allowed_tools:
-        return tool_name in allowed_tools
-    return capability is not None
 
 
 def _capability_allowed(capability: str, capabilities: list[str]) -> bool:

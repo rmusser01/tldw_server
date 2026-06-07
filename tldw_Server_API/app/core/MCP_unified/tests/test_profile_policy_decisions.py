@@ -10,9 +10,10 @@ from mcp_unified.profiles.decisions import (
     PolicyDecisionSubject,
     PolicyMatchedRule,
     compile_profile_policy_rules,
+    evaluate_profile_tool_decision,
     merge_policy_decisions,
 )
-from mcp_unified.profiles.models import ProfilePolicy
+from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 
 
 def test_policy_decision_defaults_for_ask() -> None:
@@ -49,6 +50,50 @@ def test_policy_decision_defaults_for_allow() -> None:
     assert decision.visibility == "direct"
     assert decision.call_state == "callable"
     assert decision.requires_approval is False
+
+
+def test_evaluate_profile_tool_decision_denied_tool_wins() -> None:
+    profile = MCPProfile(
+        id="strict",
+        name="Strict",
+        policy_document=ProfilePolicy(
+            allowed_tools=["fs.write"],
+            denied_tools=["fs.write"],
+        ),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.write")
+
+    assert decision.outcome == "deny"
+    assert decision.reason_code == "tool_denied"
+
+
+def test_evaluate_profile_tool_decision_allowed_tool_allows() -> None:
+    profile = MCPProfile(
+        id="reader",
+        name="Reader",
+        policy_document=ProfilePolicy(allowed_tools=["fs.read"]),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.read")
+
+    assert decision.outcome == "allow"
+    assert decision.call_state == "callable"
+
+
+def test_evaluate_profile_tool_decision_structured_ask_rule_requires_approval() -> None:
+    profile = MCPProfile(
+        id="default-ask",
+        name="Default Ask",
+        policy_document=ProfilePolicy.model_validate(
+            {"tool_rules": [{"pattern": "fs.patch", "outcome": "ask"}]}
+        ),
+    )
+
+    decision = evaluate_profile_tool_decision(profile, "fs.patch")
+
+    assert decision.outcome == "ask"
+    assert decision.call_state == "approval_required"
 
 
 def test_merge_policy_decisions_uses_deny_over_ask_over_allow() -> None:
