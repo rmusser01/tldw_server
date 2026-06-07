@@ -1211,6 +1211,10 @@ export const PlaygroundMessage = (props: Props) => {
     !isSystemMessage &&
     renderMermaidDiagrams !== false &&
     !isActiveStreamingMessage
+  const mermaidArtifactBaseContextId =
+    props.messageId ||
+    props.serverMessageId ||
+    `${props.conversationInstanceId || "local"}-message-${props.currentMessageIndex}`
   const dynamicUIEnvelope = normalizeDynamicUIEnvelope(
     props.metadataExtra?.dynamic_ui
   )
@@ -2563,6 +2567,8 @@ export const PlaygroundMessage = (props: Props) => {
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
                       codeBlockVariant="compact"
+                      artifactContextId={`${mermaidArtifactBaseContextId}-greeting`}
+                      enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
                       enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                     />
                   </React.Suspense>
@@ -2601,6 +2607,8 @@ export const PlaygroundMessage = (props: Props) => {
                             className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                             searchQuery={props.searchQuery}
                             codeBlockVariant="github"
+                            artifactContextId={`${mermaidArtifactBaseContextId}-segment-${i}`}
+                            enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
                         </React.Suspense>

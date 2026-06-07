@@ -52,7 +52,8 @@ const TaskActivityNotice: React.FC<TaskActivityNoticeProps> = ({
     defaultValue: summaryDefault,
     actor: actorLabel,
     tool: toolLabel,
-    count: countLabel,
+    count: events.length,
+    countLabel,
     note: affectedLabel
   })
 

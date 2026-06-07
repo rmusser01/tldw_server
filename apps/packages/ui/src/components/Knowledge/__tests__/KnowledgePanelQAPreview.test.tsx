@@ -131,8 +131,7 @@ vi.mock(
       ),
       Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
     }
-  },
-  { virtual: true }
+  }
 )
 
 vi.mock("../hooks", () => {
