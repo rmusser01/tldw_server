@@ -11,6 +11,7 @@ from mcp_unified.profiles.decisions import (
     PolicyMatchedRule,
     compile_profile_policy_rules,
     evaluate_profile_tool_decision,
+    explain_profile_tool_decision,
     merge_policy_decisions,
 )
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
@@ -144,9 +145,7 @@ def test_evaluate_profile_tool_decision_requires_exact_tool_rule_pattern() -> No
     profile = MCPProfile(
         id="wildcard-like",
         name="Wildcard Like",
-        policy_document=ProfilePolicy.model_validate(
-            {"tool_rules": [{"pattern": "fs.*", "outcome": "allow"}]}
-        ),
+        policy_document=ProfilePolicy.model_validate({"tool_rules": [{"pattern": "fs.*", "outcome": "allow"}]}),
     )
 
     decision = evaluate_profile_tool_decision(profile, "fs.read")
@@ -213,15 +212,53 @@ def test_evaluate_profile_tool_decision_structured_ask_rule_requires_approval() 
     profile = MCPProfile(
         id="default-ask",
         name="Default Ask",
-        policy_document=ProfilePolicy.model_validate(
-            {"tool_rules": [{"pattern": "fs.patch", "outcome": "ask"}]}
-        ),
+        policy_document=ProfilePolicy.model_validate({"tool_rules": [{"pattern": "fs.patch", "outcome": "ask"}]}),
     )
 
     decision = evaluate_profile_tool_decision(profile, "fs.patch")
 
     assert decision.outcome == "ask"
     assert decision.call_state == "approval_required"
+
+
+def test_explain_profile_tool_decision_returns_redacted_payload() -> None:
+    profile = MCPProfile(
+        id="qa",
+        name="QA",
+        policy_document=ProfilePolicy(denied_tools=["fs.write"]),
+    )
+
+    explanation = explain_profile_tool_decision(profile, "fs.write")
+
+    assert explanation.final_outcome == "deny"
+    assert explanation.reason_code == "tool_denied"
+    assert explanation.profile_id == "qa"
+    assert explanation.subject.normalized == "fs.write"
+    assert explanation.visibility == "hidden"
+    assert explanation.call_state == "blocked"
+    assert explanation.requires_approval is False
+    assert explanation.redacted is True
+    assert explanation.hook_results == []
+    assert explanation.sandbox == {}
+    assert explanation.matches[0].source == "policy_document.denied_tools"
+
+
+def test_explain_profile_tool_decision_includes_permission_mode() -> None:
+    profile = MCPProfile(
+        id="planner",
+        name="Planner",
+        policy_document=ProfilePolicy.model_validate(
+            {
+                "allowed_tools": ["fs.read"],
+                "permission_mode": "plan/read-only",
+            }
+        ),
+    )
+
+    explanation = explain_profile_tool_decision(profile, "fs.read")
+
+    assert explanation.final_outcome == "allow"
+    assert explanation.permission_mode == "plan/read-only"
 
 
 def test_merge_policy_decisions_uses_deny_over_ask_over_allow() -> None:

@@ -38,6 +38,10 @@ _OUTCOME_PRECEDENCE: dict[PolicyDecisionOutcome, int] = {
 }
 _VALID_OUTCOMES = frozenset(_OUTCOME_PRECEDENCE)
 _COMMAND_EXECUTABLE_WILDCARDS = frozenset("*?[]")
+_LEGACY_POLICY_SOURCE_LABELS = {
+    "allowed_tools": "policy_document.allowed_tools",
+    "denied_tools": "policy_document.denied_tools",
+}
 
 
 class PolicyDecisionSubject(BaseModel):
@@ -112,6 +116,25 @@ class PolicyDecision(BaseModel):
         if self.requires_approval is None:
             self.requires_approval = bool(defaults["requires_approval"])
         return self
+
+
+class PolicyExplanation(BaseModel):
+    """Redacted operator/debug explanation for one simulated policy decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    final_outcome: PolicyDecisionOutcome
+    reason_code: str
+    subject: PolicyDecisionSubject
+    matches: list[PolicyMatchedRule] = Field(default_factory=list)
+    profile_id: str | None = None
+    permission_mode: str | None = None
+    visibility: PolicyDecisionVisibility
+    call_state: PolicyDecisionCallState
+    requires_approval: bool
+    hook_results: list[dict[str, Any]] = Field(default_factory=list)
+    sandbox: dict[str, Any] = Field(default_factory=dict)
+    redacted: bool = True
 
 
 def merge_policy_decisions(
@@ -289,6 +312,45 @@ def evaluate_profile_tool_decision(
     )
 
 
+def explain_profile_tool_decision(
+    profile: MCPProfile,
+    tool_name: str,
+    *,
+    capability: str | None = None,
+) -> PolicyExplanation:
+    """Return a redacted explanation for one profile tool decision."""
+
+    decision = evaluate_profile_tool_decision(
+        profile,
+        tool_name,
+        capability=capability,
+    )
+    visibility = cast(
+        PolicyDecisionVisibility,
+        decision.visibility or _DEFAULTS_BY_OUTCOME[decision.outcome]["visibility"],
+    )
+    call_state = cast(
+        PolicyDecisionCallState,
+        decision.call_state or _DEFAULTS_BY_OUTCOME[decision.outcome]["call_state"],
+    )
+    requires_approval = (
+        decision.requires_approval
+        if decision.requires_approval is not None
+        else bool(_DEFAULTS_BY_OUTCOME[decision.outcome]["requires_approval"])
+    )
+    return PolicyExplanation(
+        final_outcome=decision.outcome,
+        reason_code=decision.reason_code,
+        subject=decision.subject,
+        matches=_explanation_matches(decision),
+        profile_id=profile.id,
+        permission_mode=_policy_permission_mode(profile.policy_document),
+        visibility=visibility,
+        call_state=call_state,
+        requires_approval=requires_approval,
+    )
+
+
 def _compile_legacy_tool_pattern(
     pattern: Any,
     *,
@@ -419,6 +481,28 @@ def _tool_rule_reason_code(rule: PolicyDecisionRule) -> str:
     if rule.outcome == "allow":
         return "tool_allowed"
     return "tool_denied"
+
+
+def _explanation_matches(decision: PolicyDecision) -> list[PolicyMatchedRule]:
+    """Return matched rules with operator-facing source labels."""
+
+    return [
+        matched_rule.model_copy(update={"source": _explanation_source(matched_rule.source)})
+        for matched_rule in decision.matched_rules
+    ]
+
+
+def _explanation_source(source: str) -> str:
+    """Return an operator-facing source label without exposing host paths."""
+
+    return _LEGACY_POLICY_SOURCE_LABELS.get(source, source)
+
+
+def _policy_permission_mode(policy_document: Any) -> str | None:
+    """Return a safe scalar permission mode from policy extras when present."""
+
+    permission_mode = _policy_value(policy_document, "permission_mode")
+    return permission_mode if isinstance(permission_mode, str) else None
 
 
 def _compile_structured_rule(
