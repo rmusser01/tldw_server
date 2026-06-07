@@ -451,7 +451,7 @@ git commit -m "fix: resolve chat media context actions"
 
 **Tests:** Targeted Vitest tests plus static checks.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 5: Verify submit-path assumptions and update tests only if needed
 
@@ -516,7 +516,7 @@ git commit -m "chore: record chat media context verification"
 
 **Tests:** Git status and targeted test evidence.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 6: Update task tracking and final status
 
