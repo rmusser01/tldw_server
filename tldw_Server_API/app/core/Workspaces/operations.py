@@ -14,6 +14,12 @@ WORKSPACE_OPERATION_STATUSES = frozenset(
 _MAX_DIAGNOSTIC_KEYS = 16
 _MAX_DIAGNOSTIC_STRING = 320
 _SECRET_RE = re.compile(r"(api[_-]?key|secret|token|password|credential)", re.IGNORECASE)
+_SECRET_VALUE_RE = re.compile(
+    r"(Bearer\s+\S+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|"
+    r"(?:ghp|github_pat|sk|pk|rk|xox[baprs]?)-[A-Za-z0-9_\-]{16,}|"
+    r"[A-Za-z0-9_\-]{32,}\.[A-Za-z0-9_\-]{16,})",
+    re.IGNORECASE,
+)
 _HOST_PATH_RE = re.compile(
     r"(/Users/[^\s'\"<>]+|/home/[^\s'\"<>]+|/private/[^\s'\"<>]+|/var/folders/[^\s'\"<>]+|[A-Za-z]:\\[^\s'\"<>]+)"
 )
@@ -101,7 +107,10 @@ def _redact_diagnostic_value(key: str, value: Any) -> Any:
         return [_redact_diagnostic_value(key, item) for item in value[:_MAX_DIAGNOSTIC_KEYS]]
     if isinstance(value, (bool, int, float)) or value is None:
         return value
-    text = _HOST_PATH_RE.sub("[redacted-path]", str(value))
+    raw_text = str(value)
+    if _SECRET_VALUE_RE.search(raw_text):
+        return "[redacted]"
+    text = _HOST_PATH_RE.sub("[redacted-path]", raw_text)
     if _SECRET_RE.search(text):
         text = "[redacted]"
     return text[:_MAX_DIAGNOSTIC_STRING]

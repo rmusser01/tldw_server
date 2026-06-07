@@ -16404,6 +16404,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "workspace_id, user_id, command, idempotency_key, and request_fingerprint are required."
             )  # noqa: TRY003
         normalized_status = self._validate_workspace_operation_status(status)
+        self._delete_expired_workspace_operation_idempotency(
+            workspace_id=workspace_key,
+            user_id=user_key,
+            command=command_key,
+            idempotency_key=key,
+        )
         existing = self.get_workspace_operation_by_idempotency(
             workspace_id=workspace_key,
             user_id=user_key,
@@ -16479,6 +16485,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if created is None:
             raise CharactersRAGDBError("Failed to reload created workspace operation.")  # noqa: TRY003
         return created
+
+    def _delete_expired_workspace_operation_idempotency(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        command: str,
+        idempotency_key: str,
+    ) -> int:
+        """Remove an expired operation envelope before reusing an idempotency tuple."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM workspace_operations
+                     WHERE workspace_id = ?
+                       AND user_id = ?
+                       AND command = ?
+                       AND idempotency_key = ?
+                       AND expires_at IS NOT NULL
+                       AND expires_at < ?
+                    """,
+                    (workspace_id, user_id, command, idempotency_key, now),
+                )
+                return int(getattr(cursor, "rowcount", 0) or 0)
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise self._workspace_operation_integrity_error(exc) from exc
 
     def get_workspace_operation(self, workspace_id: str, operation_id: str) -> dict[str, Any] | None:
         """Return a Workspace operation by id."""

@@ -77,6 +77,7 @@ export const WorkspaceList = ({
   return (
     <div className="min-h-0 overflow-auto border-t border-border">
       <table className="w-full min-w-[860px] border-collapse text-sm">
+        <caption className="sr-only">Workspaces list</caption>
         <thead className="sticky top-0 z-10 bg-bg text-xs uppercase text-text-muted">
           <tr className="border-b border-border">
             <th className="px-3 py-2 text-left font-medium">Name</th>
@@ -89,6 +90,13 @@ export const WorkspaceList = ({
           </tr>
         </thead>
         <tbody>
+          {items.length === 0 && (
+            <tr>
+              <td className="px-3 py-3 text-center text-text-muted" colSpan={7}>
+                No workspaces found
+              </td>
+            </tr>
+          )}
           {items.map((item) => (
             <tr
               key={item.id}

@@ -40,12 +40,26 @@ const rootStateCopy = (state: WorkspaceManagerItem["projectRoot"]["state"]): str
   return "Root is attached."
 }
 
+const fallbackEntropy = (): string => {
+  const cryptoApi = globalThis.crypto
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const values = new Uint32Array(2)
+    cryptoApi.getRandomValues(values)
+    return `${values[0].toString(36)}-${values[1].toString(36)}`
+  }
+  const perf = globalThis.performance
+  const perfTime = typeof perf?.now === "function" ? perf.now() : 0
+  return `${Date.now().toString(36)}-${perfTime.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2)}`
+}
+
 const generateSandboxRootIdempotencyKey = (workspaceId: string): string => {
   const randomUUID = globalThis.crypto?.randomUUID
   const entropy =
     typeof randomUUID === "function"
       ? randomUUID.call(globalThis.crypto)
-      : `${Date.now()}`
+      : fallbackEntropy()
   return `workspace-sandbox-root:${workspaceId}:${entropy}`
 }
 

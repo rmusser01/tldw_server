@@ -178,6 +178,11 @@ def _workspace_volume_from_mapping(row: Any) -> WorkspaceVolume:
         workspace_id=str(row_dict.get("workspace_id") or ""),
         user_id=str(row_dict.get("user_id") or ""),
         state=_coerce_workspace_volume_state(row_dict.get("state")),
+        root_id=(
+            str(row_dict["root_id"])
+            if row_dict.get("root_id") is not None
+            else None
+        ),
         runtime=(
             str(row_dict["runtime"])
             if row_dict.get("runtime") is not None
@@ -326,6 +331,9 @@ class SandboxStore:
         mount_path: str | None = None,
         diagnostics: dict[str, object] | None = None,
     ) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
         raise NotImplementedError
 
     def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
@@ -847,15 +855,17 @@ class InMemoryStore(SandboxStore):
             return None
         with self._lock:
             for volume in self._workspace_volumes.values():
-                if volume.user_id != user_key or volume.idempotency_key != key:
+                if (
+                    volume.user_id != user_key
+                    or volume.workspace_id != str(workspace_id)
+                    or volume.idempotency_key != key
+                ):
                     continue
                 if (
                     idempotency_fingerprint is not None
                     and volume.idempotency_fingerprint != idempotency_fingerprint
                 ):
                     raise IdempotencyConflict(volume.id, key=key)
-                if str(volume.workspace_id) != str(workspace_id):
-                    return None
                 return volume
         return None
 
@@ -872,9 +882,23 @@ class InMemoryStore(SandboxStore):
             if volume is None:
                 return None
             volume.state = _coerce_workspace_volume_state(state)
-            volume.mount_path = sanitize_workspace_volume_mount_path(mount_path)
+            if mount_path is not None:
+                volume.mount_path = sanitize_workspace_volume_mount_path(mount_path)
             if diagnostics is not None:
                 volume.diagnostics = sanitize_workspace_volume_diagnostics(diagnostics)
+            volume.updated_at = datetime.now(timezone.utc)
+            self._workspace_volumes[volume.id] = volume
+            return volume
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        root_key = str(root_id or "").strip()
+        if not root_key:
+            return None
+        with self._lock:
+            volume = self._workspace_volumes.get(str(volume_id))
+            if volume is None:
+                return None
+            volume.root_id = root_key
             volume.updated_at = datetime.now(timezone.utc)
             self._workspace_volumes[volume.id] = volume
             return volume
@@ -1377,6 +1401,7 @@ class SQLiteStore(SandboxStore):
                     workspace_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     state TEXT NOT NULL,
+                    root_id TEXT,
                     runtime TEXT,
                     display_name TEXT,
                     mount_path TEXT,
@@ -1388,8 +1413,9 @@ class SQLiteStore(SandboxStore):
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspace_volumes_workspace
                     ON workspace_volumes(workspace_id);
+                DROP INDEX IF EXISTS idx_workspace_volumes_idempotency;
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency
-                    ON workspace_volumes(user_id, idempotency_key)
+                    ON workspace_volumes(workspace_id, user_id, idempotency_key)
                     WHERE idempotency_key IS NOT NULL;
                 """
             )
@@ -1450,6 +1476,7 @@ class SQLiteStore(SandboxStore):
             _ensure_sqlite_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
             _ensure_sqlite_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
             _ensure_sqlite_column("workspace_volumes", "runtime", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "root_id", "TEXT")
             _ensure_sqlite_column("workspace_volumes", "display_name", "TEXT")
             _ensure_sqlite_column("workspace_volumes", "mount_path", "TEXT")
             _ensure_sqlite_column("workspace_volumes", "diagnostics", "TEXT")
@@ -2052,13 +2079,14 @@ class SQLiteStore(SandboxStore):
             con.execute(
                 (
                     "INSERT INTO workspace_volumes("
-                    "id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "id,workspace_id,user_id,state,root_id,runtime,display_name,mount_path,diagnostics,"
                     "idempotency_key,idempotency_fingerprint,created_at,updated_at"
-                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(id) DO UPDATE SET "
                     "workspace_id=excluded.workspace_id,"
                     "user_id=excluded.user_id,"
                     "state=excluded.state,"
+                    "root_id=excluded.root_id,"
                     "runtime=excluded.runtime,"
                     "display_name=excluded.display_name,"
                     "mount_path=excluded.mount_path,"
@@ -2072,6 +2100,7 @@ class SQLiteStore(SandboxStore):
                     str(volume.workspace_id),
                     self._user_key(volume.user_id),
                     _coerce_workspace_volume_state(volume.state).value,
+                    (str(volume.root_id) if volume.root_id is not None else None),
                     (str(volume.runtime) if volume.runtime is not None else None),
                     (str(volume.display_name) if volume.display_name is not None else None),
                     mount_path,
@@ -2092,7 +2121,7 @@ class SQLiteStore(SandboxStore):
             cur = con.execute(
                 (
                     "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
-                    "idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at "
                     "FROM workspace_volumes WHERE id=?"
                 ),
                 (str(volume_id),),
@@ -2116,10 +2145,10 @@ class SQLiteStore(SandboxStore):
             cur = con.execute(
                 (
                     "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
-                    "idempotency_key,idempotency_fingerprint,created_at,updated_at "
-                    "FROM workspace_volumes WHERE user_id=? AND idempotency_key=?"
+                    "root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE workspace_id=? AND user_id=? AND idempotency_key=?"
                 ),
-                (user_key, key),
+                (str(workspace_id), user_key, key),
             )
             row = cur.fetchone()
         if not row:
@@ -2128,8 +2157,6 @@ class SQLiteStore(SandboxStore):
         if idempotency_fingerprint is not None and volume.idempotency_fingerprint != idempotency_fingerprint:
             created_at = volume.created_at.timestamp() if volume.created_at is not None else None
             raise IdempotencyConflict(volume.id, key=key, created_at=created_at)
-        if str(volume.workspace_id) != str(workspace_id):
-            return None
         return volume
 
     def update_workspace_volume_state(
@@ -2142,7 +2169,6 @@ class SQLiteStore(SandboxStore):
     ) -> WorkspaceVolume | None:
         next_state = _coerce_workspace_volume_state(state)
         updated_at = datetime.now(timezone.utc).isoformat()
-        mount_path = sanitize_workspace_volume_mount_path(mount_path)
         diagnostics_json = (
             json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False)
             if diagnostics is not None
@@ -2150,21 +2176,60 @@ class SQLiteStore(SandboxStore):
         )
         with self._lock, self._conn() as con:
             if diagnostics is None:
-                cur = con.execute(
-                    (
-                        "UPDATE workspace_volumes SET state=?, mount_path=?, updated_at=? "
-                        "WHERE id=?"
-                    ),
-                    (next_state.value, mount_path, updated_at, str(volume_id)),
-                )
+                if mount_path is None:
+                    cur = con.execute(
+                        "UPDATE workspace_volumes SET state=?, updated_at=? WHERE id=?",
+                        (next_state.value, updated_at, str(volume_id)),
+                    )
+                else:
+                    cur = con.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=?, mount_path=?, updated_at=? "
+                            "WHERE id=?"
+                        ),
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
             else:
-                cur = con.execute(
-                    (
-                        "UPDATE workspace_volumes SET state=?, mount_path=?, diagnostics=?, updated_at=? "
-                        "WHERE id=?"
-                    ),
-                    (next_state.value, mount_path, diagnostics_json, updated_at, str(volume_id)),
-                )
+                if mount_path is None:
+                    cur = con.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=?, diagnostics=?, updated_at=? "
+                            "WHERE id=?"
+                        ),
+                        (next_state.value, diagnostics_json, updated_at, str(volume_id)),
+                    )
+                else:
+                    cur = con.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=?, mount_path=?, diagnostics=?, updated_at=? "
+                            "WHERE id=?"
+                        ),
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            diagnostics_json,
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        root_key = str(root_id or "").strip()
+        if not root_key:
+            return None
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                "UPDATE workspace_volumes SET root_id=?, updated_at=? WHERE id=?",
+                (root_key, updated_at, str(volume_id)),
+            )
             updated = int(getattr(cur, "rowcount", 0) or 0)
         return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
 
@@ -2175,7 +2240,7 @@ class SQLiteStore(SandboxStore):
         with self._lock, self._conn() as con:
             cur = con.execute(
                 (
-                    "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "SELECT id,workspace_id,user_id,state,root_id,runtime,display_name,mount_path,diagnostics,"
                     "idempotency_key,idempotency_fingerprint,created_at,updated_at "
                     "FROM workspace_volumes WHERE workspace_id=? ORDER BY created_at ASC, id ASC"
                 ),
@@ -2847,6 +2912,7 @@ class PostgresStore(SandboxStore):
                         workspace_id TEXT NOT NULL,
                         user_id TEXT NOT NULL,
                         state TEXT NOT NULL,
+                        root_id TEXT,
                         runtime TEXT,
                         display_name TEXT,
                         mount_path TEXT,
@@ -2861,10 +2927,11 @@ class PostgresStore(SandboxStore):
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_workspace_volumes_workspace ON workspace_volumes(workspace_id)"
             )
+            cur.execute("DROP INDEX IF EXISTS idx_workspace_volumes_idempotency")
             cur.execute(
                 (
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency "
-                    "ON workspace_volumes(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
+                    "ON workspace_volumes(workspace_id, user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
                 )
             )
             # Migrations: ensure new columns exist
@@ -2919,6 +2986,7 @@ class PostgresStore(SandboxStore):
             _ensure_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
             _ensure_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
             _ensure_column("workspace_volumes", "runtime", "TEXT")
+            _ensure_column("workspace_volumes", "root_id", "TEXT")
             _ensure_column("workspace_volumes", "display_name", "TEXT")
             _ensure_column("workspace_volumes", "mount_path", "TEXT")
             _ensure_column("workspace_volumes", "diagnostics", "JSONB")
@@ -3525,13 +3593,14 @@ class PostgresStore(SandboxStore):
             cur.execute(
                 """
                 INSERT INTO workspace_volumes(
-                    id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                    id,workspace_id,user_id,state,root_id,runtime,display_name,mount_path,diagnostics,
                     idempotency_key,idempotency_fingerprint,created_at,updated_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(id) DO UPDATE SET
                     workspace_id=EXCLUDED.workspace_id,
                     user_id=EXCLUDED.user_id,
                     state=EXCLUDED.state,
+                    root_id=EXCLUDED.root_id,
                     runtime=EXCLUDED.runtime,
                     display_name=EXCLUDED.display_name,
                     mount_path=EXCLUDED.mount_path,
@@ -3545,6 +3614,7 @@ class PostgresStore(SandboxStore):
                     str(volume.workspace_id),
                     self._user_key(volume.user_id),
                     _coerce_workspace_volume_state(volume.state).value,
+                    (str(volume.root_id) if volume.root_id is not None else None),
                     (str(volume.runtime) if volume.runtime is not None else None),
                     (str(volume.display_name) if volume.display_name is not None else None),
                     mount_path,
@@ -3565,7 +3635,7 @@ class PostgresStore(SandboxStore):
             cur.execute(
                 """
                 SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
-                       idempotency_key,idempotency_fingerprint,created_at,updated_at
+                       root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at
                 FROM workspace_volumes WHERE id=%s
                 """,
                 (str(volume_id),),
@@ -3589,10 +3659,10 @@ class PostgresStore(SandboxStore):
             cur.execute(
                 """
                 SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
-                       idempotency_key,idempotency_fingerprint,created_at,updated_at
-                FROM workspace_volumes WHERE user_id=%s AND idempotency_key=%s
+                       root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE workspace_id=%s AND user_id=%s AND idempotency_key=%s
                 """,
-                (user_key, key),
+                (str(workspace_id), user_key, key),
             )
             row = cur.fetchone()
         if not row:
@@ -3601,8 +3671,6 @@ class PostgresStore(SandboxStore):
         if idempotency_fingerprint is not None and volume.idempotency_fingerprint != idempotency_fingerprint:
             created_at = volume.created_at.timestamp() if volume.created_at is not None else None
             raise IdempotencyConflict(volume.id, key=key, created_at=created_at)
-        if str(volume.workspace_id) != str(workspace_id):
-            return None
         return volume
 
     def update_workspace_volume_state(
@@ -3615,27 +3683,64 @@ class PostgresStore(SandboxStore):
     ) -> WorkspaceVolume | None:
         next_state = _coerce_workspace_volume_state(state)
         updated_at = datetime.now(timezone.utc).isoformat()
-        mount_path = sanitize_workspace_volume_mount_path(mount_path)
         with self._lock, self._conn() as con, con.cursor() as cur:
             if diagnostics is None:
-                cur.execute(
-                    "UPDATE workspace_volumes SET state=%s, mount_path=%s, updated_at=%s WHERE id=%s",
-                    (next_state.value, mount_path, updated_at, str(volume_id)),
-                )
+                if mount_path is None:
+                    cur.execute(
+                        "UPDATE workspace_volumes SET state=%s, updated_at=%s WHERE id=%s",
+                        (next_state.value, updated_at, str(volume_id)),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE workspace_volumes SET state=%s, mount_path=%s, updated_at=%s WHERE id=%s",
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
             else:
-                cur.execute(
-                    (
-                        "UPDATE workspace_volumes SET state=%s, mount_path=%s, diagnostics=%s, "
-                        "updated_at=%s WHERE id=%s"
-                    ),
-                    (
-                        next_state.value,
-                        mount_path,
-                        json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False),
-                        updated_at,
-                        str(volume_id),
-                    ),
-                )
+                if mount_path is None:
+                    cur.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=%s, diagnostics=%s, "
+                            "updated_at=%s WHERE id=%s"
+                        ),
+                        (
+                            next_state.value,
+                            json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=%s, mount_path=%s, diagnostics=%s, "
+                            "updated_at=%s WHERE id=%s"
+                        ),
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        root_key = str(root_id or "").strip()
+        if not root_key:
+            return None
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                "UPDATE workspace_volumes SET root_id=%s, updated_at=%s WHERE id=%s",
+                (root_key, updated_at, str(volume_id)),
+            )
             updated = int(getattr(cur, "rowcount", 0) or 0)
         return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
 
@@ -3647,7 +3752,7 @@ class PostgresStore(SandboxStore):
             cur.execute(
                 """
                 SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
-                       idempotency_key,idempotency_fingerprint,created_at,updated_at
+                       root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at
                 FROM workspace_volumes WHERE workspace_id=%s ORDER BY created_at ASC, id ASC
                 """,
                 (workspace_key,),

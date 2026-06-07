@@ -101,6 +101,8 @@ export const normalizeWorkspaceManagerItem = (
     fileInventoryAvailable: projectRoot.fileInventory.available,
     sourceCount: context?.sources?.summary?.total ?? null,
     selectedSourceCount: context?.sources?.summary?.selected ?? null,
+    // Older Workspace Core responses omit active_operations; the manager treats
+    // missing or malformed values as no active operations to preserve route load.
     activeOperations: Array.isArray(context?.active_operations)
       ? context.active_operations
       : [],

@@ -46,6 +46,15 @@ def test_attention_state_keeps_research_workspace_ready_without_root() -> None:
     ) == "ready"
 
 
+def test_attention_state_service_errors_override_research_fast_path() -> None:
+    assert workspace_attention_state(
+        workspace_profile="research",
+        project_root_state="not_configured",
+        inventory_state="not_started",
+        service_errors=["sandbox_mount_unavailable"],
+    ) == "blocked"
+
+
 def test_attention_state_projects_active_inventory_to_working() -> None:
     assert workspace_attention_state(
         workspace_profile="project",

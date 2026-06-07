@@ -300,6 +300,17 @@ describe("workspace API domain contract", () => {
     expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
 
+  it("rejects blank IDs before making segment-routed requests", async () => {
+    await expect(workspaceApiMethods.deleteWorkspace("   ")).rejects.toThrow(
+      "workspaceId"
+    )
+    await expect(
+      workspaceApiMethods.getWorkspaceOperation("ws-1", " ")
+    ).rejects.toThrow("operationId")
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
   it("keeps source status urls available from the backend contract", async () => {
     mocks.bgRequest.mockResolvedValue({
       workspace_id: "ws-1",

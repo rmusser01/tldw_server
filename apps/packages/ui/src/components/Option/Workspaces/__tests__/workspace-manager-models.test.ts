@@ -156,6 +156,18 @@ describe("workspace manager model normalization", () => {
     expect(item.attentionState).toBe("ready")
   })
 
+  it("normalizes malformed active operations to an empty list", () => {
+    const workspace = baseWorkspace()
+    const item = normalizeWorkspaceManagerItem(
+      workspace,
+      contextFor(workspace, {
+        active_operations: "invalid" as unknown as WorkspaceContextResponse["active_operations"]
+      })
+    )
+
+    expect(item.activeOperations).toEqual([])
+  })
+
   it("normalizes archived and unknown workspace inputs conservatively", () => {
     expect(
       normalizeWorkspaceManagerItem(

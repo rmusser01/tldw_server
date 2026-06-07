@@ -263,6 +263,35 @@ describe("WorkspaceProjectRootPanel", () => {
     })
   })
 
+  it("uses getRandomValues fallback entropy when randomUUID is unavailable", async () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: (values: Uint32Array) => {
+        values[0] = 36
+        values[1] = 1296
+        return values
+      }
+    })
+    const user = userEvent.setup()
+    renderPanel(managerItem())
+
+    await user.click(
+      screen.getByRole("button", { name: "Sandbox-managed root" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Provision sandbox root" })
+    )
+
+    await waitFor(() => {
+      expect(apiMocks.provisionWorkspaceSandboxRoot).toHaveBeenCalledWith(
+        "ws-project",
+        expect.objectContaining({
+          expected_workspace_version: 4
+        }),
+        "workspace-sandbox-root:ws-project:10-100"
+      )
+    })
+  })
+
   it("recovers visible provisioning state from active operations", () => {
     renderPanel(
       managerItem({

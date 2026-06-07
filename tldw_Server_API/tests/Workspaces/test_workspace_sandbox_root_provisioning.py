@@ -9,6 +9,7 @@ from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
     WorkspaceSandboxRootProvisionRequestData,
     provision_and_attach_sandbox_root,
 )
+from tldw_Server_API.app.core.Workspaces.root_binding_service import WorkspaceRootConflictError
 
 
 @pytest.fixture
@@ -70,6 +71,9 @@ def test_provision_and_attach_sandbox_root_retries_return_same_operation(db, vol
 
     assert retry.operation["operation_id"] == first.operation["operation_id"]
     assert retry.primary_root["sandbox_mount_state"] == "not_configured"
+    volumes = volume_service.store.list_workspace_volumes_for_workspace("ws-project")
+    assert len(volumes) == 1
+    assert volumes[0].root_id == retry.primary_root["root_id"]
 
 
 def test_provision_and_attach_sandbox_root_rejects_changed_request_for_same_key(db, volume_service):
@@ -96,4 +100,34 @@ def test_provision_and_attach_sandbox_root_rejects_changed_request_for_same_key(
                 requested_runtime="vz_linux",
             ),
             idempotency_key="root-key",
+        )
+
+
+def test_provision_and_attach_sandbox_root_parses_string_false_replace_existing(db, volume_service):
+    first = provision_and_attach_sandbox_root(
+        db=db,
+        sandbox_volume_service=volume_service,
+        workspace_id="ws-project",
+        user_id="user-1",
+        request=WorkspaceSandboxRootProvisionRequestData(
+            display_name="Project root",
+            requested_runtime="docker",
+        ),
+        idempotency_key="root-key",
+    )
+
+    with pytest.raises(WorkspaceRootConflictError):
+        provision_and_attach_sandbox_root(
+            db=db,
+            sandbox_volume_service=volume_service,
+            workspace_id="ws-project",
+            user_id="user-1",
+            request={
+                "display_name": "Replacement",
+                "requested_runtime": "docker",
+                "root_id": "replacement",
+                "replace_existing": "false",
+                "expected_workspace_version": first.primary_root["version"],
+            },
+            idempotency_key="replacement-key",
         )

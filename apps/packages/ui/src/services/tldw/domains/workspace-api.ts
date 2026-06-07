@@ -684,10 +684,14 @@ export interface WorkspaceNoteUpdateRequest {
 }
 
 const encodeWorkspacePathSegment = (value: string, label: string): string => {
-  if (value.includes("/")) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    throw new Error(`${label} cannot be empty in Workspace API path segments`)
+  }
+  if (trimmed.includes("/")) {
     throw new Error(`${label} cannot contain "/" in Workspace API path segments`)
   }
-  return encodeURIComponent(value)
+  return encodeURIComponent(trimmed)
 }
 
 const workspacePath = (workspaceId: string, suffix = ""): AllowedPath =>

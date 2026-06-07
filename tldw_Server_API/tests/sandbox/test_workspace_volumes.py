@@ -61,18 +61,19 @@ def test_service_rejects_idempotency_conflict_for_different_workspace_or_runtime
         requested_runtime="docker",
     )
 
-    try:
-        service.provision_workspace_volume(
-            workspace_id="workspace-2",
-            user_id="user-1",
-            display_name="Project root",
-            idempotency_key="provision-root",
-            requested_runtime="docker",
-        )
-    except IdempotencyConflict as exc:
-        assert exc.original_id
-    else:
-        raise AssertionError("Expected idempotency conflict for changed workspace")
+    other_workspace = service.provision_workspace_volume(
+        workspace_id="workspace-2",
+        user_id="user-1",
+        display_name="Project root",
+        idempotency_key="provision-root",
+        requested_runtime="docker",
+    )
+    assert other_workspace.workspace_id == "workspace-2"
+    assert other_workspace.id != store.find_workspace_volume_by_idempotency(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        idempotency_key="provision-root",
+    ).id
 
     try:
         service.provision_workspace_volume(
@@ -125,7 +126,7 @@ def test_service_validate_and_resolve_fail_closed_for_wrong_owner_and_missing_mo
     assert mount.reason_code == "workspace_sandbox_volume_runtime_not_configured"
 
 
-def test_store_updates_volume_state_and_ready_mount_hint_round_trips(tmp_path):
+def test_store_updates_volume_state_and_bound_ready_mount_hint_round_trips(tmp_path):
     store = SQLiteStore(db_path=str(tmp_path / "sandbox.db"))
     service = SandboxWorkspaceVolumeService(store=store)
     volume = service.provision_workspace_volume(
@@ -142,6 +143,11 @@ def test_store_updates_volume_state_and_ready_mount_hint_round_trips(tmp_path):
         mount_path="/workspace/project",
         diagnostics={"message": "mounted"},
     )
+    service.bind_workspace_volume_root(
+        sandbox_volume_id=volume.id,
+        workspace_id="workspace-1",
+        root_id="primary",
+    )
 
     reloaded = service.validate_workspace_volume(
         workspace_id="workspace-1",
@@ -157,6 +163,19 @@ def test_store_updates_volume_state_and_ready_mount_hint_round_trips(tmp_path):
     assert reloaded.state == "ready"
     assert mount.state == "ready"
     assert mount.local_path == "/workspace/project"
+
+    mismatch = service.resolve_workspace_volume_mount(
+        workspace_id="workspace-1",
+        root_id="other-root",
+        sandbox_volume_id=volume.id,
+    )
+    assert mismatch.state == "unavailable"
+    assert mismatch.reason_code == "workspace_sandbox_volume_root_mismatch"
+
+    store.update_workspace_volume_state(volume.id, state=WorkspaceVolumeState.failed)
+    failed = store.get_workspace_volume(volume.id)
+    assert failed is not None
+    assert failed.mount_path == "/workspace/project"
 
 
 def test_store_direct_writes_bound_and_redact_workspace_volume_diagnostics(tmp_path):

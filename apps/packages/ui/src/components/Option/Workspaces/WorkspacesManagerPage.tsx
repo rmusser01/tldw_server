@@ -25,9 +25,21 @@ type AttentionFilter = "all" | "needs_attention"
 type DialogProfile = WorkspaceProfile | null
 
 const createWorkspaceId = (): string => {
-  const randomUUID = globalThis.crypto?.randomUUID
-  if (typeof randomUUID === "function") return randomUUID.call(globalThis.crypto)
-  return `workspace-${Date.now()}`
+  const cryptoApi = globalThis.crypto
+  const randomUUID = cryptoApi?.randomUUID
+  if (typeof randomUUID === "function") return randomUUID.call(cryptoApi)
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const values = new Uint32Array(2)
+    cryptoApi.getRandomValues(values)
+    return `workspace-${values[0].toString(36)}-${values[1].toString(36)}`
+  }
+  const perfTime =
+    typeof globalThis.performance?.now === "function"
+      ? globalThis.performance.now()
+      : 0
+  return `workspace-${Date.now().toString(36)}-${perfTime.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2)}`
 }
 
 const errorText = (error: unknown): string =>

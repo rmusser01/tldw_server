@@ -92,15 +92,15 @@ def workspace_attention_state(
     if archived or raw_root_state == "archived":
         return "archived"
 
+    service_attention = _attention_from_service_errors(service_errors)
+    if service_attention is not None:
+        return service_attention
+
     profile = _normalized_string(workspace_profile)
     if profile == "research":
         return "ready"
     if profile != "project":
         return "needs_attention"
-
-    service_attention = _attention_from_service_errors(service_errors)
-    if service_attention is not None:
-        return service_attention
 
     root_state = normalize_project_root_state(project_root_state)
     if root_state == "not_configured":

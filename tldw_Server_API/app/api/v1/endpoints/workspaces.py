@@ -519,7 +519,7 @@ def _workspace_file_inventory_summary(source: dict[str, Any]) -> dict[str, Any]:
         }
 
     counts = source.get("counts") if isinstance(source.get("counts"), dict) else {}
-    inventory_state = source.get("state") or source.get("file_inventory_state") or "not_started"
+    inventory_state = source.get("file_inventory_state") or source.get("state") or "not_started"
     return {
         "state": inventory_state,
         "indexed_file_count": 0,

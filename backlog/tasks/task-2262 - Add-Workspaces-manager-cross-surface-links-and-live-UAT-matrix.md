@@ -57,7 +57,7 @@ Execute Task 8 from the canonical Workspaces manager plan: add cross-surface lin
 - Verification: `./node_modules/.bin/vitest run __tests__/navigation/workspaces-page-wrapper.test.ts` failed before the wrapper existed, then passed after adding it.
 - Verification: `npx playwright test e2e/workflows/workspaces-manager.spec.ts --list` discovered 2 tests.
 - Verification: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line` ran under Playwright/CDP after dependency environment repair; 2 tests skipped because backend preflight was unavailable on `127.0.0.1:8000`.
-- Verification: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' TLDW_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line` failed before the Next page wrapper fix because `/workspaces` rendered the WebUI 404, then passed after the fix with `2 passed (34.8s)`.
+- Verification: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' TLDW_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_SERVER_URL=http://127.0.0.1:18001 TLDW_E2E_API_KEY=YOUR_E2E_API_KEY_HERE npx playwright test e2e/workflows/workspaces-manager.spec.ts --reporter=line` failed before the Next page wrapper fix because `/workspaces` rendered the WebUI 404, then passed after the fix with `2 passed (34.8s)`.
 - Verification: `git diff --check` passed.
 - Known blocker: `bun run verify:design-system-state` still fails on existing non-Workspaces canonical-state labels in `FirstChatStep.tsx` and `src/services/acp/readiness.ts`.
 - Bandit skipped: frontend TypeScript, E2E, docs, and Backlog-only slice.

@@ -72,6 +72,7 @@ class SandboxWorkspaceVolumeService:
             workspace_id=workspace_key,
             user_id=user_key,
             state=WorkspaceVolumeState.not_configured,
+            root_id=None,
             runtime=runtime,
             display_name=_bounded_text(display_name, 120) or "Workspace volume",
             mount_path=None,
@@ -124,7 +125,7 @@ class SandboxWorkspaceVolumeService:
         root_id: str,
         sandbox_volume_id: str,
     ) -> WorkspaceVolumeMount:
-        del root_id
+        root_key = str(root_id or "").strip()
         volume = self.store.get_workspace_volume(str(sandbox_volume_id or "").strip())
         if volume is None:
             return WorkspaceVolumeMount(
@@ -137,6 +138,12 @@ class SandboxWorkspaceVolumeService:
                 sandbox_volume_id=volume.id,
                 state=WorkspaceVolumeState.unavailable.value,
                 reason_code="workspace_sandbox_volume_owner_mismatch",
+            )
+        if volume.root_id and volume.root_id != root_key:
+            return WorkspaceVolumeMount(
+                sandbox_volume_id=volume.id,
+                state=WorkspaceVolumeState.unavailable.value,
+                reason_code="workspace_sandbox_volume_root_mismatch",
             )
         mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
         if volume.state is WorkspaceVolumeState.ready and mount_path:
@@ -151,6 +158,21 @@ class SandboxWorkspaceVolumeService:
             local_path=None,
             reason_code=_reason_code(volume) or "workspace_sandbox_volume_runtime_not_configured",
         )
+
+    def bind_workspace_volume_root(
+        self,
+        *,
+        sandbox_volume_id: str,
+        workspace_id: str,
+        root_id: str,
+    ) -> WorkspaceVolume | None:
+        """Record the Workspace project root that owns a durable Sandbox volume."""
+        workspace_key = _required_text(workspace_id, "workspace_id")
+        root_key = _required_text(root_id, "root_id")
+        volume = self.store.get_workspace_volume(str(sandbox_volume_id or "").strip())
+        if volume is None or volume.workspace_id != workspace_key:
+            return None
+        return self.store.bind_workspace_volume_root(volume.id, root_id=root_key)
 
 
 def _provision_fingerprint(

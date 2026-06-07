@@ -167,11 +167,12 @@ def _post_workspace_sandbox_root_response(
     payload: dict[str, Any],
     workspace_id: str = "ws-root",
     idempotency_key: str | None = "root-key",
+    sandbox_service: SandboxWorkspaceVolumeService | None = None,
 ):
     async def _allow_rate_limit() -> None:
         return None
 
-    sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
+    sandbox_service = sandbox_service or SandboxWorkspaceVolumeService(store=InMemoryStore())
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
     workspace_fastapi_app.dependency_overrides[
@@ -798,12 +799,14 @@ def test_provision_workspace_sandbox_root_returns_active_operation_and_pollable_
     db,
 ):
     db.upsert_workspace("ws-root", "Rooted Workspace")
+    sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
 
     response = _post_workspace_sandbox_root_response(
         workspace_fastapi_app,
         db,
         {"display_name": "Project root", "requested_runtime": "docker"},
         idempotency_key="root-key",
+        sandbox_service=sandbox_service,
     )
 
     assert response.status_code == 202, response.text
@@ -820,6 +823,7 @@ def test_provision_workspace_sandbox_root_returns_active_operation_and_pollable_
         db,
         {"display_name": "Project root", "requested_runtime": "docker"},
         idempotency_key="root-key",
+        sandbox_service=sandbox_service,
     )
     assert retry.status_code == 202, retry.text
     assert retry.json()["operation"]["operation_id"] == operation_id
@@ -845,11 +849,13 @@ def test_provision_workspace_sandbox_root_conflicts_for_changed_idempotent_reque
     db,
 ):
     db.upsert_workspace("ws-root", "Rooted Workspace")
+    sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
     first = _post_workspace_sandbox_root_response(
         workspace_fastapi_app,
         db,
         {"display_name": "Project root", "requested_runtime": "docker"},
         idempotency_key="root-key",
+        sandbox_service=sandbox_service,
     )
     assert first.status_code == 202, first.text
 
@@ -858,6 +864,7 @@ def test_provision_workspace_sandbox_root_conflicts_for_changed_idempotent_reque
         db,
         {"display_name": "Project root", "requested_runtime": "vz_linux"},
         idempotency_key="root-key",
+        sandbox_service=sandbox_service,
     )
 
     assert changed.status_code == 409, changed.text

@@ -521,8 +521,11 @@ def test_ready_sandbox_resolver_repairs_prior_unavailable_retry(db):
     assert repaired["display_name"] == "Resolved volume"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("state", ["provisioning", "cleanup_pending"])
 def test_sandbox_resolver_accepts_new_non_strict_volume_states(db, state):
+    # Non-strict attach records transitional volume states for recovery UI;
+    # strict validation below only accepts stable, usable sandbox volumes.
     db.upsert_workspace("ws-1", "Workspace")
 
     root = attach_primary_workspace_root(
@@ -540,6 +543,29 @@ def test_sandbox_resolver_accepts_new_non_strict_volume_states(db, state):
     assert root["sandbox_mount_state"] == state
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("state", ["ready"])
+def test_strict_sandbox_validation_accepts_stable_volume_states(db, state):
+    db.upsert_workspace("ws-1", "Workspace")
+
+    root = attach_primary_workspace_root(
+        db=db,
+        workspace_id="ws-1",
+        user_id="user-1",
+        request=WorkspaceRootAttachRequest(
+            backend="sandbox_volume",
+            sandbox_volume_id="volume-1",
+            strict_sandbox_validation=True,
+        ),
+        sandbox_resolver=_StaticSandboxResolver(state),
+    )
+
+    assert root["backend"] == "sandbox_volume"
+    assert root["sandbox_mount_state"] == state
+    assert db.get_workspace_primary_root("ws-1")["sandbox_mount_state"] == state
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "state",
     ["not_configured", "unavailable", "failed", "cleanup_pending"],

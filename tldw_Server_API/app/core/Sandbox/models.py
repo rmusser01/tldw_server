@@ -30,6 +30,7 @@ class WorkspaceVolume:
     workspace_id: str
     user_id: str
     state: WorkspaceVolumeState
+    root_id: str | None = None
     runtime: str | None = None
     display_name: str | None = None
     mount_path: str | None = None

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -126,12 +128,26 @@ def provision_and_attach_sandbox_root(
             ),
             sandbox_resolver=sandbox_volume_service,
         )
+        sandbox_volume_service.bind_workspace_volume_root(
+            sandbox_volume_id=volume.id,
+            workspace_id=workspace_key,
+            root_id=str(primary_root.get("root_id") or ""),
+        )
     except WorkspaceRootServiceError as exc:
+        logger.warning(
+            "Workspace sandbox root attachment failed for workspace {}: {}",
+            workspace_key,
+            exc,
+        )
         db.update_workspace_operation(
             workspace_key,
             str(operation["id"]),
             status="failed",
-            diagnostics={"message": str(exc), "code": exc.code, "retryable": True},
+            diagnostics={
+                "message": "Attachment provisioning failed.",
+                "code": exc.code,
+                "retryable": True,
+            },
         )
         raise
     except (ConflictError, InputError, CharactersRAGDBError):
@@ -186,16 +202,31 @@ def _coerce_request_data(
             display_name=request.get("display_name"),
             requested_runtime=request.get("requested_runtime"),
             root_id=request.get("root_id"),
-            replace_existing=bool(request.get("replace_existing", False)),
+            replace_existing=_parse_replace_existing(request.get("replace_existing")),
             expected_workspace_version=request.get("expected_workspace_version"),
         )
     return WorkspaceSandboxRootProvisionRequestData(
         display_name=getattr(request, "display_name", None),
         requested_runtime=getattr(request, "requested_runtime", None),
         root_id=getattr(request, "root_id", None),
-        replace_existing=bool(getattr(request, "replace_existing", False)),
+        replace_existing=_parse_replace_existing(getattr(request, "replace_existing", False)),
         expected_workspace_version=getattr(request, "expected_workspace_version", None),
     )
+
+
+def _parse_replace_existing(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value > 0
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off", ""}:
+        return False
+    return False
 
 
 def _result(

@@ -152,12 +152,12 @@ describe("WorkspacesManagerPage", () => {
     unmount()
 
     apiMocks.listWorkspaces.mockRejectedValueOnce(new Error("offline"))
-    renderManager()
+    const { unmount: unmountUnavailable } = renderManager()
     expect(await screen.findByText("Workspaces are unavailable")).toBeVisible()
     expect(
       screen.getByText("Reconnect to your tldw server to manage Workspaces.")
     ).toBeVisible()
-    unmount()
+    unmountUnavailable()
 
     apiMocks.listWorkspaces.mockResolvedValueOnce({ items: [], total: 0 })
     renderManager()
@@ -282,6 +282,35 @@ describe("WorkspacesManagerPage", () => {
           study_materials_policy: "workspace",
           workspace_profile: "project"
         }
+      )
+    })
+  })
+
+  it("uses getRandomValues fallback for workspace creation IDs", async () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: (values: Uint32Array) => {
+        values[0] = 36
+        values[1] = 1296
+        return values
+      }
+    })
+    const user = userEvent.setup()
+    renderManager()
+
+    await screen.findByText("No server-backed Workspaces yet")
+    await user.click(
+      screen.getAllByRole("button", { name: "New Research Workspace" })[0]
+    )
+    await user.type(screen.getByLabelText("Workspace name"), "Fallback ID")
+    await user.click(screen.getByRole("button", { name: "Create Workspace" }))
+
+    await waitFor(() => {
+      expect(apiMocks.upsertWorkspace).toHaveBeenCalledWith(
+        "workspace-10-100",
+        expect.objectContaining({
+          name: "Fallback ID",
+          workspace_profile: "research"
+        })
       )
     })
   })

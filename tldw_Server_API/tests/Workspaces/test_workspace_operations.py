@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.Workspaces.operations import (
     fingerprint_workspace_command,
     operation_poll_href,
+    workspace_operation_response_payload,
 )
 
 
@@ -70,6 +71,55 @@ def test_workspace_operation_create_is_idempotent_and_conflicts_on_changed_reque
             idempotency_key="root-key",
             request_fingerprint=fingerprint_workspace_command({"requested_runtime": "vz_linux"}),
         )
+
+
+def test_workspace_operation_expired_idempotency_key_creates_fresh_operation(db):
+    fingerprint = fingerprint_workspace_command({"requested_runtime": "docker"})
+    expired = datetime.now(timezone.utc) - timedelta(minutes=1)
+    first = db.create_workspace_operation(
+        workspace_id="ws-ops",
+        user_id="user-1",
+        command="provision_sandbox_root",
+        idempotency_key="reused-after-expiry",
+        request_fingerprint=fingerprint,
+        status="expired",
+        expires_at=expired,
+    )
+
+    fresh = db.create_workspace_operation(
+        workspace_id="ws-ops",
+        user_id="user-1",
+        command="provision_sandbox_root",
+        idempotency_key="reused-after-expiry",
+        request_fingerprint=fingerprint,
+        status="queued",
+    )
+
+    assert fresh["id"] != first["id"]
+    assert db.get_workspace_operation("ws-ops", first["id"]) is None
+    assert fresh["status"] == "queued"
+
+
+def test_workspace_operation_response_redacts_secret_shaped_diagnostic_values():
+    payload = workspace_operation_response_payload(
+        {
+            "id": "op-1",
+            "workspace_id": "ws-ops",
+            "command": "provision_sandbox_root",
+            "status": "failed",
+            "created_at": "2026-06-04T00:00:00Z",
+            "updated_at": "2026-06-04T00:00:01Z",
+            "diagnostics": {
+                "message": "Bearer abc.def.ghi",
+                "nested": ["eyJheader.payload.signature", "/Users/alice/private"],
+            },
+        }
+    )
+
+    diagnostic_text = repr(payload["diagnostics"])
+    assert "Bearer" not in diagnostic_text
+    assert "eyJheader" not in diagnostic_text
+    assert "/Users/alice" not in diagnostic_text
 
 
 def test_workspace_operation_cleanup_preserves_attached_root(db):
