@@ -30,7 +30,7 @@ def test_chat_session_create_requires_assistant_id_for_tracked_persona_chat():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("memory_mode", ["read_only", "read_write"])
+@pytest.mark.parametrize("memory_mode", [None, "read_only", "read_write"])
 def test_chat_session_create_preserves_explicit_persona_memory_mode(memory_mode):
     chat = ChatSessionCreate(
         assistant_kind="persona",
