@@ -38,7 +38,7 @@ const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
 const FENCE_START = /^(\s*)(`{3,}|~{3,})([^\n]*)$/
 const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/
-const INDENTED_CODE_LINE = /^(?: {4}|\t)/
+const INDENTED_CODE_LINE = /^(?: {4}|\t)\s*\S/
 
 type ClosedMermaidFenceSource = {
   blockIndex: number
