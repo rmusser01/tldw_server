@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
 from mcp_unified.gateway.profiles import GatewayProfileManager, GatewayProfileStoreMetadata
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 class GatewayProfileBootstrap:
     """Result of preparing a profile-aware standalone gateway runtime."""
 
-    runtime: ProfileAwareGatewayRuntime
+    runtime: GatewayRuntime
     profile_store: ProfileStore
     assignment_store: ProfileAssignmentStore
     audit_store: AuditStore | None
@@ -141,7 +141,7 @@ async def build_profile_gateway_runtime(
         default_profile_id=default_profile_id,
         default_preset_id=default_preset_id,
     )
-    return bootstrap.runtime
+    return cast(ProfileAwareGatewayRuntime, bootstrap.runtime)
 
 
 def _validate_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:

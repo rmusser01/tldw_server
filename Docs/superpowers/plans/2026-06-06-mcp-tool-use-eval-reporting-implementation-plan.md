@@ -614,7 +614,7 @@ git commit -m "feat: record MCP protocol tool-use events"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`
 
-- [ ] **Step 1: Write failing wrapper tests**
+- [x] **Step 1: Write failing wrapper tests**
 
 ```python
 async def test_gateway_wrapper_records_direct_call_with_profile_and_model():
@@ -671,7 +671,7 @@ async def test_gateway_bridge_call_records_effective_tool_name_when_tool_id_diff
     assert event.source_kind == "bridge"
 ```
 
-- [ ] **Step 2: Implement `ToolUseReportingGatewayRuntime`**
+- [x] **Step 2: Implement `ToolUseReportingGatewayRuntime`**
 
 Implementation requirements:
 
@@ -687,7 +687,7 @@ Implementation requirements:
   - requested bridge id from `mcp_tool_use_requested_tool_id` when present.
 - Do not persist raw bridge arguments.
 
-- [ ] **Step 3: Add a safe bridge-resolution side-channel in `profile_runtime.py`**
+- [x] **Step 3: Add a safe bridge-resolution side-channel in `profile_runtime.py`**
 
 Implementation requirements:
 
@@ -699,7 +699,7 @@ Implementation requirements:
 - The side-channel must not include delegated arguments.
 - The gateway wrapper should prefer these metadata keys when building the event. This is required because `tool_id` is not always the backend tool name.
 
-- [ ] **Step 4: Add bootstrap config tests**
+- [x] **Step 4: Add bootstrap config tests**
 
 ```python
 def test_gateway_config_parses_tool_use_reporting_defaults():
@@ -720,7 +720,7 @@ async def test_bootstrap_wraps_runtime_when_tool_use_reporting_enabled(tmp_path)
     assert isinstance(bootstrap.runtime, ToolUseReportingGatewayRuntime)
 ```
 
-- [ ] **Step 5: Implement `GatewayToolUseReportingConfig` and store factory**
+- [x] **Step 5: Implement `GatewayToolUseReportingConfig` and store factory**
 
 Implementation requirements:
 
@@ -739,7 +739,7 @@ Implementation requirements:
 - Wrap `ProfileAwareGatewayRuntime` after profile runtime construction so all profile policy decisions are visible.
 - Keep external runtime manager construction unchanged.
 
-- [ ] **Step 6: Run focused gateway tests**
+- [x] **Step 6: Run focused gateway tests**
 
 Run:
 
@@ -752,7 +752,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add mcp_unified/gateway/tool_use_reporting.py mcp_unified/gateway/config.py mcp_unified/gateway/bootstrap.py mcp_unified/gateway/profile_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
