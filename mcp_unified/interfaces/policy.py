@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from .path_scope import PathScopeCandidate
+
 
 class EffectivePolicyResolver(Protocol):
     """Resolve policy documents that apply to an MCP request context."""
@@ -46,6 +48,7 @@ class PathScopeEnforcer(Protocol):
         tool_name: str,
         tool_args: Any,
         tool_def: dict[str, Any] | None,
+        path_scope_candidates: list[PathScopeCandidate] | None = None,
     ) -> dict[str, Any]: ...
 
 

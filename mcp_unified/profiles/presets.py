@@ -186,8 +186,11 @@ _TOOL_DISCOVERY_TOOLS = [
     "tool_describe",
     "profile.tools.list",
 ]
-_FILES_READ_TOOLS = ["fs.list", "fs.read_text", "fs.stat", "fs.glob", "fs.grep"]
-_FILES_WRITE_TOOLS = [*_FILES_READ_TOOLS, "fs.write_text"]
+_FILES_READ_TOOLS = ["fs.list", "fs.read", "fs.stat", "fs.glob", "fs.grep"]
+_FILES_EDIT_TOOLS = [*_FILES_READ_TOOLS, "fs.patch"]
+_FILES_WRITE_TOOLS = [*_FILES_EDIT_TOOLS, "fs.write"]
+_LEGACY_FILES_READ_TOOLS = ["fs.read_text"]
+_LEGACY_FILES_WRITE_TOOLS = ["fs.write_text"]
 _CODE_READ_TOOLS = ["code.search", "code.symbols", "code.references"]
 _DOCS_READ_TOOLS = ["docs.search", "docs.read"]
 _DOCS_WRITE_TOOLS = [*_DOCS_READ_TOOLS, "docs.write"]
@@ -559,11 +562,11 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "files",
                 "code",
                 "git",
-                "tests",
                 "backend",
                 "tool_discovery",
             ],
             deferred_categories=[
+                "tests",
                 "safe_test_runner",
                 "issue_tracker",
                 "browser",
@@ -629,12 +632,12 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             direct_categories=[
                 "files",
                 "code",
-                "tests",
                 "browser",
                 "frontend",
                 "tool_discovery",
             ],
             deferred_categories=[
+                "tests",
                 "git",
                 "safe_test_runner",
                 "issue_tracker",

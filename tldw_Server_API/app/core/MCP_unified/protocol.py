@@ -34,6 +34,10 @@ except ImportError:  # Fallback for v1
 
 from loguru import logger
 
+from mcp_unified.interfaces.path_scope import (
+    PathScopeCandidate,
+    normalize_path_scope_candidates,
+)
 from mcp_unified.tool_use_reporting.builders import (
     classify_tool_use_exception,
     extract_safe_context_dimensions,
@@ -146,6 +150,16 @@ def _is_truthy(value: Any) -> bool:
         return str(value or "").strip().lower() in _TRUTHY_VALUES
     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
         return False
+
+
+def _is_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
+    """Return True when a TypeError reports an unsupported keyword argument."""
+
+    message = str(exc)
+    return (
+        f"unexpected keyword argument '{keyword}'" in message
+        or f'unexpected keyword argument "{keyword}"' in message
+    )
 
 
 async def _no_redis_client_factory(**_kwargs: Any) -> None:
@@ -2273,6 +2287,7 @@ class MCPProtocol:
         tool_args: Any,
         context: RequestContext,
         tool_def: dict[str, Any] | None,
+        path_scope_candidates: list[PathScopeCandidate] | None = None,
     ) -> dict[str, Any]:
         policy = dict(effective_policy or {})
         policy_document = dict(policy.get("policy_document") or {})
@@ -2296,13 +2311,31 @@ class MCPProtocol:
                 "scope_payload": {"path_scope_mode": path_scope_mode, "reason": "policy_unavailable"},
             }
         try:
-            return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
-                effective_policy=policy,
-                context=context,
-                tool_name=tool_name,
-                tool_args=tool_args,
-                tool_def=tool_def,
-            )
+            try:
+                return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
+                    effective_policy=policy,
+                    context=context,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    tool_def=tool_def,
+                    path_scope_candidates=path_scope_candidates,
+                )
+            except TypeError as exc:
+                if not _is_unexpected_keyword_type_error(exc, "path_scope_candidates"):
+                    raise
+                if path_scope_candidates:
+                    raise PermissionError("path_scope_candidates_unsupported") from exc
+                return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
+                    effective_policy=policy,
+                    context=context,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    tool_def=tool_def,
+                )
+        except PermissionError:
+            raise
+        except TypeError:
+            raise
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Failed to evaluate MCP Hub path scope: {}", exc)
             return {
@@ -2313,6 +2346,35 @@ class MCPProtocol:
                 "normalized_paths": [],
                 "scope_payload": {"path_scope_mode": path_scope_mode, "reason": "path_scope_unavailable"},
             }
+
+    async def _extract_path_scope_candidates(
+        self,
+        *,
+        module: BaseModule,
+        tool_name: str,
+        tool_args: Any,
+        context: RequestContext,
+        tool_def: dict[str, Any] | None,
+    ) -> list[PathScopeCandidate] | None:
+        metadata = tool_def.get("metadata") if isinstance(tool_def, dict) else None
+        if not isinstance(metadata, dict) or metadata.get("path_scope_candidate_source") != "module":
+            return None
+        if not isinstance(tool_args, dict):
+            raise PermissionError("path_scope_candidates_unavailable")
+        extractor = getattr(module, "extract_path_scope_candidates", None)
+        if not callable(extractor):
+            raise PermissionError("path_scope_candidates_unavailable")
+        try:
+            candidates = normalize_path_scope_candidates(
+                await extractor(tool_name, tool_args, context)
+            )
+        except NotImplementedError as exc:
+            raise PermissionError("path_scope_candidates_unavailable") from exc
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+            raise InvalidParamsException(str(exc)) from exc
+        if not candidates:
+            raise PermissionError("path_scope_candidates_unavailable")
+        return candidates
 
     async def _evaluate_external_access(
         self,
@@ -2645,12 +2707,32 @@ class MCPProtocol:
             # by raising a sentinel exception handled by process_request
             raise InvalidParamsException(str(ve)) from ve
 
+        policy_document = (effective_policy or {}).get("policy_document")
+        path_scope_mode = ""
+        if isinstance(policy_document, dict):
+            path_scope_mode = str(policy_document.get("path_scope_mode") or "").strip()
+        elif isinstance(policy_document, BaseModel):
+            if hasattr(policy_document, "model_dump"):
+                policy_document_payload = policy_document.model_dump()
+            else:  # pragma: no cover - pydantic v1 compatibility
+                policy_document_payload = policy_document.dict()
+            path_scope_mode = str(policy_document_payload.get("path_scope_mode") or "").strip()
+        path_scope_candidates = None
+        if bool((effective_policy or {}).get("enabled")) and path_scope_mode not in {"", "none"}:
+            path_scope_candidates = await self._extract_path_scope_candidates(
+                module=module,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                context=context,
+                tool_def=tool_def if isinstance(tool_def, dict) else None,
+            )
         path_scope_result = await self._evaluate_path_scope(
             effective_policy=effective_policy,
             tool_name=tool_name,
             tool_args=tool_args,
             context=context,
             tool_def=tool_def if isinstance(tool_def, dict) else None,
+            path_scope_candidates=path_scope_candidates,
         )
         within_resolved_scope = bool(path_scope_result.get("within_scope", True)) and bool(
             external_access_result.get("within_scope", True)
@@ -2896,6 +2978,18 @@ class MCPProtocol:
                     profile_id=profile_id,
                     duration_ms=duration_ms,
                 )
+                result_eval = self._tool_use_eval_metadata(payload=result if isinstance(result, dict) else None)
+                for key in (
+                    "tool_prompt_id",
+                    "tool_prompt_version",
+                    "action_family",
+                    "result_kind",
+                    "path_filter_used",
+                    "truncated",
+                    "reason_code",
+                ):
+                    if key in result_eval:
+                        execution_eval[key] = result_eval[key]
                 if isinstance(result, str):
                     content = [{"type": "text", "text": result}]
                 elif isinstance(result, list):

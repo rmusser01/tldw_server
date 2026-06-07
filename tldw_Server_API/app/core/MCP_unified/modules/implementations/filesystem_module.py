@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import hashlib
 import os
 import re
 import stat as stat_module
+import tempfile
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,11 +26,15 @@ from typing import Any
 
 from loguru import logger
 
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
 )
 
+from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
+from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
+from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 
 
 def _first_nonempty(*values: Any) -> str | None:
@@ -51,6 +57,10 @@ class FilesystemModule(BaseModule):
     ) -> None:
         super().__init__(config)
         self._workspace_root_resolver = workspace_root_resolver or McpHubWorkspaceRootResolver()
+        self._read_receipts = ReadReceiptManager(
+            secret=config.settings.get("read_receipt_secret"),
+            ttl_seconds=self._setting_positive_int("read_receipt_ttl_seconds", 1_800),
+        )
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Filesystem module: {self.name}")
@@ -100,10 +110,107 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
+                "path_scope_action": "read",
+                "legacy_tool": True,
+                "replacement_tool": "fs.read",
                 **shared_path_metadata,
             },
         )
         read_text_tool["inputSchema"]["additionalProperties"] = False
+
+        read_tool = create_tool_definition(
+            name="fs.read",
+            description="Read a bounded UTF-8 text file with hash metadata under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "start_line": {"type": "integer", "minimum": 1, "default": 1},
+                    "max_lines": {"type": "integer", "minimum": 1},
+                    "max_bytes": {"type": "integer", "minimum": 1},
+                    "include_line_numbers": {"type": "boolean", "default": False},
+                    "include_receipt": {"type": "boolean", "default": True},
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                "path_scope_action": "read",
+                "eval": {
+                    "task_families": ["filesystem_read"],
+                    "expected_result_kind": "structured_filesystem_read",
+                },
+                **shared_path_metadata,
+            },
+        )
+        read_tool["inputSchema"]["additionalProperties"] = False
+
+        patch_tool = create_tool_definition(
+            name="fs.patch",
+            description="Apply a bounded unified diff to workspace files after preimage checks.",
+            parameters={
+                "properties": {
+                    "diff": {"type": "string", "description": "Unified diff text"},
+                    "expected_sha256_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "read_receipt_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "create_parent_directories": {"type": "boolean", "default": False},
+                    "allow_create": {"type": "boolean", "default": False},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["diff"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.edit", "filesystem.write"],
+                "path_scope_candidate_source": "module",
+                "eval": {
+                    "task_families": ["filesystem_edit"],
+                    "expected_result_kind": "structured_filesystem_edit",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_fs_metadata,
+            },
+        )
+        patch_tool["inputSchema"]["additionalProperties"] = False
+
+        write_tool = create_tool_definition(
+            name="fs.write",
+            description="Create or replace a whole UTF-8 text file under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "content": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["create", "replace"]},
+                    "expected_sha256": {"type": "string"},
+                    "read_receipt": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "content", "mode"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.write"],
+                "path_scope_action": "write",
+                "eval": {
+                    "task_families": ["filesystem_write"],
+                    "expected_result_kind": "structured_filesystem_write",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        write_tool["inputSchema"]["additionalProperties"] = False
 
         write_text_tool = create_tool_definition(
             name="fs.write_text",
@@ -117,7 +224,12 @@ class FilesystemModule(BaseModule):
             },
             metadata={
                 "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
                 "capabilities": ["filesystem.write"],
+                "path_scope_action": "write",
+                "legacy_tool": True,
+                "replacement_tools": ["fs.patch", "fs.write"],
                 **shared_path_metadata,
             },
         )
@@ -204,7 +316,17 @@ class FilesystemModule(BaseModule):
         )
         grep_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_text_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
+        return [
+            list_tool,
+            read_tool,
+            read_text_tool,
+            patch_tool,
+            write_tool,
+            write_text_tool,
+            stat_tool,
+            glob_tool,
+            grep_tool,
+        ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -228,6 +350,85 @@ class FilesystemModule(BaseModule):
                 "path": self._to_workspace_relative_path(workspace_root, target),
                 "text": read_result["text"],
             }
+
+        if tool_name == "fs.read":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            rel_path = self._to_workspace_relative_path(workspace_root, target)
+            read_result = await asyncio.to_thread(
+                self._read_file,
+                target,
+                start_line=int(args.get("start_line", 1)),
+                max_lines=self._bounded_positive_int(
+                    args.get("max_lines"),
+                    self._setting_positive_int("read_default_max_lines", 2_000),
+                    maximum=self._setting_positive_int("read_max_lines", 20_000),
+                ),
+                max_bytes=self._bounded_positive_int(
+                    args.get("max_bytes"),
+                    self._setting_positive_int("read_default_max_bytes", self._max_read_bytes()),
+                    maximum=self._setting_positive_int("read_max_bytes", self._max_read_bytes()),
+                ),
+                hash_max_file_bytes=self._setting_positive_int("read_hash_max_file_bytes", 5_000_000),
+                include_line_numbers=bool(args.get("include_line_numbers", False)),
+            )
+            result = {"path": rel_path, **read_result}
+            if (
+                bool(args.get("include_receipt", True))
+                and not result.get("truncated")
+                and isinstance(result.get("sha256"), str)
+                and self._read_receipts.enabled
+            ):
+                result["read_receipt"] = self._read_receipts.issue(
+                    path=rel_path,
+                    sha256=str(result["sha256"]),
+                    size=int(result.get("bytes_total") or 0),
+                    workspace_id=self._context_metadata_value(context, "workspace_id"),
+                    session_id=_first_nonempty(
+                        getattr(context, "session_id", None), self._context_metadata_value(context, "session_id")
+                    ),
+                )
+            result["eval"] = build_execution_eval_metadata(
+                tool_name="fs.read",
+                tool_prompt_id="mcp.fs.read.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_read",
+                result_kind="structured_filesystem_read",
+                path_filter_used=True,
+                truncated=bool(result.get("truncated", False)),
+            )
+            return result
+
+        if tool_name == "fs.patch":
+            patch_files = self._parse_patch_diff(str(args.get("diff") or ""))
+            return await asyncio.to_thread(
+                self._apply_patch_files,
+                workspace_root,
+                patch_files,
+                self._string_map_argument(args.get("expected_sha256_by_path")),
+                self._string_map_argument(args.get("read_receipt_by_path")),
+                bool(args.get("allow_create", False)),
+                bool(args.get("create_parent_directories", False)),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("patch_preimage_max_bytes", 5_000_000),
+                self._setting_positive_int("patch_write_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "fs.write":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._write_file,
+                workspace_root,
+                target,
+                str(args.get("content")),
+                str(args.get("mode")),
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("write_max_bytes", 5_000_000),
+                self._setting_positive_int("write_preimage_max_bytes", 5_000_000),
+                context,
+            )
 
         if tool_name == "fs.write_text":
             target = self._resolve_workspace_path(workspace_root, str(args.get("path")))
@@ -373,6 +574,84 @@ class FilesystemModule(BaseModule):
                 raise ValueError("path is required")
             return
 
+        if tool_name == "fs.read":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "start_line",
+                    "max_lines",
+                    "max_bytes",
+                    "include_line_numbers",
+                    "include_receipt",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_positive_int_argument(arguments, "start_line")
+            self._validate_positive_int_argument(arguments, "max_lines")
+            self._validate_positive_int_argument(arguments, "max_bytes")
+            self._validate_bool_argument(arguments, "include_line_numbers")
+            self._validate_bool_argument(arguments, "include_receipt")
+            return
+
+        if tool_name == "fs.patch":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "diff",
+                    "expected_sha256_by_path",
+                    "read_receipt_by_path",
+                    "create_parent_directories",
+                    "allow_create",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            diff = arguments.get("diff")
+            if not isinstance(diff, str) or not diff.strip():
+                raise ValueError("diff is required")
+            self._validate_optional_string_map_argument(arguments, "expected_sha256_by_path")
+            self._validate_optional_string_map_argument(arguments, "read_receipt_by_path")
+            self._validate_bool_argument(arguments, "create_parent_directories")
+            self._validate_bool_argument(arguments, "allow_create")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
+        if tool_name == "fs.write":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "content",
+                    "mode",
+                    "expected_sha256",
+                    "read_receipt",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            content = arguments.get("content")
+            mode = arguments.get("mode")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(content, str):
+                raise ValueError("content must be a string")
+            if mode not in {"create", "replace"}:
+                raise ValueError("mode must be create or replace")
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
         if tool_name == "fs.write_text":
             unknown = sorted(set(arguments) - {"path", "content"})
             if unknown:
@@ -471,9 +750,7 @@ class FilesystemModule(BaseModule):
                     raise ValueError("regex grep is disabled by module configuration")
                 max_pattern_length = self._setting_positive_int("grep_max_pattern_length", 512)
                 if len(pattern) > max_pattern_length:
-                    raise ValueError(
-                        f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})"
-                    )
+                    raise ValueError(f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})")
             return
 
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -489,6 +766,53 @@ class FilesystemModule(BaseModule):
         value = arguments.get(key)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
             raise ValueError(f"{key} must be a positive integer")
+
+    @staticmethod
+    def _validate_optional_string_map_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, dict) or not all(
+            isinstance(map_key, str) and isinstance(map_value, str) for map_key, map_value in value.items()
+        ):
+            raise ValueError(f"{key} must be an object with string values")
+
+    async def extract_path_scope_candidates(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Any | None = None,
+    ) -> list[PathScopeCandidate]:
+        """Derive per-file path/action candidates for patch tools before enforcement."""
+
+        del context
+        if tool_name != "fs.patch":
+            return await super().extract_path_scope_candidates(tool_name, arguments, None)
+
+        candidates: list[PathScopeCandidate] = []
+        for patch_file in self._parse_patch_diff(str((arguments or {}).get("diff") or "")):
+            path = patch_file.new_path
+            if path is None:
+                raise ValueError("invalid_patch_path")
+            if patch_file.action == "create":
+                candidates.append(
+                    PathScopeCandidate(
+                        path=path,
+                        action="write",
+                        source="filesystem_diff",
+                        creates_file=True,
+                    )
+                )
+            else:
+                candidates.append(
+                    PathScopeCandidate(
+                        path=path,
+                        action="edit",
+                        source="filesystem_diff",
+                        requires_existing_file=True,
+                    )
+                )
+        return candidates
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize filesystem inputs while allowing portable glob syntax."""
@@ -540,6 +864,13 @@ class FilesystemModule(BaseModule):
         return Path(workspace_root_raw).expanduser().resolve(strict=False)
 
     @staticmethod
+    def _context_metadata_value(context: Any | None, key: str) -> str | None:
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        return _first_nonempty(metadata.get(key))
+
+    @staticmethod
     def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
         candidate = Path(raw_path).expanduser()
         if not candidate.is_absolute():
@@ -570,12 +901,16 @@ class FilesystemModule(BaseModule):
         return resolved
 
     @staticmethod
-    def _bounded_positive_int(value: Any, default: int) -> int:
+    def _bounded_positive_int(value: Any, default: int, *, maximum: int | None = None) -> int:
         if value is None:
-            return max(1, int(default))
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise ValueError("limit must be a positive integer")
-        return value
+            limit = max(1, int(default))
+        else:
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError("limit must be a positive integer")
+            limit = value
+        if maximum is not None:
+            limit = min(limit, max(1, int(maximum)))
+        return limit
 
     @staticmethod
     def _normalize_portable_pattern(pattern: str) -> str:
@@ -730,9 +1065,8 @@ class FilesystemModule(BaseModule):
                 else:
                     candidate_type = candidate_kind
 
-                include_candidate = (
-                    (candidate_kind == "file" and include_files)
-                    or (candidate_kind == "directory" and include_directories)
+                include_candidate = (candidate_kind == "file" and include_files) or (
+                    candidate_kind == "directory" and include_directories
                 )
                 if not include_candidate:
                     continue
@@ -1026,6 +1360,519 @@ class FilesystemModule(BaseModule):
         rel_text = relative.as_posix()
         return rel_text if rel_text not in {"", "."} else "."
 
+    def _parse_patch_diff(self, diff_text: str) -> tuple[PatchFile, ...]:
+        try:
+            return parse_unified_diff(
+                diff_text,
+                max_files=self._setting_positive_int("patch_max_files", 20),
+                max_hunks=self._setting_positive_int("patch_max_hunks", 200),
+                max_bytes=self._setting_positive_int("patch_max_diff_bytes", 1_000_000),
+            )
+        except FilesystemPatchError as exc:
+            raise ValueError(exc.reason_code) from exc
+
+    @staticmethod
+    def _string_map_argument(value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        return {str(key): str(map_value) for key, map_value in dict(value).items()}
+
+    def _apply_patch_files(
+        self,
+        workspace_root: Path,
+        patch_files: tuple[PatchFile, ...],
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        allow_create: bool,
+        create_parent_directories: bool,
+        dry_run: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        plans = [
+            self._plan_patch_file(
+                workspace_root,
+                patch_file,
+                expected_sha256_by_path,
+                read_receipt_by_path,
+                allow_create,
+                create_parent_directories,
+                preimage_max_bytes,
+                write_max_bytes,
+                context,
+            )
+            for patch_file in patch_files
+        ]
+
+        if not dry_run:
+            written: list[dict[str, Any]] = []
+            try:
+                for plan in plans:
+                    target = plan["_target"]
+                    if plan["_create_parent_directories"]:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                    self._assert_preimage_unchanged(
+                        target,
+                        plan["result"].get("sha256_before"),
+                        int(plan["result"].get("bytes_before") or 0),
+                    )
+                    self._atomic_write_text_file(target, str(plan["_text_after"]))
+                    written.append(plan)
+            except Exception as exc:
+                if not written:
+                    raise ValueError(str(exc)) from exc
+                for plan in reversed(written):
+                    target = plan["_target"]
+                    try:
+                        if plan["_existed_before"]:
+                            self._atomic_write_text_file(target, str(plan["_text_before"]))
+                        else:
+                            target.unlink(missing_ok=True)
+                    except Exception:
+                        logger.exception("Failed to roll back partial fs.patch write for {}", target.name)
+                raise ValueError("partial_write_rollback_attempted") from exc
+
+        file_results = []
+        for plan in plans:
+            record = dict(plan["result"])
+            if not dry_run:
+                record["bytes_written"] = record["bytes_after"]
+            file_results.append(record)
+
+        summary = {
+            "files": len(file_results),
+            "hunks": sum(int(item["hunks_applied"]) for item in file_results),
+            "additions": sum(int(item["additions"]) for item in file_results),
+            "deletions": sum(int(item["deletions"]) for item in file_results),
+        }
+        return {
+            "applied": not dry_run,
+            "dry_run": dry_run,
+            "files": file_results,
+            "summary": summary,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.patch",
+                tool_prompt_id="mcp.fs.patch.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_edit",
+                result_kind="structured_filesystem_edit",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+
+    def _plan_patch_file(
+        self,
+        workspace_root: Path,
+        patch_file: PatchFile,
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        allow_create: bool,
+        create_parent_directories: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        rel_path = patch_file.new_path
+        if rel_path is None:
+            raise ValueError("invalid_patch_path")
+        target = self._resolve_workspace_path_no_follow(workspace_root, rel_path)
+        response_path = self._to_workspace_relative_path(workspace_root, target)
+        additions, deletions = self._patch_line_counts(patch_file)
+
+        if patch_file.action == "create":
+            if not allow_create:
+                raise ValueError("patch_create_not_allowed")
+            if target.exists() or target.is_symlink():
+                raise ValueError("patch_create_target_exists")
+            if not target.parent.exists() and not create_parent_directories:
+                raise ValueError("patch_parent_missing")
+            original_text = ""
+            sha256_before = None
+            bytes_before = 0
+            created = True
+            action = "write"
+            text_before = None
+        else:
+            if target.is_symlink():
+                raise ValueError("file_not_regular")
+            if not target.exists():
+                raise FileNotFoundError(f"path not found: {target}")
+            if not target.is_file():
+                raise ValueError("file_not_regular")
+            file_size = target.stat(follow_symlinks=False).st_size
+            if file_size > preimage_max_bytes:
+                raise ValueError("patch_preimage_too_large")
+            payload = target.read_bytes()
+            if b"\x00" in payload:
+                raise ValueError("binary content is not supported by fs.patch")
+            try:
+                original_text = payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("binary content is not supported by fs.patch") from exc
+            sha256_before = hashlib.sha256(payload).hexdigest()
+            bytes_before = len(payload)
+            self._authorize_patch_preimage(
+                response_path,
+                sha256_before,
+                bytes_before,
+                expected_sha256_by_path,
+                read_receipt_by_path,
+                context,
+            )
+            created = False
+            action = "edit"
+            text_before = original_text
+
+        try:
+            text_after = apply_patch_to_text(original_text, patch_file)
+        except FilesystemPatchError as exc:
+            raise ValueError(exc.reason_code) from exc
+        data_after = text_after.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("patch_write_too_large")
+
+        return {
+            "_target": target,
+            "_text_after": text_after,
+            "_text_before": text_before,
+            "_existed_before": not created,
+            "_create_parent_directories": create_parent_directories,
+            "result": {
+                "path": response_path,
+                "action": action,
+                "created": created,
+                "hunks_applied": len(patch_file.hunks),
+                "additions": additions,
+                "deletions": deletions,
+                "bytes_before": bytes_before,
+                "bytes_after": len(data_after),
+                "sha256_before": sha256_before,
+                "sha256_after": hashlib.sha256(data_after).hexdigest(),
+            },
+        }
+
+    def _authorize_patch_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        context: Any | None,
+    ) -> None:
+        expected_sha256 = expected_sha256_by_path.get(rel_path)
+        receipt = read_receipt_by_path.get(rel_path)
+        if expected_sha256 is None and receipt is None:
+            raise ValueError("patch_preimage_required")
+        if expected_sha256 is not None and expected_sha256 == sha256_before:
+            return
+        if receipt is not None:
+            self._validate_patch_read_receipt(receipt, rel_path, sha256_before, bytes_before, context)
+            return
+        raise ValueError("patch_preimage_mismatch")
+
+    def _validate_patch_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("patch_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("patch_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and payload.session_id != context_session_id:
+            raise ValueError("patch_read_receipt_mismatch")
+
+    @staticmethod
+    def _patch_line_counts(patch_file: PatchFile) -> tuple[int, int]:
+        additions = 0
+        deletions = 0
+        for hunk in patch_file.hunks:
+            for line in hunk.lines:
+                if line.kind == "add":
+                    additions += 1
+                elif line.kind == "remove":
+                    deletions += 1
+        return additions, deletions
+
+    @staticmethod
+    def _assert_preimage_unchanged(target: Path, expected_sha256: str | None, expected_size: int) -> None:
+        """Recheck the authorized file preimage immediately before committing writes."""
+
+        if expected_sha256 is None:
+            if expected_size == 0 and (target.exists() or target.is_symlink()):
+                raise ValueError("preimage_changed_during_commit")
+            return
+        if target.is_symlink() or not target.exists() or not target.is_file():
+            raise ValueError("preimage_changed_during_commit")
+        payload = target.read_bytes()
+        if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
+            raise ValueError("preimage_changed_during_commit")
+
+    @staticmethod
+    def _atomic_write_text_file(target: Path, text: str) -> None:
+        """Atomically replace a text file while preserving existing file mode."""
+
+        existing_mode: int | None = None
+        if target.exists() and not target.is_symlink():
+            existing_mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                if existing_mode is not None:
+                    os.fchmod(handle.fileno(), existing_mode)
+                handle.write(text.encode("utf-8"))
+            os.replace(tmp_path, target)
+        finally:
+            with suppress(OSError):
+                if tmp_path.exists():
+                    tmp_path.unlink()
+
+    def _write_file(
+        self,
+        workspace_root: Path,
+        target: Path,
+        content: str,
+        mode: str,
+        expected_sha256: Any,
+        read_receipt: Any,
+        dry_run: bool,
+        write_max_bytes: int,
+        preimage_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        if "\x00" in content:
+            raise ValueError("binary content is not supported by fs.write")
+        data_after = content.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("write_content_too_large")
+
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        created = mode == "create"
+        sha256_before = None
+        bytes_before = 0
+
+        if mode == "create":
+            if target.exists() or target.is_symlink():
+                raise ValueError("write_target_exists")
+        else:
+            if target.is_symlink():
+                raise ValueError("file_not_regular")
+            if not target.exists():
+                raise FileNotFoundError(f"path not found: {target}")
+            if not target.is_file():
+                raise ValueError("file_not_regular")
+            file_size = target.stat(follow_symlinks=False).st_size
+            if file_size > preimage_max_bytes:
+                raise ValueError("write_preimage_too_large")
+            payload = target.read_bytes()
+            if b"\x00" in payload:
+                raise ValueError("binary content is not supported by fs.write")
+            try:
+                payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("binary content is not supported by fs.write") from exc
+            sha256_before = hashlib.sha256(payload).hexdigest()
+            bytes_before = len(payload)
+            self._authorize_write_preimage(
+                rel_path,
+                sha256_before,
+                bytes_before,
+                expected_sha256,
+                read_receipt,
+                context,
+            )
+
+        sha256_after = hashlib.sha256(data_after).hexdigest()
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._assert_preimage_unchanged(target, sha256_before, bytes_before)
+            self._atomic_write_text_file(target, content)
+
+        result: dict[str, Any] = {
+            "path": rel_path,
+            "mode": mode,
+            "written": not dry_run,
+            "dry_run": dry_run,
+            "created": created,
+            "bytes_before": bytes_before,
+            "bytes_after": len(data_after),
+            "sha256_before": sha256_before,
+            "sha256_after": sha256_after,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.write",
+                tool_prompt_id="mcp.fs.write.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_write",
+                result_kind="structured_filesystem_write",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+        if not dry_run:
+            result["bytes_written"] = len(data_after)
+        return result
+
+    def _authorize_write_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256: Any,
+        read_receipt: Any,
+        context: Any | None,
+    ) -> None:
+        has_expected = isinstance(expected_sha256, str) and bool(expected_sha256)
+        has_receipt = isinstance(read_receipt, str) and bool(read_receipt)
+        if not has_expected and not has_receipt:
+            raise ValueError("write_preimage_required")
+        if has_expected and str(expected_sha256) == sha256_before:
+            return
+        if has_receipt:
+            self._validate_write_read_receipt(str(read_receipt), rel_path, sha256_before, bytes_before, context)
+            return
+        raise ValueError("write_preimage_mismatch")
+
+    def _validate_write_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("write_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("write_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and payload.session_id != context_session_id:
+            raise ValueError("write_read_receipt_mismatch")
+
+    @staticmethod
+    def _read_file(
+        target: Path,
+        *,
+        start_line: int,
+        max_lines: int,
+        max_bytes: int,
+        hash_max_file_bytes: int,
+        include_line_numbers: bool,
+    ) -> dict[str, Any]:
+        if target.is_symlink():
+            raise ValueError(f"path is not a regular file: {target}")
+        if not target.exists():
+            raise FileNotFoundError(f"path not found: {target}")
+        if not target.is_file():
+            raise ValueError(f"path is not a file: {target}")
+
+        file_size = target.stat(follow_symlinks=False).st_size
+        can_hash = file_size <= hash_max_file_bytes
+        if can_hash:
+            payload = target.read_bytes()
+            output_payload = payload[:max_bytes]
+        else:
+            with target.open("rb") as handle:
+                output_payload = handle.read(max_bytes)
+            payload = output_payload
+        if b"\x00" in payload:
+            raise ValueError("binary content is not supported by fs.read")
+
+        byte_truncated = file_size > len(output_payload)
+        if can_hash:
+            full_text = FilesystemModule._decode_utf8_text(payload, allow_prefix=False)
+        else:
+            full_text = None
+        text = FilesystemModule._decode_utf8_text(output_payload, allow_prefix=byte_truncated)
+        newline_style = FilesystemModule._detect_newline_style(output_payload)
+        all_lines = text.splitlines(keepends=True)
+        line_count_total = (
+            len((full_text if full_text is not None else text).splitlines())
+            if full_text is not None or not byte_truncated
+            else None
+        )
+        start_index = max(0, start_line - 1)
+        selected_lines = all_lines[start_index : start_index + max_lines]
+        line_truncated = start_index + max_lines < len(all_lines)
+        selected_content = "".join(selected_lines)
+        content = (
+            FilesystemModule._numbered_lines(selected_lines, start_line) if include_line_numbers else selected_content
+        )
+        end_line = start_line + len(selected_lines) - 1 if selected_lines else start_line - 1
+
+        result: dict[str, Any] = {
+            "content": content,
+            "start_line": start_line,
+            "end_line": end_line,
+            "line_count_total": line_count_total,
+            "bytes_read": len(selected_content.encode("utf-8")),
+            "bytes_total": file_size,
+            "newline_style": newline_style,
+            "truncated": bool(byte_truncated or line_truncated),
+        }
+        if byte_truncated:
+            result["truncation_reason"] = "max_bytes"
+        elif line_truncated:
+            result["truncation_reason"] = "max_lines"
+        if can_hash:
+            result["sha256"] = hashlib.sha256(payload).hexdigest()
+        else:
+            result["hash_omitted_reason"] = "hash_omitted_file_too_large"
+        return result
+
+    @staticmethod
+    def _decode_utf8_text(payload: bytes, *, allow_prefix: bool) -> str:
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if allow_prefix and exc.reason == "unexpected end of data":
+                return payload[: exc.start].decode("utf-8")
+            raise ValueError("binary content is not supported by fs.read") from exc
+
+    @staticmethod
+    def _numbered_lines(lines: list[str], start_line: int) -> str:
+        return "".join(f"{line_number}\t{line}" for line_number, line in enumerate(lines, start=start_line))
+
+    @staticmethod
+    def _detect_newline_style(payload: bytes) -> str:
+        crlf = payload.count(b"\r\n")
+        without_crlf = payload.replace(b"\r\n", b"")
+        lf = without_crlf.count(b"\n")
+        cr = without_crlf.count(b"\r")
+        styles = sum(1 for count in (crlf, lf, cr) if count > 0)
+        if styles > 1:
+            return "mixed"
+        if crlf:
+            return "crlf"
+        if cr:
+            return "cr"
+        return "lf"
+
     @staticmethod
     def _read_text_file(target: Path, max_read_bytes: int) -> dict[str, Any]:
         if not target.exists():
@@ -1035,9 +1882,7 @@ class FilesystemModule(BaseModule):
 
         file_size = target.stat().st_size
         if file_size > max_read_bytes:
-            raise ValueError(
-                f"file exceeds fs.read_text limit ({file_size} bytes > {max_read_bytes} bytes)"
-            )
+            raise ValueError(f"file exceeds fs.read_text limit ({file_size} bytes > {max_read_bytes} bytes)")
 
         payload = target.read_bytes()
         if b"\x00" in payload:
