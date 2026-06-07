@@ -112,6 +112,21 @@ def test_merge_policy_decisions_defaults_to_deny_without_matches() -> None:
     assert merged.call_state == "blocked"
 
 
+def test_merge_policy_decisions_keeps_first_same_precedence_reason() -> None:
+    subject = PolicyDecisionSubject(type="tool", normalized="fs.write")
+    merged = merge_policy_decisions(
+        [
+            PolicyDecision(outcome="ask", reason_code="profile_ask", subject=subject),
+            PolicyDecision(outcome="ask", reason_code="workspace_ask", subject=subject),
+        ],
+        subject=subject,
+    )
+
+    assert merged.outcome == "ask"
+    assert merged.reason_code == "profile_ask"
+    assert merged.call_state == "approval_required"
+
+
 def test_compile_profile_policy_rules_preserves_legacy_tool_fields() -> None:
     rules = compile_profile_policy_rules(
         ProfilePolicy(
@@ -140,6 +155,28 @@ def test_compile_profile_policy_rules_rejects_broad_bash_pattern() -> None:
         compile_profile_policy_rules(ProfilePolicy(allowed_tools=["Bash(*)"]))
 
 
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "Bash(* *)",
+        "Bash(* --version)",
+        "Bash(git* status)",
+        "Bash(?sh -lc)",
+        "Bash([gr]it status)",
+    ],
+)
+def test_compile_profile_policy_rules_rejects_wildcard_executable_patterns(
+    pattern: str,
+) -> None:
+    with pytest.raises(ValueError, match="command executable must be fixed"):
+        compile_profile_policy_rules(ProfilePolicy(allowed_tools=[pattern]))
+
+
+def test_compile_profile_policy_rules_rejects_empty_legacy_tool_pattern() -> None:
+    with pytest.raises(ValueError, match="legacy tool policy patterns cannot be empty"):
+        compile_profile_policy_rules(ProfilePolicy(allowed_tools=[""]))
+
+
 def test_compile_profile_policy_rules_includes_structured_extra_rules() -> None:
     rules = compile_profile_policy_rules(
         {
@@ -154,3 +191,29 @@ def test_compile_profile_policy_rules_includes_structured_extra_rules() -> None:
         ("command", None, ("git", "status"), "allow"),
         ("mcp", "mcp__github__*", None, "deny"),
     ]
+
+
+def test_compile_profile_policy_rules_rejects_structured_command_string_argv() -> None:
+    with pytest.raises(ValueError, match="command policy rule argv must be a sequence"):
+        compile_profile_policy_rules({"command_rules": [{"argv": "git status", "outcome": "allow"}]})
+
+
+def test_compile_profile_policy_rules_rejects_structured_command_set_argv() -> None:
+    with pytest.raises(ValueError, match="command policy rule argv must be a sequence"):
+        compile_profile_policy_rules({"command_rules": [{"argv": {"git"}, "outcome": "allow"}]})
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["*", "--version"],
+        ["git*", "status"],
+        ["?sh", "-lc"],
+        ["[gr]it", "status"],
+    ],
+)
+def test_compile_profile_policy_rules_rejects_structured_wildcard_executables(
+    argv: list[str],
+) -> None:
+    with pytest.raises(ValueError, match="command executable must be fixed"):
+        compile_profile_policy_rules({"command_rules": [{"argv": argv, "outcome": "allow"}]})

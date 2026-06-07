@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -35,6 +35,7 @@ _OUTCOME_PRECEDENCE: dict[PolicyDecisionOutcome, int] = {
     "deny": 3,
 }
 _VALID_OUTCOMES = frozenset(_OUTCOME_PRECEDENCE)
+_COMMAND_EXECUTABLE_WILDCARDS = frozenset("*?[]")
 
 
 class PolicyDecisionSubject(BaseModel):
@@ -188,6 +189,8 @@ def _compile_legacy_tool_pattern(
 
     if not isinstance(pattern, str):
         raise ValueError("legacy tool policy patterns must be strings")
+    if not pattern.strip():
+        raise ValueError("legacy tool policy patterns cannot be empty")
     if pattern.startswith("Bash(") and pattern.endswith(")"):
         return _compile_bash_pattern(
             pattern[len("Bash(") : -1],
@@ -229,7 +232,16 @@ def _bash_pattern_argv(inner: str) -> tuple[str, ...]:
     argv = tuple(normalized.split())
     if not argv:
         raise ValueError("bash patterns must include a command")
+    _validate_fixed_command_executable(argv)
     return argv
+
+
+def _validate_fixed_command_executable(argv: tuple[str, ...]) -> None:
+    """Require command rules to name a fixed executable token."""
+
+    executable = argv[0]
+    if any(character in _COMMAND_EXECUTABLE_WILDCARDS for character in executable):
+        raise ValueError("command executable must be fixed")
 
 
 def _as_sequence(value: Any) -> list[Any]:
@@ -325,12 +337,13 @@ def _structured_command_argv(rule_document: Any) -> tuple[str, ...]:
             return _bash_pattern_argv(pattern[len("Bash(") : -1])
         raise ValueError("command policy rules require argv")
 
-    if isinstance(argv_value, str):
-        argv = tuple(argv_value.split())
-    else:
-        argv = tuple(_as_sequence(argv_value))
+    if isinstance(argv_value, (str, bytes, Mapping)) or not isinstance(argv_value, Sequence):
+        raise ValueError("command policy rule argv must be a sequence")
+
+    argv = tuple(argv_value)
     if not argv or not all(isinstance(item, str) and item for item in argv):
         raise ValueError("command policy rule argv must be non-empty strings")
+    _validate_fixed_command_executable(argv)
     return argv
 
 
