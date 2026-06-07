@@ -10,6 +10,9 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import (
     ModuleConfig,
     create_tool_definition,
 )
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module import (
+    FilesystemModule,
+)
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
 
 
@@ -225,3 +228,25 @@ async def test_protocol_fails_closed_when_enforcer_cannot_accept_required_candid
             params={"name": "fs.patch", "arguments": {"diff": _PATCH_TEXT}},
             context=_context(),
         )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_uses_real_filesystem_patch_candidates() -> None:
+    module = FilesystemModule(ModuleConfig(name="filesystem"))
+    enforcer = _RecordingPathEnforcer()
+    protocol = _build_protocol(module, enforcer)
+
+    await protocol.prepare_tool_call(
+        params={"name": "fs.patch", "arguments": {"diff": _PATCH_TEXT}},
+        context=_context(),
+    )
+
+    assert enforcer.received_candidates == [  # nosec B101
+        PathScopeCandidate(
+            path="src/app.py",
+            action="edit",
+            source="filesystem_diff",
+            requires_existing_file=True,
+        )
+    ]

@@ -18,6 +18,7 @@ import hashlib
 import os
 import re
 import stat as stat_module
+import tempfile
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,13 +26,15 @@ from typing import Any
 
 from loguru import logger
 
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
 )
 
 from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
-from .filesystem_receipts import ReadReceiptManager
+from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
+from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 
 
 def _first_nonempty(*values: Any) -> str | None:
@@ -140,6 +143,42 @@ class FilesystemModule(BaseModule):
         )
         read_tool["inputSchema"]["additionalProperties"] = False
 
+        patch_tool = create_tool_definition(
+            name="fs.patch",
+            description="Apply a bounded unified diff to workspace files after preimage checks.",
+            parameters={
+                "properties": {
+                    "diff": {"type": "string", "description": "Unified diff text"},
+                    "expected_sha256_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "read_receipt_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "create_parent_directories": {"type": "boolean", "default": False},
+                    "allow_create": {"type": "boolean", "default": False},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["diff"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.edit", "filesystem.write"],
+                "path_scope_candidate_source": "module",
+                "eval": {
+                    "task_families": ["filesystem_edit"],
+                    "expected_result_kind": "structured_filesystem_edit",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_fs_metadata,
+            },
+        )
+        patch_tool["inputSchema"]["additionalProperties"] = False
+
         write_text_tool = create_tool_definition(
             name="fs.write_text",
             description="Write UTF-8 text content to a file under the active trusted workspace root.",
@@ -239,7 +278,7 @@ class FilesystemModule(BaseModule):
         )
         grep_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_tool, read_text_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
+        return [list_tool, read_tool, read_text_tool, patch_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -307,6 +346,22 @@ class FilesystemModule(BaseModule):
                 truncated=bool(result.get("truncated", False)),
             )
             return result
+
+        if tool_name == "fs.patch":
+            patch_files = self._parse_patch_diff(str(args.get("diff") or ""))
+            return await asyncio.to_thread(
+                self._apply_patch_files,
+                workspace_root,
+                patch_files,
+                self._string_map_argument(args.get("expected_sha256_by_path")),
+                self._string_map_argument(args.get("read_receipt_by_path")),
+                bool(args.get("allow_create", False)),
+                bool(args.get("create_parent_directories", False)),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("patch_preimage_max_bytes", 5_000_000),
+                self._setting_positive_int("patch_write_max_bytes", 5_000_000),
+                context,
+            )
 
         if tool_name == "fs.write_text":
             target = self._resolve_workspace_path(workspace_root, str(args.get("path")))
@@ -476,6 +531,30 @@ class FilesystemModule(BaseModule):
             self._validate_bool_argument(arguments, "include_receipt")
             return
 
+        if tool_name == "fs.patch":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "diff",
+                    "expected_sha256_by_path",
+                    "read_receipt_by_path",
+                    "create_parent_directories",
+                    "allow_create",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            diff = arguments.get("diff")
+            if not isinstance(diff, str) or not diff.strip():
+                raise ValueError("diff is required")
+            self._validate_optional_string_map_argument(arguments, "expected_sha256_by_path")
+            self._validate_optional_string_map_argument(arguments, "read_receipt_by_path")
+            self._validate_bool_argument(arguments, "create_parent_directories")
+            self._validate_bool_argument(arguments, "allow_create")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
         if tool_name == "fs.write_text":
             unknown = sorted(set(arguments) - {"path", "content"})
             if unknown:
@@ -592,6 +671,52 @@ class FilesystemModule(BaseModule):
         value = arguments.get(key)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
             raise ValueError(f"{key} must be a positive integer")
+
+    @staticmethod
+    def _validate_optional_string_map_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, dict) or not all(
+            isinstance(map_key, str) and isinstance(map_value, str)
+            for map_key, map_value in value.items()
+        ):
+            raise ValueError(f"{key} must be an object with string values")
+
+    async def extract_path_scope_candidates(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Any | None = None,
+    ) -> list[PathScopeCandidate]:
+        del context
+        if tool_name != "fs.patch":
+            return await super().extract_path_scope_candidates(tool_name, arguments, None)
+
+        candidates: list[PathScopeCandidate] = []
+        for patch_file in self._parse_patch_diff(str((arguments or {}).get("diff") or "")):
+            path = patch_file.new_path
+            if path is None:
+                raise ValueError("invalid_patch_path")
+            if patch_file.action == "create":
+                candidates.append(
+                    PathScopeCandidate(
+                        path=path,
+                        action="write",
+                        source="filesystem_diff",
+                        creates_file=True,
+                    )
+                )
+            else:
+                candidates.append(
+                    PathScopeCandidate(
+                        path=path,
+                        action="edit",
+                        source="filesystem_diff",
+                        requires_existing_file=True,
+                    )
+                )
+        return candidates
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize filesystem inputs while allowing portable glob syntax."""
@@ -1139,6 +1264,244 @@ class FilesystemModule(BaseModule):
             return candidate.name
         rel_text = relative.as_posix()
         return rel_text if rel_text not in {"", "."} else "."
+
+    def _parse_patch_diff(self, diff_text: str) -> tuple[PatchFile, ...]:
+        try:
+            return parse_unified_diff(
+                diff_text,
+                max_files=self._setting_positive_int("patch_max_files", 20),
+                max_hunks=self._setting_positive_int("patch_max_hunks", 200),
+                max_bytes=self._setting_positive_int("patch_max_diff_bytes", 1_000_000),
+            )
+        except FilesystemPatchError as exc:
+            raise ValueError(exc.reason_code) from exc
+
+    @staticmethod
+    def _string_map_argument(value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        return {str(key): str(map_value) for key, map_value in dict(value).items()}
+
+    def _apply_patch_files(
+        self,
+        workspace_root: Path,
+        patch_files: tuple[PatchFile, ...],
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        allow_create: bool,
+        create_parent_directories: bool,
+        dry_run: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        plans = [
+            self._plan_patch_file(
+                workspace_root,
+                patch_file,
+                expected_sha256_by_path,
+                read_receipt_by_path,
+                allow_create,
+                create_parent_directories,
+                preimage_max_bytes,
+                write_max_bytes,
+                context,
+            )
+            for patch_file in patch_files
+        ]
+
+        if not dry_run:
+            for plan in plans:
+                target = plan["_target"]
+                if plan["_create_parent_directories"]:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                self._atomic_write_text_file(target, str(plan["_text_after"]))
+
+        file_results = []
+        for plan in plans:
+            record = dict(plan["result"])
+            if not dry_run:
+                record["bytes_written"] = record["bytes_after"]
+            file_results.append(record)
+
+        summary = {
+            "files": len(file_results),
+            "hunks": sum(int(item["hunks_applied"]) for item in file_results),
+            "additions": sum(int(item["additions"]) for item in file_results),
+            "deletions": sum(int(item["deletions"]) for item in file_results),
+        }
+        return {
+            "applied": not dry_run,
+            "dry_run": dry_run,
+            "files": file_results,
+            "summary": summary,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.patch",
+                tool_prompt_id="mcp.fs.patch.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_edit",
+                result_kind="structured_filesystem_edit",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+
+    def _plan_patch_file(
+        self,
+        workspace_root: Path,
+        patch_file: PatchFile,
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        allow_create: bool,
+        create_parent_directories: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        rel_path = patch_file.new_path
+        if rel_path is None:
+            raise ValueError("invalid_patch_path")
+        target = self._resolve_workspace_path_no_follow(workspace_root, rel_path)
+        response_path = self._to_workspace_relative_path(workspace_root, target)
+        additions, deletions = self._patch_line_counts(patch_file)
+
+        if patch_file.action == "create":
+            if not allow_create:
+                raise ValueError("patch_create_not_allowed")
+            if target.exists() or target.is_symlink():
+                raise ValueError("patch_create_target_exists")
+            if not target.parent.exists() and not create_parent_directories:
+                raise ValueError("patch_parent_missing")
+            original_text = ""
+            sha256_before = None
+            bytes_before = 0
+            created = True
+            action = "write"
+        else:
+            if target.is_symlink():
+                raise ValueError("file_not_regular")
+            if not target.exists():
+                raise FileNotFoundError(f"path not found: {target}")
+            if not target.is_file():
+                raise ValueError("file_not_regular")
+            file_size = target.stat(follow_symlinks=False).st_size
+            if file_size > preimage_max_bytes:
+                raise ValueError("patch_preimage_too_large")
+            payload = target.read_bytes()
+            if b"\x00" in payload:
+                raise ValueError("binary content is not supported by fs.patch")
+            try:
+                original_text = payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("binary content is not supported by fs.patch") from exc
+            sha256_before = hashlib.sha256(payload).hexdigest()
+            bytes_before = len(payload)
+            self._authorize_patch_preimage(
+                response_path,
+                sha256_before,
+                bytes_before,
+                expected_sha256_by_path,
+                read_receipt_by_path,
+                context,
+            )
+            created = False
+            action = "edit"
+
+        try:
+            text_after = apply_patch_to_text(original_text, patch_file)
+        except FilesystemPatchError as exc:
+            raise ValueError(exc.reason_code) from exc
+        data_after = text_after.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("patch_write_too_large")
+
+        return {
+            "_target": target,
+            "_text_after": text_after,
+            "_create_parent_directories": create_parent_directories,
+            "result": {
+                "path": response_path,
+                "action": action,
+                "created": created,
+                "hunks_applied": len(patch_file.hunks),
+                "additions": additions,
+                "deletions": deletions,
+                "bytes_before": bytes_before,
+                "bytes_after": len(data_after),
+                "sha256_before": sha256_before,
+                "sha256_after": hashlib.sha256(data_after).hexdigest(),
+            },
+        }
+
+    def _authorize_patch_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        context: Any | None,
+    ) -> None:
+        expected_sha256 = expected_sha256_by_path.get(rel_path)
+        receipt = read_receipt_by_path.get(rel_path)
+        if expected_sha256 is None and receipt is None:
+            raise ValueError("patch_preimage_required")
+        if expected_sha256 is not None and expected_sha256 == sha256_before:
+            return
+        if receipt is not None:
+            self._validate_patch_read_receipt(receipt, rel_path, sha256_before, bytes_before, context)
+            return
+        raise ValueError("patch_preimage_mismatch")
+
+    def _validate_patch_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("patch_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and context_workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("patch_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and context_session_id and payload.session_id != context_session_id:
+            raise ValueError("patch_read_receipt_mismatch")
+
+    @staticmethod
+    def _patch_line_counts(patch_file: PatchFile) -> tuple[int, int]:
+        additions = 0
+        deletions = 0
+        for hunk in patch_file.hunks:
+            for line in hunk.lines:
+                if line.kind == "add":
+                    additions += 1
+                elif line.kind == "remove":
+                    deletions += 1
+        return additions, deletions
+
+    @staticmethod
+    def _atomic_write_text_file(target: Path, text: str) -> None:
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(text.encode("utf-8"))
+            os.replace(tmp_path, target)
+        finally:
+            with suppress(OSError):
+                if tmp_path.exists():
+                    tmp_path.unlink()
 
     @staticmethod
     def _read_file(
