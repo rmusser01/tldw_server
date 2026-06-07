@@ -35,6 +35,7 @@ class _FilesystemRegistry:
             "fs.read",
             "fs.read_text",
             "fs.patch",
+            "fs.write",
             "fs.write_text",
             "fs.stat",
             "fs.glob",
@@ -201,9 +202,9 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     tools = await mod.get_tools()
     by_name = {tool["name"]: tool for tool in tools}
 
-    assert {"fs.list", "fs.read", "fs.read_text", "fs.patch", "fs.write_text"} <= set(by_name)  # nosec B101
+    assert {"fs.list", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"} <= set(by_name)  # nosec B101
 
-    for tool_name in ("fs.list", "fs.read", "fs.read_text", "fs.patch", "fs.write_text"):
+    for tool_name in ("fs.list", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"):
         metadata = by_name[tool_name]["metadata"]
         assert metadata["uses_filesystem"] is True  # nosec B101
         assert metadata["path_boundable"] is True  # nosec B101
@@ -222,6 +223,13 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert patch_metadata["eval"]["task_families"] == ["filesystem_edit"]  # nosec B101
     assert patch_metadata["eval"]["expected_result_kind"] == "structured_filesystem_edit"  # nosec B101
     assert by_name["fs.patch"]["inputSchema"]["additionalProperties"] is False  # nosec B101
+    write_metadata = by_name["fs.write"]["metadata"]
+    assert write_metadata["path_argument_hints"] == ["path"]  # nosec B101
+    assert write_metadata["path_scope_action"] == "write"  # nosec B101
+    assert write_metadata["write_capable"] is True  # nosec B101
+    assert write_metadata["eval"]["task_families"] == ["filesystem_write"]  # nosec B101
+    assert write_metadata["eval"]["expected_result_kind"] == "structured_filesystem_write"  # nosec B101
+    assert by_name["fs.write"]["inputSchema"]["additionalProperties"] is False  # nosec B101
     assert by_name["fs.write_text"]["metadata"]["category"] == "management"  # nosec B101
 
 
@@ -716,6 +724,141 @@ async def test_filesystem_patch_can_create_file_when_allowed(tmp_path: Path) -> 
     assert result["files"][0]["path"] == "docs/notes.txt"  # nosec B101
     assert result["files"][0]["action"] == "write"  # nosec B101
     assert result["files"][0]["created"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_create_creates_new_text_file(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-create", user_id="1", metadata={})
+
+    result = await mod.execute_tool(
+        "fs.write",
+        {"path": "docs/new.txt", "content": "created\n", "mode": "create"},
+        context=context,
+    )
+
+    assert (workspace_root / "docs" / "new.txt").read_text(encoding="utf-8") == "created\n"  # nosec B101
+    assert result["path"] == "docs/new.txt"  # nosec B101
+    assert result["written"] is True  # nosec B101
+    assert result["created"] is True  # nosec B101
+    assert result["bytes_written"] == len("created\n".encode("utf-8"))  # nosec B101
+    assert result["eval"]["action_family"] == "filesystem_write"  # nosec B101
+
+    with pytest.raises(ValueError, match="write_target_exists"):
+        await mod.execute_tool(
+            "fs.write",
+            {"path": "docs/new.txt", "content": "again\n", "mode": "create"},
+            context=context,
+        )
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_replace_requires_preimage(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "story.txt").write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-preimage", user_id="1", metadata={})
+
+    with pytest.raises(ValueError, match="write_preimage_required"):
+        await mod.execute_tool(
+            "fs.write",
+            {"path": "story.txt", "content": "new\n", "mode": "replace"},
+            context=context,
+        )
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-expected", user_id="1", metadata={})
+    expected_sha = hashlib.sha256("old\n".encode("utf-8")).hexdigest()
+
+    result = await mod.execute_tool(
+        "fs.write",
+        {"path": "story.txt", "content": "new\n", "mode": "replace", "expected_sha256": expected_sha},
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "new\n"  # nosec B101
+    assert result["written"] is True  # nosec B101
+    assert result["created"] is False  # nosec B101
+    assert result["sha256_before"] == expected_sha  # nosec B101
+    assert result["sha256_after"] == hashlib.sha256("new\n".encode("utf-8")).hexdigest()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_replace_with_read_receipt(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-write-receipt", user_id="1", metadata={"workspace_id": "ws-1"})
+    read_result = await mod.execute_tool("fs.read", {"path": "story.txt"}, context=context)
+
+    result = await mod.execute_tool(
+        "fs.write",
+        {
+            "path": "story.txt",
+            "content": "new\n",
+            "mode": "replace",
+            "read_receipt": read_result["read_receipt"],
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "new\n"  # nosec B101
+    assert result["sha256_before"] == read_result["sha256"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_rejects_stale_hash_and_dry_run_does_not_write(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-stale", user_id="1", metadata={})
+    expected_sha = hashlib.sha256("old\n".encode("utf-8")).hexdigest()
+
+    with pytest.raises(ValueError, match="write_preimage_mismatch"):
+        await mod.execute_tool(
+            "fs.write",
+            {"path": "story.txt", "content": "new\n", "mode": "replace", "expected_sha256": "0" * 64},
+            context=context,
+        )
+
+    result = await mod.execute_tool(
+        "fs.write",
+        {
+            "path": "story.txt",
+            "content": "dry-run\n",
+            "mode": "replace",
+            "expected_sha256": expected_sha,
+            "dry_run": True,
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
+    assert result["written"] is False  # nosec B101
+    assert result["dry_run"] is True  # nosec B101
+    assert result["sha256_after"] == hashlib.sha256("dry-run\n".encode("utf-8")).hexdigest()  # nosec B101
 
 
 @pytest.mark.asyncio

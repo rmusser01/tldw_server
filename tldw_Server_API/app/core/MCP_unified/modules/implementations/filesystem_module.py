@@ -179,6 +179,36 @@ class FilesystemModule(BaseModule):
         )
         patch_tool["inputSchema"]["additionalProperties"] = False
 
+        write_tool = create_tool_definition(
+            name="fs.write",
+            description="Create or replace a whole UTF-8 text file under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "content": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["create", "replace"]},
+                    "expected_sha256": {"type": "string"},
+                    "read_receipt": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "content", "mode"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.write"],
+                "path_scope_action": "write",
+                "eval": {
+                    "task_families": ["filesystem_write"],
+                    "expected_result_kind": "structured_filesystem_write",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        write_tool["inputSchema"]["additionalProperties"] = False
+
         write_text_tool = create_tool_definition(
             name="fs.write_text",
             description="Write UTF-8 text content to a file under the active trusted workspace root.",
@@ -278,7 +308,17 @@ class FilesystemModule(BaseModule):
         )
         grep_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_tool, read_text_tool, patch_tool, write_text_tool, stat_tool, glob_tool, grep_tool]
+        return [
+            list_tool,
+            read_tool,
+            read_text_tool,
+            patch_tool,
+            write_tool,
+            write_text_tool,
+            stat_tool,
+            glob_tool,
+            grep_tool,
+        ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -360,6 +400,21 @@ class FilesystemModule(BaseModule):
                 bool(args.get("dry_run", False)),
                 self._setting_positive_int("patch_preimage_max_bytes", 5_000_000),
                 self._setting_positive_int("patch_write_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "fs.write":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._write_file,
+                workspace_root,
+                target,
+                str(args.get("content")),
+                str(args.get("mode")),
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("write_max_bytes", 5_000_000),
                 context,
             )
 
@@ -552,6 +607,36 @@ class FilesystemModule(BaseModule):
             self._validate_optional_string_map_argument(arguments, "read_receipt_by_path")
             self._validate_bool_argument(arguments, "create_parent_directories")
             self._validate_bool_argument(arguments, "allow_create")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
+        if tool_name == "fs.write":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "content",
+                    "mode",
+                    "expected_sha256",
+                    "read_receipt",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            content = arguments.get("content")
+            mode = arguments.get("mode")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(content, str):
+                raise ValueError("content must be a string")
+            if mode not in {"create", "replace"}:
+                raise ValueError("mode must be create or replace")
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
             self._validate_bool_argument(arguments, "dry_run")
             return
 
@@ -1502,6 +1587,131 @@ class FilesystemModule(BaseModule):
             with suppress(OSError):
                 if tmp_path.exists():
                     tmp_path.unlink()
+
+    def _write_file(
+        self,
+        workspace_root: Path,
+        target: Path,
+        content: str,
+        mode: str,
+        expected_sha256: Any,
+        read_receipt: Any,
+        dry_run: bool,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        if "\x00" in content:
+            raise ValueError("binary content is not supported by fs.write")
+        data_after = content.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("write_content_too_large")
+
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        created = mode == "create"
+        sha256_before = None
+        bytes_before = 0
+
+        if mode == "create":
+            if target.exists() or target.is_symlink():
+                raise ValueError("write_target_exists")
+        else:
+            if target.is_symlink():
+                raise ValueError("file_not_regular")
+            if not target.exists():
+                raise FileNotFoundError(f"path not found: {target}")
+            if not target.is_file():
+                raise ValueError("file_not_regular")
+            payload = target.read_bytes()
+            if b"\x00" in payload:
+                raise ValueError("binary content is not supported by fs.write")
+            try:
+                payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("binary content is not supported by fs.write") from exc
+            sha256_before = hashlib.sha256(payload).hexdigest()
+            bytes_before = len(payload)
+            self._authorize_write_preimage(
+                rel_path,
+                sha256_before,
+                bytes_before,
+                expected_sha256,
+                read_receipt,
+                context,
+            )
+
+        sha256_after = hashlib.sha256(data_after).hexdigest()
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._atomic_write_text_file(target, content)
+
+        result: dict[str, Any] = {
+            "path": rel_path,
+            "mode": mode,
+            "written": not dry_run,
+            "dry_run": dry_run,
+            "created": created,
+            "bytes_before": bytes_before,
+            "bytes_after": len(data_after),
+            "sha256_before": sha256_before,
+            "sha256_after": sha256_after,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.write",
+                tool_prompt_id="mcp.fs.write.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_write",
+                result_kind="structured_filesystem_write",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+        if not dry_run:
+            result["bytes_written"] = len(data_after)
+        return result
+
+    def _authorize_write_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256: Any,
+        read_receipt: Any,
+        context: Any | None,
+    ) -> None:
+        has_expected = isinstance(expected_sha256, str) and bool(expected_sha256)
+        has_receipt = isinstance(read_receipt, str) and bool(read_receipt)
+        if not has_expected and not has_receipt:
+            raise ValueError("write_preimage_required")
+        if has_expected and str(expected_sha256) == sha256_before:
+            return
+        if has_receipt:
+            self._validate_write_read_receipt(str(read_receipt), rel_path, sha256_before, bytes_before, context)
+            return
+        raise ValueError("write_preimage_mismatch")
+
+    def _validate_write_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("write_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and context_workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("write_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and context_session_id and payload.session_id != context_session_id:
+            raise ValueError("write_read_receipt_mismatch")
 
     @staticmethod
     def _read_file(
