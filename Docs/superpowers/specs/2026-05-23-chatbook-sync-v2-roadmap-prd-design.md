@@ -2,7 +2,7 @@
 
 Date: 2026-05-23
 Owner: Codex collaboration session
-Status: Approved design direction; spec review passed 2026-05-23; pending implementation planning
+Status: Server-side roadmap implemented through M3; Chatbook client integration remains downstream
 Backlog: TASK-490
 Supersedes: `Docs/superpowers/specs/2026-05-10-chatbook-sync-engine-prd-design.md`
 
