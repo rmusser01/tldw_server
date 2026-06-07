@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, React, Vitest, Playwright.
 
-**Backlog Task:** TASK-2278.6
+**Backlog Task:** TASK-2279.6
 
 ---
 
@@ -142,11 +142,11 @@ cd apps/extension
 bunx playwright test tests/e2e/knowledge-empty-recovery.spec.ts --project=chromium-extension --reporter=line
 ```
 
-Record any WXT blocker under TASK-2278.5 and TASK-2278.6.
+Record any WXT blocker under TASK-2279.5 and TASK-2279.6.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add apps/packages/ui/src/services/rag apps/packages/ui/src/components/Option/KnowledgeQA apps/tldw-frontend/e2e/ux-audit/knowledge-empty-recovery.spec.ts apps/extension/tests/e2e/knowledge-empty-recovery.spec.ts "backlog/tasks/task-2278.6 - Verify-Knowledge-QA-scoped-search-and-saved-profile-round-trip.md"
+git add apps/packages/ui/src/services/rag apps/packages/ui/src/components/Option/KnowledgeQA apps/tldw-frontend/e2e/ux-audit/knowledge-empty-recovery.spec.ts apps/extension/tests/e2e/knowledge-empty-recovery.spec.ts "backlog/tasks/task-2279.6 - Verify-Knowledge-QA-scoped-search-and-saved-profile-round-trip.md"
 git commit -m "feat: verify knowledge qa scoped search"
 ```

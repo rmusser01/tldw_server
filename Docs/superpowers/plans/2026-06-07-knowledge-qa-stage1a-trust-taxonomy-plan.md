@@ -4,11 +4,11 @@
 
 **Goal:** Add a shared Knowledge QA trust taxonomy and safe response handling so uncited, partial, failed, unknown, no-result, and unsynced states cannot render as grounded success.
 
-**Architecture:** Put trust normalization in a small shared helper consumed by `KnowledgeQAProvider`, answer UI, history, and export-entry surfaces. This stage should classify and render states, but it should not enforce backend citation validity yet. Backend enforcement is owned by TASK-2278.4 after evidence payloads are materialized.
+**Architecture:** Put trust normalization in a small shared helper consumed by `KnowledgeQAProvider`, answer UI, history, and export-entry surfaces. This stage should classify and render states, but it should not enforce backend citation validity yet. Backend enforcement is owned by TASK-2279.4 after evidence payloads are materialized.
 
 **Tech Stack:** TypeScript, React, Vitest, shared Knowledge QA UI.
 
-**Backlog Task:** TASK-2278.2
+**Backlog Task:** TASK-2279.2
 
 ---
 
@@ -227,6 +227,6 @@ Expected: exit 0.
 - [ ] **Step 4: Update Backlog and commit**
 
 ```bash
-git add apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2278.2 - Define-Knowledge-QA-trust-taxonomy-and-safe-response-handling.md"
+git add apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2279.2 - Define-Knowledge-QA-trust-taxonomy-and-safe-response-handling.md"
 git commit -m "feat: add knowledge qa trust taxonomy"
 ```

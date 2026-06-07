@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, WXT, Chrome extension APIs, Playwright, Vitest.
 
-**Backlog Task:** TASK-2278.5
+**Backlog Task:** TASK-2279.5
 
 ---
 
@@ -119,7 +119,7 @@ Inspect:
 - `apps/extension/wxt.config.ts`
 - `apps/extension/playwright.config.ts`
 
-Limit attempts to three. If unresolved, document exact command, stall point, process tree, and owner in `TASK-2278.5`.
+Limit attempts to three. If unresolved, document exact command, stall point, process tree, and owner in `TASK-2279.5`.
 
 - [ ] **Step 3: Run Knowledge QA extension E2E**
 
@@ -152,6 +152,6 @@ git diff --check -- apps/packages/ui/src/components/Option/KnowledgeQA apps/exte
 - [ ] **Step 3: Commit**
 
 ```bash
-git add apps/packages/ui/src/components/Option/KnowledgeQA apps/extension/tests/e2e apps/extension/playwright.config.ts "backlog/tasks/task-2278.5 - Harden-Knowledge-QA-extension-runtime-and-sync-reliability.md"
+git add apps/packages/ui/src/components/Option/KnowledgeQA apps/extension/tests/e2e apps/extension/playwright.config.ts "backlog/tasks/task-2279.5 - Harden-Knowledge-QA-extension-runtime-and-sync-reliability.md"
 git commit -m "fix: harden knowledge qa extension reliability"
 ```

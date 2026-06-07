@@ -8,7 +8,7 @@
 
 **Tech Stack:** Markdown, Backlog.md MCP, optional future React/Python plans.
 
-**Backlog Task:** TASK-2278.9
+**Backlog Task:** TASK-2279.9
 
 ---
 
@@ -23,7 +23,7 @@
 
 - Create: `Docs/Plans/2026-06-07-knowledge-qa-stage7-evidence-workflow-backlog.md`
 - Modify: `Docs/superpowers/specs/2026-06-07-knowledge-qa-follow-on-trust-remediation-design.md` only if accepted scope changes are needed
-- Modify: `backlog/tasks/task-2278.9 - Plan-non-blocking-Knowledge-QA-evidence-workflow-improvements.md`
+- Modify: `backlog/tasks/task-2279.9 - Plan-non-blocking-Knowledge-QA-evidence-workflow-improvements.md`
 
 ## Task 1: Write Non-Blocking Enhancement Backlog
 
@@ -98,6 +98,6 @@ Expected: matches only in explicit non-goal/out-of-scope text.
 - [ ] **Step 3: Update Backlog and commit**
 
 ```bash
-git add Docs/Plans/2026-06-07-knowledge-qa-stage7-evidence-workflow-backlog.md "backlog/tasks/task-2278.9 - Plan-non-blocking-Knowledge-QA-evidence-workflow-improvements.md"
+git add Docs/Plans/2026-06-07-knowledge-qa-stage7-evidence-workflow-backlog.md "backlog/tasks/task-2279.9 - Plan-non-blocking-Knowledge-QA-evidence-workflow-improvements.md"
 git commit -m "docs: plan knowledge qa evidence workflow backlog"
 ```

@@ -8,13 +8,13 @@
 
 **Tech Stack:** Python, FastAPI/Pydantic, RAG response mapping, TypeScript, React, Pytest, Vitest.
 
-**Backlog Task:** TASK-2278.4
+**Backlog Task:** TASK-2279.4
 
 ---
 
 ## Boundaries
 
-- Depends on TASK-2278.3 evidence materialization.
+- Depends on TASK-2279.3 evidence materialization.
 - Do not require semantic claim-to-source adjudication in this release slice.
 - Do not add flashcard behavior to `/knowledge`.
 
@@ -155,6 +155,6 @@ python -m bandit -r tldw_Server_API/app/core/RAG/rag_service/trust_contracts.py 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/RAG/rag_service/trust_contracts.py tldw_Server_API/app/core/RAG/rag_service/response_mapping.py tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/tests/RAG/test_knowledge_trust_contracts.py apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2278.4 - Enforce-Knowledge-QA-citation-validity-and-abstention.md"
+git add tldw_Server_API/app/core/RAG/rag_service/trust_contracts.py tldw_Server_API/app/core/RAG/rag_service/response_mapping.py tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/tests/RAG/test_knowledge_trust_contracts.py apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2279.4 - Enforce-Knowledge-QA-citation-validity-and-abstention.md"
 git commit -m "feat: enforce knowledge qa trust contract"
 ```

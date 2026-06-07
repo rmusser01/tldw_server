@@ -8,7 +8,7 @@
 
 **Tech Stack:** Markdown, Backlog.md MCP, ripgrep, git diff hygiene checks.
 
-**Backlog Task:** TASK-2278.1
+**Backlog Task:** TASK-2279.1
 
 ---
 
@@ -23,7 +23,7 @@
 
 - Create: `Docs/Plans/2026-06-07-knowledge-qa-follow-on-gap-matrix.md`
 - Modify: `Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md`
-- Modify: `backlog/tasks/task-2278.1 - Reconcile-Knowledge-QA-follow-on-baseline-and-release-gates.md`
+- Modify: `backlog/tasks/task-2279.1 - Reconcile-Knowledge-QA-follow-on-baseline-and-release-gates.md`
 - Reference: `Docs/superpowers/specs/2026-06-07-knowledge-qa-follow-on-trust-remediation-design.md`
 - Reference: `backlog/tasks/task-528 - Plan-knowledge-QA-WebUI-and-extension-remediation-after-UX-audit.md`
 
@@ -68,7 +68,7 @@ Create `Docs/Plans/2026-06-07-knowledge-qa-follow-on-gap-matrix.md` with this st
 
 | Live finding | Existing TASK-528 coverage | Remaining gap | Owner task | Release gate |
 | --- | --- | --- | --- | --- |
-| WebUI search returned sources but zero citations | Results/evidence UI guardrails exist | Need trust taxonomy and citation enforcement | TASK-2278.2, TASK-2278.4 | Normal answer requires valid citations |
+| WebUI search returned sources but zero citations | Results/evidence UI guardrails exist | Need trust taxonomy and citation enforcement | TASK-2279.2, TASK-2279.4 | Normal answer requires valid citations |
 ```
 
 - [ ] **Step 2: Add every reviewed finding**
@@ -88,14 +88,14 @@ Include rows for:
 
 Expected owner mapping:
 
-- TASK-2278.2 for trust taxonomy
-- TASK-2278.3 for evidence materialization
-- TASK-2278.4 for citation enforcement and abstention
-- TASK-2278.5 for extension runtime and sync reliability
-- TASK-2278.6 for scoped-search round-trip
-- TASK-2278.7 for export/history propagation
-- TASK-2278.8 for live UAT gates
-- TASK-2278.9 for non-blocking evidence workflow improvements
+- TASK-2279.2 for trust taxonomy
+- TASK-2279.3 for evidence materialization
+- TASK-2279.4 for citation enforcement and abstention
+- TASK-2279.5 for extension runtime and sync reliability
+- TASK-2279.6 for scoped-search round-trip
+- TASK-2279.7 for export/history propagation
+- TASK-2279.8 for live UAT gates
+- TASK-2279.9 for non-blocking evidence workflow improvements
 
 ## Task 3: Update UAT Checklist
 
@@ -135,11 +135,11 @@ Expected: matches appear only in explicit out-of-scope guardrail text.
 
 - [ ] **Step 3: Update Backlog**
 
-Use Backlog MCP to add implementation notes to `TASK-2278.1` with matrix path, verification commands, and known skips.
+Use Backlog MCP to add implementation notes to `TASK-2279.1` with matrix path, verification commands, and known skips.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Docs/Plans/2026-06-07-knowledge-qa-follow-on-gap-matrix.md Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md "backlog/tasks/task-2278.1 - Reconcile-Knowledge-QA-follow-on-baseline-and-release-gates.md"
+git add Docs/Plans/2026-06-07-knowledge-qa-follow-on-gap-matrix.md Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md "backlog/tasks/task-2279.1 - Reconcile-Knowledge-QA-follow-on-baseline-and-release-gates.md"
 git commit -m "docs: reconcile knowledge qa follow-on baseline"
 ```

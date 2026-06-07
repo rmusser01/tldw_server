@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python fixture helpers, FastAPI backend, Playwright, WebUI E2E, WXT extension E2E, Markdown release checklist.
 
-**Backlog Task:** TASK-2278.8
+**Backlog Task:** TASK-2279.8
 
 ---
 
@@ -143,11 +143,11 @@ Record exact backend command, frontend URL, fixture manifest, console errors, an
 
 - [ ] **Step 3: Run extension live test or record blocker**
 
-If WXT build stalls, capture the command, timeout, and owner in `TASK-2278.8`.
+If WXT build stalls, capture the command, timeout, and owner in `TASK-2279.8`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Helper_Scripts/seed_knowledge_qa_uat.py tldw_Server_API/tests/RAG apps/tldw-frontend/e2e apps/extension/tests/e2e Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md Docs/User_Guides/WebUI_Extension/Knowledge_QA_Guide.md "backlog/tasks/task-2278.8 - Add-Knowledge-QA-live-UAT-fixtures-and-release-gates.md"
+git add Helper_Scripts/seed_knowledge_qa_uat.py tldw_Server_API/tests/RAG apps/tldw-frontend/e2e apps/extension/tests/e2e Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md Docs/User_Guides/WebUI_Extension/Knowledge_QA_Guide.md "backlog/tasks/task-2279.8 - Add-Knowledge-QA-live-UAT-fixtures-and-release-gates.md"
 git commit -m "test: add knowledge qa live uat gates"
 ```

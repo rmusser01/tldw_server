@@ -4,11 +4,11 @@
 
 **Goal:** Ensure every Knowledge QA source row has inspectable evidence or a specific unavailable reason, plus stable source, chunk, and excerpt identifiers.
 
-**Architecture:** Add backend response contract fields through the RAG result mapper and expose them through existing frontend `RagResult` rendering. Keep this stage focused on materializing evidence; citation validity enforcement happens in TASK-2278.4.
+**Architecture:** Add backend response contract fields through the RAG result mapper and expose them through existing frontend `RagResult` rendering. Keep this stage focused on materializing evidence; citation validity enforcement happens in TASK-2279.4.
 
 **Tech Stack:** Python, FastAPI/Pydantic, RAG response mapping, TypeScript, React, Pytest, Vitest.
 
-**Backlog Task:** TASK-2278.3
+**Backlog Task:** TASK-2279.3
 
 ---
 
@@ -179,6 +179,6 @@ Expected: no new findings in touched code.
 
 ```bash
 git diff --check -- tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/app/core/RAG/rag_service apps/packages/ui/src/components/Option/KnowledgeQA
-git add tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/app/core/RAG/rag_service apps/packages/ui/src/components/Option/KnowledgeQA tldw_Server_API/tests/RAG/test_knowledge_evidence_materialization.py "backlog/tasks/task-2278.3 - Materialize-Knowledge-QA-evidence-excerpts-and-source-identifiers.md"
+git add tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/app/core/RAG/rag_service apps/packages/ui/src/components/Option/KnowledgeQA tldw_Server_API/tests/RAG/test_knowledge_evidence_materialization.py "backlog/tasks/task-2279.3 - Materialize-Knowledge-QA-evidence-excerpts-and-source-identifiers.md"
 git commit -m "feat: materialize knowledge qa evidence"
 ```

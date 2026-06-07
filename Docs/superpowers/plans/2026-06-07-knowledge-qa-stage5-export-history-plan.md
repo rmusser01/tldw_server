@@ -8,14 +8,14 @@
 
 **Tech Stack:** TypeScript, React, local storage helpers, Markdown export utilities, Vitest.
 
-**Backlog Task:** TASK-2278.7
+**Backlog Task:** TASK-2279.7
 
 ---
 
 ## Boundaries
 
-- Depends on TASK-2278.2 trust taxonomy.
-- Depends on TASK-2278.3 evidence metadata and TASK-2278.4 origin labeling for full coverage.
+- Depends on TASK-2279.2 trust taxonomy.
+- Depends on TASK-2279.3 evidence metadata and TASK-2279.4 origin labeling for full coverage.
 - Do not add flashcard behavior to `/knowledge`.
 
 ## Files
@@ -150,6 +150,6 @@ Expected: no scope matches in touched Knowledge QA runtime files.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2278.7 - Propagate-Knowledge-QA-trust-status-into-export-and-history.md"
+git add apps/packages/ui/src/components/Option/KnowledgeQA "backlog/tasks/task-2279.7 - Propagate-Knowledge-QA-trust-status-into-export-and-history.md"
 git commit -m "feat: preserve knowledge qa trust in history and export"
 ```

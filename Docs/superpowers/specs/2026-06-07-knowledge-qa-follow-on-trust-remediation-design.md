@@ -5,7 +5,7 @@
 This design defines a follow-on remediation program for `/knowledge` after the
 `TASK-528` recovery and guardrail work. It is based on live WebUI and browser
 extension testing against a running backend, plus the current `origin/dev`
-baseline at `0efb6778b8`.
+baseline at `1d752415d3`.
 
 The goal is to make Knowledge QA trustworthy as a workflow for searching a
 personal library and reviewing grounded answers with citations. The work should
@@ -540,15 +540,15 @@ The implementation-planning step created reviewable child tasks and plan files
 from the stages above. Continuation should start from these task slices and keep
 each Backlog record current as implementation proceeds:
 
-- `TASK-2278.1`: Reconcile Knowledge QA follow-on trust baseline.
-- `TASK-2278.2`: Define Knowledge QA trust taxonomy and safe response handling.
-- `TASK-2278.3`: Materialize Knowledge QA evidence excerpts and source previews.
-- `TASK-2278.4`: Enforce Knowledge QA citation validity and abstention.
-- `TASK-2278.5`: Harden Knowledge QA extension setup and sync reliability.
-- `TASK-2278.6`: Verify Knowledge QA scoped search and saved profile round-trip.
-- `TASK-2278.7`: Propagate Knowledge QA trust status into export and history.
-- `TASK-2278.8`: Add Knowledge QA live UAT fixtures and release gates.
-- `TASK-2278.9`: Plan non-blocking Knowledge QA evidence workflow improvements.
+- `TASK-2279.1`: Reconcile Knowledge QA follow-on trust baseline.
+- `TASK-2279.2`: Define Knowledge QA trust taxonomy and safe response handling.
+- `TASK-2279.3`: Materialize Knowledge QA evidence excerpts and source previews.
+- `TASK-2279.4`: Enforce Knowledge QA citation validity and abstention.
+- `TASK-2279.5`: Harden Knowledge QA extension setup and sync reliability.
+- `TASK-2279.6`: Verify Knowledge QA scoped search and saved profile round-trip.
+- `TASK-2279.7`: Propagate Knowledge QA trust status into export and history.
+- `TASK-2279.8`: Add Knowledge QA live UAT fixtures and release gates.
+- `TASK-2279.9`: Plan non-blocking Knowledge QA evidence workflow improvements.
 
 Each implementation plan should include:
 
