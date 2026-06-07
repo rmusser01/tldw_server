@@ -78,6 +78,15 @@ const diagramArtifact: ArtifactItem = {
   lineCount: 2
 }
 
+const graphvizArtifact: ArtifactItem = {
+  id: "graphviz-assistant-message-1-segment-0-block-0-abc123",
+  title: "Graphviz diagram 1",
+  content: "digraph G {\n  A -> B\n}",
+  kind: "diagram",
+  language: "graphviz",
+  lineCount: 3
+}
+
 const resetArtifactsStore = () => {
   useArtifactsStore.setState((state) => ({
     ...state,
@@ -133,6 +142,20 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
         source: diagramArtifact.content
       })
     )
+  })
+
+  it("does not render non-Mermaid diagram artifacts with the Mermaid block", () => {
+    useArtifactsStore.getState().openArtifact(graphvizArtifact)
+
+    const { container } = render(<ArtifactsPanel />)
+
+    expect(screen.getByText("Graphviz diagram 1")).toBeInTheDocument()
+    expect(
+      screen.queryByTestId("shared-mermaid-diagram-block")
+    ).not.toBeInTheDocument()
+    expect(container).toHaveTextContent("digraph G")
+    expect(container).toHaveTextContent("A -> B")
+    expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
   })
 
   it("jumps to the matching Mermaid artifact origin", () => {
