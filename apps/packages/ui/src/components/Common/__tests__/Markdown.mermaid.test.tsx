@@ -347,6 +347,29 @@ describe("Markdown Mermaid fences", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("keeps Mermaid fences on the diagram path when React replays render", () => {
+    render(
+      <React.StrictMode>
+        <Markdown
+          message={
+            "Assistant diagram:\n\n```mermaid\ngraph TD\nA --> B\n```"
+          }
+          enableMermaidDiagrams
+        />
+      </React.StrictMode>
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: "graph TD\nA --> B",
+        blockIndex: 0
+      })
+    )
+  })
+
   it("keeps non-Mermaid ST-compatible markdown on the HTML path when enabled", () => {
     const { container } = render(
       <Markdown

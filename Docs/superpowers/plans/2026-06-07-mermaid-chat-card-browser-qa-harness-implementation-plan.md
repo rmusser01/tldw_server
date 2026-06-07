@@ -8,6 +8,8 @@
 
 **Tech Stack:** Next.js pages router, React, shared UI package components, Playwright smoke tests, Backlog.md task tracking.
 
+**Execution Status:** Complete. Tasks 1-4 are implemented, verified, and recorded in `TASK-2313`.
+
 ---
 
 ## File Map
@@ -30,7 +32,7 @@ Do not modify `apps/tldw-frontend/e2e/smoke/page-inventory.ts`. Smoke-excluded r
 **Files:**
 - Create: `apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts`
 
-- [ ] **Step 1: Write the failing smoke test**
+- [x] **Step 1: Write the failing smoke test**
 
 Create `apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts`:
 
@@ -104,7 +106,7 @@ test.describe("Mermaid chat-card browser QA harness", () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify RED**
+- [x] **Step 2: Run the test to verify RED**
 
 Run from `apps/tldw-frontend`:
 
@@ -114,7 +116,7 @@ npx playwright test e2e/smoke/mermaid-chat-cards.spec.ts --reporter=line
 
 Expected: FAIL because `/__debug__/mermaid-chat-cards` does not exist and/or `mermaid-chat-card-harness` is not visible.
 
-- [ ] **Step 3: Keep the red test uncommitted**
+- [x] **Step 3: Keep the red test uncommitted**
 
 Do not commit the red test by itself. Repo policy requires commits to contain working code. Leave the new test file unstaged or staged locally until Task 2 makes it pass, then commit the passing test with the implementation.
 
@@ -124,7 +126,7 @@ Do not commit the red test by itself. Repo policy requires commits to contain wo
 - Create: `apps/tldw-frontend/pages/__debug__/mermaid-chat-cards.tsx`
 - Modify: `apps/tldw-frontend/pages/_app.tsx`
 
-- [ ] **Step 1: Implement the debug route**
+- [x] **Step 1: Implement the debug route**
 
 Create `apps/tldw-frontend/pages/__debug__/mermaid-chat-cards.tsx`:
 
@@ -239,7 +241,7 @@ export default dynamic(() => Promise.resolve(MermaidChatCardsHarness), {
 })
 ```
 
-- [ ] **Step 2: Add debug gate bypass**
+- [x] **Step 2: Add debug gate bypass**
 
 Modify `apps/tldw-frontend/pages/_app.tsx` near the existing route booleans:
 
@@ -256,7 +258,7 @@ const shouldBypassGates =
 
 Keep `hideHeader` / `hideSidebar` behavior unchanged unless the page renders incorrectly. The debug page can be wrapped in `OptionLayout` as long as the route content is visible and unblocked.
 
-- [ ] **Step 3: Run Playwright to verify GREEN for route and gates**
+- [x] **Step 3: Run Playwright to verify GREEN for route and gates**
 
 Run from `apps/tldw-frontend`:
 
@@ -266,7 +268,9 @@ npx playwright test e2e/smoke/mermaid-chat-cards.spec.ts --reporter=line
 
 Expected: PASS for the new smoke test.
 
-- [ ] **Step 4: Commit route and gate implementation**
+- [x] **Step 4: Commit route and gate implementation**
+
+Implementation note: this is being committed with the route metadata and shared Markdown replay fix because the new browser harness exposed that shared renderer bug during green verification.
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts apps/tldw-frontend/pages/__debug__/mermaid-chat-cards.tsx apps/tldw-frontend/pages/_app.tsx
@@ -278,7 +282,7 @@ git commit -m "feat: add mermaid chat card debug harness"
 **Files:**
 - Modify: `apps/packages/ui/src/routes/route-metadata.ts`
 
-- [ ] **Step 1: Add metadata entry**
+- [x] **Step 1: Add metadata entry**
 
 Modify `apps/packages/ui/src/routes/route-metadata.ts` near the existing `/__debug__` routes:
 
@@ -295,7 +299,7 @@ defineRoute({
 
 Do not add this path to `apps/tldw-frontend/e2e/smoke/page-inventory.ts`.
 
-- [ ] **Step 2: Run route governance tests**
+- [x] **Step 2: Run route governance tests**
 
 Run from `apps/packages/ui`:
 
@@ -311,7 +315,11 @@ npx playwright test e2e/smoke/route-contract-stage2.spec.ts --grep "Route metada
 
 Expected: PASS. If route-contract expectations conflict with existing skipped debug entries, do not broaden the scope casually; document the existing inconsistency and keep this route out of `page-inventory.ts`.
 
-- [ ] **Step 3: Commit route metadata**
+Execution note: `route-governance.metadata-coverage.test.ts` still has pre-existing metadata/inventory baseline failures unrelated to `/__debug__/mermaid-chat-cards`; the smoke-excluded route invariant passed.
+
+- [x] **Step 3: Commit route metadata**
+
+Implementation note: this is being committed with the route, Playwright harness, and shared Markdown replay fix.
 
 ```bash
 git add apps/packages/ui/src/routes/route-metadata.ts
@@ -323,7 +331,7 @@ git commit -m "chore: classify mermaid chat card debug route"
 **Files:**
 - Modify: `backlog/tasks/task-2313 - Add-Mermaid-chat-card-browser-QA-harness.md`
 
-- [ ] **Step 1: Install dependencies without lockfile changes**
+- [x] **Step 1: Install dependencies without lockfile changes**
 
 Run from `apps`:
 
@@ -337,7 +345,7 @@ Expected: PASS. If `apps/packages/ui/node_modules/antd` symlink changes, restore
 git restore -- apps/packages/ui/node_modules/antd
 ```
 
-- [ ] **Step 2: Run focused Mermaid tests**
+- [x] **Step 2: Run focused Mermaid tests**
 
 Run from `apps/packages/ui`:
 
@@ -357,7 +365,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run new browser smoke test**
+- [x] **Step 3: Run new browser smoke test**
 
 Run from `apps/tldw-frontend`:
 
@@ -367,7 +375,7 @@ npx playwright test e2e/smoke/mermaid-chat-cards.spec.ts --reporter=line
 
 Expected: PASS.
 
-- [ ] **Step 4: Run frontend compile**
+- [x] **Step 4: Run frontend compile**
 
 Run from `apps/tldw-frontend`:
 
@@ -377,7 +385,7 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile
 
 Expected: PASS with token sync OK.
 
-- [ ] **Step 5: Browser-plugin manual check**
+- [x] **Step 5: Browser-plugin manual check**
 
 If the dev server is not already running, start it from `apps/tldw-frontend`:
 
@@ -393,7 +401,7 @@ http://127.0.0.1:18002/__debug__/mermaid-chat-cards
 
 Expected: harness root visible, no readiness or first-run blocker, valid Mermaid sections render, and fallback sections show source. Stop the dev server before final response.
 
-- [ ] **Step 6: Update Backlog final summary**
+- [x] **Step 6: Update Backlog final summary**
 
 Update `TASK-2313` with:
 
@@ -402,7 +410,7 @@ Update `TASK-2313` with:
 - Bandit skipped because no Python source changed;
 - any known environment skips, especially if Browser plugin is blocked.
 
-- [ ] **Step 7: Final status check**
+- [x] **Step 7: Final status check**
 
 Run:
 
@@ -412,7 +420,7 @@ git status --short
 
 Expected: only intended files changed.
 
-- [ ] **Step 8: Commit closeout**
+- [x] **Step 8: Commit closeout**
 
 ```bash
 git add \
