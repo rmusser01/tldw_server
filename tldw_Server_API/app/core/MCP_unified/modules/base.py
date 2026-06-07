@@ -16,6 +16,8 @@ from typing import Any, Optional, TypeVar
 
 from loguru import logger
 
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
 from ..tool_observability import ensure_tool_definition_eval_metadata
 
 T = TypeVar("T")
@@ -598,6 +600,17 @@ class BaseModule(ABC):
         """
         # Basic validation - check required fields
         pass
+
+    async def extract_path_scope_candidates(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Optional[Any] = None,
+    ) -> list[PathScopeCandidate]:
+        """Return module-derived path/action candidates for path-scope enforcement."""
+
+        del arguments, context
+        raise NotImplementedError(f"Path scope candidate extraction not implemented for {tool_name}")
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """

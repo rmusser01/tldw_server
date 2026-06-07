@@ -1,7 +1,7 @@
 ---
 id: TASK-2297
 title: Implement MCP safe file tools
-status: To Do
+status: In Progress
 labels:
 - mcp
 - filesystem
