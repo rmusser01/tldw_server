@@ -38,6 +38,7 @@ Spec review follow-up applied before implementation planning:
 - Playwright coverage must assert `server-readiness-recovery` and `first-run-gate-overlay` are absent.
 - Invalid Mermaid assertions should use the existing `Unable to render Mermaid diagram.` fallback text plus raw source.
 - Harness fixture sections should provide stable wrapper `data-testid` selectors instead of requiring new component-level test ids in `MermaidDiagramBlock`.
+- Implementation plan created at `Docs/superpowers/plans/2026-06-07-mermaid-chat-card-browser-qa-harness-implementation-plan.md`. The plan preserves TDD red/green verification while avoiding a failing red-test-only commit, in line with the repo working-commit policy.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
