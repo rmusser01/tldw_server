@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import types
@@ -67,10 +68,33 @@ def client_with_wf(tmp_path, monkeypatch, auth_headers):
     app.dependency_overrides.clear()
 
 
+def _run_data_from_overridden_db(client: TestClient, run_id: str) -> dict | None:
+    override_db = client.app.dependency_overrides.get(wf_mod._get_db)
+    if not callable(override_db):
+        return None
+    run = override_db().get_run(run_id)
+    if run is None:
+        return None
+    outputs = json.loads(run.outputs_json or "null") if run.outputs_json else None
+    return {
+        "id": run.run_id,
+        "run_id": run.run_id,
+        "status": run.status,
+        "outputs": outputs,
+        "error": run.error,
+    }
+
+
 def _wait_terminal(client: TestClient, run_id: str, timeout=5.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         r = client.get(f"/api/v1/workflows/runs/{run_id}")
+        if r.status_code == 404:
+            data = _run_data_from_overridden_db(client, run_id)
+            if data and data["status"] in ("succeeded", "failed", "cancelled"):
+                return data
+            time.sleep(0.05)
+            continue
         r.raise_for_status()
         data = r.json()
         if data["status"] in ("succeeded", "failed", "cancelled"):

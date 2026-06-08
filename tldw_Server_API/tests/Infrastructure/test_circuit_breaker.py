@@ -1087,7 +1087,7 @@ class TestPersistentStore:
         name = "lease-limit"
         cfg = CircuitBreakerConfig(
             failure_threshold=1,
-            recovery_timeout=0.05,
+            recovery_timeout=5.0,
             half_open_max_calls=1,
             success_threshold=1,
         )
@@ -1105,7 +1105,7 @@ class TestPersistentStore:
 
         cb_a.record_failure(TransientError("trip"))
         assert cb_a.is_open
-        time.sleep(0.06)
+        cb_a.force_half_open()
 
         release_event = threading.Event()
         result: dict[str, object] = {}

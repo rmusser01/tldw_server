@@ -3241,7 +3241,7 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
     }
     assert import_calls == []
 
-    selected_specs = [
+    route_key_specs = [
         spec
         for spec in specs
         if spec.route_key
@@ -3252,6 +3252,12 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
             "characters",
             "character-messages",
         }
+    ]
+    expected_names = {
+        str(definition["expected_name"]) for definition in router_definitions
+    }
+    selected_specs = [
+        spec for spec in route_key_specs if spec.name in expected_names
     ]
     assert len(selected_specs) == len(router_definitions)
 

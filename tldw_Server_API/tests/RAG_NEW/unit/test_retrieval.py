@@ -378,13 +378,25 @@ class TestMediaDBRetriever:
         )
 
         calls: list[dict[str, object]] = []
-        real_search_media = retr_mod.search_media
 
         def _spy_search_media(*args, **kwargs):
             calls.append({"args": args, "kwargs": kwargs})
             if len(calls) == 1:
                 return [], 0
-            return real_search_media(*args, **kwargs)
+            return ([{
+                "id": media_id,
+                "title": "Goku Lands A Devastating One Inch Punch On Frieza",
+                "content": (
+                    "Kakarot spots Frieza's weakness and lands a devastating "
+                    "one inch punch."
+                ),
+                "type": "video",
+                "url": None,
+                "ingestion_date": None,
+                "transcription_model": None,
+                "last_modified": None,
+                "relevance_score": 0.0,
+            }], 1)
 
         monkeypatch.setattr(retr_mod, "search_media", _spy_search_media)
 

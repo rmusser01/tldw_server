@@ -18,7 +18,8 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture()
-def client_with_wf(tmp_path, auth_headers):
+def client_with_wf(tmp_path, auth_headers, monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_SQLITE_POOL_SIZE", "4")
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
@@ -51,10 +52,12 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
-    with TestClient(app, headers=auth_headers) as client:
-        yield client
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, headers=auth_headers) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
 
 
 def test_cancel_during_long_prompt(client_with_wf: TestClient):

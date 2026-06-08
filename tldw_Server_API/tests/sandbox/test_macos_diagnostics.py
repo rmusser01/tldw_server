@@ -206,6 +206,17 @@ def test_collect_macos_diagnostics_reports_missing_helper_and_templates(monkeypa
     monkeypatch.delenv("TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy=None: {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=False,
+                reasons=["macos_helper_missing"],
+            )
+        },
+    )
 
     data = diagnostics_module.collect_macos_diagnostics()
 

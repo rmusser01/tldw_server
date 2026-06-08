@@ -5,6 +5,10 @@ import os
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
+
 
 def _client(monkeypatch) -> TestClient:
     monkeypatch.setenv("TEST_MODE", "1")
@@ -22,10 +26,34 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(app)
 
 
+def _stub_lima_preflight(
+    monkeypatch,
+    *,
+    available: bool,
+    reasons: list[str] | None = None,
+    allowlist_ready: bool = False,
+    deny_all_ready: bool = True,
+) -> None:
+    def _fake_preflight(self, network_policy: str | None = None):
+        return RuntimePreflightResult(
+            runtime=RuntimeType.lima,
+            available=available,
+            reasons=list(reasons or []),
+            host={"os": "linux", "variant": "native"},
+            enforcement_ready={
+                "deny_all": deny_all_ready,
+                "allowlist": allowlist_ready,
+            },
+        )
+
+    monkeypatch.setattr(LimaRunner, "preflight", _fake_preflight)
+
+
 def test_lima_policy_unsupported_includes_reasons(monkeypatch) -> None:
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_DENY_ALL_READY", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY", "0")
+    _stub_lima_preflight(monkeypatch, available=True, allowlist_ready=False)
 
     payload = {
         "spec_version": "1.0",
@@ -48,6 +76,12 @@ def test_lima_policy_unsupported_includes_reasons(monkeypatch) -> None:
 def test_lima_runtime_unavailable_includes_permission_denied_reason(monkeypatch) -> None:
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_PERMISSION_DENIED", "1")
+    _stub_lima_preflight(
+        monkeypatch,
+        available=False,
+        reasons=["permission_denied_host_enforcement"],
+        deny_all_ready=False,
+    )
 
     payload = {
         "spec_version": "1.0",

@@ -1565,10 +1565,29 @@ class TestProcessDocuments:
     # --- Mocked Analysis Test ---
     # IMPORTANT: Update patch path if needed
     @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.analyze")
-    def test_process_doc_with_analysis_mocked(self, mock_analyze, client, dummy_headers):
+    def test_process_doc_with_analysis_mocked(self, mock_analyze, client, dummy_headers, monkeypatch):
         """Test enabling analysis with mocking."""
         mock_analysis_text = "This is the mocked document analysis."
         mock_analyze.return_value = mock_analysis_text
+
+        async def fake_download_url_async(
+            client,
+            url,
+            target_dir,
+            *_args,
+            **_kwargs,
+        ):
+            target_path = Path(target_dir) / "downloaded_analysis_fixture.txt"
+            target_path.write_text(
+                "Sample TXT for mocked document analysis and chunking.",
+                encoding="utf-8",
+            )
+            return target_path
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.media.process_documents.core_download_url_async",
+            fake_download_url_async,
+        )
 
         form_data = {
             "urls": [VALID_TXT_URL],
