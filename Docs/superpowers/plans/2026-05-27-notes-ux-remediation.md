@@ -469,13 +469,15 @@ Likely tests:
 - Browser smoke: create link -> reload note -> navigate via connection.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 8.
-- [ ] Add failing tests for unclear/missing link labels or broken target states.
-- [ ] Improve connection labels and route affordances.
-- [ ] Add unavailable/deleted target UI state.
-- [ ] Run focused tests and browser smoke.
-- [ ] Run Bandit if backend code changes.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 8.
+- [x] Add failing tests for unclear/missing link labels or broken target states.
+- [x] Improve connection labels and route affordances.
+- [x] Add unavailable/deleted target UI state.
+- [x] Run focused tests and assess browser smoke feasibility.
+- [x] Run Bandit if backend code changes.
+- [x] Update Backlog notes with verification.
+
+**Verification notes:** Focused frontend connection tests passed for `NotesGraphModal.stage2.graph-view.test.tsx`, `NotesManagerPage.stage6.manual-links.test.tsx`, `NotesManagerPage.stage7.wikilinks.test.tsx`, `NotesManagerPage.stage26.backlink-labels.test.tsx`, and `NotesManagerPage.stage27.source-links.test.tsx` with 22 tests total. A full Notes component sweep was also run: 66 of 67 files passed and 203 of 204 tests passed; the remaining deterministic failure is the unrelated `NotesManagerPage.stage10.ai-title.test.tsx` strategy dropdown option lookup (`LLM (quality)`) and is recorded as an existing/non-PR8 issue. Browser smoke is marked needs-verification for PR 8 because this slice used mocked graph/link payloads and did not start a live API/WebUI stack. No Python files were touched, so Bandit was not applicable.
 
 ---
 

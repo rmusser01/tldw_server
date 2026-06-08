@@ -61,6 +61,7 @@ import {
   normalizeConversationId,
   toConversationLabel,
   toAttachmentMarkdown,
+  formatSourceNodeLabel,
   normalizeGraphNoteId,
   getNotesGraphEdgeLabel,
   parseSourceNodeId,
@@ -414,7 +415,7 @@ const NotesManagerPage: React.FC = () => {
         if (!sourceId) continue
         sourceNodeMap.set(sourceId, {
           id: sourceId,
-          label: String(node?.label || sourceId)
+          label: formatSourceNodeLabel(sourceId, String(node?.label || sourceId))
         })
       }
     }

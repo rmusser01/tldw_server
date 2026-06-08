@@ -324,4 +324,58 @@ describe('NotesManagerPage stage 6 manual link management', () => {
     })
     expect(screen.getByTestId('notes-manual-links-empty')).toHaveTextContent('No manual links yet.')
   })
+
+  it('marks manual links with unavailable targets instead of opening placeholder notes', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+
+      if (path.startsWith('/api/v1/notes/?')) {
+        return {
+          items: [
+            { id: 'note-a', title: 'Seed note', content: 'Seed content', version: 1 }
+          ],
+          pagination: { total_items: 1, total_pages: 1 }
+        }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Seed note' }
+          ],
+          edges: [
+            {
+              id: 'e:missing-link',
+              source: 'note-a',
+              target: 'note-missing',
+              type: 'manual',
+              directed: false
+            }
+          ]
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await saveSeedNote()
+
+    const unavailableLink = await screen.findByTestId('notes-manual-link-unavailable-e_missing-link')
+    expect(unavailableLink).toHaveTextContent('Unavailable note')
+    expect(unavailableLink).toHaveTextContent('note-missing')
+    expect(screen.queryByRole('button', { name: 'Note note-missing' })).not.toBeInTheDocument()
+  })
 })
