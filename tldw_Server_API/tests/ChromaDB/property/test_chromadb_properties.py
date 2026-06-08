@@ -29,6 +29,18 @@ _state_mgr_singleton = None
 _state_mgr_base_dir = None
 
 
+def _new_chroma_manager(base_dir: str, user_id: str = "prop_stateful") -> ChromaDBManager:
+    """Create a Chroma manager rooted under a test-owned temporary directory."""
+    return ChromaDBManager(
+        user_id=user_id,
+        user_embedding_config={
+            "USER_DB_BASE_DIR": base_dir,
+            "embedding_config": {"default_model_id": "unused", "models": {}},
+            "chroma_client_settings": {"anonymized_telemetry": False, "allow_reset": True},
+        },
+    )
+
+
 def _get_shared_state_manager():
 
 
@@ -36,14 +48,7 @@ def _get_shared_state_manager():
     with _state_mgr_lock:
         if _state_mgr_singleton is None:
             base_dir = tempfile.mkdtemp(prefix="chroma_prop_shared_")
-            _state_mgr_singleton = ChromaDBManager(
-                user_id="prop_stateful",
-                user_embedding_config={
-                    "USER_DB_BASE_DIR": base_dir,
-                    "embedding_config": {"default_model_id": "unused", "models": {}},
-                    "chroma_client_settings": {"anonymized_telemetry": False, "allow_reset": True},
-                },
-            )
+            _state_mgr_singleton = _new_chroma_manager(base_dir)
             _state_mgr_base_dir = base_dir
         return _state_mgr_singleton
 
@@ -472,17 +477,20 @@ class ChromaDBStateMachine(RuleBasedStateMachine):
     def __init__(self):
 
         super().__init__()
-        # Use a single shared manager across all examples to avoid too many open files
-        self.manager = _get_shared_state_manager()
+        self._base_dir = tempfile.mkdtemp(prefix="chroma_prop_state_machine_")
+        self.manager = _new_chroma_manager(self._base_dir)
         # Keep the namespace deterministic so Hypothesis can replay failures.
-        self._ns = "sm_stateful_"
+        self._ns = "sm_"
         # Track state local to this run
         self.collections = {}  # collection_name -> set of ids
         self.documents = {}     # (collection, id) -> document
         self.embeddings = {}    # (collection, id) -> embedding
 
     def _full(self, collection: str) -> str:
-        return f"{self._ns}{collection}"
+        suffix = collection[:60]
+        if suffix and not suffix[-1].isalnum():
+            suffix = f"{suffix[:-1]}{collection[-1]}"
+        return f"{self._ns}{suffix}"
 
     collections_bundle = Bundle("collections")
     documents_bundle = Bundle("documents")
@@ -587,6 +595,26 @@ class ChromaDBStateMachine(RuleBasedStateMachine):
                     _ = None
         finally:
             self.collections.clear()
+            self.documents.clear()
+            self.embeddings.clear()
+            try:
+                self.manager.close()
+            except Exception:
+                _ = None
+            shutil.rmtree(self._base_dir, ignore_errors=True)
+
+
+def test_state_machine_examples_use_isolated_chroma_managers():
+    """Each state-machine run must use isolated Chroma storage for replay safety."""
+    first = ChromaDBStateMachine()
+    second = ChromaDBStateMachine()
+
+    try:
+        assert first.manager is not second.manager
+        assert first.manager.user_chroma_path != second.manager.user_chroma_path
+    finally:
+        first.teardown()
+        second.teardown()
 
 
 # Run the stateful test
