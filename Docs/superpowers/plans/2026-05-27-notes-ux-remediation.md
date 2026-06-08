@@ -582,12 +582,23 @@ Likely tests:
 - E2E/browser smoke: create -> tag -> search/filter -> reopen/edit.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 11.
-- [ ] Add failing tests for chosen power-user affordance.
-- [ ] Implement one focused speed improvement at a time.
-- [ ] Verify shortcut conflicts and keyboard accessibility.
-- [ ] Run focused tests and browser smoke.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 11.
+- [x] Add failing tests for chosen power-user affordance.
+- [x] Implement one focused speed improvement at a time.
+- [x] Verify shortcut conflicts and keyboard accessibility.
+- [x] Run focused tests; browser smoke needs verification in an app/backend environment.
+- [x] Update Backlog notes with verification.
+
+**PR 11 implementation notes:**
+- Added `Alt + Shift + D` to duplicate the current note or unsaved draft into a new dirty draft, reusing the existing duplicate action and preserving the global shortcut guard for text inputs/editors.
+- Added shortcut-help copy for the duplicate shortcut.
+- Verification:
+  - Red: `bunx vitest run src/components/Notes/__tests__/NotesManagerPage.stage38.productivity-extensions.test.tsx src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx` failed for missing duplicate shortcut behavior and missing help-modal copy.
+  - Green: same command passed 2 files / 9 tests.
+  - Focused regression: `bunx vitest run src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability.test.tsx src/components/Notes/__tests__/NotesManagerPage.stage16.bulk-actions.test.tsx src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx src/components/Notes/__tests__/NotesManagerPage.stage38.productivity-extensions.test.tsx` passed 4 files / 18 tests.
+  - Full Notes sweep: `bunx vitest run src/components/Notes/__tests__` reported 66 files passed and 1 known unrelated failure in `NotesManagerPage.stage10.ai-title.test.tsx` (`LLM (quality)` selector not found), with 206 / 207 tests passing.
+  - Browser smoke: Needs verification; this frontend-only worktree did not have a running backend/app browser-smoke harness for `/notes`.
+  - Bandit: Not applicable; no Python/backend files changed.
 
 ---
 

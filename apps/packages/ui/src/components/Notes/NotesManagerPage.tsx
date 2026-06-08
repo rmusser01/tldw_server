@@ -2076,6 +2076,14 @@ const NotesManagerPage: React.FC = () => {
         return
       }
 
+      // Alt+Shift+D - duplicate current note or draft
+      if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && (event.key === 'd' || event.key === 'D')) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        event.preventDefault()
+        void duplicateSelectedNote()
+        return
+      }
+
       // Ctrl/Cmd+K — focus search
       if ((event.ctrlKey || event.metaKey) && event.key === 'k' && !event.shiftKey && !event.altKey) {
         if (shouldIgnoreGlobalShortcut(event.target)) return
@@ -2114,7 +2122,7 @@ const NotesManagerPage: React.FC = () => {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [ed.setEditorMode, focusSearchInput, handleNewNote])
+  }, [duplicateSelectedNote, ed.setEditorMode, focusSearchInput, handleNewNote])
 
   // Auto-trigger notes tutorial on first visit
   React.useEffect(() => {
