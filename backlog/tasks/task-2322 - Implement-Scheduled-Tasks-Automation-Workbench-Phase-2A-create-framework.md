@@ -21,6 +21,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskCreatePanel.tsx
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
 ---
 
 ## Description
@@ -76,6 +78,13 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 3 code-quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 tests.
 - Task 3 code-quality template regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 14 tests.
 - Task 3 code-quality diff check: `git diff --check` passed.
+- Task 4: Integrated URL-backed Overview, Tasks, and Create tabs into `ScheduledTasksPage` using the Phase 2A route-state helpers. Overview now owns summary/callout content, Tasks owns the empty/table/detail drawer surface, and Create renders `ScheduledTaskCreatePanel` with URL-selected templates.
+- Task 4: Added task detail deep-link synchronization for `?tab=tasks&task_id=...`, row inspection URL updates, close/removed-task route clearing, invalid-tab fallback copy, and invalid task non-blocking copy.
+- Task 4 TDD red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx --maxWorkers=1 --no-file-parallelism` failed with the expected missing tab/deep-link/Create editor behaviors before production changes.
+- Task 4 verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 28 tests.
+- Task 4 CreatePanel regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 tests.
+- Task 4 diff check: `git diff --check` passed.
+- Bandit skip: Task 4 changed frontend TypeScript/TSX tests/components and Backlog tracking only; no backend Python files were touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

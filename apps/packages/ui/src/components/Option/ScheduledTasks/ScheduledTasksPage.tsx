@@ -1,8 +1,8 @@
 import React, { useState } from "react"
-import { Alert, Button, Empty, Space, Spin, Typography, message } from "antd"
+import { Alert, Button, Empty, Space, Spin, Tabs, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
@@ -18,6 +18,17 @@ import { ScheduledTaskTable } from "./ScheduledTaskTable"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
+import { ScheduledTaskCreatePanel } from "./ScheduledTaskCreatePanel"
+import {
+  SCHEDULED_TASK_TABS,
+  buildScheduledTaskSearch,
+  parseScheduledTaskRouteState,
+  type ScheduledTaskTabId
+} from "./scheduled-task-route-state"
+import {
+  getScheduledTaskTemplate,
+  type ScheduledTaskTemplateId
+} from "./scheduled-task-templates"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 const SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS = 8000
@@ -33,6 +44,7 @@ const LoadingState: React.FC = () => (
 
 export const ScheduledTasksPage: React.FC = () => {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { t } = useTranslation(["scheduledTasks", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
@@ -43,6 +55,25 @@ export const ScheduledTasksPage: React.FC = () => {
   const [scheduledTasksSupported, setScheduledTasksSupported] = useState<
     boolean | null
   >(null)
+  const routeState = React.useMemo(
+    () => parseScheduledTaskRouteState(searchParams),
+    [searchParams]
+  )
+
+  const updateRoute = React.useCallback(
+    ({
+      tab,
+      templateId,
+      taskId
+    }: {
+      tab: ScheduledTaskTabId
+      templateId?: string | null
+      taskId?: string | null
+    }) => {
+      setSearchParams(new URLSearchParams(buildScheduledTaskSearch({ tab, templateId, taskId })))
+    },
+    [setSearchParams]
+  )
 
   React.useEffect(() => {
     if (connectionConfigLoading) return
@@ -111,6 +142,14 @@ export const ScheduledTasksPage: React.FC = () => {
   )
   const hasLoadedTasks = Boolean(tasksQuery.data)
   const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
+  const selectedTemplate = React.useMemo(
+    () =>
+      routeState.tab === "create"
+        ? getScheduledTaskTemplate(routeState.templateId)
+        : null,
+    [routeState.tab, routeState.templateId]
+  )
+  const selectedTemplateId = selectedTemplate?.id ?? null
   const isLoadingTasks =
     connectionConfigLoading ||
     scheduledTasksSupported === null ||
@@ -119,21 +158,58 @@ export const ScheduledTasksPage: React.FC = () => {
     scheduledTasksSupported !== false && !isLoadingTasks && !tasksQuery.isError
 
   React.useEffect(() => {
-    if (selectedTaskId === null || !hasLoadedTasks) return
-    if (tasks.some((task) => task.id === selectedTaskId)) return
+    if (routeState.tab !== "tasks") {
+      if (selectedTaskId !== null) {
+        setSelectedTaskId(null)
+      }
+      return
+    }
 
-    setSelectedTaskId(null)
-  }, [hasLoadedTasks, selectedTaskId, tasks])
+    if (!hasLoadedTasks) return
+
+    if (!routeState.taskId) {
+      if (selectedTaskId !== null) {
+        setSelectedTaskId(null)
+      }
+      return
+    }
+
+    const routeTaskExists = tasks.some((task) => task.id === routeState.taskId)
+    if (routeTaskExists) {
+      if (selectedTaskId !== routeState.taskId) {
+        setSelectedTaskId(routeState.taskId)
+      }
+      return
+    }
+
+    if (selectedTaskId === routeState.taskId) {
+      setSelectedTaskId(null)
+      updateRoute({ tab: "tasks" })
+      return
+    }
+
+    if (selectedTaskId !== null) {
+      setSelectedTaskId(null)
+    }
+  }, [
+    hasLoadedTasks,
+    routeState.tab,
+    routeState.taskId,
+    selectedTaskId,
+    tasks,
+    updateRoute
+  ])
 
   const closeTaskDetail = () => {
     if (selectedTaskId === null) return
     setSelectedTaskId(null)
+    updateRoute({ tab: "tasks" })
   }
 
   const openCreateReminder = () => {
     closeTaskDetail()
     setEditingTask(null)
-    setEditorOpen(true)
+    updateRoute({ tab: "create" })
   }
 
   const openEditReminder = (task: ScheduledTask) => {
@@ -142,7 +218,10 @@ export const ScheduledTasksPage: React.FC = () => {
     setEditorOpen(true)
   }
 
-  const openTaskDetail = (task: ScheduledTask) => setSelectedTaskId(task.id)
+  const openTaskDetail = (task: ScheduledTask) => {
+    setSelectedTaskId(task.id)
+    updateRoute({ tab: "tasks", taskId: task.id })
+  }
 
   const closeEditor = () => {
     setEditorOpen(false)
@@ -172,6 +251,29 @@ export const ScheduledTasksPage: React.FC = () => {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleCreateReminderFromPanel = async (
+    payload: CreateScheduledTaskReminderPayload
+  ) => {
+    setSaving(true)
+    try {
+      await createScheduledTaskReminder(payload)
+      message.success("Reminder task created")
+      await refreshTasks()
+    } catch (error: any) {
+      message.error(error?.message || "Unable to save reminder task")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTabChange = (tab: string) => {
+    updateRoute({ tab: tab as ScheduledTaskTabId })
+  }
+
+  const handleSelectTemplate = (templateId: ScheduledTaskTemplateId | null) => {
+    updateRoute({ tab: "create", templateId })
   }
 
   const handleDeleteReminder = async (task: ScheduledTask) => {
@@ -219,6 +321,66 @@ export const ScheduledTasksPage: React.FC = () => {
       })
     : null
   const scheduledTasksFeatureName = t("scheduledTasks:title", "Scheduled tasks")
+  const missingRouteTask =
+    routeState.tab === "tasks" &&
+    hasLoadedTasks &&
+    Boolean(routeState.taskId) &&
+    !tasks.some((task) => task.id === routeState.taskId) &&
+    selectedTaskId !== routeState.taskId
+
+  const renderOverviewTab = () => (
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      {hasLoadedTasks ? (
+        <ScheduledTaskOverview
+          tasks={tasks}
+          partial={Boolean(tasksQuery.data?.partial)}
+        />
+      ) : null}
+
+      {hasLoadedTasks && hasWatchlistJob ? (
+        <Alert
+          type="info"
+          showIcon
+          title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
+        />
+      ) : null}
+    </Space>
+  )
+
+  const renderTasksTab = () => (
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      {missingRouteTask ? <Alert type="warning" showIcon title="Task not found." /> : null}
+
+      {hasLoadedTasks && tasks.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <Typography.Text strong>No scheduled tasks yet.</Typography.Text>
+              <Typography.Text type="secondary">
+                Create a reminder now. Automation templates for GitHub, YouTube, RAG, and
+                agents are planned follow-up phases.
+              </Typography.Text>
+            </div>
+          }
+        >
+          <Button type="primary" onClick={openCreateReminder}>
+            Create scheduled task
+          </Button>
+        </Empty>
+      ) : null}
+
+      {hasLoadedTasks && tasks.length > 0 ? (
+        <ScheduledTaskTable
+          tasks={tasks}
+          onCreateReminder={openCreateReminder}
+          onInspectTask={openTaskDetail}
+          onEditReminder={openEditReminder}
+          onDeleteReminder={handleDeleteReminder}
+        />
+      ) : null}
+    </Space>
+  )
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -235,6 +397,13 @@ export const ScheduledTasksPage: React.FC = () => {
       </div>
 
       {isLoadingTasks ? <LoadingState /> : null}
+      {routeState.invalidTab ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="That tab is not available. Showing Overview."
+        />
+      ) : null}
       {scheduledTasksSupported === false ? (
         <RecoveryCallout
           state={unsupportedState?.state ?? "unavailable"}
@@ -293,49 +462,27 @@ export const ScheduledTasksPage: React.FC = () => {
 
       {canShowScheduledTasksWorkbench ? (
         <>
-          {hasLoadedTasks ? (
-            <ScheduledTaskOverview
-              tasks={tasks}
-              partial={Boolean(tasksQuery.data?.partial)}
-            />
-          ) : null}
-
-          {hasLoadedTasks && hasWatchlistJob ? (
-            <Alert
-              type="info"
-              showIcon
-              title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
-            />
-          ) : null}
-
-          {hasLoadedTasks && tasks.length === 0 ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <Typography.Text strong>No scheduled tasks yet.</Typography.Text>
-                  <Typography.Text type="secondary">
-                    Create a reminder now. Automation templates for GitHub, YouTube, RAG, and
-                    agents are planned follow-up phases.
-                  </Typography.Text>
-                </div>
-              }
-            >
-              <Button type="primary" onClick={openCreateReminder}>
-                Create scheduled task
-              </Button>
-            </Empty>
-          ) : null}
-
-          {hasLoadedTasks && tasks.length > 0 ? (
-            <ScheduledTaskTable
-              tasks={tasks}
-              onCreateReminder={openCreateReminder}
-              onInspectTask={openTaskDetail}
-              onEditReminder={openEditReminder}
-              onDeleteReminder={handleDeleteReminder}
-            />
-          ) : null}
+          <Tabs
+            activeKey={routeState.tab}
+            onChange={handleTabChange}
+            items={SCHEDULED_TASK_TABS.map((tab) => ({
+              key: tab.id,
+              label: tab.label,
+              children:
+                tab.id === "overview"
+                  ? renderOverviewTab()
+                  : tab.id === "tasks"
+                    ? renderTasksTab()
+                    : (
+                        <ScheduledTaskCreatePanel
+                          selectedTemplateId={selectedTemplateId}
+                          onSelectTemplate={handleSelectTemplate}
+                          onCreateReminder={handleCreateReminderFromPanel}
+                          savingReminder={saving}
+                        />
+                      )
+            }))}
+          />
 
           <ReminderTaskEditor
             open={editorOpen}
