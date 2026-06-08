@@ -261,6 +261,7 @@ export const ScheduledTasksPage: React.FC = () => {
       await createScheduledTaskReminder(payload)
       message.success("Reminder task created")
       await refreshTasks()
+      updateRoute({ tab: "create" })
     } catch (error: any) {
       message.error(error?.message || "Unable to save reminder task")
     } finally {

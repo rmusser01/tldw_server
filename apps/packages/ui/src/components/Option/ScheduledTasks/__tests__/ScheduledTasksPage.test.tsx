@@ -810,6 +810,17 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+    expect(
+      screen.getByRole("heading", {
+        level: 3,
+        name: "Choose what you want to automate"
+      })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create reminder" })).toBeInTheDocument()
   })
 
   it("does not create a one-time reminder without run_at", async () => {
