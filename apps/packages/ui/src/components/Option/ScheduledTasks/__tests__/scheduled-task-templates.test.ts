@@ -91,6 +91,20 @@ describe("scheduled task templates", () => {
     expect(toSafeHandoffSourceText("repository issues URL")).toBe("repository issues URL")
   })
 
+  it("rejects compound sensitive URL params in handoff source text", () => {
+    expect(toSafeHandoffSourceText("https://example.com/feed?access_token=secret")).toBe(
+      null
+    )
+    expect(toSafeHandoffSourceText("https://example.com/feed?refresh_token=secret")).toBe(
+      null
+    )
+    expect(toSafeHandoffSourceText("https://example.com/feed?id_token=secret")).toBe(null)
+    expect(toSafeHandoffSourceText("https://example.com/feed?client_secret=secret")).toBe(
+      null
+    )
+    expect(toSafeHandoffSourceText("https://example.com/feed")).toBe("https://example.com/feed")
+  })
+
   it("rejects non-string handoff source text", () => {
     expect(toSafeHandoffSourceText(null)).toBe(null)
     expect(toSafeHandoffSourceText(123)).toBe(null)

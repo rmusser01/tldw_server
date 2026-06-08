@@ -60,6 +60,9 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 2 code-quality follow-up: Hardened template matching to use word/phrase boundaries instead of raw substrings, and treated bare-domain source text with fragments as unsafe handoff text.
 - Task 2 code-quality red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` failed on `renew credentials` matching Watch through `new` and `example.com/feed#private` being accepted.
 - Task 2 code-quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 13 tests.
+- Task 2 privacy follow-up: Broadened sensitive handoff URL parameter detection to reject compound keys such as `access_token`, `refresh_token`, `id_token`, and `client_secret`.
+- Task 2 privacy red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` failed because `https://example.com/feed?access_token=secret` was accepted.
+- Task 2 privacy verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 14 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

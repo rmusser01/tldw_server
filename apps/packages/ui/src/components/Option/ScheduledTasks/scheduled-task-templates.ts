@@ -46,7 +46,7 @@ export interface ScheduledTaskTemplateFilter {
 }
 
 const SENSITIVE_URL_PARAM_PATTERN =
-  /(^|[?&#])(token|api[_-]?key|key|secret|session|sid|auth|code|invite)=/i
+  /(^|[?&#])([a-z0-9]+[_-])*(token|api[_-]?key|key|secret|session|sid|auth|code|invite)([_-][a-z0-9]+)*=/i
 
 export const SCHEDULED_TASK_TEMPLATES: readonly ScheduledTaskTemplate[] = [
   {
