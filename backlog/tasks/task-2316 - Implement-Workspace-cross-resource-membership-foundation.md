@@ -155,6 +155,9 @@ Task 5 code-quality follow-up:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `73 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
 - Bandit touched runtime scan reported zero findings in `/tmp/bandit_workspace_membership_task5_restore_fix.json`.
+Task 5 reviews after follow-up:
+- Spec compliance review approved explicit backfill, compact context totals, partial-error fallback, and the MCP/trust separation boundary.
+- Code quality review approved after the restored-membership accounting fix and focused regression coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
