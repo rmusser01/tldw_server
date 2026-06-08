@@ -18643,7 +18643,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     cursor_resource_id,
                 ]
             )
-        params.append(normalized_limit)
+        params.append(normalized_limit + 1)
         cursor_obj = self.execute_query(
             f"SELECT * FROM workspace_resource_memberships WHERE {' AND '.join(clauses)} "  # nosec B608
             "ORDER BY updated_at DESC, resource_type ASC, resource_id ASC LIMIT ?",
@@ -18687,7 +18687,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "(updated_at < ? OR (updated_at = ? AND workspace_id > ?))"
             )
             params.extend([cursor_updated_at, cursor_updated_at, cursor_workspace_id])
-        params.append(normalized_limit)
+        params.append(normalized_limit + 1)
         cursor_obj = self.execute_query(
             f"SELECT * FROM workspace_resource_memberships WHERE {' AND '.join(clauses)} "  # nosec B608
             "ORDER BY updated_at DESC, workspace_id ASC LIMIT ?",

@@ -3,7 +3,9 @@
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendDatabaseError,
     CharactersRAGDB,
+    CharactersRAGDBError,
     ConflictError,
 )
 
@@ -277,6 +279,33 @@ def test_list_workspace_resource_memberships_order_is_deterministic(db):
     ]
 
 
+def test_list_workspace_resource_memberships_returns_limit_plus_one_for_pagination(db):
+    for resource_type, resource_id in (
+        ("media", "42"),
+        ("media", "99"),
+        ("workspace_source", "src-b"),
+    ):
+        db.add_workspace_resource_membership(
+            "ws-1",
+            {"resource_type": resource_type, "resource_id": resource_id},
+        )
+        _set_membership_updated_at(
+            db,
+            "ws-1",
+            resource_type,
+            resource_id,
+            "2026-06-07T12:00:00.000Z",
+        )
+
+    rows = db.list_workspace_resource_memberships("ws-1", limit=2)
+
+    assert [(row["resource_type"], row["resource_id"]) for row in rows] == [
+        ("media", "42"),
+        ("media", "99"),
+        ("workspace_source", "src-b"),
+    ]
+
+
 def test_list_resource_workspace_memberships_returns_all_active_workspaces(db):
     db.add_workspace_resource_membership(
         "ws-2",
@@ -297,6 +326,109 @@ def test_list_resource_workspace_memberships_returns_all_active_workspaces(db):
     rows = db.list_resource_workspace_memberships("media", "42")
 
     assert [row["workspace_id"] for row in rows] == ["ws-1", "ws-2"]
+
+
+def test_list_resource_workspace_memberships_returns_limit_plus_one_for_pagination(db):
+    for workspace_id in ("ws-2", "ws-1", "ws-3"):
+        db.add_workspace_resource_membership(
+            workspace_id,
+            {"resource_type": "media", "resource_id": "42", "role": "source"},
+        )
+        _set_membership_updated_at(
+            db,
+            workspace_id,
+            "media",
+            "42",
+            "2026-06-07T12:00:00.000Z",
+        )
+
+    rows = db.list_resource_workspace_memberships("media", "42", limit=2)
+
+    assert [row["workspace_id"] for row in rows] == ["ws-1", "ws-2", "ws-3"]
+
+
+def test_delete_workspace_preserves_membership_history(db):
+    created = db.add_workspace_resource_membership(
+        "ws-1",
+        {"resource_type": "media", "resource_id": "42", "role": "source"},
+    )
+    workspace = db.get_workspace("ws-1")
+    assert workspace is not None
+
+    assert db.delete_workspace("ws-1", expected_version=workspace["version"]) is True
+
+    assert db.get_workspace("ws-1") is None
+    preserved = db.get_workspace_resource_membership(
+        "ws-1",
+        "media",
+        "42",
+        include_deleted=True,
+    )
+    assert preserved is not None
+    assert preserved["deleted"] in (False, 0)
+    assert preserved["created_at"] == created["created_at"]
+
+
+def test_hard_delete_workspace_removes_membership_rows(db):
+    db.add_workspace_resource_membership(
+        "ws-1",
+        {"resource_type": "media", "resource_id": "42", "role": "source"},
+    )
+
+    db.hard_delete_workspace("ws-1")
+
+    assert (
+        db.get_workspace_resource_membership(
+            "ws-1",
+            "media",
+            "42",
+            include_deleted=True,
+        )
+        is None
+    )
+
+
+class _BackendErrorTransaction:
+    def __init__(self, error: BackendDatabaseError):
+        self.error = error
+
+    def __enter__(self):
+        raise self.error
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+def test_workspace_membership_backend_error_wraps_unrelated_errors(db, monkeypatch):
+    monkeypatch.setattr(
+        db,
+        "transaction",
+        lambda: _BackendErrorTransaction(BackendDatabaseError("pg down")),
+    )
+
+    with pytest.raises(CharactersRAGDBError, match="pg down"):
+        db.add_workspace_resource_membership(
+            "ws-1",
+            {"resource_type": "media", "resource_id": "42"},
+        )
+
+
+def test_workspace_membership_backend_constraint_error_maps_to_conflict(db, monkeypatch):
+    monkeypatch.setattr(
+        db,
+        "transaction",
+        lambda: _BackendErrorTransaction(
+            BackendDatabaseError("duplicate key value violates unique constraint")
+        ),
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        db.add_workspace_resource_membership(
+            "ws-1",
+            {"resource_type": "media", "resource_id": "42"},
+        )
+
+    assert exc_info.value.entity == "workspace_resource_memberships"
 
 
 def test_workspace_subresource_public_getters_return_existing_scoped_rows(db):
