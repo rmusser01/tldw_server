@@ -20,6 +20,8 @@ modified_files:
 - tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
 - tldw_Server_API/app/core/Workspaces/membership_models.py
 - tldw_Server_API/app/api/v1/schemas/workspace_schemas.py
+- tldw_Server_API/app/core/Workspaces/membership_adapters.py
+- tldw_Server_API/app/core/Workspaces/membership_service.py
 - tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py
 ---
 
@@ -78,6 +80,14 @@ Task 2 follow-up self-review update:
 - Final focused verification after that addition: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `34 passed, 6 warnings`.
 - Spec compliance review approved Task 2 after checking constants, dataclasses, cursor helpers, schema literals, bounded JSON validation, response/list/context summaries, and no endpoint/service wiring.
 - Code quality review approved Task 2 after the hardening follow-up and found no remaining model/schema issues.
+
+Task 3 completed by Worker 3:
+- Added fail-closed Workspace membership adapters for `workspace_note`, `workspace_source`, `workspace_artifact`, `media`, and `chat`.
+- Added `WorkspaceMembershipService` with link/get/list/reverse-list/unlink/summary orchestration, archived write rejection, restore-after-soft-delete, cursor payloads, and unresolved per-row summaries for adapter read failures.
+- Added focused adapter/service tests to `tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `48 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched-scope scan reported zero findings for `membership_adapters.py` and `membership_service.py`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
