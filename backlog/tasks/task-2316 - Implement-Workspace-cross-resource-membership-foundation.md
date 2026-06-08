@@ -94,7 +94,7 @@ Task 3 spec-review coverage follow-up:
 - Added reverse lookup fail-closed coverage for unsupported resource types.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `52 passed, 6 warnings`.
 Task 3 code-quality follow-up:
-- Prevented duplicate `on_link` adapter hooks on idempotent active-row retries while preserving create/restore hooks.
+- First attempted to gate `on_link` by active-row retries, then replaced that with the final reserved-hook design below after code-quality re-review exposed race and retry ambiguity.
 - Made generic summary adapter failures return a safe unresolved message instead of raw exception text.
 - Changed direct `get_membership` to read existing memberships before resource resolution so unavailable backing services produce unresolved summaries instead of hard failures.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
@@ -104,6 +104,8 @@ Task 3 on-link race follow-up:
 - This avoids duplicate side effects under insert/restore races and avoids non-retryable post-commit hook failures until the DB contract or an outbox can report durable transitions.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
 - Bandit touched-scope scan reported zero findings for `membership_adapters.py` and `membership_service.py`.
+- Spec compliance review approved Task 3 after coverage follow-up.
+- Code quality review approved Task 3 after the reserved `on_link` correction and found no remaining adapter/service issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
