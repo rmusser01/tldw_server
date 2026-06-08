@@ -15,8 +15,10 @@ references:
 - Docs/superpowers/specs/2026-06-04-canonical-workspaces-manager-project-creation-design.md
 documentation:
 - Docs/superpowers/specs/2026-06-07-workspace-cross-resource-membership-design.md
+- Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-06-07-workspace-cross-resource-membership-design.md
+- Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md
 - backlog/tasks/task-2315 - Design-Workspace-cross-resource-membership-foundation.md
 ---
 
@@ -35,6 +37,12 @@ Create a focused design/spec for GitHub issue #1990 cross-resource Workspace mem
 - [ ] #5 Design verification is recorded; Bandit applicability is documented for docs-only scope.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -44,7 +52,7 @@ Create a focused design/spec for GitHub issue #1990 cross-resource Workspace mem
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Drafted and reviewed the Workspace cross-resource membership design for GitHub issue #1990. The design recommends a generic server-backed membership table plus fail-closed resource adapters, keeps Research Workspace source selection and Project Workspace root/runtime bindings separate, defines API/read-model/backfill behavior, distinguishes scoped workspace_note from future global note membership, and records a sequential implementation roadmap with parallelizable slices. Follow-up review refinements clarified soft-delete restore semantics, archived workspace write rejection, deterministic cursor ordering, and the boundary between generic membership and MCP effective permission preview/path admission. Verification: git diff --check passed. Bandit is not applicable because this task only changes Markdown design/tracking files.
+Drafted, reviewed, and refined the Workspace cross-resource membership design and implementation plan for GitHub issue #1990. The design recommends a generic server-backed membership table plus fail-closed resource adapters, keeps Research Workspace source selection and Project Workspace root/runtime bindings separate, defines API/read-model/backfill behavior, distinguishes scoped workspace_note from future global note membership, and records a sequential implementation plan with TDD checkpoints and parallelizable slices. Follow-up review refinements clarified soft-delete restore semantics, archived workspace write rejection, deterministic cursor ordering, distinct reverse-lookup cursor shape, and the boundary between generic membership and MCP effective permission preview/path admission. Verification: git diff --check passed for the committed design baseline; final plan verification is recorded in the current planning commit. Bandit is not applicable because this task only changes Markdown design/tracking files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
