@@ -117,11 +117,11 @@ Task 4 completed by Worker 4:
 - Added reverse resource lookup router under `/api/v1/workspace-memberships/resources/{resource_type}/{resource_id}` with the resource-scoped response shape.
 - Registered the reverse router in the content and minimal router groups using the Workspace route gate.
 - Added focused FastAPI endpoint tests for create, idempotent duplicate, conflicting duplicate, archived write rejection, filtered list with `resolve=false`, get/missing get, soft-delete hiding, relink restore, reverse lookup, unsupported resource type, and missing media DB.
-- TDD red run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q --tb=short` failed during collection before `workspace_memberships.py` existed.
-- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q --tb=short` passed with `11 passed, 6 warnings`.
-- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `66 passed, 6 warnings`.
+- TDD red run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` failed with `11 failed` because the membership routes returned `404`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `11 passed, 6 warnings`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
-- Bandit touched-scope scan reported zero findings for `workspaces.py`, `workspace_memberships.py`, and `workspace_schemas.py` (`/tmp/bandit_workspace_memberships_api.json`).
+- Bandit touched-scope scan reported zero findings for `workspaces.py`, `workspace_memberships.py`, and `workspace_schemas.py` (`/tmp/bandit_workspace_membership_api_task2316.json`).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
