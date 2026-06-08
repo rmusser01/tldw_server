@@ -57,6 +57,9 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Bandit skip: Task 2 changed frontend TypeScript tests/helpers and Backlog tracking only; no backend Python files were touched.
 - Task 2 spec-review follow-up: Removed the extra Ingest matcher keyword `channel`; the focused template test still matches `keep this channel searchable` through the required `searchable` keyword.
 - Task 2 follow-up verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 10 tests.
+- Task 2 code-quality follow-up: Hardened template matching to use word/phrase boundaries instead of raw substrings, and treated bare-domain source text with fragments as unsafe handoff text.
+- Task 2 code-quality red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` failed on `renew credentials` matching Watch through `new` and `example.com/feed#private` being accepted.
+- Task 2 code-quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 13 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

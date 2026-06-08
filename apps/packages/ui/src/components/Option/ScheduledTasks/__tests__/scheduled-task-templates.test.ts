@@ -53,6 +53,22 @@ describe("scheduled task templates", () => {
     expect(findScheduledTaskTemplates("   ")).toEqual([])
   })
 
+  it("matches keywords by word or phrase boundaries instead of substrings", () => {
+    expect(
+      findScheduledTaskTemplates("renew credentials").map((template) => template.id)
+    ).not.toContain("watch")
+    expect(
+      findScheduledTaskTemplates("paragraph summary").map((template) => template.id)
+    ).not.toContain("recurring_question")
+  })
+
+  it("keeps registry ordering when keyword match scores tie", () => {
+    expect(findScheduledTaskTemplates("new index").map((template) => template.id)).toEqual([
+      "watch",
+      "ingest"
+    ])
+  })
+
   it("filters templates by availability and category", () => {
     expect(
       filterScheduledTaskTemplates("available_now").map((template) => template.id)
@@ -70,8 +86,15 @@ describe("scheduled task templates", () => {
 
   it("rejects URL fragments and private URL params in handoff source text", () => {
     expect(toSafeHandoffSourceText("https://example.com/feed#private")).toBe(null)
+    expect(toSafeHandoffSourceText("example.com/feed#private")).toBe(null)
     expect(toSafeHandoffSourceText("https://example.com/feed?api_key=secret")).toBe(null)
     expect(toSafeHandoffSourceText("repository issues URL")).toBe("repository issues URL")
+  })
+
+  it("rejects non-string handoff source text", () => {
+    expect(toSafeHandoffSourceText(null)).toBe(null)
+    expect(toSafeHandoffSourceText(123)).toBe(null)
+    expect(toSafeHandoffSourceText({})).toBe(null)
   })
 
   it("exposes the expected state labels", () => {

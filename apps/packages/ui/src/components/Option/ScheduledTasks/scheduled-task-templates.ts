@@ -162,6 +162,20 @@ export const filterScheduledTaskTemplates = (
   return SCHEDULED_TASK_TEMPLATES.filter((template) => template.category === filterId)
 }
 
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const keywordMatchesQuery = (query: string, keyword: string): boolean => {
+  const normalizedKeyword = keyword.trim().toLowerCase()
+  if (!normalizedKeyword) {
+    return false
+  }
+
+  return new RegExp(`(^|[^a-z0-9])${escapeRegExp(normalizedKeyword)}($|[^a-z0-9])`).test(
+    query
+  )
+}
+
 export const findScheduledTaskTemplates = (
   query: string | null | undefined
 ): ScheduledTaskTemplate[] => {
@@ -175,7 +189,7 @@ export const findScheduledTaskTemplates = (
     index,
     score: template.keywords.reduce(
       (score, keyword) =>
-        normalizedQuery.includes(keyword.toLowerCase()) ? score + 1 : score,
+        keywordMatchesQuery(normalizedQuery, keyword) ? score + 1 : score,
       0
     )
   }))
@@ -204,7 +218,9 @@ export const getScheduledTaskTemplateStateLabel = (
 }
 
 const appearsToBeUrl = (value: string): boolean =>
-  /^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^www\./i.test(value)
+  /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
+  /^www\./i.test(value) ||
+  /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}([/:?#]|$)/i.test(value)
 
 export const toSafeHandoffSourceText = (value: unknown): string | null => {
   if (typeof value !== "string") {
