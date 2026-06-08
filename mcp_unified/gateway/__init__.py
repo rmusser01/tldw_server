@@ -29,6 +29,12 @@ from .credential_grants import (
 )
 from .lifecycle import GatewayExternalRuntimeLifecycleConfig
 from .profile_runtime import ProfileAwareGatewayRuntime
+from .profile_governance import (
+    AllowPermissionChangeGovernor,
+    PermissionChangeDecision,
+    PermissionChangeGovernor,
+    PermissionChangeRequest,
+)
 from .profiles import (
     GatewayProfileManagementError,
     GatewayProfileManager,
@@ -60,6 +66,7 @@ __all__ = [
     "GatewayExternalRuntimeError",
     "GatewayExternalRuntimeManager",
     "ExternalRuntimeGatewayRuntime",
+    "AllowPermissionChangeGovernor",
     "GatewayProfileBootstrap",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileManagementError",
@@ -73,6 +80,9 @@ __all__ = [
     "GatewayToolUseReportingConfig",
     "GatewayToolUseReportingStoreConfig",
     "GatewayToolUseReportingStoreKind",
+    "PermissionChangeDecision",
+    "PermissionChangeGovernor",
+    "PermissionChangeRequest",
     "ToolUseReportingGatewayRuntime",
     "ProfileAwareGatewayRuntime",
     "bootstrap_profile_gateway",

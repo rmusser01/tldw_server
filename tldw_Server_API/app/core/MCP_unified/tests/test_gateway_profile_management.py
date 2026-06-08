@@ -7,12 +7,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from mcp_unified.gateway.profile_governance import (
+    PermissionChangeDecision,
+    PermissionChangeRequest,
+)
 from mcp_unified.gateway.profiles import (
     GatewayProfileManagementError,
     GatewayProfileManager,
     GatewayProfileStoreMetadata,
 )
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.presets import PRESET_VERSION
 from mcp_unified.profiles.store import (
     InMemoryProfileAssignmentStore,
     InMemoryProfileStore,
@@ -63,6 +68,42 @@ class FailingAuditStore(InMemoryAuditStore):
         raise RuntimeError(f"audit unavailable for {event.event_type}")
 
 
+class RecordingPermissionGovernor:
+    """Permission-change governor double that records redacted requests."""
+
+    def __init__(
+        self,
+        *,
+        outcome: str = "allow",
+        reason_code: str | None = None,
+    ) -> None:
+        self.outcome = outcome
+        self.reason_code = reason_code or f"{outcome}_for_test"
+        self.requests: list[PermissionChangeRequest] = []
+
+    async def evaluate_permission_change(
+        self,
+        request: PermissionChangeRequest,
+    ) -> PermissionChangeDecision:
+        self.requests.append(request)
+        return PermissionChangeDecision(
+            outcome=self.outcome,
+            reason_code=self.reason_code,
+        )
+
+
+class LegacyPolicyModel:
+    """Small Pydantic-v1-like policy object for payload helper coverage."""
+
+    def dict(self) -> dict[str, object]:
+        """Return a mapping using the Pydantic v1 method name."""
+        return {
+            "allowed_tools": ("fs.*",),
+            "resource_constraints": (),
+            "tool_patterns": set(),
+        }
+
+
 class ConflictingCreateProfileStore(InMemoryProfileStore):
     """Profile store double that reports an atomic create conflict."""
 
@@ -100,6 +141,7 @@ def _manager(
     *,
     audit_store: InMemoryAuditStore | None = None,
     fallback_default_profile_id: str | None = None,
+    permission_governor: RecordingPermissionGovernor | None = None,
 ) -> GatewayProfileManager:
     return GatewayProfileManager(
         profile_store=profile_store,
@@ -107,6 +149,7 @@ def _manager(
         audit_store=audit_store,
         store_metadata=GatewayProfileStoreMetadata(kind="memory", persistent=False),
         fallback_default_profile_id=fallback_default_profile_id,
+        permission_governor=permission_governor,
     )
 
 
@@ -192,7 +235,7 @@ async def test_duplicate_preset_uses_preset_id_as_default_stored_id() -> None:
     assert payload["profile"]["id"] == "project-researcher"
     assert payload["profile"]["name"] == "Project Researcher"
     assert payload["profile"]["preset_id"] == "project-researcher"
-    assert payload["profile"]["preset_version"] == "2026.05.27"
+    assert payload["profile"]["preset_version"] == PRESET_VERSION
     assert payload["profile"]["provenance"]["duplicated"] is True
     assert payload["store"] == {"kind": "memory", "persistent": False}
 
@@ -270,6 +313,81 @@ async def test_create_profile_persists_valid_profile_and_audits_success() -> Non
     assert stored.updated_at.isoformat() == payload["profile"]["updated_at"]
     assert stored.enabled is True
     assert [event.event_type for event in audit_store.events] == ["profile.created"]
+
+
+@pytest.mark.asyncio
+async def test_create_profile_calls_permission_governor_with_redacted_summary() -> None:
+    audit_store = InMemoryAuditStore()
+    governor = RecordingPermissionGovernor()
+    manager = _manager(
+        InMemoryProfileStore(),
+        audit_store=audit_store,
+        permission_governor=governor,
+    )
+
+    await manager.create_profile(
+        {
+            "id": "custom-writer",
+            "name": "Custom Writer",
+            "policy_document": {
+                "allowed_tools": ["fs.write"],
+                "path_grants": [
+                    {"prefix": "docs/private", "actions": ["write"], "effect": "allow"}
+                ],
+            },
+        }
+    )
+
+    assert len(governor.requests) == 1
+    request = governor.requests[0]
+    assert request.action == "profile.create"
+    assert request.profile_id == "custom-writer"
+    assert request.target_type == "profile"
+    assert request.target_id == "custom-writer"
+    assert "policy_document" in request.changed_fields
+    assert request.policy_fields == ("allowed_tools", "path_grants")
+    assert "path_grants_changed" in request.risk_flags
+    assert "path_grants_write_or_edit" in request.risk_flags
+
+    assert [event.event_type for event in audit_store.events] == ["profile.created"]
+    governance_payload = audit_store.events[0].payload["governance"]
+    assert governance_payload["action"] == "profile.create"
+    assert governance_payload["decision"] == {
+        "outcome": "allow",
+        "reason_code": "allow_for_test",
+    }
+    serialized_payload = json.dumps(audit_store.events[0].payload, sort_keys=True)
+    assert "policy_document" not in serialized_payload
+    assert "docs/private" not in serialized_payload
+    assert "fs.write" not in serialized_payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy_document",
+    [
+        {"path_grants": {"prefix": "docs", "actions": ["read"]}},
+        {"path_grants": ["oops"]},
+        {"path_grants": [{"prefix": "/absolute", "actions": ["read"]}]},
+    ],
+)
+async def test_create_profile_rejects_invalid_path_grant_policy_without_persisting(
+    policy_document: dict[str, object],
+) -> None:
+    store = InMemoryProfileStore()
+    manager = _manager(store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.create_profile(
+            {
+                "id": "bad-grants",
+                "name": "Bad Grants",
+                "policy_document": policy_document,
+            }
+        )
+
+    assert exc_info.value.reason_code == "invalid_profile_request"
+    assert await store.get_profile("bad-grants") is None
 
 
 @pytest.mark.asyncio
@@ -800,6 +918,168 @@ async def test_patch_profile_policy_document_handles_missing_stored_policy() -> 
     stored = await store.get_profile("reviewer")
     assert stored is not None
     assert stored.policy_document.allowed_tools == ["review.run"]
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_accepts_path_grants_and_reports_governance_risk() -> None:
+    governor = RecordingPermissionGovernor()
+    store = InMemoryProfileStore([MCPProfile(id="writer", name="Writer")])
+    manager = _manager(store, permission_governor=governor)
+
+    payload = await manager.patch_profile(
+        "writer",
+        {
+            "policy_document": {
+                "path_grants": [
+                    {"prefix": "docs", "actions": ["read", "edit"], "effect": "allow"}
+                ],
+            }
+        },
+    )
+
+    assert payload["profile"]["policy_document"]["path_grants"] == [
+        {"actions": ["read", "edit"], "effect": "allow", "prefix": "docs"}
+    ]
+    stored = await store.get_profile("writer")
+    assert stored is not None
+    assert stored.policy_document.model_dump(mode="json")["path_grants"] == [
+        {"actions": ["read", "edit"], "effect": "allow", "prefix": "docs"}
+    ]
+    assert len(governor.requests) == 1
+    request = governor.requests[0]
+    assert request.action == "profile.patch"
+    assert request.changed_fields == ("policy_document",)
+    assert request.policy_fields == ("path_grants",)
+    assert "path_grants_write_or_edit" in request.risk_flags
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_rejects_non_mapping_path_grant_entries() -> None:
+    store = InMemoryProfileStore([MCPProfile(id="writer", name="Writer")])
+    manager = _manager(store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.patch_profile(
+            "writer",
+            {"policy_document": {"path_grants": ["oops"]}},
+        )
+
+    assert exc_info.value.reason_code == "invalid_profile_patch"
+    stored = await store.get_profile("writer")
+    assert stored is not None
+    assert "path_grants" not in stored.policy_document.model_dump(mode="json")
+
+
+def test_permission_change_decision_defaults_reason_code_to_outcome() -> None:
+    denied = PermissionChangeDecision(outcome="deny")
+    contradictory = PermissionChangeDecision(outcome="ask", reason_code="allowed")
+
+    assert denied.reason_code == "deny"
+    assert contradictory.reason_code == "ask"
+
+
+def test_permission_summary_helpers_handle_legacy_policy_and_empty_collections() -> None:
+    payload = GatewayProfileManager._policy_payload(LegacyPolicyModel())
+
+    assert payload["allowed_tools"] == ("fs.*",)
+    assert GatewayProfileManager._non_empty_policy_fields(
+        {
+            "empty_tuple": (),
+            "empty_set": set(),
+            "empty_list": [],
+            "filled_tuple": ("x",),
+        }
+    ) == ("filled_tuple",)
+    assert GatewayProfileManager._has_wildcard_tool_policy(payload) is True
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_denied_permission_change_does_not_persist_and_redacts_audit() -> None:
+    audit_store = InMemoryAuditStore()
+    governor = RecordingPermissionGovernor(
+        outcome="deny",
+        reason_code="write_grants_blocked",
+    )
+    store = InMemoryProfileStore([MCPProfile(id="writer", name="Writer")])
+    manager = _manager(
+        store,
+        audit_store=audit_store,
+        permission_governor=governor,
+    )
+    before = await store.get_profile("writer")
+    assert before is not None
+    before_dump = before.model_dump(mode="json")
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.patch_profile(
+            "writer",
+            {
+                "policy_document": {
+                    "allowed_tools": ["mcp__filesystem__write_file"],
+                    "path_grants": [
+                        {
+                            "prefix": "docs/private",
+                            "actions": ["write"],
+                            "effect": "allow",
+                        }
+                    ],
+                }
+            },
+        )
+
+    assert exc_info.value.reason_code == "permission_change_denied"
+    after = await store.get_profile("writer")
+    assert after is not None
+    assert after.model_dump(mode="json") == before_dump
+    assert [event.event_type for event in audit_store.events] == [
+        "profile.permission_change_blocked"
+    ]
+    event = audit_store.events[0]
+    assert event.target_type == "profile"
+    assert event.target_id == "writer"
+    assert event.payload["reason_code"] == "permission_change_denied"
+    assert event.payload["decision"] == {
+        "outcome": "deny",
+        "reason_code": "write_grants_blocked",
+    }
+    assert event.payload["policy_fields"] == ["allowed_tools", "path_grants"]
+    serialized_payload = json.dumps(event.payload, sort_keys=True)
+    assert "policy_document" not in serialized_payload
+    assert "docs/private" not in serialized_payload
+    assert "mcp__filesystem__write_file" not in serialized_payload
+
+
+@pytest.mark.asyncio
+async def test_default_profile_ask_governance_decision_blocks_assignment_change() -> None:
+    audit_store = InMemoryAuditStore()
+    governor = RecordingPermissionGovernor(
+        outcome="ask",
+        reason_code="approval_required_for_default_change",
+    )
+    store = InMemoryProfileStore([MCPProfile(id="reviewer", name="Reviewer")])
+    assignment_store = InMemoryProfileAssignmentStore()
+    manager = _manager(
+        store,
+        assignment_store,
+        audit_store=audit_store,
+        permission_governor=governor,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.set_default_profile("reviewer")
+
+    assert exc_info.value.reason_code == "permission_change_requires_approval"
+    assert await assignment_store.get_assignment("gateway-default") is None
+    assert len(governor.requests) == 1
+    request = governor.requests[0]
+    assert request.action == "profile.default_change"
+    assert "default_profile_change" in request.risk_flags
+    assert [event.event_type for event in audit_store.events] == [
+        "profile.permission_change_blocked"
+    ]
+    assert audit_store.events[0].payload["reason_code"] == (
+        "permission_change_requires_approval"
+    )
 
 
 @pytest.mark.asyncio
