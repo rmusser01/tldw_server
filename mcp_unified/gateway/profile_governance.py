@@ -28,7 +28,7 @@ class PermissionChangeDecision:
     """Governance result for one permission-changing profile mutation."""
 
     outcome: PermissionChangeOutcome
-    reason_code: str = "allowed"
+    reason_code: str | None = None
     message: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -36,8 +36,23 @@ class PermissionChangeDecision:
         """Validate the decision shape at the trust boundary."""
         if self.outcome not in _VALID_PERMISSION_CHANGE_OUTCOMES:
             raise ValueError("permission change outcome must be deny, ask, or allow")
-        if not isinstance(self.reason_code, str) or not self.reason_code.strip():
+        normalized_reason_code = (
+            self.reason_code.strip() if isinstance(self.reason_code, str) else ""
+        )
+        if (
+            not normalized_reason_code
+            or (
+                normalized_reason_code == "allowed"
+                and self.outcome != "allow"
+            )
+            or (
+                normalized_reason_code in _VALID_PERMISSION_CHANGE_OUTCOMES
+                and normalized_reason_code != self.outcome
+            )
+        ):
             object.__setattr__(self, "reason_code", self.outcome)
+        elif normalized_reason_code != self.reason_code:
+            object.__setattr__(self, "reason_code", normalized_reason_code)
         if not isinstance(self.metadata, Mapping):
             object.__setattr__(self, "metadata", {})
 

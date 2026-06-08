@@ -92,6 +92,18 @@ class RecordingPermissionGovernor:
         )
 
 
+class LegacyPolicyModel:
+    """Small Pydantic-v1-like policy object for payload helper coverage."""
+
+    def dict(self) -> dict[str, object]:
+        """Return a mapping using the Pydantic v1 method name."""
+        return {
+            "allowed_tools": ("fs.*",),
+            "resource_constraints": (),
+            "tool_patterns": set(),
+        }
+
+
 class ConflictingCreateProfileStore(InMemoryProfileStore):
     """Profile store double that reports an atomic create conflict."""
 
@@ -348,6 +360,34 @@ async def test_create_profile_calls_permission_governor_with_redacted_summary() 
     assert "policy_document" not in serialized_payload
     assert "docs/private" not in serialized_payload
     assert "fs.write" not in serialized_payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy_document",
+    [
+        {"path_grants": {"prefix": "docs", "actions": ["read"]}},
+        {"path_grants": ["oops"]},
+        {"path_grants": [{"prefix": "/absolute", "actions": ["read"]}]},
+    ],
+)
+async def test_create_profile_rejects_invalid_path_grant_policy_without_persisting(
+    policy_document: dict[str, object],
+) -> None:
+    store = InMemoryProfileStore()
+    manager = _manager(store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.create_profile(
+            {
+                "id": "bad-grants",
+                "name": "Bad Grants",
+                "policy_document": policy_document,
+            }
+        )
+
+    assert exc_info.value.reason_code == "invalid_profile_request"
+    assert await store.get_profile("bad-grants") is None
 
 
 @pytest.mark.asyncio
@@ -911,6 +951,46 @@ async def test_patch_profile_accepts_path_grants_and_reports_governance_risk() -
     assert request.changed_fields == ("policy_document",)
     assert request.policy_fields == ("path_grants",)
     assert "path_grants_write_or_edit" in request.risk_flags
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_rejects_non_mapping_path_grant_entries() -> None:
+    store = InMemoryProfileStore([MCPProfile(id="writer", name="Writer")])
+    manager = _manager(store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.patch_profile(
+            "writer",
+            {"policy_document": {"path_grants": ["oops"]}},
+        )
+
+    assert exc_info.value.reason_code == "invalid_profile_patch"
+    stored = await store.get_profile("writer")
+    assert stored is not None
+    assert "path_grants" not in stored.policy_document.model_dump(mode="json")
+
+
+def test_permission_change_decision_defaults_reason_code_to_outcome() -> None:
+    denied = PermissionChangeDecision(outcome="deny")
+    contradictory = PermissionChangeDecision(outcome="ask", reason_code="allowed")
+
+    assert denied.reason_code == "deny"
+    assert contradictory.reason_code == "ask"
+
+
+def test_permission_summary_helpers_handle_legacy_policy_and_empty_collections() -> None:
+    payload = GatewayProfileManager._policy_payload(LegacyPolicyModel())
+
+    assert payload["allowed_tools"] == ("fs.*",)
+    assert GatewayProfileManager._non_empty_policy_fields(
+        {
+            "empty_tuple": (),
+            "empty_set": set(),
+            "empty_list": [],
+            "filled_tuple": ("x",),
+        }
+    ) == ("filled_tuple",)
+    assert GatewayProfileManager._has_wildcard_tool_policy(payload) is True
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 ---
 id: TASK-2304
 title: Add MCP permission-change governance hooks
-status: In Progress
+status: Done
 labels:
 - mcp
 - policy
@@ -44,11 +44,19 @@ Touched files:
 - `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`
 
 Verification:
-- Red check: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py::test_create_profile_calls_permission_governor_with_redacted_summary -q` failed before implementation with missing `mcp_unified.gateway.profile_governance`.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py::test_gateway_profile_management_error_status_mapping -q` passed.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check mcp_unified/gateway/profile_governance.py mcp_unified/gateway/profiles.py mcp_unified/gateway/fastapi.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py` passed.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile mcp_unified/gateway/profile_governance.py mcp_unified/gateway/profiles.py mcp_unified/gateway/fastapi.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py` passed.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/gateway/profile_governance.py mcp_unified/gateway/profiles.py mcp_unified/gateway/fastapi.py -f json -o /tmp/bandit_mcp_permission_governance.json` passed with 0 findings.
+- Red check: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py::test_create_profile_calls_permission_governor_with_redacted_summary -q` failed before implementation with missing `mcp_unified.gateway.profile_governance`.
+- `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py::test_gateway_profile_management_error_status_mapping -q` passed.
+- `python -m ruff check mcp_unified/gateway/profile_governance.py mcp_unified/gateway/profiles.py mcp_unified/gateway/fastapi.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py` passed.
+- `python -m py_compile mcp_unified/gateway/profile_governance.py mcp_unified/gateway/profiles.py mcp_unified/gateway/fastapi.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py` passed.
+- `python -m bandit -r mcp_unified/gateway/profile_governance.py mcp_unified/gateway/profiles.py mcp_unified/gateway/fastapi.py -f json -o /tmp/bandit_mcp_permission_governance.json` passed with 0 findings.
+
+Review follow-up:
+- Rebasing on `origin/dev` reported the branch was already up to date.
+- Added create-time and patch-time path-grant validation regressions for malformed `path_grants`.
+- Normalized default `PermissionChangeDecision.reason_code` values so blocked outcomes cannot emit `allowed`.
+- Hardened policy summary helpers for Pydantic v1-style `.dict()` payloads, empty collections, and tuple/set wildcard policy values.
+- Re-ran `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py::test_gateway_profile_management_error_status_mapping -q`; 78 passed.
+- Re-ran the ruff, py_compile, and Bandit commands above; all passed and Bandit reported 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

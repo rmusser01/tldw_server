@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -55,6 +55,7 @@ _POLICY_PATCH_FIELDS = frozenset(
         *PATH_GRANT_AUTHORING_KEYS,
     }
 )
+_PATH_GRANT_POLICY_FIELDS = frozenset({"path_grants", *PATH_GRANT_AUTHORING_KEYS})
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +286,10 @@ class GatewayProfileManager:
 
         now = datetime.now(timezone.utc)
         profile = profile.model_copy(update={"updated_at": now}, deep=True)
+        self._validate_path_grant_policy_payload(
+            self._policy_payload(profile.policy_document),
+            reason_code="invalid_profile_request",
+        )
         governance_request = self._permission_request_for_profile(
             "profile.create",
             profile,
@@ -1037,9 +1042,20 @@ class GatewayProfileManager:
             sorted(
                 str(key)
                 for key, value in policy_payload.items()
-                if value not in (None, [], {}, "")
+                if GatewayProfileManager._has_non_empty_policy_value(value)
             )
         )
+
+    @staticmethod
+    def _has_non_empty_policy_value(value: Any) -> bool:
+        if value is None or value == "":
+            return False
+        if isinstance(value, Collection) and not isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
+            return len(value) > 0
+        return True
 
     @staticmethod
     def _policy_payload(policy_document: object | None) -> dict[str, Any]:
@@ -1048,6 +1064,10 @@ class GatewayProfileManager:
         model_dump = getattr(policy_document, "model_dump", None)
         if callable(model_dump):
             payload = model_dump(mode="json")
+            return payload if isinstance(payload, dict) else {}
+        dict_method = getattr(policy_document, "dict", None)
+        if callable(dict_method):
+            payload = dict_method()
             return payload if isinstance(payload, dict) else {}
         if isinstance(policy_document, Mapping):
             return dict(policy_document)
@@ -1059,11 +1079,31 @@ class GatewayProfileManager:
             values = policy_payload.get(field)
             if isinstance(values, str):
                 values = [values]
-            if not isinstance(values, list):
+            if not isinstance(values, (list, tuple, set)):
                 continue
             if any(isinstance(value, str) and "*" in value for value in values):
                 return True
         return False
+
+    def _validate_path_grant_policy_payload(
+        self,
+        policy_payload: Mapping[str, Any],
+        *,
+        reason_code: str,
+    ) -> None:
+        if not any(field in policy_payload for field in _PATH_GRANT_POLICY_FIELDS):
+            return
+
+        raw_path_grants = policy_payload.get("path_grants")
+        if "path_grants" in policy_payload and (
+            not isinstance(raw_path_grants, list)
+            or any(not isinstance(item, Mapping) for item in raw_path_grants)
+        ):
+            raise self._error("Invalid profile request", reason_code=reason_code)
+
+        compiled_path_grants = compile_policy_path_grants(policy_payload)
+        if compiled_path_grants.has_errors:
+            raise self._error("Invalid profile request", reason_code=reason_code)
 
     async def _get_profile(self, profile_id: str) -> MCPProfile | None:
         try:
@@ -1159,13 +1199,10 @@ class GatewayProfileManager:
                     "Invalid profile patch",
                     reason_code="invalid_profile_patch",
                 )
-            if any(field in policy_patch for field in {"path_grants", *PATH_GRANT_AUTHORING_KEYS}):
-                compiled_path_grants = compile_policy_path_grants(policy_patch)
-                if compiled_path_grants.has_errors:
-                    raise self._error(
-                        "Invalid profile patch",
-                        reason_code="invalid_profile_patch",
-                    )
+            self._validate_path_grant_policy_payload(
+                policy_patch,
+                reason_code="invalid_profile_patch",
+            )
             if not policy_patch and set(normalized) == {"policy_document"}:
                 raise self._error(
                     "Invalid profile patch",
