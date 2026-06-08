@@ -209,6 +209,17 @@ def build_chacha_rls_sql() -> list[str]:
           USING (client_id = current_setting('app.current_user_id', true));
         """
     )
+
+    # Workspace resource memberships
+    add("ALTER TABLE IF EXISTS workspace_resource_memberships ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS workspace_resource_memberships FORCE ROW LEVEL SECURITY;")
+    add("DROP POLICY IF EXISTS workspace_resource_memberships_tenant_isolation ON workspace_resource_memberships;")
+    add(
+        """
+        CREATE POLICY workspace_resource_memberships_tenant_isolation ON workspace_resource_memberships
+          USING (client_id = current_setting('app.current_user_id', true));
+        """
+    )
     return stmts
 
 
