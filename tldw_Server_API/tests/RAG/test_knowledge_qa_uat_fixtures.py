@@ -10,9 +10,8 @@ import pytest
 from Helper_Scripts import seed_knowledge_qa_uat
 from tldw_Server_API.tests.RAG import knowledge_qa_uat_fixtures as fixtures
 
-pytestmark = pytest.mark.unit
 
-
+@pytest.mark.unit
 def test_knowledge_qa_uat_fixture_strings_are_distinct_and_deterministic() -> None:
     values = [
         fixtures.KNOWN_CITED_QUERY,
@@ -30,6 +29,7 @@ def test_knowledge_qa_uat_fixture_strings_are_distinct_and_deterministic() -> No
     assert fixtures.KNOWLEDGE_QA_UAT_MANIFEST_SCHEMA_VERSION == 1
 
 
+@pytest.mark.unit
 def test_seed_helper_dry_run_manifest_uses_fixture_contract() -> None:
     manifest = seed_knowledge_qa_uat.build_dry_run_manifest()
 
@@ -44,6 +44,7 @@ def test_seed_helper_dry_run_manifest_uses_fixture_contract() -> None:
     assert all(source["id"] is None for source in manifest["sources"].values())
 
 
+@pytest.mark.integration
 def test_seed_helper_dry_run_cli_writes_manifest(tmp_path: Path) -> None:
     manifest_path = tmp_path / "knowledge-qa-uat.json"
     repo_root = Path(__file__).resolve().parents[3]

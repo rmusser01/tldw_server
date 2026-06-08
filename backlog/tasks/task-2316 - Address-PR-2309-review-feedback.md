@@ -2,11 +2,20 @@
 id: TASK-2316
 title: Address PR 2309 review feedback
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-08 03:38
+labels: []
+dependencies: []
 modified_files:
 - Docs/superpowers/plans/2026-06-08-pr-2309-review-remediation-plan.md
 - apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx
 - apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.persistence.test.tsx
 - apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx
+- apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/SourceList.behavior.test.tsx
+- apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/SourceList.viewer.test.tsx
+- apps/packages/ui/src/components/Option/KnowledgeQA/SetupDiagnostics.tsx
+- apps/packages/ui/src/components/Option/KnowledgeQA/SourceList.tsx
 - apps/packages/ui/src/components/Option/KnowledgeQA/scopeValidation.ts
 - apps/packages/ui/src/components/Option/KnowledgeQA/trustState.ts
 - apps/extension/tests/e2e/utils/extension-launch-health.spec.ts
@@ -41,28 +50,18 @@ Address reviewer and bot feedback on PR #2309 after rebasing on latest dev, incl
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-06-08: Rebased local branch `codex/knowledge-qa-follow-on-remediation` onto latest `origin/dev` before remediation. Added focused red/green coverage for stale retry-sync trust persistence, selected-note stable source metadata, selected-note SQL allowlist bounding, sync-adapter offload, chat source lookup caching, explicit note selection source fallback/cache bypass, and effective retrieval search-mode fallback. Fixed the provider retry path to persist recomputed post-sync trust context, added evidence-origin inference for heuristic trust normalization, stabilized notes retriever metadata, bounded explicit-note SQL placeholders, offloaded explicit note retrieval, cached chat source exclusion lookups, and made explicit source selections authoritative while disabling cache reuse. Preserved classification `skip_search` generation-only behavior and switched retrieval-error fallback to `retrieval_search_mode`.
+<!-- SECTION:NOTES:BEGIN -->
+2026-06-08: Rebased local branch `codex/knowledge-qa-follow-on-remediation` onto latest `origin/dev` before remediation. Added red/green coverage and fixes for stale retry-sync trust persistence, selected-note stable source metadata, selected-note SQL allowlist bounding, sync-adapter offload, chat source lookup caching, explicit note selection source fallback/cache bypass, effective retrieval search-mode fallback, classification `skip_search` generation-only behavior, extension launch-health bypass removal, manifest parse diagnostics, shared trust contract usage, requested pytest markers, and malformed Backlog markers.
 
-2026-06-08: Addressed extension/test/docs review comments. The extension launch health test now uses the shared conditional launch wrapper instead of unconditional `test.fail(true)` and uses a case-insensitive setup button locator. Manifest parsing now reports invalid JSON with the manifest path and has direct unit coverage. AnswerPanel test fixtures now use narrower Knowledge QA union/result types. Scope validation no longer carries an unreachable web branch in local-source matching. `response_mapping.py` imports the shared evidence text keys from `trust_contracts.py` and documents `_web_fallback_used`. Requested pytest unit markers were added, and malformed Backlog final-summary markers/task-id markdown were repaired.
+2026-06-08 follow-up: Addressed remaining current/outside-diff PR comments by fixing SourceList pinned fallback-key cleanup to use `original_result_index` consistently, adding a regression test that fails on the old mapped-index cleanup, making SetupDiagnostics host-access button visibility explicit, typing SourceList viewer fixtures as `RagResult[]`, and marking the dry-run subprocess UAT fixture test as integration while keeping pure fixture tests unit.
 
-2026-06-08 verification:
-- Red runs failed before implementation for backend live regressions and retry-sync trust persistence.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG/test_knowledge_qa_live_regressions.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py::TestUnifiedPipeline::test_skip_search_classification_bypasses_retrieval -q` passed 14 tests.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG/test_knowledge_qa_uat_fixtures.py tldw_Server_API/tests/RAG/test_knowledge_trust_contracts.py -q` passed 12 tests.
-- `bunx vitest run src/components/Option/KnowledgeQA/__tests__` passed 55 files / 486 tests.
-- `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc -p tsconfig.json --noEmit` passed in `apps/packages/ui`; the first run without extra heap hit Node OOM.
-- `bun run compile` passed in `apps/extension`.
-- `node apps/node_modules/.bun/vitest@4.0.18+0560a95e2bbfec09/node_modules/vitest/vitest.mjs run --config /private/tmp/vitest-extension-utils.config.ts` passed 3 extension utility tests.
-- `npx playwright test tests/e2e/utils/extension-launch-health.spec.ts --reporter=line` built the extension and reported 1 skipped because this host still exposes no extension targets; this is now the shared conditional launch-unavailable skip, not an expected-failure bypass.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py tldw_Server_API/app/core/RAG/rag_service/response_mapping.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py -f json -o /tmp/bandit_pr2309_review_remediation.json` reported 0 findings, 0 errors, 1 existing skipped nosec.
-- `git diff --check` passed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Verification: SourceList fallback-key regression red check failed with the old mapped-index cleanup and passed after restoring the fix. Focused SourceList/connection tests passed 47 tests. `tldw_Server_API/tests/RAG/test_knowledge_qa_uat_fixtures.py` passed 3 tests. Backend RAG regression set passed 26 tests. Full Knowledge QA UI suite passed 55 files / 487 tests. TypeScript passed with `NODE_OPTIONS=--max-old-space-size=8192`. Extension compile passed. Extension utility tests passed 3 tests. Extension launch-health built the extension and reported 1 skipped because this host exposes no extension targets; this is the shared conditional launch-unavailable skip, not an expected-failure bypass. Bandit follow-up JSON reported 0 results and 0 errors. `git diff --check` passed.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2309 on latest `origin/dev` and addressed the actionable review feedback without adding flashcard behavior. Fixed Knowledge QA retry-sync trust persistence, selected-note evidence identity, explicit scoped-source retrieval/cache behavior, effective-mode fallback, classification skip-search generation, chat source lookup caching, extension launch-health bypass, manifest parse diagnostics, requested test markers, and malformed Backlog markers. Verification covered focused and full Knowledge QA frontend tests, backend RAG regressions, extension compile/utility/launch-health checks, TypeScript, Bandit, and diff hygiene.
+Rebased PR #2309 on latest `origin/dev` and addressed actionable review feedback without adding flashcard behavior. Fixed Knowledge QA retry-sync trust persistence, selected-note evidence identity, explicit scoped-source retrieval/cache behavior, effective-mode fallback, classification skip-search generation, chat source lookup caching, extension launch-health bypass, manifest parse diagnostics, requested test markers, malformed Backlog markers, SourceList pinned fallback-key pruning, explicit setup diagnostics host-access rendering state, and SourceList viewer test typing. Verification covered focused and full Knowledge QA frontend tests, backend RAG regressions, extension compile/utility/launch-health checks, TypeScript, Bandit, and diff hygiene.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

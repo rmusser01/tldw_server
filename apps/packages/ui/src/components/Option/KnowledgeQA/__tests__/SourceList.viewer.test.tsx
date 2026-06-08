@@ -1,21 +1,22 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourceList } from "../SourceList"
+import type { RagResult } from "../types"
 
-const defaultResults = [
-    {
-      id: "r1",
-      content:
-        "Full source content line 1.\nFull source content line 2.\nFull source content line 3.",
-      metadata: {
-        title: "Quarterly Financial Review",
-        source_type: "notes",
-        page_number: 12,
-        url: "https://example.com/source/r1",
-      },
-      score: 0.92,
+const defaultResults: RagResult[] = [
+  {
+    id: "r1",
+    content:
+      "Full source content line 1.\nFull source content line 2.\nFull source content line 3.",
+    metadata: {
+      title: "Quarterly Financial Review",
+      source_type: "notes",
+      page_number: 12,
+      url: "https://example.com/source/r1",
     },
-] as Array<Record<string, any>>
+    score: 0.92,
+  },
+]
 
 const state = {
   results: [...defaultResults],

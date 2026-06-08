@@ -488,7 +488,9 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
 
   useEffect(() => {
     const validSourceKeys = new Set(
-      results.map((result, index) => getResultFeedbackKey(result, index))
+      results.map((result, index) =>
+        getResultFeedbackKey(result, getOriginalResultIndex(result, index))
+      )
     )
     setPinnedSources((previous) =>
       Object.fromEntries(

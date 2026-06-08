@@ -261,6 +261,8 @@ export function KnowledgeQASetupDiagnostics({
     hasServerUrl &&
     !authMissing &&
     connection.isChecking
+  const showSeparateHostAccessButton =
+    canRequestHostAccess && extensionFailureState !== "api_allowlist_blocked"
 
   const checks = useMemo<DiagnosticCheck[]>(() => {
     const serverUrlCheck: DiagnosticCheck = hasServerUrl
@@ -431,8 +433,7 @@ export function KnowledgeQASetupDiagnostics({
             {primaryActionLabel}
           </button>
 
-          {canRequestHostAccess &&
-            extensionFailureState !== "api_allowlist_blocked" && (
+          {showSeparateHostAccessButton && (
             <button
               type="button"
               onClick={handleRequestHostAccess}
@@ -441,7 +442,7 @@ export function KnowledgeQASetupDiagnostics({
               <KeyRound className="h-4 w-4" aria-hidden />
               Request host access
             </button>
-            )}
+          )}
 
           <button
             type="button"
