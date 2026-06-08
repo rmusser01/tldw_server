@@ -199,6 +199,7 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
 
   return (
     <details
+      open
       className={cn("rounded-xl border border-border bg-muted/20", className)}
       aria-label="Search details"
     >
@@ -233,7 +234,7 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
           </div>
         ) : null}
         <div>
-          <span className="font-medium">Web fallback:</span>{" "}
+          <span className="font-medium">Web fallback</span>{" "}
           {searchDetails.webFallbackEnabled
             ? searchDetails.webFallbackTriggered
               ? `Triggered${searchDetails.webFallbackEngine ? ` (${searchDetails.webFallbackEngine})` : ""}`

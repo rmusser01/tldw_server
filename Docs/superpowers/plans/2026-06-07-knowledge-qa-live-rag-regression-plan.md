@@ -42,16 +42,17 @@
 
 **Tests:** Run focused backend tests, the fixture smoke tests, Bandit on touched backend code, and the WebUI live gate against a launched backend.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Verification completed:**
-- Backend focused suite: `21 passed, 6 warnings`.
-- Frontend KnowledgeQA provider/layout/answer-panel suites: `99 passed`.
-- TypeScript UI package check: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json` completed successfully before the rebase.
-- `git diff --check` completed successfully.
-- Bandit touched backend/test scope wrote `/tmp/bandit_knowledge_qa_live_regressions.json` with zero findings.
+- Backend focused regression: `1 passed, 7 deselected, 6 warnings` for `test_selected_note_scope_survives_webui_chunk_type_filter`.
+- Backend focused suites: `17 passed, 6 warnings` for `test_knowledge_qa_live_regressions.py` and `test_knowledge_trust_contracts.py`.
+- Frontend KnowledgeQA provider/layout/answer-panel/search-details suites: `64 passed`.
+- Exact WebUI scoped-note POST replay returned the selected note, `chunk_type: "text"`, and `chunk_type_filter_after: 1`.
+- WebUI live backend gate: `6 passed` for `e2e/ux-audit/knowledge-qa-live-backend.spec.ts`.
+- Research Workspace post-rebase type fixture follow-up tracked separately as `TASK-2315`; its focused test passed (`6 passed`) and the UI package TypeScript check completed successfully.
+- `git diff --check` completed successfully before plan/backlog finalization.
+- Bandit touched backend/test scope with pytest assert warnings excluded wrote `/tmp/bandit_knowledge_qa_follow_on_retry_skip_b101.json` with zero findings.
 - Scope guard over touched Knowledge QA files found no out-of-scope learning-mode terminology.
 
-**Current blocker:** The live Playwright WebUI gate cannot be rerun in this session because the sandbox blocks the local Next server bind (`listen EPERM 0.0.0.0:8080`) and the required escalation was rejected by the approval reviewer due the account usage limit until 4:42 PM. Direct non-health localhost POST probes are also blocked by the sandbox and share the same approval limitation.
-
-**Post-rebase note:** After rebasing on the latest `origin/dev`, the same UI package TypeScript check fails in `src/components/Option/ResearchWorkspace/__tests__/WorkspaceCapabilityRemediation.test.tsx` because the test fixture makes `workspace_profile` optional while `WorkspaceCapabilitiesResponse` now requires it. This is outside the touched Knowledge QA scope.
+**Current blocker:** None for the Knowledge QA live gate. The backend and frontend had to be launched with escalation because the sandbox blocks local port binding and browser-driven localhost access.

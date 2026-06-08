@@ -2264,6 +2264,7 @@ class NotesDBRetriever(BaseRetriever):
                 "created_at": row.get("created_at"),
                 "updated_at": updated_at,
                 "source": "notes_db",
+                "chunk_type": "text",
             },
             score=score,
         )

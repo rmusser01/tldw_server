@@ -124,6 +124,33 @@ describe("SearchDetailsPanel", () => {
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
   })
 
+  it("keeps core runtime details visible when the evidence rail switches to details", () => {
+    state.searchDetails = {
+      expandedQueries: [],
+      rerankingEnabled: false,
+      rerankingStrategy: null,
+      averageRelevance: null,
+      webFallbackEnabled: false,
+      webFallbackTriggered: false,
+      webFallbackEngine: null,
+      documentsConsidered: null,
+      chunksConsidered: null,
+      documentsReturned: 1,
+      candidatesConsidered: null,
+      candidatesReturned: 1,
+      candidatesRejected: null,
+      retrievalLatencyMs: null,
+      alsoConsidered: [],
+      whyTheseSources: null,
+    }
+
+    render(<SearchDetailsPanel />)
+
+    const webFallbackLine = screen.getByText(/Web fallback:?/i).closest("div")
+    expect(webFallbackLine).toBeVisible()
+    expect(webFallbackLine).toHaveTextContent(/Web fallback disabled/i)
+  })
+
   it("summarizes materialized evidence origins and unavailable results", () => {
     state.results = [
       {

@@ -128,6 +128,41 @@ async def test_selected_note_scope_returns_selected_note_when_query_is_natural_l
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_selected_note_scope_survives_webui_chunk_type_filter(
+    tmp_path: Path,
+) -> None:
+    notes_db_path = tmp_path / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=str(notes_db_path), client_id="pytest")
+    note_id = chacha_db.add_note(
+        title=KNOWN_NOTE_SOURCE_TITLE,
+        content=KNOWN_NOTE_SOURCE_BODY,
+    )
+
+    result = await unified_rag_pipeline(
+        query=SCOPED_INCLUDED_QUERY,
+        sources=["media_db", "notes", "characters", "chats"],
+        notes_db_path=str(notes_db_path),
+        chacha_db=chacha_db,
+        search_mode="hybrid",
+        top_k=8,
+        min_score=0.0,
+        enable_generation=False,
+        enable_reranking=True,
+        enable_cache=False,
+        include_note_ids=[note_id],
+        chunk_type_filter=["text", "code", "table", "list"],
+    )
+
+    assert result.metadata.get("sources_searched") == ["notes"]
+    assert result.metadata.get("chunk_type_filter_after") != 0
+    assert any(
+        str(_document_id(document)).replace("note_", "") == str(note_id)
+        for document in result.documents
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_explicit_note_selection_excludes_unselected_media_sources(
     tmp_path: Path,
 ) -> None:
