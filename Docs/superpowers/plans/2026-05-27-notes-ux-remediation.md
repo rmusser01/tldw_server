@@ -303,13 +303,13 @@ Likely tests:
 - Browser screenshots/checks for desktop and mobile empty state.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 4.
-- [ ] Add failing tests for route metadata, navigation/filter summary, empty state, and first-create focus behavior.
-- [ ] Run focused tests and confirm failures.
-- [ ] Implement focused empty-state and focus-management improvements.
-- [ ] Verify mobile layout.
-- [ ] Run tests and browser checks.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 4.
+- [x] Add failing tests for route metadata, navigation/filter summary, empty state, and first-create focus behavior.
+- [x] Run focused tests and confirm failures.
+- [x] Implement focused empty-state and focus-management improvements.
+- [x] Verify mobile layout.
+- [x] Run tests and browser checks.
+- [x] Update Backlog notes with verification.
 
 ---
 

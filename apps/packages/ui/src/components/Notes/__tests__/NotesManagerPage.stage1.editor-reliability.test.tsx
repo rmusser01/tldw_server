@@ -473,15 +473,23 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("hides the welcome state after starting a new draft", async () => {
+  it("opens a writable, focused title field after starting a new draft from the empty state", async () => {
     renderPage()
 
     expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
+    fireEvent.click(screen.getByRole("button", { name: "Create note" }))
 
     await waitFor(() => {
       expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
+    })
+
+    const titleInput = screen.getByRole("textbox", { name: "Note title" })
+    expect(titleInput).toBeEnabled()
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+
+    await waitFor(() => {
+      expect(titleInput).toHaveFocus()
     })
   })
 
