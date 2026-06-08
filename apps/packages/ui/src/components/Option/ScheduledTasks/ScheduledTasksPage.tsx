@@ -51,6 +51,7 @@ export const ScheduledTasksPage: React.FC = () => {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [createdTaskFallback, setCreatedTaskFallback] = useState<ScheduledTask | null>(null)
   const [saving, setSaving] = useState(false)
   const [scheduledTasksSupported, setScheduledTasksSupported] = useState<
     boolean | null
@@ -137,8 +138,12 @@ export const ScheduledTasksPage: React.FC = () => {
 
   const tasks = tasksQuery.data?.items ?? []
   const selectedTask = React.useMemo(
-    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
-    [selectedTaskId, tasks]
+    () => {
+      const refreshedTask = tasks.find((task) => task.id === selectedTaskId)
+      if (refreshedTask) return refreshedTask
+      return createdTaskFallback?.id === selectedTaskId ? createdTaskFallback : null
+    },
+    [createdTaskFallback, selectedTaskId, tasks]
   )
   const hasLoadedTasks = Boolean(tasksQuery.data)
   const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
@@ -182,6 +187,13 @@ export const ScheduledTasksPage: React.FC = () => {
       return
     }
 
+    if (createdTaskFallback?.id === routeState.taskId) {
+      if (selectedTaskId !== routeState.taskId) {
+        setSelectedTaskId(routeState.taskId)
+      }
+      return
+    }
+
     if (selectedTaskId === routeState.taskId) {
       setSelectedTaskId(null)
       updateRoute({ tab: "tasks" })
@@ -192,6 +204,7 @@ export const ScheduledTasksPage: React.FC = () => {
       setSelectedTaskId(null)
     }
   }, [
+    createdTaskFallback?.id,
     hasLoadedTasks,
     routeState.tab,
     routeState.taskId,
@@ -200,8 +213,22 @@ export const ScheduledTasksPage: React.FC = () => {
     updateRoute
   ])
 
+  React.useEffect(() => {
+    if (!createdTaskFallback) return
+
+    if (tasks.some((task) => task.id === createdTaskFallback.id)) {
+      setCreatedTaskFallback(null)
+      return
+    }
+
+    if (selectedTaskId !== createdTaskFallback.id) {
+      setCreatedTaskFallback(null)
+    }
+  }, [createdTaskFallback, selectedTaskId, tasks])
+
   const closeTaskDetail = () => {
     if (selectedTaskId === null) return
+    setCreatedTaskFallback(null)
     setSelectedTaskId(null)
     updateRoute({ tab: "tasks" })
   }
@@ -219,6 +246,9 @@ export const ScheduledTasksPage: React.FC = () => {
   }
 
   const openTaskDetail = (task: ScheduledTask) => {
+    if (createdTaskFallback?.id !== task.id) {
+      setCreatedTaskFallback(null)
+    }
     setSelectedTaskId(task.id)
     updateRoute({ tab: "tasks", taskId: task.id })
   }
@@ -258,10 +288,12 @@ export const ScheduledTasksPage: React.FC = () => {
   ) => {
     setSaving(true)
     try {
-      await createScheduledTaskReminder(payload)
-      message.success("Reminder task created")
+      const createdTask = await createScheduledTaskReminder(payload)
+      setCreatedTaskFallback(createdTask)
+      setSelectedTaskId(createdTask.id)
+      updateRoute({ tab: "tasks", taskId: createdTask.id })
+      message.success("Reminder scheduled. Status appears in Tasks.")
       await refreshTasks()
-      updateRoute({ tab: "create" })
     } catch (error: any) {
       message.error(error?.message || "Unable to save reminder task")
     } finally {

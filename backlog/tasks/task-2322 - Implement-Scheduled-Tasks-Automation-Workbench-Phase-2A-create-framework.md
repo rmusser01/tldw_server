@@ -36,7 +36,7 @@ Implement the frontend-only Phase 2A /scheduled-tasks Create framework from the 
 - [ ] #1 URL state helpers support Overview, Tasks, Create, selected template, task detail, invalid tab, invalid template, and invalid task states.
 - [ ] #2 Template registry and matcher keep Reminder as the only fully available template and keep Watch/Ingest/Advanced handoff-only while RAG/Agent remain planned.
 - [x] #3 Create panel renders templates by intent, not source vendor, and uses handoff panels without claiming a task was created.
-- [ ] #4 ScheduledTasksPage integrates tabs, create flow, detail deep links, invalid route states, and created reminder detail navigation while preserving Phase 1 overview/table/detail behavior.
+- [x] #4 ScheduledTasksPage integrates tabs, create flow, detail deep links, invalid route states, and created reminder detail navigation while preserving Phase 1 overview/table/detail behavior.
 - [ ] #5 Focused ScheduledTasks and route tests pass; extension route smoke is updated or skip rationale is recorded.
 - [ ] #6 No backend files are changed; Bandit is run only if backend Python changes unexpectedly, otherwise skip rationale is recorded.
 <!-- AC:END -->
@@ -90,6 +90,12 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 4 quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 28 tests.
 - Task 4 quality CreatePanel regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 tests.
 - Task 4 quality diff check: `git diff --check` passed.
+- Task 5: Wired successful Reminder creation from the Create panel to the created task detail. The page now stores the returned created task as a temporary detail fallback, routes to `?tab=tasks&task_id=<created.id>`, prefers refreshed list data when it arrives, and clears the fallback when the list catches up, selection changes, detail closes, or the selected reminder is deleted.
+- Task 5 red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx --maxWorkers=1 --no-file-parallelism` failed with 2 expected failures because successful Create-panel reminder creation still left the Create tab selected and did not open a detail dialog.
+- Task 5 verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 29 tests.
+- Task 5 CreatePanel regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 tests.
+- Task 5 diff check: `git diff --check` passed.
+- Bandit skip: Task 5 changed frontend TypeScript/TSX tests/components and Backlog tracking only; no backend Python files were touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

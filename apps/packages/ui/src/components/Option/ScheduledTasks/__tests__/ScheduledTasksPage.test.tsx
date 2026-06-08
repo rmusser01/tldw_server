@@ -772,15 +772,38 @@ describe("ScheduledTasksPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("creates a reminder task from the editor and refreshes the list", async () => {
+  it("opens the created reminder detail after successful creation", async () => {
     const user = userEvent.setup()
 
-    mocks.listScheduledTasks.mockResolvedValue({
-      items: [],
-      total: 0,
-      partial: false,
-      errors: []
-    })
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "reminder_task:2",
+            primitive: "reminder_task",
+            title: "Daily review",
+            description: null,
+            status: "scheduled",
+            enabled: true,
+            schedule_summary: "2026-03-21T10:00:00+00:00",
+            timezone: "UTC",
+            next_run_at: "2026-03-21T10:00:00+00:00",
+            last_run_at: null,
+            edit_mode: "native",
+            manage_url: null,
+            source_ref: { task_id: "2" }
+          }
+        ],
+        total: 1,
+        partial: false,
+        errors: []
+      })
     mocks.createScheduledTaskReminder.mockResolvedValue({
       id: "reminder_task:2",
       primitive: "reminder_task",
@@ -810,17 +833,55 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
-    await waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument()
-    })
-    expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
-    expect(
-      screen.getByRole("heading", {
-        level: 3,
-        name: "Choose what you want to automate"
+    expect(await screen.findByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true")
+    const drawer = await screen.findByRole("dialog", { name: /Daily review/i })
+    expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
+    expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the created reminder detail open from the API response until the list catches up", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
       })
-    ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create reminder" })).toBeInTheDocument()
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+    mocks.createScheduledTaskReminder.mockResolvedValue({
+      id: "reminder_task:pending",
+      primitive: "reminder_task",
+      title: "Pending reminder",
+      description: null,
+      status: "scheduled",
+      enabled: true,
+      schedule_summary: "2026-03-21T10:00:00+00:00",
+      timezone: "UTC",
+      next_run_at: "2026-03-21T10:00:00+00:00",
+      last_run_at: null,
+      edit_mode: "native",
+      manage_url: null,
+      source_ref: { task_id: "pending" }
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
+
+    await user.type(await screen.findByRole("textbox", { name: "Title" }), "Pending reminder")
+    fireEvent.change(screen.getByLabelText("Run once at"), {
+      target: { value: "2026-03-21T10:00" }
+    })
+    await user.click(await screen.findByRole("button", { name: "Save reminder" }))
+
+    const drawer = await screen.findByRole("dialog", { name: /Pending reminder/i })
+    expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
+    expect(screen.queryByText("Task not found.")).not.toBeInTheDocument()
   })
 
   it("does not create a one-time reminder without run_at", async () => {
