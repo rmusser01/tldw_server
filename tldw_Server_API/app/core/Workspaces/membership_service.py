@@ -87,7 +87,6 @@ class WorkspaceMembershipService:
             include_deleted=True,
         )
         restore_deleted = existing is not None and self._row_is_deleted(existing)
-        should_call_on_link = existing is None or restore_deleted
         row = self.chacha_db.add_workspace_resource_membership(
             workspace_id,
             {
@@ -102,8 +101,6 @@ class WorkspaceMembershipService:
             },
             user_id=user_id,
         )
-        if should_call_on_link:
-            adapter.on_link(row, context)
         return self._serialize_membership(row, context=context, summary_ref=ref if resolve else None, resolve=resolve)
 
     def get_membership(

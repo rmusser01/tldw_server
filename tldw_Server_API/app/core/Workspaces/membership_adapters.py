@@ -48,7 +48,11 @@ class WorkspaceMembershipAdapter(Protocol):
         """Return a display summary for a resource."""
 
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
-        """Optional hook after a membership row is created or restored."""
+        """Reserved hook for future transition-aware link side effects.
+
+        The first-slice service does not invoke this until membership writes can
+        report insert/restore transitions or use an outbox.
+        """
 
     def on_unlink(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         """Optional hook after a membership row is soft-deleted."""

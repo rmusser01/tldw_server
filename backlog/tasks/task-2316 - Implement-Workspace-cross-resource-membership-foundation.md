@@ -99,6 +99,11 @@ Task 3 code-quality follow-up:
 - Changed direct `get_membership` to read existing memberships before resource resolution so unavailable backing services produce unresolved summaries instead of hard failures.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
 - Bandit touched-scope scan reported zero findings for `membership_service.py`.
+Task 3 on-link race follow-up:
+- Reserved `on_link` as a future transition-aware adapter hook and stopped invoking it from first-slice `link_membership`.
+- This avoids duplicate side effects under insert/restore races and avoids non-retryable post-commit hook failures until the DB contract or an outbox can report durable transitions.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
+- Bandit touched-scope scan reported zero findings for `membership_adapters.py` and `membership_service.py`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -778,10 +778,10 @@ def test_link_membership_restores_deleted_row_after_adapter_validation() -> None
     assert db.last_add_data["restore_deleted"] is True
     assert payload["resource_id"] == "42"
     assert payload["deleted"] is False
-    assert adapter.linked
+    assert adapter.linked == []
 
 
-def test_link_membership_idempotent_retry_does_not_duplicate_on_link_hook() -> None:
+def test_link_membership_idempotent_retry_does_not_invoke_reserved_on_link_hook() -> None:
     db = FakeChaChaDB()
     adapter = RecordingAdapter()
     service = WorkspaceMembershipService(db, adapters={"media": adapter})
@@ -801,7 +801,7 @@ def test_link_membership_idempotent_retry_does_not_duplicate_on_link_hook() -> N
 
     assert first_payload["resource_id"] == "42"
     assert retry_payload["resource_id"] == "42"
-    assert len(adapter.linked) == 1
+    assert adapter.linked == []
 
 
 def test_get_membership_returns_unresolved_summary_when_media_db_is_unavailable() -> None:
