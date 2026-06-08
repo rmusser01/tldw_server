@@ -18423,7 +18423,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 entity="workspace_resource_memberships",
                                 entity_id=values["resource_id"],
                             )
-                        conn.execute(
+                        deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+                        cursor = conn.execute(
                             """
                             UPDATE workspace_resource_memberships
                                SET role = ?,
@@ -18439,6 +18440,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                              WHERE workspace_id = ?
                                AND resource_type = ?
                                AND resource_id = ?
+                               AND deleted = ?
                             """,
                             (
                                 values["role"],
@@ -18453,18 +18455,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 normalized_workspace_id,
                                 values["resource_type"],
                                 values["resource_id"],
+                                deleted_value,
                             ),
                         )
-                        restored = self._get_workspace_resource_membership_with_conn(
+                        if cursor.rowcount == 1:
+                            restored = self._get_workspace_resource_membership_with_conn(
+                                conn,
+                                normalized_workspace_id,
+                                values["resource_type"],
+                                values["resource_id"],
+                                include_deleted=False,
+                            )
+                            if restored is None:
+                                raise CharactersRAGDBError("Restored membership row could not be reloaded.")  # noqa: TRY003
+                            return restored
+
+                        raced = self._get_workspace_resource_membership_with_conn(
                             conn,
                             normalized_workspace_id,
                             values["resource_type"],
                             values["resource_id"],
-                            include_deleted=False,
+                            include_deleted=True,
                         )
-                        if restored is None:
-                            raise CharactersRAGDBError("Restored membership row could not be reloaded.")  # noqa: TRY003
-                        return restored
+                        if raced is None or raced.get("deleted") in (True, 1):
+                            raise CharactersRAGDBError("Restore race left membership unavailable.")  # noqa: TRY003
+                        if self._workspace_membership_fields_match(raced, values):
+                            return raced
+                        raise ConflictError(
+                            "Workspace resource membership already restored with different fields.",
+                            entity="workspace_resource_memberships",
+                            entity_id=values["resource_id"],
+                        )
 
                     if self._workspace_membership_fields_match(existing, values):
                         return existing
@@ -18737,7 +18758,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if existing is None or existing.get("deleted") in (True, 1):
                     return None
                 deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
-                conn.execute(
+                active_deleted_value = self._workspace_active_deleted_value()
+                cursor = conn.execute(
                     """
                     UPDATE workspace_resource_memberships
                        SET deleted = ?,
@@ -18748,6 +18770,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      WHERE workspace_id = ?
                        AND resource_type = ?
                        AND resource_id = ?
+                       AND deleted = ?
                     """,
                     (
                         deleted_value,
@@ -18757,15 +18780,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         normalized_workspace_id,
                         normalized_resource_type,
                         normalized_resource_id,
+                        active_deleted_value,
                     ),
                 )
-                return self._get_workspace_resource_membership_with_conn(
+                if cursor.rowcount == 1:
+                    return self._get_workspace_resource_membership_with_conn(
+                        conn,
+                        normalized_workspace_id,
+                        normalized_resource_type,
+                        normalized_resource_id,
+                        include_deleted=True,
+                    )
+
+                raced = self._get_workspace_resource_membership_with_conn(
                     conn,
                     normalized_workspace_id,
                     normalized_resource_type,
                     normalized_resource_id,
                     include_deleted=True,
                 )
+                if raced is None or raced.get("deleted") in (True, 1):
+                    return None
+                raise CharactersRAGDBError("Delete race left membership active.")  # noqa: TRY003
         except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             raise self._workspace_membership_write_error(exc) from exc
 

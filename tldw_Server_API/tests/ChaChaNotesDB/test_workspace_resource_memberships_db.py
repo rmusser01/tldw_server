@@ -431,6 +431,115 @@ def test_workspace_membership_backend_constraint_error_maps_to_conflict(db, monk
     assert exc_info.value.entity == "workspace_resource_memberships"
 
 
+class _RowcountCursor:
+    def __init__(self, rowcount: int):
+        self.rowcount = rowcount
+
+
+class _RowcountZeroConnection:
+    def __init__(self):
+        self.statements: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, statement: str, params: tuple[object, ...]):
+        self.statements.append((statement, params))
+        return _RowcountCursor(0)
+
+
+class _RowcountZeroTransaction:
+    def __init__(self, conn: _RowcountZeroConnection):
+        self.conn = conn
+
+    def __enter__(self):
+        return self.conn
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+def _membership_row(**updates: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "workspace_id": "ws-1",
+        "resource_type": "media",
+        "resource_id": "42",
+        "role": "member",
+        "label": "Restored",
+        "transfer_policy": "link",
+        "provenance": {"source_surface": "restore"},
+        "provenance_json": '{"source_surface": "restore"}',
+        "metadata": {"reason": "manual"},
+        "metadata_json": '{"reason": "manual"}',
+        "created_by_user_id": "user-1",
+        "updated_by_user_id": "user-2",
+        "created_at": "2026-06-07T12:00:00.000Z",
+        "updated_at": "2026-06-07T12:01:00.000Z",
+        "deleted": 0,
+        "client_id": "test-client",
+        "version": 3,
+    }
+    row.update(updates)
+    return row
+
+
+def test_restore_deleted_membership_race_returns_already_restored_row(db, monkeypatch):
+    fake_conn = _RowcountZeroConnection()
+    calls: list[bool] = []
+    deleted_row = _membership_row(deleted=1, version=2)
+    active_row = _membership_row(deleted=0, version=3)
+
+    def fake_getter(conn, workspace_id, resource_type, resource_id, *, include_deleted):
+        calls.append(include_deleted)
+        if len(calls) == 1:
+            return deleted_row
+        return active_row if include_deleted else None
+
+    monkeypatch.setattr(db, "transaction", lambda: _RowcountZeroTransaction(fake_conn))
+    monkeypatch.setattr(db, "_get_workspace_resource_membership_with_conn", fake_getter)
+
+    restored = db.add_workspace_resource_membership(
+        "ws-1",
+        {
+            "resource_type": "media",
+            "resource_id": "42",
+            "role": "member",
+            "label": "Restored",
+            "transfer_policy": "link",
+            "provenance": {"source_surface": "restore"},
+            "metadata": {"reason": "manual"},
+            "restore_deleted": True,
+        },
+        user_id="user-2",
+    )
+
+    assert restored == active_row
+    assert calls == [True, True]
+    assert "AND deleted = ?" in fake_conn.statements[0][0]
+
+
+def test_delete_membership_race_returns_none_for_already_deleted_row(db, monkeypatch):
+    fake_conn = _RowcountZeroConnection()
+    calls: list[bool] = []
+    active_row = _membership_row(deleted=0, version=2)
+    deleted_row = _membership_row(deleted=1, version=3)
+
+    def fake_getter(conn, workspace_id, resource_type, resource_id, *, include_deleted):
+        calls.append(include_deleted)
+        return active_row if len(calls) == 1 else deleted_row
+
+    monkeypatch.setattr(db, "transaction", lambda: _RowcountZeroTransaction(fake_conn))
+    monkeypatch.setattr(db, "_get_workspace_resource_membership_with_conn", fake_getter)
+
+    deleted = db.delete_workspace_resource_membership(
+        "ws-1",
+        "media",
+        "42",
+        user_id="user-2",
+    )
+
+    assert deleted is None
+    assert calls == [True, True]
+    assert "AND deleted = ?" in fake_conn.statements[0][0]
+
+
 def test_workspace_subresource_public_getters_return_existing_scoped_rows(db):
     source = db.add_workspace_source(
         "ws-1",
