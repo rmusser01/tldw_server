@@ -13,6 +13,8 @@ WORKSPACE_MIGRATION_MAX_DIAGNOSTICS_BYTES = 64 * 1024
 WORKSPACE_MIGRATION_MAX_CHUNK_METADATA_BYTES = 64 * 1024
 WORKSPACE_MIGRATION_MAX_CHUNK_BYTES = 2 * 1024 * 1024
 WORKSPACE_MIGRATION_MAX_DECLARED_CHUNKS = 512
+WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES = 16 * 1024
+WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES = 16 * 1024
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 WorkspaceProfile = Literal["research", "project"]
@@ -50,6 +52,22 @@ WorkspaceProjectRootState = Literal[
     "cleanup_pending",
     "archived",
 ]
+WorkspaceMembershipResourceType = Literal[
+    "workspace_note",
+    "media",
+    "workspace_source",
+    "workspace_artifact",
+    "chat",
+]
+WorkspaceMembershipRole = Literal[
+    "member",
+    "source",
+    "artifact",
+    "conversation",
+    "runtime",
+    "reference",
+]
+WorkspaceMembershipTransferPolicy = Literal["link", "copy", "promote", "import"]
 
 
 def _json_size_bytes(value: Any) -> int:
@@ -191,6 +209,83 @@ class WorkspaceResponse(BaseModel):
 class WorkspaceListResponse(BaseModel):
     items: list[WorkspaceResponse]
     total: int
+
+
+# --- Membership schemas ---
+
+class WorkspaceMembershipCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: WorkspaceMembershipResourceType
+    resource_id: str = Field(..., min_length=1)
+    role: WorkspaceMembershipRole = "member"
+    label: str | None = Field(default=None, max_length=512)
+    transfer_policy: WorkspaceMembershipTransferPolicy = "link"
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("provenance")
+    @classmethod
+    def _validate_provenance_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_json_size(
+            value,
+            field_name="provenance",
+            max_bytes=WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+        )
+
+    @field_validator("metadata")
+    @classmethod
+    def _validate_membership_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_json_size(
+            value,
+            field_name="metadata",
+            max_bytes=WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+        )
+
+
+class WorkspaceMembershipSummaryResponse(BaseModel):
+    title: str | None = None
+    subtitle: str | None = None
+    href: str | None = None
+    updated_at: str | None = None
+    state: str = "available"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceMembershipResponse(BaseModel):
+    workspace_id: str
+    resource_type: WorkspaceMembershipResourceType
+    resource_id: str
+    role: WorkspaceMembershipRole
+    label: str | None = None
+    transfer_policy: WorkspaceMembershipTransferPolicy = "link"
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    summary: WorkspaceMembershipSummaryResponse | None = None
+    created_at: str
+    updated_at: str
+    version: int
+    deleted: bool = False
+
+
+class WorkspaceMembershipListSummary(BaseModel):
+    total: int = 0
+    by_resource_type: dict[str, int] = Field(default_factory=dict)
+    by_role: dict[str, int] = Field(default_factory=dict)
+
+
+class WorkspaceMembershipListResponse(BaseModel):
+    workspace_id: str
+    items: list[WorkspaceMembershipResponse]
+    total: int
+    next_cursor: str | None = None
+    summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
+
+
+class WorkspaceContextMembershipSummary(BaseModel):
+    total: int = 0
+    by_resource_type: dict[str, int] = Field(default_factory=dict)
+    by_role: dict[str, int] = Field(default_factory=dict)
 
 
 # --- Source schemas ---

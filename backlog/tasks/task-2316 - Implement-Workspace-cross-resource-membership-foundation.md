@@ -55,6 +55,13 @@ Task 1 completed and reviewed:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py -q` passed with `21 passed, 6 warnings`.
 - Verification: `git diff --check 243e0b63c9..924aafeb0a66919201b60b4c19414a399f2b81bf` passed.
 - Worker Bandit touched-scope scan reported zero findings for `ChaChaNotes_DB.py`.
+Task 2 completed by Worker 2:
+- Added `membership_models.py` constants, dataclasses, and base64-url JSON cursor helpers for workspace and reverse resource membership pagination.
+- Added Workspace membership request/response/list/context summary schemas with Literal validation and 16 KiB provenance/metadata JSON bounds.
+- Added focused model/schema tests in `tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `21 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched-scope scan reported zero findings for `membership_models.py` and `workspace_schemas.py`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
