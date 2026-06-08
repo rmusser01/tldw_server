@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react"
-import { Button, Input, Space, Table, Tag, Typography } from "antd"
+import { Button, Input, Select, Space, Table, Tag, Typography } from "antd"
 import type { ColumnsType } from "antd/es/table"
 import type {
   ScheduledTask,
@@ -7,7 +7,6 @@ import type {
 } from "@/services/scheduled-tasks-control-plane"
 import {
   SCHEDULED_TASK_ATTENTION_STATUS_KEYS,
-  buildWatchlistTaskLinks,
   formatScheduledTaskTimestamp,
   getScheduledTaskProductStatus,
   getScheduledTaskTypeLabel,
@@ -16,6 +15,7 @@ import {
   type ScheduledTaskProductStatus,
   type ScheduledTaskStatusKey
 } from "./scheduled-task-status"
+import { WatchlistTaskActionLinks } from "./WatchlistTaskActionLinks"
 
 export interface ScheduledTaskTableRowActionContext {
   task: ScheduledTask
@@ -229,8 +229,6 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
           )
         }
 
-        const links = buildWatchlistTaskLinks(task)
-
         return (
           <Space wrap>
             <Button
@@ -240,61 +238,11 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
             >
               Inspect
             </Button>
-            {links.settingsUrl ? (
-              <Button
-                size="small"
-                type="link"
-                href={links.settingsUrl}
-                target="_self"
-                aria-label={watchlistLinkLabel("Open monitor settings", task)}
-              >
-                Open monitor settings
-              </Button>
-            ) : null}
-            {links.activityUrl ? (
-              <Button
-                size="small"
-                type="link"
-                href={links.activityUrl}
-                target="_self"
-                aria-label={watchlistLinkLabel("Open activity", task)}
-              >
-                Open activity
-              </Button>
-            ) : null}
-            {links.reportsUrl ? (
-              <Button
-                size="small"
-                type="link"
-                href={links.reportsUrl}
-                target="_self"
-                aria-label={watchlistLinkLabel("Open reports", task)}
-              >
-                Open reports
-              </Button>
-            ) : null}
-            {links.latestRunUrl ? (
-              <Button
-                size="small"
-                type="link"
-                href={links.latestRunUrl}
-                target="_self"
-                aria-label={watchlistLinkLabel("Open latest run", task)}
-              >
-                Open latest run
-              </Button>
-            ) : null}
-            {links.latestOutputUrl ? (
-              <Button
-                size="small"
-                type="link"
-                href={links.latestOutputUrl}
-                target="_self"
-                aria-label={watchlistLinkLabel("Open latest report", task)}
-              >
-                Open latest report
-              </Button>
-            ) : null}
+            <WatchlistTaskActionLinks
+              task={task}
+              size="small"
+              getAriaLabel={watchlistLinkLabel}
+            />
           </Space>
         )
       }
@@ -328,40 +276,28 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
               onChange={(event) => setSearchText(event.target.value)}
               style={{ width: 240 }}
             />
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Space align="center" size={8}>
               <Typography.Text type="secondary">Status</Typography.Text>
-              <select
+              <Select
+                id="scheduled-task-status-filter"
                 aria-label="Status filter"
                 value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as ScheduledTaskStatusFilter)
-                }
-                style={{ height: 32 }}
-              >
-                {statusFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                onChange={(value) => setStatusFilter(value)}
+                options={statusFilterOptions}
+                style={{ width: 160 }}
+              />
+            </Space>
+            <Space align="center" size={8}>
               <Typography.Text type="secondary">Type</Typography.Text>
-              <select
+              <Select
+                id="scheduled-task-type-filter"
                 aria-label="Type filter"
                 value={typeFilter}
-                onChange={(event) =>
-                  setTypeFilter(event.target.value as ScheduledTaskTypeFilter)
-                }
-                style={{ height: 32 }}
-              >
-                {typeFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(value) => setTypeFilter(value)}
+                options={typeFilterOptions}
+                style={{ width: 180 }}
+              />
+            </Space>
           </Space>
         </div>
       )}

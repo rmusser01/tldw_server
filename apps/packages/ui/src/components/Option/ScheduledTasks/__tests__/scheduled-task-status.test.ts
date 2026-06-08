@@ -134,6 +134,48 @@ describe("scheduled task status helpers", () => {
     })
   })
 
+  it("falls back to internal Watchlists settings when manage_url is unsafe", () => {
+    const baseTask = {
+      id: "watchlist_job:unsafe-url",
+      primitive: "watchlist_job" as const,
+      title: "Unsafe URL monitor",
+      status: "scheduled",
+      enabled: true,
+      edit_mode: "external" as const,
+      source_ref: { job_id: 42 }
+    }
+
+    for (const manageUrl of [
+      "https://evil.example/watchlists?tab=jobs",
+      "//evil.example/watchlists?tab=jobs",
+      "javascript:alert(1)",
+      "/not-watchlists?tab=jobs",
+      "/watchlists.example?tab=jobs"
+    ]) {
+      expect(
+        buildWatchlistTaskLinks({
+          ...baseTask,
+          manage_url: manageUrl
+        }).settingsUrl
+      ).toBe("/watchlists?tab=jobs")
+    }
+  })
+
+  it("keeps safe path-only Watchlists manage URLs", () => {
+    expect(
+      buildWatchlistTaskLinks({
+        id: "watchlist_job:safe-url",
+        primitive: "watchlist_job",
+        title: "Safe URL monitor",
+        status: "scheduled",
+        enabled: true,
+        edit_mode: "external",
+        manage_url: "/watchlists/jobs/42?tab=jobs",
+        source_ref: { job_id: 42 }
+      }).settingsUrl
+    ).toBe("/watchlists/jobs/42?tab=jobs")
+  })
+
   it("builds exact Watchlists run and output links when ids are available", () => {
     expect(
       buildWatchlistTaskLinks({

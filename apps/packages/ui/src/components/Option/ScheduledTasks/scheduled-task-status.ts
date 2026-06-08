@@ -128,6 +128,23 @@ const emptyWatchlistTaskLinks = (settingsUrl: string | null): WatchlistTaskLinks
   latestOutputUrl: null
 })
 
+export const sanitizeWatchlistsManageUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null
+
+  const trimmed = value.trim()
+  if (!trimmed || /[\r\n]/.test(trimmed)) return null
+  if (trimmed.startsWith("//")) return null
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return null
+  if (!trimmed.startsWith("/watchlists")) return null
+
+  const nextCharacter = trimmed.charAt("/watchlists".length)
+  if (nextCharacter && !["/", "?", "#"].includes(nextCharacter)) {
+    return null
+  }
+
+  return trimmed
+}
+
 const statusIncludes = (status: string, tokens: readonly string[]): boolean => {
   const normalized = status.toLowerCase()
   return tokens.some((token) => {
@@ -292,11 +309,12 @@ export const buildWatchlistTaskLinks = (
   task: WatchlistTaskLinkInput
 ): WatchlistTaskLinks => {
   if (task.primitive !== "watchlist_job") {
-    return emptyWatchlistTaskLinks(task.manage_url || null)
+    return emptyWatchlistTaskLinks(sanitizeWatchlistsManageUrl(task.manage_url))
   }
 
   const sourceRef = task.source_ref || {}
-  const settingsUrl = task.manage_url || "/watchlists?tab=jobs"
+  const settingsUrl =
+    sanitizeWatchlistsManageUrl(task.manage_url) ?? "/watchlists?tab=jobs"
   const jobId = toPositiveInteger(sourceRef.job_id)
   const latestRunId = firstPositiveInteger(sourceRef, RUN_ID_KEYS)
   const latestOutputId = firstPositiveInteger(sourceRef, OUTPUT_ID_KEYS)

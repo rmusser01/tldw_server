@@ -1,6 +1,7 @@
 import React from "react"
 import { Button, Card, Descriptions, Tag, Typography } from "antd"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import { buildWatchlistTaskLinks } from "./scheduled-task-status"
 
 type WatchlistJobReadOnlyPanelProps = {
   task: ScheduledTask
@@ -11,7 +12,7 @@ export const WatchlistJobReadOnlyPanel: React.FC<WatchlistJobReadOnlyPanelProps>
   task,
   onOpenManageUrl
 }) => {
-  const manageUrl = task.manage_url ?? "/watchlists?tab=jobs"
+  const manageUrl = buildWatchlistTaskLinks(task).settingsUrl ?? "/watchlists?tab=jobs"
 
   return (
     <Card title={task.title}>

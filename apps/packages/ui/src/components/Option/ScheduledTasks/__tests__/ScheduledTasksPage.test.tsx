@@ -103,6 +103,32 @@ describe("ScheduledTasksPage", () => {
     expect(mocks.listScheduledTasks).not.toHaveBeenCalled()
   })
 
+  it("passes an abort signal to the scheduled-tasks support probe", async () => {
+    let receivedSignal: AbortSignal | undefined
+    fetchMock.mockImplementationOnce((_url, init?: RequestInit) => {
+      receivedSignal = init?.signal ?? undefined
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          paths: {
+            "/api/v1/scheduled-tasks": {}
+          }
+        })
+      })
+    })
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+    expect(receivedSignal).toBeInstanceOf(AbortSignal)
+  })
+
   it("shows auth-required recovery copy for scheduled task load failures", async () => {
     mocks.listScheduledTasks.mockRejectedValue(
       Object.assign(new Error("Request failed: 401 (GET /api/v1/scheduled-tasks)"), {
@@ -433,6 +459,8 @@ describe("ScheduledTasksPage", () => {
   })
 
   it("filters scheduled tasks by product status and search text", async () => {
+    const user = userEvent.setup()
+
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
         {
@@ -480,16 +508,14 @@ describe("ScheduledTasksPage", () => {
     expect(within(healthyRow as HTMLElement).getByText("Waiting for next run")).toBeInTheDocument()
     expect(within(healthyRow as HTMLElement).queryByText("scheduled")).not.toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText("Status filter"), {
-      target: { value: "needs_attention" }
-    })
+    await user.click(screen.getByRole("combobox", { name: "Status filter" }))
+    await user.click(await screen.findByTitle("Needs attention"))
 
     expect(screen.queryByText("Healthy reminder")).not.toBeInTheDocument()
     expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText("Status filter"), {
-      target: { value: "all" }
-    })
+    await user.click(screen.getByRole("combobox", { name: "Status filter" }))
+    await user.click(await screen.findByTitle("All statuses"))
     fireEvent.change(screen.getByRole("textbox", { name: "Search scheduled tasks" }), {
       target: { value: "healthy" }
     })

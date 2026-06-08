@@ -20,6 +20,7 @@ import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
+const SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS = 8000
 
 const LoadingState: React.FC = () => (
   <div role="status" aria-live="polite">
@@ -53,10 +54,16 @@ export const ScheduledTasksPage: React.FC = () => {
     }
 
     let cancelled = false
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => {
+      controller.abort()
+    }, SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS)
 
     const probeScheduledTasksSupport = async () => {
       try {
-        const response = await fetch(`${serverUrl}/openapi.json`)
+        const response = await fetch(`${serverUrl}/openapi.json`, {
+          signal: controller.signal
+        })
         if (!response.ok) {
           if (!cancelled) {
             setScheduledTasksSupported(true)
@@ -77,6 +84,8 @@ export const ScheduledTasksPage: React.FC = () => {
         if (!cancelled) {
           setScheduledTasksSupported(true)
         }
+      } finally {
+        window.clearTimeout(timeoutId)
       }
     }
 
@@ -84,6 +93,8 @@ export const ScheduledTasksPage: React.FC = () => {
 
     return () => {
       cancelled = true
+      window.clearTimeout(timeoutId)
+      controller.abort()
     }
   }, [connectionConfig?.serverUrl, connectionConfigLoading])
 

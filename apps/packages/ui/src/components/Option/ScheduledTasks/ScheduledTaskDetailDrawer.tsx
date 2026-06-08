@@ -2,13 +2,13 @@ import React from "react"
 import { Button, Descriptions, Drawer, Space, Tag, Typography } from "antd"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import {
-  buildWatchlistTaskLinks,
   formatScheduledTaskTimestamp,
   getScheduledTaskProductStatus,
   getScheduledTaskTypeLabel,
   isNativeReminderTask,
   scheduledTaskStatusToneToTagColor
 } from "./scheduled-task-status"
+import { WatchlistTaskActionLinks } from "./WatchlistTaskActionLinks"
 
 export interface ScheduledTaskDetailDrawerProps {
   open: boolean
@@ -102,37 +102,7 @@ const renderTaskActions = ({
     )
   }
 
-  const links = buildWatchlistTaskLinks(task)
-
-  return (
-    <Space wrap>
-      {links.settingsUrl ? (
-        <Button type="link" href={links.settingsUrl} target="_self">
-          Open monitor settings
-        </Button>
-      ) : null}
-      {links.activityUrl ? (
-        <Button type="link" href={links.activityUrl} target="_self">
-          Open activity
-        </Button>
-      ) : null}
-      {links.reportsUrl ? (
-        <Button type="link" href={links.reportsUrl} target="_self">
-          Open reports
-        </Button>
-      ) : null}
-      {links.latestRunUrl ? (
-        <Button type="link" href={links.latestRunUrl} target="_self">
-          Open latest run
-        </Button>
-      ) : null}
-      {links.latestOutputUrl ? (
-        <Button type="link" href={links.latestOutputUrl} target="_self">
-          Open latest report
-        </Button>
-      ) : null}
-    </Space>
-  )
+  return <WatchlistTaskActionLinks task={task} />
 }
 
 export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps> = ({
