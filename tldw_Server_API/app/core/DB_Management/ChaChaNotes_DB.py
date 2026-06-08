@@ -9108,6 +9108,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ws_notes_workspace ON workspace_notes(workspace_id)"
             )
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_resource_memberships (
+                    workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    resource_type       TEXT NOT NULL,
+                    resource_id         TEXT NOT NULL,
+                    role                TEXT NOT NULL DEFAULT 'member',
+                    label               TEXT,
+                    transfer_policy     TEXT NOT NULL DEFAULT 'link',
+                    provenance_json     TEXT NOT NULL DEFAULT '{}',
+                    metadata_json       TEXT NOT NULL DEFAULT '{}',
+                    created_by_user_id  TEXT,
+                    updated_by_user_id  TEXT,
+                    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted             BOOLEAN NOT NULL DEFAULT 0,
+                    client_id           TEXT NOT NULL DEFAULT 'unknown',
+                    version             INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (workspace_id, resource_type, resource_id)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_workspace "
+                "ON workspace_resource_memberships(workspace_id, deleted, resource_type, role)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_resource "
+                "ON workspace_resource_memberships(resource_type, resource_id, deleted)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_updated "
+                "ON workspace_resource_memberships(workspace_id, updated_at)"
+            )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite workspace sub-resource schema: {exc}") from exc  # noqa: TRY003
 
@@ -9289,6 +9322,32 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_ws_notes_workspace ON workspace_notes(workspace_id)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_resource_memberships (
+                workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                resource_type       TEXT NOT NULL,
+                resource_id         TEXT NOT NULL,
+                role                TEXT NOT NULL DEFAULT 'member',
+                label               TEXT,
+                transfer_policy     TEXT NOT NULL DEFAULT 'link',
+                provenance_json     TEXT NOT NULL DEFAULT '{}',
+                metadata_json       TEXT NOT NULL DEFAULT '{}',
+                created_by_user_id  TEXT,
+                updated_by_user_id  TEXT,
+                created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                deleted             BOOLEAN NOT NULL DEFAULT false,
+                client_id           TEXT NOT NULL DEFAULT 'unknown',
+                version             INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (workspace_id, resource_type, resource_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_workspace "
+            "ON workspace_resource_memberships(workspace_id, deleted, resource_type, role)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_resource "
+            "ON workspace_resource_memberships(resource_type, resource_id, deleted)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_updated "
+            "ON workspace_resource_memberships(workspace_id, updated_at)",
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
@@ -16096,6 +16155,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
             self.hard_delete_conversation(str(conversation_id))
         with self.transaction() as conn:
+            conn.execute("DELETE FROM workspace_resource_memberships WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspace_project_roots WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
 
@@ -18059,6 +18119,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:
+        """Fetch a workspace source by id."""
+        return self._get_workspace_source(workspace_id, source_id)
+
     def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all sources for a workspace ordered by position."""
         cursor = self.execute_query(
@@ -18144,6 +18208,580 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "UPDATE workspace_sources SET position = ?, version = version + 1 WHERE workspace_id = ? AND id = ?",
                     (idx, workspace_id, source_id),
                 )
+
+    # --- Workspace Resource Membership Methods ---
+
+    @staticmethod
+    def _normalize_workspace_membership_required_string(value: Any, field_name: str) -> str:
+        normalized = str(value if value is not None else "").strip()
+        if not normalized:
+            raise InputError(f"{field_name} is required.")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _normalize_workspace_membership_optional_string(value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @classmethod
+    def _normalize_workspace_membership_json_object(cls, value: Any, field_name: str) -> tuple[dict[str, Any], str]:
+        if value is None:
+            normalized: dict[str, Any] = {}
+        elif isinstance(value, str):
+            if not value.strip():
+                normalized = {}
+            else:
+                try:
+                    parsed = json.loads(value)
+                except json.JSONDecodeError as exc:
+                    raise InputError(f"{field_name} must be valid JSON.") from exc  # noqa: TRY003
+                if not isinstance(parsed, dict):
+                    raise InputError(f"{field_name} must be a JSON object.")  # noqa: TRY003
+                normalized = parsed
+        elif isinstance(value, Mapping):
+            normalized = dict(value)
+        else:
+            raise InputError(f"{field_name} must be a JSON object.")  # noqa: TRY003
+
+        try:
+            dumped = json.dumps(normalized, ensure_ascii=True, sort_keys=True)
+        except TypeError as exc:
+            raise InputError(f"{field_name} must be JSON-serializable.") from exc  # noqa: TRY003
+        return normalized, dumped
+
+    @classmethod
+    def _load_workspace_membership_json_object(cls, value: Any, *, field_name: str) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, Mapping):
+            return dict(value)
+        if isinstance(value, str):
+            if not value.strip():
+                return {}
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                preview = value[:120].replace("\n", "\\n")
+                logger.warning(
+                    "Failed to decode workspace resource membership JSON field {} ({} chars): {}",
+                    field_name,
+                    len(value),
+                    preview,
+                )
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def _normalize_workspace_membership_input(self, data: Mapping[str, Any]) -> dict[str, Any]:
+        resource_type = self._normalize_workspace_membership_required_string(
+            data.get("resource_type"),
+            "resource_type",
+        )
+        resource_id = self._normalize_workspace_membership_required_string(
+            data.get("resource_id"),
+            "resource_id",
+        )
+        role = self._normalize_workspace_membership_optional_string(data.get("role")) or "member"
+        transfer_policy = (
+            self._normalize_workspace_membership_optional_string(data.get("transfer_policy"))
+            or "link"
+        )
+        label = self._normalize_workspace_membership_optional_string(data.get("label"))
+        provenance, provenance_json = self._normalize_workspace_membership_json_object(
+            data.get("provenance", data.get("provenance_json")),
+            "provenance",
+        )
+        metadata, metadata_json = self._normalize_workspace_membership_json_object(
+            data.get("metadata", data.get("metadata_json")),
+            "metadata",
+        )
+        return {
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "role": role,
+            "label": label,
+            "transfer_policy": transfer_policy,
+            "provenance": provenance,
+            "provenance_json": provenance_json,
+            "metadata": metadata,
+            "metadata_json": metadata_json,
+        }
+
+    def _normalize_workspace_membership_actor(self, user_id: str | None) -> str | None:
+        if user_id is None:
+            return None
+        normalized = str(user_id).strip()
+        return normalized or None
+
+    def _normalize_workspace_membership_row(self, row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if not row:
+            return None
+        item = dict(row)
+        item["provenance"] = self._load_workspace_membership_json_object(
+            item.get("provenance_json"),
+            field_name="provenance_json",
+        )
+        item["metadata"] = self._load_workspace_membership_json_object(
+            item.get("metadata_json"),
+            field_name="metadata_json",
+        )
+        item["version"] = int(item.get("version") or 1)
+        return item
+
+    @staticmethod
+    def _workspace_membership_fields_match(
+        existing: Mapping[str, Any],
+        requested: Mapping[str, Any],
+    ) -> bool:
+        return (
+            existing.get("role") == requested.get("role")
+            and existing.get("label") == requested.get("label")
+            and existing.get("transfer_policy") == requested.get("transfer_policy")
+            and existing.get("provenance") == requested.get("provenance")
+            and existing.get("metadata") == requested.get("metadata")
+        )
+
+    @staticmethod
+    def _workspace_membership_is_constraint_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(
+            token in message
+            for token in (
+                "unique",
+                "duplicate",
+                "constraint",
+                "foreign key",
+            )
+        )
+
+    def _workspace_membership_write_error(self, exc: Exception) -> CharactersRAGDBError:
+        if self._workspace_membership_is_constraint_error(exc):
+            return ConflictError(
+                f"Workspace resource membership write conflicted: {exc}",
+                entity="workspace_resource_memberships",
+            )
+        return CharactersRAGDBError(f"Workspace resource membership write failed: {exc}")  # noqa: TRY003
+
+    def _get_workspace_resource_membership_with_conn(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        workspace_id: str,
+        resource_type: str,
+        resource_id: str,
+        *,
+        include_deleted: bool,
+    ) -> dict[str, Any] | None:
+        clauses = [
+            "workspace_id = ?",
+            "resource_type = ?",
+            "resource_id = ?",
+        ]
+        params: list[Any] = [workspace_id, resource_type, resource_id]
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._workspace_active_deleted_value())
+        row = conn.execute(
+            f"SELECT * FROM workspace_resource_memberships WHERE {' AND '.join(clauses)}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        return self._normalize_workspace_membership_row(row)
+
+    def add_workspace_resource_membership(
+        self,
+        workspace_id: str,
+        data: dict[str, Any],
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or restore a Workspace resource membership."""
+        normalized_workspace_id = self._normalize_workspace_membership_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        values = self._normalize_workspace_membership_input(data)
+        actor = self._normalize_workspace_membership_actor(user_id)
+        restore_deleted = bool(data.get("restore_deleted") is True)
+        now = self._get_current_utc_timestamp_iso()
+        active_deleted_value = self._workspace_active_deleted_value()
+
+        try:
+            with self.transaction() as conn:
+                existing = self._get_workspace_resource_membership_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    values["resource_type"],
+                    values["resource_id"],
+                    include_deleted=True,
+                )
+                if existing is not None:
+                    if existing.get("deleted") in (True, 1):
+                        if not restore_deleted:
+                            raise ConflictError(
+                                "Workspace resource membership exists but is deleted.",
+                                entity="workspace_resource_memberships",
+                                entity_id=values["resource_id"],
+                            )
+                        conn.execute(
+                            """
+                            UPDATE workspace_resource_memberships
+                               SET role = ?,
+                                   label = ?,
+                                   transfer_policy = ?,
+                                   provenance_json = ?,
+                                   metadata_json = ?,
+                                   updated_by_user_id = ?,
+                                   updated_at = ?,
+                                   deleted = ?,
+                                   client_id = ?,
+                                   version = version + 1
+                             WHERE workspace_id = ?
+                               AND resource_type = ?
+                               AND resource_id = ?
+                            """,
+                            (
+                                values["role"],
+                                values["label"],
+                                values["transfer_policy"],
+                                values["provenance_json"],
+                                values["metadata_json"],
+                                actor,
+                                now,
+                                active_deleted_value,
+                                self.client_id or "unknown",
+                                normalized_workspace_id,
+                                values["resource_type"],
+                                values["resource_id"],
+                            ),
+                        )
+                        restored = self._get_workspace_resource_membership_with_conn(
+                            conn,
+                            normalized_workspace_id,
+                            values["resource_type"],
+                            values["resource_id"],
+                            include_deleted=False,
+                        )
+                        if restored is None:
+                            raise CharactersRAGDBError("Restored membership row could not be reloaded.")  # noqa: TRY003
+                        return restored
+
+                    if self._workspace_membership_fields_match(existing, values):
+                        return existing
+                    raise ConflictError(
+                        "Workspace resource membership already exists with different fields.",
+                        entity="workspace_resource_memberships",
+                        entity_id=values["resource_id"],
+                    )
+
+                conn.execute(
+                    """
+                    INSERT INTO workspace_resource_memberships (
+                        workspace_id,
+                        resource_type,
+                        resource_id,
+                        role,
+                        label,
+                        transfer_policy,
+                        provenance_json,
+                        metadata_json,
+                        created_by_user_id,
+                        updated_by_user_id,
+                        created_at,
+                        updated_at,
+                        deleted,
+                        client_id,
+                        version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        normalized_workspace_id,
+                        values["resource_type"],
+                        values["resource_id"],
+                        values["role"],
+                        values["label"],
+                        values["transfer_policy"],
+                        values["provenance_json"],
+                        values["metadata_json"],
+                        actor,
+                        actor,
+                        now,
+                        now,
+                        active_deleted_value,
+                        self.client_id or "unknown",
+                    ),
+                )
+                created = self._get_workspace_resource_membership_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    values["resource_type"],
+                    values["resource_id"],
+                    include_deleted=False,
+                )
+                if created is None:
+                    raise CharactersRAGDBError("Created membership row could not be reloaded.")  # noqa: TRY003
+                return created
+        except ConflictError:
+            raise
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            existing = self.get_workspace_resource_membership(
+                normalized_workspace_id,
+                values["resource_type"],
+                values["resource_id"],
+                include_deleted=True,
+            )
+            if existing is not None and not existing.get("deleted") and self._workspace_membership_fields_match(
+                existing,
+                values,
+            ):
+                return existing
+            raise self._workspace_membership_write_error(exc) from exc
+
+    def get_workspace_resource_membership(
+        self,
+        workspace_id: str,
+        resource_type: str,
+        resource_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Fetch one Workspace resource membership by composite id."""
+        normalized_workspace_id = self._normalize_workspace_membership_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        normalized_resource_type = self._normalize_workspace_membership_required_string(
+            resource_type,
+            "resource_type",
+        )
+        normalized_resource_id = self._normalize_workspace_membership_required_string(
+            resource_id,
+            "resource_id",
+        )
+        try:
+            if include_deleted:
+                cursor = self.execute_query(
+                    "SELECT * FROM workspace_resource_memberships "
+                    "WHERE workspace_id = ? AND resource_type = ? AND resource_id = ?",
+                    (
+                        normalized_workspace_id,
+                        normalized_resource_type,
+                        normalized_resource_id,
+                    ),
+                )
+                return self._normalize_workspace_membership_row(cursor.fetchone())
+            cursor = self.execute_query(
+                "SELECT * FROM workspace_resource_memberships "
+                "WHERE workspace_id = ? AND resource_type = ? AND resource_id = ? AND deleted = ?",
+                (
+                    normalized_workspace_id,
+                    normalized_resource_type,
+                    normalized_resource_id,
+                    self._workspace_active_deleted_value(),
+                ),
+            )
+            return self._normalize_workspace_membership_row(cursor.fetchone())
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed fetching workspace resource membership: {exc}") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _normalize_membership_limit(limit: int) -> int:
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise InputError("limit must be an integer.")  # noqa: TRY003
+        if limit < 1 or limit > 1000:
+            raise InputError("limit must be between 1 and 1000.")  # noqa: TRY003
+        return limit
+
+    def list_workspace_resource_memberships(
+        self,
+        workspace_id: str,
+        *,
+        resource_type: str | None = None,
+        role: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 100,
+        cursor: tuple[str, str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List resource memberships for a workspace in deterministic order."""
+        normalized_workspace_id = self._normalize_workspace_membership_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        normalized_limit = self._normalize_membership_limit(limit)
+        clauses = ["workspace_id = ?"]
+        params: list[Any] = [normalized_workspace_id]
+        if resource_type is not None:
+            clauses.append("resource_type = ?")
+            params.append(
+                self._normalize_workspace_membership_required_string(
+                    resource_type,
+                    "resource_type",
+                )
+            )
+        if role is not None:
+            clauses.append("role = ?")
+            params.append(self._normalize_workspace_membership_required_string(role, "role"))
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._workspace_active_deleted_value())
+        if cursor is not None:
+            if len(cursor) != 3:
+                raise InputError("cursor must be a tuple of (updated_at, resource_type, resource_id).")  # noqa: TRY003
+            cursor_updated_at, cursor_resource_type, cursor_resource_id = cursor
+            clauses.append(
+                "(updated_at < ? "
+                "OR (updated_at = ? AND resource_type > ?) "
+                "OR (updated_at = ? AND resource_type = ? AND resource_id > ?))"
+            )
+            params.extend(
+                [
+                    cursor_updated_at,
+                    cursor_updated_at,
+                    cursor_resource_type,
+                    cursor_updated_at,
+                    cursor_resource_type,
+                    cursor_resource_id,
+                ]
+            )
+        params.append(normalized_limit)
+        cursor_obj = self.execute_query(
+            f"SELECT * FROM workspace_resource_memberships WHERE {' AND '.join(clauses)} "  # nosec B608
+            "ORDER BY updated_at DESC, resource_type ASC, resource_id ASC LIMIT ?",
+            tuple(params),
+        )
+        return [
+            normalized
+            for row in cursor_obj.fetchall()
+            if (normalized := self._normalize_workspace_membership_row(row)) is not None
+        ]
+
+    def list_resource_workspace_memberships(
+        self,
+        resource_type: str,
+        resource_id: str,
+        *,
+        include_deleted: bool = False,
+        limit: int = 100,
+        cursor: tuple[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List all workspace memberships for one resource."""
+        normalized_resource_type = self._normalize_workspace_membership_required_string(
+            resource_type,
+            "resource_type",
+        )
+        normalized_resource_id = self._normalize_workspace_membership_required_string(
+            resource_id,
+            "resource_id",
+        )
+        normalized_limit = self._normalize_membership_limit(limit)
+        clauses = ["resource_type = ?", "resource_id = ?"]
+        params: list[Any] = [normalized_resource_type, normalized_resource_id]
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._workspace_active_deleted_value())
+        if cursor is not None:
+            if len(cursor) != 2:
+                raise InputError("cursor must be a tuple of (updated_at, workspace_id).")  # noqa: TRY003
+            cursor_updated_at, cursor_workspace_id = cursor
+            clauses.append(
+                "(updated_at < ? OR (updated_at = ? AND workspace_id > ?))"
+            )
+            params.extend([cursor_updated_at, cursor_updated_at, cursor_workspace_id])
+        params.append(normalized_limit)
+        cursor_obj = self.execute_query(
+            f"SELECT * FROM workspace_resource_memberships WHERE {' AND '.join(clauses)} "  # nosec B608
+            "ORDER BY updated_at DESC, workspace_id ASC LIMIT ?",
+            tuple(params),
+        )
+        return [
+            normalized
+            for row in cursor_obj.fetchall()
+            if (normalized := self._normalize_workspace_membership_row(row)) is not None
+        ]
+
+    def delete_workspace_resource_membership(
+        self,
+        workspace_id: str,
+        resource_type: str,
+        resource_id: str,
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Soft-delete one Workspace resource membership.
+
+        Missing rows and already deleted rows are idempotent no-ops.
+        """
+        normalized_workspace_id = self._normalize_workspace_membership_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        normalized_resource_type = self._normalize_workspace_membership_required_string(
+            resource_type,
+            "resource_type",
+        )
+        normalized_resource_id = self._normalize_workspace_membership_required_string(
+            resource_id,
+            "resource_id",
+        )
+        actor = self._normalize_workspace_membership_actor(user_id)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                existing = self._get_workspace_resource_membership_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    normalized_resource_type,
+                    normalized_resource_id,
+                    include_deleted=True,
+                )
+                if existing is None or existing.get("deleted") in (True, 1):
+                    return None
+                deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+                conn.execute(
+                    """
+                    UPDATE workspace_resource_memberships
+                       SET deleted = ?,
+                           updated_at = ?,
+                           updated_by_user_id = ?,
+                           client_id = ?,
+                           version = version + 1
+                     WHERE workspace_id = ?
+                       AND resource_type = ?
+                       AND resource_id = ?
+                    """,
+                    (
+                        deleted_value,
+                        now,
+                        actor,
+                        self.client_id or "unknown",
+                        normalized_workspace_id,
+                        normalized_resource_type,
+                        normalized_resource_id,
+                    ),
+                )
+                return self._get_workspace_resource_membership_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    normalized_resource_type,
+                    normalized_resource_id,
+                    include_deleted=True,
+                )
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise self._workspace_membership_write_error(exc) from exc
+
+    def get_conversation_for_workspace_membership(self, conversation_id: str) -> dict[str, Any] | None:
+        """Fetch the compact conversation row needed by Workspace membership adapters."""
+        normalized_conversation_id = self._normalize_workspace_membership_required_string(
+            conversation_id,
+            "conversation_id",
+        )
+        cursor = self.execute_query(
+            "SELECT id, title, workspace_id, scope_type, last_modified, version "
+            "FROM conversations WHERE id = ? AND deleted = 0",
+            (normalized_conversation_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
     # --- Workspace Artifact Methods ---
 
@@ -18669,6 +19307,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def get_workspace_note(self, workspace_id: str, note_id: int) -> dict[str, Any] | None:
+        """Fetch a non-deleted workspace note by id."""
+        return self._get_workspace_note(workspace_id, note_id)
 
     def list_workspace_notes(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all non-deleted notes for a workspace."""

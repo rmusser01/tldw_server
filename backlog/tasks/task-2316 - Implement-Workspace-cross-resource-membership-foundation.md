@@ -15,6 +15,9 @@ references:
 documentation:
 - Docs/superpowers/specs/2026-06-07-workspace-cross-resource-membership-design.md
 - Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md
+modified_files:
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
 ---
 
 ## Description
