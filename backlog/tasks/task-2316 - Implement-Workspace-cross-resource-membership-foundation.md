@@ -131,6 +131,9 @@ Task 4 spec-review fix:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `66 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
 - Bandit touched-scope scan reported zero findings for `workspace_schemas.py` (`/tmp/bandit_workspace_membership_schema_review_fix.json`).
+Task 4 reviews after follow-up:
+- Spec compliance re-review approved the API routes after the unsupported POST resource-type fix; required prefixes, filters, `resolve=false`, soft-delete/relink, reverse lookup, archived write, and missing media DB behavior remain compliant.
+- Code quality review approved the endpoint implementation and focused tests; no route registration, dependency usage, response model, or error mapping issues were found.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
