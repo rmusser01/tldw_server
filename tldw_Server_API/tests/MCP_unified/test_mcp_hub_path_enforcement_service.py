@@ -577,6 +577,28 @@ async def test_authored_path_grants_compile_for_runtime_enforcement() -> None:
     assert denied["reason"] == "path_action_denied"
     assert denied["path_decisions"][0]["matched_grant_prefix"] == "documents/private"
 
+    root_allowed = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grant_authoring": {
+                    "workspace": [
+                        {"prefix": "./", "actions": ["read"]},
+                    ],
+                },
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        tool_args={"path": "README.md"},
+        tool_def=_filesystem_tool_def(action="read"),
+    )
+
+    assert root_allowed["within_scope"] is True
+    assert root_allowed["path_decisions"][0]["grant_source"] == "path_grants"
+    assert root_allowed["path_decisions"][0]["matched_grant_prefix"] == "."
+
 
 @pytest.mark.asyncio
 async def test_invalid_authored_path_grants_do_not_fall_back_to_legacy_allowlist() -> None:
@@ -608,6 +630,10 @@ async def test_invalid_authored_path_grants_do_not_fall_back_to_legacy_allowlist
     assert result["within_scope"] is False
     assert result["reason"] == "path_action_not_granted"
     assert result["path_decisions"][0]["grant_outcome"] == "not_granted"
+    assert result["scope_payload"]["path_grant_diagnostic_codes"] == ["invalid_prefix"]
+    assert result["scope_payload"]["path_grant_diagnostics"] == [
+        {"code": "invalid_prefix", "source": "workspace[0]", "severity": "error"}
+    ]
 
 
 @pytest.mark.asyncio

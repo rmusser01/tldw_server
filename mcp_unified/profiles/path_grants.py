@@ -98,14 +98,11 @@ def _as_action_list(value: Any) -> list[str]:
 def _normalize_path_prefix(raw_value: Any) -> str | None:
     """Normalize a workspace-relative path-grant prefix."""
 
-    value = str(raw_value or "").strip().replace("\\", "/")
-    while value.startswith("./"):
-        value = value[2:]
-    value = re.sub(r"/+", "/", value)
+    if not raw_value:
+        return None
+    value = str(raw_value).strip().replace("\\", "/")
     if not value:
         return None
-    if value == ".":
-        return "."
     if value.startswith("/") or _WINDOWS_DRIVE_PREFIX_RE.match(value):
         return None
 
@@ -171,11 +168,13 @@ def _compile_rules(rules: Iterable[tuple[Mapping[str, Any], str, str]]) -> PathG
                 "prefix": prefix,
                 "actions": set(actions),
                 "effect": effect,
-                "source": source,
-                "level": level,
+                "sources": {source},
+                "levels": {level},
             }
         else:
             existing["actions"].update(actions)
+            existing["sources"].add(source)
+            existing["levels"].add(level)
 
     items = sorted(merged.values(), key=lambda item: (str(item["prefix"]), str(item["effect"])))
     path_grants = [
@@ -191,8 +190,8 @@ def _compile_rules(rules: Iterable[tuple[Mapping[str, Any], str, str]]) -> PathG
             "prefix": str(item["prefix"]),
             "actions": sorted(item["actions"]),
             "effect": str(item["effect"]),
-            "source": str(item["source"]),
-            "level": str(item["level"]),
+            "source": ", ".join(sorted(item["sources"])),
+            "level": ", ".join(sorted(item["levels"])),
         }
         for item in items
     ]
@@ -214,9 +213,16 @@ def compile_policy_path_grants(policy_document: Mapping[str, Any]) -> PathGrantC
 
     document = _as_mapping(policy_document)
     if "path_grants" in document:
+        raw_grants = document.get("path_grants")
+        if isinstance(raw_grants, Mapping) or not isinstance(raw_grants, Iterable) or isinstance(
+            raw_grants, (str, bytes, bytearray)
+        ):
+            diagnostic = _diagnostic("invalid_shape", "path_grants must be a list of grant objects", "path_grants")
+            return PathGrantCompilationResult(path_grants=[], preview=[], diagnostics=[diagnostic.as_dict()])
         rules = (
             (rule, f"path_grants[{index}]", "runtime")
-            for index, rule in enumerate(_as_rule_list(document.get("path_grants")))
+            for index, rule in enumerate(raw_grants)
+            if isinstance(rule, Mapping)
         )
         return _compile_rules(rules)
 

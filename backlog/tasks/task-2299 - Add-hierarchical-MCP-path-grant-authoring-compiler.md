@@ -43,13 +43,13 @@ Added `mcp_unified.profiles.path_grants` as a standalone compiler for flat and a
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented hierarchical MCP path-grant authoring as an optional compiler layer over the existing flat `path_grants` runtime contract. Authored rules compile to normalized flat grants, explicit flat grants remain authoritative, invalid authored rules fail closed, and the user guide documents the authoring shape.
+Implemented hierarchical MCP path-grant authoring as an optional compiler layer over the existing flat `path_grants` runtime contract. Authored rules compile to normalized flat grants, explicit flat grants remain authoritative, invalid authored rules fail closed with redacted diagnostic metadata, and the user guide documents the authoring shape.
 
 Verification:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_path_grant_authoring.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q` -> 45 passed, 6 warnings.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m ruff check <touched python files>` -> all checks passed.
+- `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_path_grant_authoring.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q` -> 47 passed, 6 warnings.
+- `ruff check <touched python files>` -> all checks passed.
 - `git diff --check` -> clean.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r mcp_unified/profiles/path_grants.py mcp_unified/profiles/__init__.py tldw_Server_API/app/services/mcp_hub_path_enforcement_service.py -f json -o /tmp/bandit_mcp_hierarchical_path_grants.json` -> 0 findings, 0 errors.
+- `python -m bandit -r mcp_unified/profiles/path_grants.py mcp_unified/profiles/__init__.py tldw_Server_API/app/services/mcp_hub_path_enforcement_service.py -f json -o /tmp/bandit_mcp_hierarchical_path_grants.json` -> 0 findings, 0 errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

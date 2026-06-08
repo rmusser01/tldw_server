@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
-from mcp_unified.profiles.path_grants import compile_policy_path_grants, has_path_grant_policy
+from mcp_unified.profiles.path_grants import (
+    PathGrantCompilationResult,
+    compile_policy_path_grants,
+    has_path_grant_policy,
+)
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
@@ -174,11 +178,35 @@ def _policy_allowlist_prefixes(effective_policy: dict[str, Any] | None) -> list[
     return sorted(out)
 
 
-def _policy_path_grants(effective_policy: dict[str, Any] | None) -> list[dict[str, Any]] | None:
+def _policy_path_grant_compilation(effective_policy: dict[str, Any] | None) -> PathGrantCompilationResult | None:
     policy_document = _as_dict((effective_policy or {}).get("policy_document"))
     if not has_path_grant_policy(policy_document):
         return None
-    return compile_policy_path_grants(policy_document).path_grants
+    return compile_policy_path_grants(policy_document)
+
+
+def _path_grant_diagnostic_summary(compilation: PathGrantCompilationResult | None) -> list[dict[str, str]]:
+    if compilation is None:
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for diagnostic in compilation.diagnostics:
+        code = str(diagnostic.get("code") or "").strip()
+        source = str(diagnostic.get("source") or "").strip()
+        severity = str(diagnostic.get("severity") or "").strip()
+        if not code:
+            continue
+        key = (code, source, severity)
+        if key in seen:
+            continue
+        seen.add(key)
+        item = {"code": code}
+        if source:
+            item["source"] = source
+        if severity:
+            item["severity"] = severity
+        out.append(item)
+    return out
 
 
 def _allowlist_roots(*, workspace_root: Path, allowlist_prefixes: list[str]) -> list[Path]:
@@ -435,6 +463,8 @@ class McpHubPathEnforcementService:
             "path_scope_mode": scope_payload.get("path_scope_mode"),
             "workspace_id": scope_payload.get("workspace_id"),
             "path_allowlist_prefixes": list(scope_payload.get("path_allowlist_prefixes") or []),
+            "path_grant_diagnostic_codes": list(scope_payload.get("path_grant_diagnostic_codes") or []),
+            "path_grant_diagnostics": list(scope_payload.get("path_grant_diagnostics") or []),
             "path_decisions": path_decisions,
         }
         return {key: value for key, value in preview.items() if value not in ("", [])}
@@ -517,7 +547,9 @@ class McpHubPathEnforcementService:
         workspace_root = Path(workspace_root_text).expanduser().resolve(strict=False)
         base_path = Path(str(scope.get("cwd") or workspace_root)).expanduser().resolve(strict=False)
         path_allowlist_prefixes = _policy_allowlist_prefixes(effective_policy)
-        path_grants = _policy_path_grants(effective_policy)
+        path_grant_compilation = _policy_path_grant_compilation(effective_policy)
+        path_grants = path_grant_compilation.path_grants if path_grant_compilation is not None else None
+        path_grant_diagnostics = _path_grant_diagnostic_summary(path_grant_compilation)
         is_multi_root_candidate = (
             str(scope.get("path_scope_mode") or "").strip() == "workspace_root" and len(allowed_workspace_ids) > 1
         )
@@ -634,6 +666,7 @@ class McpHubPathEnforcementService:
                             scope=scope,
                             reason=str(decision.get("reason_code") or "path_action_not_granted"),
                             path_decisions=[decision],
+                            path_grant_diagnostics=path_grant_diagnostics,
                         )
             result["normalized_paths"] = normalized_paths
             path_decisions: list[dict[str, Any]] = []
@@ -665,6 +698,7 @@ class McpHubPathEnforcementService:
                 normalized_paths=normalized_paths,
                 path_allowlist_prefixes=path_allowlist_prefixes,
                 path_decisions=path_decisions,
+                path_grant_diagnostics=path_grant_diagnostics,
                 allowed_workspace_ids=allowed_workspace_ids,
                 workspace_bundle_ids=list(multi_root_result.get("workspace_bundle_ids") or []),
                 workspace_bundle_roots=list(multi_root_result.get("workspace_bundle_roots") or []),
@@ -716,6 +750,7 @@ class McpHubPathEnforcementService:
                         scope=scope,
                         reason=str(decision.get("reason_code") or "path_action_not_granted"),
                         path_decisions=list(path_decisions),
+                        path_grant_diagnostics=path_grant_diagnostics,
                     )
                 continue
             if allowlist_roots and not any(_is_within(root, normalized) for root in allowlist_roots):
@@ -734,6 +769,7 @@ class McpHubPathEnforcementService:
             normalized_paths=normalized_paths,
             path_allowlist_prefixes=path_allowlist_prefixes,
             path_decisions=path_decisions,
+            path_grant_diagnostics=path_grant_diagnostics,
         )
         return result
 
@@ -745,6 +781,7 @@ class McpHubPathEnforcementService:
         reason: str | None = None,
         path_allowlist_prefixes: list[str] | None = None,
         path_decisions: list[dict[str, Any]] | None = None,
+        path_grant_diagnostics: list[dict[str, str]] | None = None,
         allowed_workspace_ids: list[str] | None = None,
         workspace_bundle_ids: list[str] | None = None,
         workspace_bundle_roots: list[str] | None = None,
@@ -766,6 +803,11 @@ class McpHubPathEnforcementService:
             payload["path_allowlist_prefixes"] = list(path_allowlist_prefixes)
         if path_decisions:
             payload["path_decisions"] = [dict(decision) for decision in path_decisions]
+        if path_grant_diagnostics:
+            diagnostics = [dict(diagnostic) for diagnostic in path_grant_diagnostics]
+            diagnostic_codes = [str(diagnostic.get("code") or "").strip() for diagnostic in diagnostics]
+            payload["path_grant_diagnostics"] = diagnostics
+            payload["path_grant_diagnostic_codes"] = sorted(_unique([code for code in diagnostic_codes if code]))
         if allowed_workspace_ids:
             payload["allowed_workspace_ids"] = list(allowed_workspace_ids)
         if workspace_bundle_ids:
@@ -788,6 +830,7 @@ class McpHubPathEnforcementService:
         scope: dict[str, Any],
         reason: str,
         path_decisions: list[dict[str, Any]],
+        path_grant_diagnostics: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "path_scope_mode": str(scope.get("path_scope_mode") or "none").strip() or "none",
@@ -795,6 +838,11 @@ class McpHubPathEnforcementService:
             "reason": reason,
             "path_decisions": [dict(decision) for decision in path_decisions],
         }
+        if path_grant_diagnostics:
+            diagnostics = [dict(diagnostic) for diagnostic in path_grant_diagnostics]
+            diagnostic_codes = [str(diagnostic.get("code") or "").strip() for diagnostic in diagnostics]
+            payload["path_grant_diagnostics"] = diagnostics
+            payload["path_grant_diagnostic_codes"] = sorted(_unique([code for code in diagnostic_codes if code]))
         return {key: value for key, value in payload.items() if value not in (None, "", [])}
 
     def _blocked_result(
@@ -834,6 +882,7 @@ class McpHubPathEnforcementService:
         scope: dict[str, Any],
         reason: str,
         path_decisions: list[dict[str, Any]],
+        path_grant_diagnostics: list[dict[str, str]] | None = None,
         force_approval: bool = True,
     ) -> dict[str, Any]:
         return {
@@ -847,6 +896,7 @@ class McpHubPathEnforcementService:
                 scope=scope,
                 reason=reason,
                 path_decisions=path_decisions,
+                path_grant_diagnostics=path_grant_diagnostics,
             ),
         }
 

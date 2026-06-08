@@ -35,9 +35,24 @@ def test_compile_hierarchical_path_grants_returns_flat_runtime_grants() -> None:
         "prefix": "documents/private",
         "actions": ["edit", "write"],
         "effect": "deny",
-        "source": "folders[0]",
+        "source": "folders[0], folders[1]",
         "level": "folder",
     }
+    assert result.diagnostics == []
+
+
+def test_compile_hierarchical_path_grants_normalizes_root_prefix_forms() -> None:
+    from mcp_unified.profiles.path_grants import compile_hierarchical_path_grants
+
+    result = compile_hierarchical_path_grants(
+        {
+            "workspace": [
+                {"prefix": "././", "actions": ["read"]},
+            ]
+        }
+    )
+
+    assert result.path_grants == [{"prefix": ".", "actions": ["read"], "effect": "allow"}]
     assert result.diagnostics == []
 
 
@@ -85,3 +100,15 @@ def test_compile_policy_path_grants_prefers_explicit_flat_grants() -> None:
 
     assert result.path_grants == [{"prefix": "flat", "actions": ["read"], "effect": "allow"}]
     assert result.preview[0]["source"] == "path_grants[0]"
+
+
+def test_compile_policy_path_grants_rejects_dict_shaped_flat_grants() -> None:
+    from mcp_unified.profiles.path_grants import compile_policy_path_grants
+
+    result = compile_policy_path_grants({"path_grants": {"prefix": "docs", "actions": ["read"]}})
+
+    assert result.path_grants == []
+    assert result.preview == []
+    assert result.has_errors is True
+    assert result.diagnostics[0]["code"] == "invalid_shape"
+    assert result.diagnostics[0]["source"] == "path_grants"
