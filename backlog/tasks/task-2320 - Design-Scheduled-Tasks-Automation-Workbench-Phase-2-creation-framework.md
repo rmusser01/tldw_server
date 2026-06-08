@@ -50,7 +50,7 @@ Drafted the Scheduled Tasks Automation Workbench Phase 2 creation design as a pr
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Phase 2 creation design spec and marked it ready for user review. Local review tightened extension behavior and post-create management/monitoring expectations. Verification: staged diff check passed; placeholder-marker scan found none in the spec; smart-punctuation scan found none. Bandit is not applicable because this is a documentation/backlog-only task.
+Created the Phase 2 creation design spec and refined it after product/UX review. The review pass added task-detail URL behavior, invalid tab/task fallback behavior, a distinct Handoff only capability state, a split between Reminder creation wizard and handoff panels, static Phase 2A capability-registry guidance, conservative reminder status/notification copy, and URL privacy safeguards for handoff summaries and extension prefills. Bandit is not applicable because this is a documentation/backlog-only task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

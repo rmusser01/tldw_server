@@ -166,7 +166,10 @@ Deep link behavior:
 | `/scheduled-tasks?tab=create` | Opens Create |
 | `/scheduled-tasks?tab=create&template=reminder` | Opens Create with Reminder selected |
 | `/scheduled-tasks?tab=create&template=watch` | Opens Create with Watch for new items selected |
+| `/scheduled-tasks?tab=tasks&task_id=<id>` | Opens Tasks and attempts to open the task detail drawer |
+| Invalid tab | Opens Overview with a non-blocking "Tab not available" message |
 | Invalid template | Opens Create with a non-blocking "Template not available" message |
+| Missing/invalid task ID | Opens Tasks with a non-blocking "Task not found" message after task data loads |
 | Created reminder success | Opens created task detail by default, with "Create another" as secondary |
 
 ## Create Tab Model
@@ -179,18 +182,20 @@ Recommended structure:
 2. **Lightweight filters.** Suggested filters: All, Available now, Watch, Ingest, Research, Agent, Advanced.
 3. **Template grid.** Cards grouped by intent, not source.
 4. **Capability messages.** Each card must show whether it can be created here, needs setup elsewhere, is managed by Watchlists, is planned, or is unavailable.
-5. **Selected template panel or wizard.** Use the same underlying model for available templates and handoff templates.
+5. **Selected template panel or wizard.** Use one template selection model, then route to either the Reminder creation wizard or a handoff/planned-state panel.
+
+Phase 2A should use a static frontend template capability registry plus existing scheduled-tasks support checks. It should not introduce or simulate a new backend capability-reporting API. The "Available now" filter means "available according to the Phase 2A template registry and existing reminder API support."
 
 ### Template Catalog
 
 | Template | User intent | Phase 2A state | Primary CTA | Secondary action |
 | --- | --- | --- | --- | --- |
 | Reminder | "Remind me later or repeatedly" | Available | Create reminder | Create another after success |
-| Watch for new items | "Tell me when something new appears" | Managed in Watchlists or Needs setup | Continue in Watchlists | Copy setup summary |
-| Ingest new content | "Add new content to my library/search" | Managed in Watchlists or Needs setup | Continue in Watchlists | Copy setup summary |
+| Watch for new items | "Tell me when something new appears" | Handoff only or Needs setup | Continue in Watchlists | Copy setup summary |
+| Ingest new content | "Add new content to my library/search" | Handoff only or Needs setup | Continue in Watchlists | Copy setup summary |
 | Recurring question | "Keep asking this question as new data arrives" | Planned | View planned capability | Open Knowledge/RAG area when available |
 | Agent task | "Send a prompt/message to an agent later" | Planned | View planned capability | Open ACP/Agent area when available |
-| Advanced task | "I know the domain I need" | Available as handoff chooser | Choose destination | Copy setup summary |
+| Advanced task | "I know the domain I need" | Handoff only | Choose destination | Copy setup summary |
 
 ### Capability States
 
@@ -198,6 +203,7 @@ Recommended structure:
 | --- | --- | --- |
 | Available | Can be created from `/scheduled-tasks` now | Enabled CTA, full wizard, success opens task |
 | Needs setup | Could work after configuration or credentials | CTA opens setup destination or health guidance |
+| Handoff only | Phase 2A can guide the user to the owning workspace but cannot create a task | CTA opens domain destination or copyable setup panel; no create/scheduled language |
 | Managed in Watchlists | Domain already owns the required deep setup | CTA opens Watchlists with explanation |
 | Planned | Product direction exists but this template cannot create a task yet | Disabled create CTA; show honest future state and domain link if useful |
 | Unavailable | Dependency is down or unsupported in current environment | Disabled create CTA with recovery action when available |
@@ -228,24 +234,38 @@ Constraints:
 - Keep the matching logic testable as a pure helper.
 - Structure the model so a later AI draft assistant can replace or augment matching without changing the card/wizard IA.
 
-## Creation Flow
+## Creation And Handoff Flow
 
-All Phase 2A templates should use the same conceptual flow, even when some steps collapse for handoff cards.
+Phase 2A should split task creation from domain handoff.
+
+1. **Create wizard.** Used only for Available templates that create a real scheduled task from `/scheduled-tasks`. In Phase 2A this means Reminder.
+2. **Handoff panel.** Used for Handoff only, Needs setup, Managed in Watchlists, Planned, and Unavailable templates. Handoff panels may use the same review language, but should not force users through disabled wizard steps or imply a task will be saved.
+
+Create wizard steps:
 
 | Step | Purpose | Phase 2A behavior |
 | --- | --- | --- |
 | 1. Intent | Choose what the user wants to automate | Template card or matched prompt result |
-| 2. Configure | Capture task-specific inputs | Reminder fields are editable; handoff templates collect only safe summary details if supported |
-| 3. Preview | Explain what will happen before save | Reminder shows schedule/result destination; handoff templates show setup summary and owner |
-| 4. Schedule | Pick one-time or recurring cadence | Reminder supports current schedule controls; handoff templates explain schedule happens in domain workspace |
-| 5. Review | Confirm name, schedule, owner, results destination | Required before create or handoff |
-| 6. Create / Continue | Save or open domain workspace | Reminder creates task; Watch/Ingest continues in Watchlists; planned templates do not create |
+| 2. Configure | Capture task-specific inputs | Reminder fields are editable |
+| 3. Preview | Explain what will happen before save | Reminder shows schedule, status destination, and notification expectation |
+| 4. Schedule | Pick one-time or recurring cadence | Reminder supports current schedule controls |
+| 5. Review | Confirm name, schedule, owner, and status/notification destination | Required before create |
+| 6. Create | Save the scheduled task | Reminder creates a task and returns the created task ID for detail navigation |
+
+Handoff panel sections:
+
+| Section | Purpose | Phase 2A behavior |
+| --- | --- | --- |
+| Intent summary | Confirm what the user wants | Plain-language summary of Watch, Ingest, Recurring Question, Agent Task, or Advanced destination |
+| Owner | Explain where setup continues | Watchlists, Knowledge/RAG, ACP/Agent Tasks, Workflows, or unavailable/planned state |
+| Safe details | Preserve only visible user-provided context | Optional editable setup summary; no hidden URL capture |
+| Next step | Move without fake creation | Open domain workspace, copy setup summary, or view planned capability |
 
 After successful reminder creation:
 
 - Default action: open created task detail in Tasks.
 - Secondary action: create another.
-- Confirmation copy: "Reminder scheduled. Results and status appear in Tasks. Notifications follow your current reminder settings."
+- Confirmation copy: "Reminder scheduled. Status appears in Tasks. Notifications follow your current reminder settings."
 
 After Watch/Ingest handoff:
 
@@ -253,6 +273,7 @@ After Watch/Ingest handoff:
 - Show "Setup continues in Watchlists".
 - Include copyable setup summary when a prefilled deep link is not supported.
 - Link to Watchlists in a new or current route according to existing navigation patterns.
+- Keep any handoff source text visible and editable before the user copies or opens it.
 
 ## Watchlists Boundary
 
@@ -288,11 +309,12 @@ Examples can include GitHub issues, YouTube channels, RSS feeds, site pages, for
 When Phase 2A cannot safely create a Watch/Ingest task:
 
 - Explain why setup continues elsewhere.
-- Preserve the user's chosen intent and any safe source text in a copyable summary.
+- Preserve the user's chosen intent and any safe, user-visible source text in a copyable summary.
 - Deep-link to the closest Watchlists creation/setup destination if available.
 - Avoid hidden side effects.
 - Avoid "created", "scheduled", or "active" success language.
 - Provide a return path to `/scheduled-tasks`.
+- Do not silently copy, prefill, or preserve URLs that may contain credentials, session tokens, invite secrets, private query parameters, fragments, or other sensitive values. Source values should be user-visible and editable before handoff.
 
 Suggested copy:
 
@@ -424,11 +446,13 @@ Every Review screen or handoff screen should answer:
 | Loading templates | Use skeleton cards or lightweight loading text | "Loading automation templates..." |
 | Available template | Enable full wizard | "Create reminder" |
 | Needs setup | Explain missing dependency and action | "Connect or configure this in Watchlists before scheduling." |
+| Handoff only | Explain that this is guidance, not task creation | "Setup continues in Watchlists. No scheduled task has been created yet." |
 | Managed elsewhere | Explain owner and handoff | "Managed in Watchlists" |
 | Planned | Prevent create while preserving roadmap clarity | "Planned capability" |
 | Handoff success | Confirm no task was created | "Setup continues in Watchlists." |
 | Create success | Confirm exact created entity | "Reminder scheduled." |
 | Create failure | Explain cause and preserve inputs | "Could not schedule reminder. Check the highlighted fields and try again." |
+| Invalid tab | Keep user in the workbench without blocking | "That tab is not available. Showing Overview." |
 | Invalid deep link | Keep user in Create without blocking | "That template is not available. Choose another template." |
 
 ## Results And Home Surfacing Model
@@ -437,7 +461,7 @@ Phase 2A should not implement a new Home automation inbox. It must still set cor
 
 Recommended copy policy:
 
-- For Reminder: use only result/notification language supported by the existing reminder behavior.
+- For Reminder: use only status/notification language supported by the existing reminder behavior.
 - For Watchlists-managed tasks: say results and detailed activity are managed in Watchlists; `/scheduled-tasks` shows the task row and available deep links when the job is visible through the control plane.
 - For planned RAG/Agent tasks: do not promise Home surfacing yet.
 
@@ -475,6 +499,7 @@ Phase 2A extension expectations:
 - The extension can open `/scheduled-tasks?tab=create` and direct template URLs.
 - The same intent cards, capability states, and handoff copy should render in extension-sized layouts.
 - If the extension has a current-page URL available to pass safely, it may prefill only a visible source field or setup summary. It must not silently infer filters, schedule, credentials, notification policy, or task ownership.
+- Current-page URLs must be displayed before use and should be sanitized or omitted when they contain credential-like query parameters, fragments, session identifiers, or other private values.
 - If current-page context detection is not implemented, the UI should behave exactly like the WebUI Create tab.
 - Context-aware creation from current pages remains a later phase unless existing extension and route contracts already support it safely.
 
@@ -588,14 +613,18 @@ Phase 2B should not start from implementation details. It should define product-
 ### Phase 2A Product Acceptance
 
 - `/scheduled-tasks` supports URL-addressable Overview, Tasks, and Create tabs.
+- `/scheduled-tasks?tab=tasks&task_id=<id>` can open the Tasks tab and task detail drawer when the task exists.
 - Create tab presents templates by intent, not by source vendor.
 - Reminder is the only fully available creation template unless an existing API safely supports more.
+- Phase 2A template availability is driven by a static frontend registry and existing reminder/scheduled-tasks support checks, not a new simulated capability API.
 - Watch for new items and Ingest new content do not claim creation success unless a real task is created.
 - GitHub and YouTube appear only as examples inside broader Watch/Ingest copy, not as top-level IA assumptions.
 - Deterministic template finder suggests templates from keyword matching and does not infer config.
 - Planned Recurring Question and Agent Task cards clearly communicate that task creation is not available yet.
-- Advanced task is a domain handoff chooser, not a raw JSON/config builder.
+- Advanced task is a handoff-only domain chooser, not a raw JSON/config builder.
+- Handoff-only templates use a handoff panel rather than a fake or disabled create wizard.
 - Handoff screens include owner, next step, and "No scheduled task has been created yet" where applicable.
+- Handoff summaries never silently preserve hidden or sensitive URL values.
 - Reminder success opens task detail by default and offers Create another.
 - Existing Watchlists UX remains reachable and unchanged.
 - Keyboard, screen-reader, and extension-sized responsive flows are covered by focused tests or documented verification.
