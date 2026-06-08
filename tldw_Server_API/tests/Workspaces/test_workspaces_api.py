@@ -372,6 +372,154 @@ def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fast
 
 
 @pytest.mark.integration
+def test_workspace_api_patches_assistant_defaults(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": {
+                        "assistant_kind": "persona",
+                        "assistant_id": "persona-1",
+                        "persona_memory_mode": "read_only",
+                    },
+                },
+            )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["assistant_defaults"]["assistant_kind"] == "persona"
+        assert payload["assistant_defaults"]["assistant_id"] == "persona-1"
+        assert payload["assistant_defaults"]["persona_memory_mode"] == "read_only"
+        assert payload["assistant_defaults"]["voice"] is None
+        assert payload["assistant_defaults"]["style"] is None
+        assert payload["assistant_defaults"]["tool_policy_profile_id"] is None
+        persisted = db.get_workspace("ws-assistant")
+        assert persisted is not None
+        assert persisted["assistant_defaults_json"] == {
+            "assistant_kind": "persona",
+            "assistant_id": "persona-1",
+            "persona_memory_mode": "read_only",
+        }
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_api_requires_confirmation_for_read_write_assistant_default(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            missing_confirmation = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": {
+                        "assistant_kind": "persona",
+                        "assistant_id": "persona-1",
+                        "persona_memory_mode": "read_write",
+                    },
+                },
+            )
+            assert missing_confirmation.status_code == 422, missing_confirmation.text
+
+            confirmed = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": {
+                        "assistant_kind": "persona",
+                        "assistant_id": "persona-1",
+                        "persona_memory_mode": "read_write",
+                    },
+                    "confirm_read_write_assistant_default": True,
+                },
+            )
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.json()["assistant_defaults"]["persona_memory_mode"] == "read_write"
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_api_rejects_confirmation_only_patch(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "confirm_read_write_assistant_default": True,
+                },
+            )
+        assert response.status_code == 422, response.text
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
 def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 

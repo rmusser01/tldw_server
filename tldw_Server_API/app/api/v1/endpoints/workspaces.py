@@ -128,6 +128,7 @@ def _ws_to_response(ws: dict) -> WorkspaceResponse:
         audio_model=ws.get("audio_model"),
         audio_voice=ws.get("audio_voice"),
         audio_speed=ws.get("audio_speed"),
+        assistant_defaults=ws.get("assistant_defaults_json"),
         created_at=str(ws.get("created_at", "")),
         last_modified=str(ws.get("last_modified", "")),
         version=ws.get("version", 1),
@@ -950,6 +951,9 @@ async def patch_workspace(
 ):
     """Update workspace fields with optimistic locking."""
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
+    if "assistant_defaults" in updates:
+        updates["assistant_defaults_json"] = updates.pop("assistant_defaults")
+    updates.pop("confirm_read_write_assistant_default", None)
     if not updates:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

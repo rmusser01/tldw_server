@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
 
 
 WORKSPACE_MIGRATION_MAX_MANIFEST_BYTES = 256 * 1024
@@ -17,6 +17,18 @@ _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 WorkspaceProfile = Literal["research", "project"]
 WorkspaceKind = Literal["research_workspace", "project_workspace"]
+WorkspaceAssistantKind = Literal["persona"]
+WorkspacePersonaMemoryMode = Literal["read_only", "read_write"]
+WorkspaceEffectiveAssistantDefaultStatus = Literal["available", "unavailable", "none"]
+WorkspaceEffectiveAssistantDefaultSource = Literal["workspace", "none"]
+WorkspaceAssistantDefaultDegradedReason = Literal[
+    "persona_deleted",
+    "persona_unavailable",
+    "persona_feature_disabled",
+    "permission_denied",
+    "invalid_default",
+    "unsupported_assistant_kind",
+]
 WorkspaceResolutionStatus = Literal["complete", "partial", "failed"]
 WorkspaceAttentionState = Literal[
     "ready",
@@ -67,6 +79,63 @@ class WorkspaceUpsertRequest(BaseModel):
     workspace_profile: WorkspaceProfile = "research"
 
 
+class WorkspaceAssistantDefaults(BaseModel):
+    """Persisted default assistant selection for new Workspace-scoped chats."""
+
+    assistant_kind: WorkspaceAssistantKind
+    assistant_id: str = Field(..., min_length=1, max_length=128)
+    persona_memory_mode: WorkspacePersonaMemoryMode = "read_only"
+    voice: None = None
+    style: None = None
+    tool_policy_profile_id: None = None
+
+    @field_validator("voice", "style", "tool_policy_profile_id", mode="before")
+    @classmethod
+    def _deferred_fields_must_be_null(cls, value: Any, info: ValidationInfo) -> None:
+        if value is not None:
+            raise ValueError(f"{info.field_name} must be null")
+        return None
+
+
+class WorkspaceEffectiveAssistantDefault(BaseModel):
+    """Resolved Workspace assistant default exposed to clients with degradation state."""
+
+    status: WorkspaceEffectiveAssistantDefaultStatus
+    source: WorkspaceEffectiveAssistantDefaultSource
+    assistant_kind: WorkspaceAssistantKind | None = None
+    assistant_id: str | None = None
+    label: str | None = None
+    persona_memory_mode: WorkspacePersonaMemoryMode | None = None
+    degraded_reason: WorkspaceAssistantDefaultDegradedReason | None = None
+
+    @model_validator(mode="after")
+    def _validate_status_relations(self) -> "WorkspaceEffectiveAssistantDefault":
+        if self.status == "available":
+            if self.assistant_kind is None or self.assistant_id is None:
+                raise ValueError("available assistant defaults require assistant_kind and assistant_id")
+            if self.degraded_reason is not None:
+                raise ValueError("available assistant defaults must not include degraded_reason")
+            return self
+        if self.status == "unavailable":
+            if self.degraded_reason is None:
+                raise ValueError("unavailable assistant defaults require degraded_reason")
+            return self
+        populated_none_fields = [
+            field_name
+            for field_name in (
+                "assistant_kind",
+                "assistant_id",
+                "label",
+                "persona_memory_mode",
+                "degraded_reason",
+            )
+            if getattr(self, field_name) is not None
+        ]
+        if populated_none_fields:
+            raise ValueError("none assistant defaults must not include assistant or degradation fields")
+        return self
+
+
 class WorkspacePatchRequest(BaseModel):
     name: str | None = None
     archived: bool | None = None
@@ -79,7 +148,23 @@ class WorkspacePatchRequest(BaseModel):
     audio_model: str | None = None
     audio_voice: str | None = None
     audio_speed: float | None = None
+    assistant_defaults: WorkspaceAssistantDefaults | None = None
+    confirm_read_write_assistant_default: StrictBool | None = None
     version: int = Field(..., description="Current version for optimistic locking")
+
+    @model_validator(mode="after")
+    def _validate_assistant_default_confirmation(self) -> "WorkspacePatchRequest":
+        if self.assistant_defaults is None:
+            if self.confirm_read_write_assistant_default is not None:
+                raise ValueError("confirm_read_write_assistant_default only applies to assistant_defaults")
+            return self
+        if self.assistant_defaults.persona_memory_mode == "read_write":
+            if self.confirm_read_write_assistant_default is not True:
+                raise ValueError("read_write assistant defaults require confirm_read_write_assistant_default=true")
+            return self
+        if self.confirm_read_write_assistant_default is not None:
+            raise ValueError("confirm_read_write_assistant_default only applies to read_write assistant defaults")
+        return self
 
 
 class WorkspaceResponse(BaseModel):
@@ -96,6 +181,8 @@ class WorkspaceResponse(BaseModel):
     audio_model: str | None = None
     audio_voice: str | None = None
     audio_speed: float | None = None
+    assistant_defaults: WorkspaceAssistantDefaults | None = None
+    effective_assistant_default: WorkspaceEffectiveAssistantDefault | None = None
     created_at: str
     last_modified: str
     version: int
