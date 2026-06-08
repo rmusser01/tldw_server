@@ -715,6 +715,32 @@ describe("WebClipperPanel save flow", () => {
     )
   })
 
+  it("marks note saves as captured while preserving user tags and provenance", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText("Tags"), "research, planning")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_url: "https://example.com/story",
+        capture_metadata: expect.objectContaining({
+          requested_type: "article",
+          actual_type: "article"
+        }),
+        note: expect.objectContaining({
+          keywords: ["research", "planning", "captured"]
+        })
+      })
+    )
+  })
+
   it("runs requested enrichments after save and surfaces completion and conflict states", async () => {
     const user = userEvent.setup()
     const ocrCompletion = createDeferred<Record<string, unknown>>()

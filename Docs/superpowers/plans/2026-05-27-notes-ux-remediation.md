@@ -372,6 +372,8 @@ Likely tests:
   - a reserved tag such as `captured` or `inbox`,
   - or both.
 
+**Decision:** Use a normal reserved tag, `captured`, as the first Inbox/captured view backing model. Web Clipper continues to persist first-class `source_url` and `capture_metadata`; both Web Clipper and sidepanel quick-save add `captured` only to newly captured notes. Sidepanel quick-save persists the page URL in note content because the generic notes create endpoint does not support arbitrary `metadata.source_url`.
+
 **Test plan:**
 - Backend test: Web Clipper save creates/updates note and clipper provenance.
 - Backend or client test: sidepanel quick-save persists source URL/origin through supported storage.
@@ -380,16 +382,18 @@ Likely tests:
 - Browser/sidepanel check where feasible.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 6.
-- [ ] Record the Inbox backing decision in the task.
-- [ ] Add failing tests for sidepanel quick-save provenance persistence.
-- [ ] Add failing tests for captured/inbox list filtering.
-- [ ] Implement the smallest durable provenance path.
-- [ ] Update notes list filter/view model.
-- [ ] Run frontend and backend focused tests.
-- [ ] Run Bandit for touched Python scope if backend code changes.
-- [ ] Run browser/sidepanel verification.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 6.
+- [x] Record the Inbox backing decision in the task.
+- [x] Add failing tests for sidepanel quick-save provenance persistence.
+- [x] Add failing tests for captured/inbox list filtering.
+- [x] Implement the smallest durable provenance path.
+- [x] Update notes list filter/view model.
+- [x] Run frontend and backend focused tests.
+- [x] Run Bandit for touched Python scope if backend code changes.
+- [x] Run browser/sidepanel verification.
+- [x] Update Backlog notes with verification.
+
+**Verification notes:** Focused frontend tests passed. Browser smoke reached `/notes` on the local Next dev server and confirmed the Captured filter renders in the Notes sidebar. Pointer activation could not be completed because the broader page layout placed the notes list partly under the app/sidebar region (`Captured` button left edge at x=-13), causing surrounding elements to intercept clicks; this is a separate layout/accessibility issue for PR 9 rather than the PR 6 data-model change. No Python files were touched, so Bandit was not applicable.
 
 ---
 

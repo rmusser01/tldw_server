@@ -23,6 +23,7 @@ import {
 } from './notes-manager-utils'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
+import { CAPTURED_NOTE_KEYWORD } from '@/services/notes-capture'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -329,6 +330,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           defaultValue: '{{total}} total',
           total
         })
+  const capturedFilterActive = keywordTokens.some(
+    (keyword) => keyword.trim().toLocaleLowerCase() === CAPTURED_NOTE_KEYWORD
+  )
 
   const switchViewMode = React.useCallback(
     (mode: NotesListViewMode) => {
@@ -791,7 +795,27 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     storageKey="filters"
                     testId="notes-section-filters"
                   >
-                    <div className="flex items-center justify-end">
+                    <div className="flex items-center justify-between gap-2">
+                      <Tooltip
+                        title={t('option:notesSearch.capturedFilterTooltip', {
+                          defaultValue: 'Show notes saved from browser capture.'
+                        })}
+                      >
+                        <Button
+                          size="small"
+                          type={capturedFilterActive ? 'primary' : 'default'}
+                          aria-pressed={capturedFilterActive}
+                          onClick={() => {
+                            handleKeywordFilterChange([CAPTURED_NOTE_KEYWORD])
+                            setPage(1)
+                          }}
+                          data-testid="notes-captured-filter"
+                        >
+                          {t('option:notesSearch.capturedFilterAction', {
+                            defaultValue: 'Captured'
+                          })}
+                        </Button>
+                      </Tooltip>
                       <Popover
                         trigger="click"
                         content={searchTipsContent}

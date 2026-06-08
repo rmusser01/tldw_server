@@ -436,4 +436,29 @@ describe("NotesManagerPage stage 39 organization model", () => {
     expect(await screen.findByRole("button", { name: "Organize help" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Tags help" })).toBeInTheDocument()
   })
+
+  it("offers a captured view backed by the reserved captured tag", async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-panel-mock")).toHaveTextContent("2")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Captured" }))
+
+    await waitFor(() => {
+      const searchPaths = mockBgRequest.mock.calls
+        .map((args) => String((args[0] as { path?: string }).path || ""))
+        .filter((path) => path.startsWith("/api/v1/notes/search/?"))
+
+      expect(searchPaths.some((path) => path.includes("tokens=captured"))).toBe(true)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-panel-mock")).toHaveTextContent("1")
+      expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
+        "Tags: captured"
+      )
+    })
+  })
 })
