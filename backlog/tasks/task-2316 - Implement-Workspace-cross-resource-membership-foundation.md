@@ -23,6 +23,11 @@ modified_files:
 - tldw_Server_API/app/core/Workspaces/membership_adapters.py
 - tldw_Server_API/app/core/Workspaces/membership_service.py
 - tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py
+- tldw_Server_API/app/api/v1/endpoints/workspaces.py
+- tldw_Server_API/app/api/v1/endpoints/workspace_memberships.py
+- tldw_Server_API/app/api/v1/router_groups/content.py
+- tldw_Server_API/app/api/v1/router_groups/minimal.py
+- tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py
 ---
 
 ## Description
@@ -34,7 +39,7 @@ Implement the approved first server-backed Workspace cross-resource membership s
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 ChaChaNotes persists `workspace_resource_memberships` with SQLite/PostgreSQL schema support, idempotent create, conflict handling, soft-delete, restore, deterministic workspace listing, and reverse resource lookup.
-- [ ] #2 Workspace membership models, schemas, adapters, service, and API endpoints implement the approved first slice for `workspace_note`, `media`, `workspace_source`, `workspace_artifact`, and `chat`.
+- [x] #2 Workspace membership models, schemas, adapters, service, and API endpoints implement the approved first slice for `workspace_note`, `media`, `workspace_source`, `workspace_artifact`, and `chat`.
 - [ ] #3 Backfill helper is explicit and idempotent; Workspace context exposes compact membership totals without making membership a global Library/Notes/search filter.
 - [ ] #4 MCP permission preview/path admission remains driven by MCP policy/root bindings, not generic membership.
 - [ ] #5 Focused tests and Bandit verification are recorded; known skips or unrelated failures are documented.
@@ -106,6 +111,17 @@ Task 3 on-link race follow-up:
 - Bandit touched-scope scan reported zero findings for `membership_adapters.py` and `membership_service.py`.
 - Spec compliance review approved Task 3 after coverage follow-up.
 - Code quality review approved Task 3 after the reserved `on_link` correction and found no remaining adapter/service issues.
+
+Task 4 completed by Worker 4:
+- Added Workspace membership API routes under `/api/v1/workspaces/{workspace_id}/memberships` for list, create, get, and soft-delete.
+- Added reverse resource lookup router under `/api/v1/workspace-memberships/resources/{resource_type}/{resource_id}` with the resource-scoped response shape.
+- Registered the reverse router in the content and minimal router groups using the Workspace route gate.
+- Added focused FastAPI endpoint tests for create, idempotent duplicate, conflicting duplicate, archived write rejection, filtered list with `resolve=false`, get/missing get, soft-delete hiding, relink restore, reverse lookup, unsupported resource type, and missing media DB.
+- TDD red run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q --tb=short` failed during collection before `workspace_memberships.py` existed.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q --tb=short` passed with `11 passed, 6 warnings`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `66 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched-scope scan reported zero findings for `workspaces.py`, `workspace_memberships.py`, and `workspace_schemas.py` (`/tmp/bandit_workspace_memberships_api.json`).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

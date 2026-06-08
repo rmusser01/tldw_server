@@ -33,6 +33,9 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceFileInventoryScanRequest,
     WorkspaceFileInventoryStatusResponse,
     WorkspaceListResponse,
+    WorkspaceMembershipCreateRequest,
+    WorkspaceMembershipListResponse,
+    WorkspaceMembershipResponse,
     WorkspaceNoteCreateRequest,
     WorkspaceNoteResponse,
     WorkspaceNoteUpdateRequest,
@@ -71,6 +74,10 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     enqueue_workspace_file_inventory_scan_job,
 )
 from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
+from tldw_Server_API.app.core.Workspaces.membership_service import (
+    WorkspaceMembershipService,
+    WorkspaceMembershipServiceError,
+)
 from tldw_Server_API.app.core.Workspaces.source_jobs import (
     WORKSPACE_SOURCE_JOB_DOMAIN,
     WORKSPACE_SOURCE_JOB_QUEUE,
@@ -462,6 +469,39 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
+
+
+def _membership_service(db: CharactersRAGDB) -> WorkspaceMembershipService:
+    return WorkspaceMembershipService(db)
+
+
+def _request_user_id(current_user: User) -> str:
+    return str(current_user.id)
+
+
+def _membership_service_error_to_http(exc: WorkspaceMembershipServiceError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "code": exc.code,
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+def _workspace_membership_not_found(resource_type: str, resource_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "code": "workspace_membership_not_found",
+            "message": "Workspace membership was not found.",
+            "details": {
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+            },
+        },
+    )
 
 
 def _workspace_with_primary_root(
@@ -983,6 +1023,140 @@ async def delete_workspace(
         db.delete_workspace(workspace_id, ws["version"])
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
+
+
+# ── Memberships ─────────────────────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/memberships",
+    response_model=WorkspaceMembershipListResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace resource memberships",
+)
+async def list_workspace_memberships(
+    workspace_id: str,
+    resource_type: str | None = Query(default=None),
+    role: str | None = Query(default=None),
+    include_deleted: bool = Query(default=False),
+    resolve: bool = Query(default=True),
+    limit: int = Query(default=100, ge=1, le=1000),
+    cursor: str | None = Query(default=None),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceMembershipListResponse:
+    """List memberships for one workspace."""
+    try:
+        payload = _membership_service(db).list_workspace_memberships(
+            workspace_id,
+            resource_type=resource_type,
+            role=role,
+            include_deleted=include_deleted,
+            resolve=resolve,
+            limit=limit,
+            cursor=cursor,
+            media_db=media_db,
+            user_id=_request_user_id(current_user),
+        )
+    except WorkspaceMembershipServiceError as exc:
+        raise _membership_service_error_to_http(exc) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace memberships") from exc
+    return WorkspaceMembershipListResponse(**payload)
+
+
+@router.post(
+    "/{workspace_id}/memberships",
+    response_model=WorkspaceMembershipResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Create workspace resource membership",
+)
+async def create_workspace_membership(
+    workspace_id: str,
+    body: WorkspaceMembershipCreateRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceMembershipResponse:
+    """Link a resource to a workspace, idempotently for matching active rows."""
+    try:
+        payload = _membership_service(db).link_membership(
+            workspace_id,
+            body,
+            media_db=media_db,
+            user_id=_request_user_id(current_user),
+            resolve=True,
+        )
+    except WorkspaceMembershipServiceError as exc:
+        raise _membership_service_error_to_http(exc) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create workspace membership") from exc
+    return WorkspaceMembershipResponse(**payload)
+
+
+@router.get(
+    "/{workspace_id}/memberships/{resource_type}/{resource_id}",
+    response_model=WorkspaceMembershipResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace resource membership",
+)
+async def get_workspace_membership(
+    workspace_id: str,
+    resource_type: str,
+    resource_id: str,
+    resolve: bool = Query(default=True),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceMembershipResponse:
+    """Fetch one active workspace membership by resource."""
+    try:
+        payload = _membership_service(db).get_membership(
+            workspace_id,
+            resource_type,
+            resource_id,
+            media_db=media_db,
+            user_id=_request_user_id(current_user),
+            resolve=resolve,
+        )
+    except WorkspaceMembershipServiceError as exc:
+        raise _membership_service_error_to_http(exc) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace membership") from exc
+    if payload is None:
+        raise _workspace_membership_not_found(resource_type, resource_id)
+    return WorkspaceMembershipResponse(**payload)
+
+
+@router.delete(
+    "/{workspace_id}/memberships/{resource_type}/{resource_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
+    summary="Delete workspace resource membership",
+)
+async def delete_workspace_membership(
+    workspace_id: str,
+    resource_type: str,
+    resource_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> Response:
+    """Soft-delete a workspace membership; missing rows are idempotent no-ops."""
+    try:
+        _membership_service(db).unlink_membership(
+            workspace_id,
+            resource_type,
+            resource_id,
+            media_db=media_db,
+            user_id=_request_user_id(current_user),
+        )
+    except WorkspaceMembershipServiceError as exc:
+        raise _membership_service_error_to_http(exc) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete workspace membership") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Sources ─────────────────────────────────────────────────────

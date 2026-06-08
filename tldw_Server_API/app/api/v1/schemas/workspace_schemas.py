@@ -290,6 +290,15 @@ class WorkspaceMembershipListResponse(BaseModel):
     summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
 
 
+class WorkspaceResourceMembershipListResponse(BaseModel):
+    resource_type: WorkspaceMembershipResourceType
+    resource_id: str
+    items: list[WorkspaceMembershipResponse]
+    total: int
+    next_cursor: str | None = None
+    summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
+
+
 class WorkspaceContextMembershipSummary(BaseModel):
     total: int = 0
     by_resource_type: dict[str, int] = Field(default_factory=dict)
