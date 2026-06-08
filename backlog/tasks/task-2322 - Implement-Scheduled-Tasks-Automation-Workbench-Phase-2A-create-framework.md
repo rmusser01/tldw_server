@@ -71,6 +71,11 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 3 template regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 14 tests.
 - Task 3 additional check: `cd apps/packages/ui && bunx tsc --noEmit --pretty false` was attempted but exited with Node heap out-of-memory before type diagnostics were produced.
 - Bandit skip: Task 3 changed frontend TypeScript/TSX tests/components and Backlog tracking only; no backend Python files were touched.
+- Task 3 code-quality follow-up: Removed raw free-form handoff notes from visible/copyable setup summaries and added prose-secret warning coverage for values like `api key: sk-test-secret`.
+- Task 3 code-quality red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` failed because prose secret text rendered in the setup summary and no warning appeared.
+- Task 3 code-quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 tests.
+- Task 3 code-quality template regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 14 tests.
+- Task 3 code-quality diff check: `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -80,6 +80,28 @@ describe("ScheduledTaskCreatePanel", () => {
     )
   })
 
+  it("does not include prose secrets in handoff summary", async () => {
+    const user = userEvent.setup()
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="watch"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+      />
+    )
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Optional source or setup note" }),
+      "api key: sk-test-secret"
+    )
+
+    expect(screen.getByText(/private-looking values/)).toBeInTheDocument()
+    expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent(
+      "api key: sk-test-secret"
+    )
+    expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent("sk-test-secret")
+  })
+
   it("renders planned Recurring question without create controls", () => {
     render(
       <ScheduledTaskCreatePanel

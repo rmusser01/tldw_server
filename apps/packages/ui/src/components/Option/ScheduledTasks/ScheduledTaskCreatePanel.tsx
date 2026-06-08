@@ -31,6 +31,12 @@ const isTemplateFilterId = (value: SegmentedValue): value is ScheduledTaskTempla
 const requiresWatchlistsHandoff = (template: ScheduledTaskTemplate): boolean =>
   template.id === "watch" || template.id === "ingest"
 
+const PRIVATE_LOOKING_PROSE_PATTERN =
+  /\b(api[_ -]?key|password|passphrase|secret|bearer\s+token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)\b|sk-[A-Za-z0-9_-]+/i
+
+const containsPrivateLookingProse = (value: string): boolean =>
+  PRIVATE_LOOKING_PROSE_PATTERN.test(value)
+
 const TemplateCard: React.FC<{
   template: ScheduledTaskTemplate
   stateLabel: string
@@ -64,12 +70,16 @@ const TemplateCard: React.FC<{
 const HandoffPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => {
   const [sourceNote, setSourceNote] = useState("")
   const safeSourceText = toSafeHandoffSourceText(sourceNote)
-  const hasUnsafeSource = Boolean(sourceNote.trim()) && !safeSourceText
+  const normalizedSourceNote = sourceNote.trim()
+  const hasUnsafeSource =
+    Boolean(normalizedSourceNote) &&
+    (!safeSourceText || containsPrivateLookingProse(normalizedSourceNote))
+  const hasSafeSourceNote = Boolean(normalizedSourceNote) && !hasUnsafeSource
   const watchlistsHandoff = requiresWatchlistsHandoff(template)
   const summaryLines = [
     `Template: ${template.title}`,
     `Intent: ${template.intent}`,
-    safeSourceText ? `Source/setup note: ${safeSourceText}` : null
+    hasSafeSourceNote ? "Source/setup note provided" : null
   ].filter((line): line is string => Boolean(line))
 
   return (
