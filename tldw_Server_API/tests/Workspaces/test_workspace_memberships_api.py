@@ -362,6 +362,16 @@ def test_unsupported_resource_type_returns_stable_400_code(client: TestClient) -
     assert response.json()["detail"]["code"] == "unsupported_resource_type"
 
 
+def test_post_unsupported_resource_type_returns_stable_400_code(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/workspaces/workspace-1/memberships",
+        json=_membership_payload(resource_type="note", resource_id="1"),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "unsupported_resource_type"
+
+
 def test_missing_media_db_on_media_link_returns_503_code(membership_app: FastAPI) -> None:
     membership_app.dependency_overrides[try_get_media_db_for_user] = lambda: None
     with TestClient(membership_app, raise_server_exceptions=False) as test_client:

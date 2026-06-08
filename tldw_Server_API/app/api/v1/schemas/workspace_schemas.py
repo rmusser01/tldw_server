@@ -224,7 +224,7 @@ class WorkspaceListResponse(BaseModel):
 class WorkspaceMembershipCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    resource_type: WorkspaceMembershipResourceType
+    resource_type: str = Field(..., min_length=1)
     resource_id: str = Field(..., min_length=1)
     role: WorkspaceMembershipRole = "member"
     label: str | None = Field(default=None, max_length=512)

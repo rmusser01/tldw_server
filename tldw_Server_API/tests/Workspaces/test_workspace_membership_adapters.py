@@ -197,7 +197,6 @@ def test_workspace_membership_create_request_accepts_valid_payload() -> None:
 @pytest.mark.parametrize(
     "field_name,value",
     [
-        ("resource_type", "note"),
         ("role", "owner"),
         ("transfer_policy", "move"),
     ],

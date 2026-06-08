@@ -122,6 +122,15 @@ Task 4 completed by Worker 4:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
 - Bandit touched-scope scan reported zero findings for `workspaces.py`, `workspace_memberships.py`, and `workspace_schemas.py` (`/tmp/bandit_workspace_membership_api_task2316.json`).
+Task 4 spec-review fix:
+- Fixed unsupported POST resource types reaching FastAPI/Pydantic literal validation before the service by changing `WorkspaceMembershipCreateRequest.resource_type` to a raw non-empty string while keeping response schemas typed.
+- Added POST regression coverage for `resource_type="note"` returning `400` with `detail.code == "unsupported_resource_type"`.
+- Updated the older schema unit expectation so role/transfer-policy literals remain schema-owned while create `resource_type` validation is service-owned.
+- TDD red run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py::test_post_unsupported_resource_type_returns_stable_400_code -q --tb=short` failed with `assert 422 == 400`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `12 passed, 6 warnings`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `66 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched-scope scan reported zero findings for `workspace_schemas.py` (`/tmp/bandit_workspace_membership_schema_review_fix.json`).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
