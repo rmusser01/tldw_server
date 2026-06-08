@@ -135,6 +135,42 @@ def test_precomputed_query_retries_transient_hnsw_segment_error(mock_chroma_clie
     retry_collection.query.assert_called_once()
 
 
+def test_store_retries_transient_hnsw_segment_error(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    first_collection = MagicMock()
+    first_collection.name = "retry_store_collection"
+    first_collection.metadata = {}
+    first_collection.count.return_value = 0
+    first_collection.upsert.side_effect = InternalError(
+        "Error executing plan: Internal error: Error creating hnsw segment reader: Nothing found on disk"
+    )
+    retry_collection = MagicMock()
+    retry_collection.name = "retry_store_collection"
+    mock_chroma_client.get_or_create_collection.side_effect = [first_collection, retry_collection]
+    monkeypatch.setattr(cdl.time, "sleep", lambda _seconds: None)
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+
+    result = mgr.store_in_chroma(
+        collection_name="retry_store_collection",
+        texts=["hello"],
+        embeddings=[[0.1, 0.2, 0.3]],
+        ids=["doc_1"],
+        metadatas=[{"i": 1}],
+    )
+
+    assert result is retry_collection
+    assert mock_chroma_client.get_or_create_collection.call_count == 2
+    first_collection.upsert.assert_called_once()
+    retry_collection.upsert.assert_called_once_with(
+        documents=["hello"],
+        embeddings=[[0.1, 0.2, 0.3]],
+        ids=["doc_1"],
+        metadatas=[{"i": 1}],
+    )
+
+
 @pytest.mark.unit
 def test_minimal_integration_with_real_persistent_client(temp_chroma_path):
     """Lightweight integration: real PersistentClient in temp dir, basic lifecycle."""

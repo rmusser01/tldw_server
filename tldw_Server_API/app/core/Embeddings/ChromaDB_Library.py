@@ -1328,6 +1328,32 @@ class ChromaDBManager:
                     f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} items to '{target_collection.name}'.")
 
             except chromadb.errors.ChromaError as ce:  # Catch specific ChromaDB errors
+                if _is_transient_chroma_segment_error(ce):
+                    logger.warning(
+                        f"User '{self.user_id}': Retrying ChromaDB upsert for collection "
+                        f"'{target_collection.name}' after transient segment-reader error: {ce}"
+                    )
+                    time.sleep(0.05)
+                    try:
+                        target_collection = self.client.get_or_create_collection(name=target_collection.name)
+                        target_collection.upsert(
+                            documents=texts,
+                            embeddings=embeddings_list,
+                            ids=ids,
+                            metadatas=cleaned_metadatas
+                        )
+                        logger.info(
+                            f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} "
+                            f"items to '{target_collection.name}' after retry.")
+                        return target_collection
+                    except chromadb.errors.ChromaError as retry_error:
+                        logger.error(
+                            f"User '{self.user_id}': ChromaDB retry in store_in_chroma for collection "
+                            f"'{target_collection.name}' failed: {retry_error}",
+                            exc_info=True)
+                        raise RuntimeError(
+                            f"ChromaDB operation failed after retry: {retry_error}"
+                        ) from retry_error
                 logger.error(
                     f"User '{self.user_id}': ChromaDB error in store_in_chroma for collection '{target_collection.name}': {ce}",
                     exc_info=True)
