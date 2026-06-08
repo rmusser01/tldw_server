@@ -1,7 +1,7 @@
 ---
 id: TASK-2316
 title: Implement Workspace cross-resource membership foundation
-status: In Progress
+status: Done
 labels:
 - workspaces
 - project-workspace
@@ -29,6 +29,9 @@ modified_files:
 - tldw_Server_API/app/api/v1/router_groups/minimal.py
 - tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py
 - tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py
+- tldw_Server_API/app/core/Workspaces/README.md
+- backlog/tasks/task-2315 - Design-Workspace-cross-resource-membership-foundation.md
+- backlog/tasks/task-2316 - Implement-Workspace-cross-resource-membership-foundation.md
 ---
 
 ## Description
@@ -163,15 +166,26 @@ Task 5 reviews after follow-up:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the first server-backed Workspace cross-resource membership foundation under the design in TASK-2315. The implementation added ChaChaNotes `workspace_resource_memberships` persistence, typed membership/cursor models, fail-closed adapters for `workspace_note`, `media`, `workspace_source`, `workspace_artifact`, and `chat`, Workspace membership service orchestration, workspace-scoped and reverse resource lookup API routes, explicit idempotent backfill, and compact Workspace context membership totals while preserving the boundary that membership is association rather than ownership transfer, global filtering, or MCP trust/path admission.
 
+Task 6 documented the membership boundary in `tldw_Server_API/app/core/Workspaces/README.md`, including `workspace_sources` as Research Workspace source selection/readiness, MCP permission/path admission as MCP policy/root binding-owned, future adapter validation through domain adapters, and explicit non-automatic backfill.
+
+Final verification on 2026-06-07:
+- Focused selected suite: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py tldw_Server_API/tests/Workspaces/test_workspace_sub_resources_api.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py -q` passed with `194 passed, 6 warnings`.
+- Broader Workspace regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces -q` passed with `370 passed, 8 warnings`.
+- Bandit touched Python paths: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Workspaces/membership_models.py tldw_Server_API/app/core/Workspaces/membership_adapters.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/endpoints/workspace_memberships.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py -f json -o /tmp/bandit_workspace_memberships.json` exited 0 with zero findings. The JSON summary reported `results: 0` and `skipped_tests: 76` from existing `# nosec` suppressions in scanned files.
+- `git diff --check` passed.
+- `git status --short --branch` before Backlog finalization showed only the intended README edit; final status is recorded in the closing commit.
+
+Known skips/blockers: none. The broader Workspace regression was run and passed, so there are no unrelated Workspace failures to record for this task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

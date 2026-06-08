@@ -42,6 +42,33 @@ holds focused core helpers used by those flows.
   and Jobs enqueue helpers for project-root file inventory.
 - `workspace_artifact_exports.py` - artifact export helpers and traceability checks.
 
+## Membership
+
+`workspace_resource_memberships` stores Workspace-to-resource associations. It
+does not transfer ownership, hide or move global records, or make `/workspaces`
+the global filter for Library, Notes, Chat, or search surfaces. The first slice
+supports explicit links for `workspace_note`, `media`, `workspace_source`,
+`workspace_artifact`, and `chat`.
+
+`workspace_sources` remains the Research Workspace source-selection and
+readiness table. A `workspace_source` membership can associate that source row
+with the generic membership read model, but it does not replace source
+selection, source ordering, ingest readiness, or status projection behavior.
+
+The explicit backfill helper links existing Workspace-scoped source, artifact,
+note, and chat rows into `workspace_resource_memberships` on demand. Backfill is
+idempotent and intentionally not automatic at startup; callers must opt in when
+they want existing rows represented in the generic membership table.
+
+MCP effective permission preview and path admission continue to use MCP policy
+and root bindings. Generic Workspace membership is not a trust source for MCP
+tool execution, file access, ACP execution, or Sandbox path admission.
+
+Future membership adapters must validate access through the owning domain
+adapter before linking or resolving a resource. Unsupported resource types must
+fail closed, and summaries/provenance should avoid exposing secrets, absolute
+paths, sandbox mount paths, prompts, model output contents, or file contents.
+
 ## How It Connects
 
 - `app/api/v1/endpoints/workspaces.py` exposes workspace CRUD, sources, status, preview, sub-resource routes, and read-only Workspace Core contract surfaces.
@@ -115,6 +142,9 @@ holds focused core helpers used by those flows.
 - Artifact export requires an accepted review state and preserves traceability
   through `root_artifact_id`, `artifact_version_id`, `source_lineage`, and
   embedded metadata.
+- Generic membership rows are a read-model association layer over domain-owned
+  resources. Domain tables and adapters remain responsible for ownership,
+  visibility, and access validation.
 
 ### Follow-Up Slices
 
@@ -138,6 +168,9 @@ holds focused core helpers used by those flows.
   idempotency tests.
 - New artifact export format: update `workspace_artifact_exports.py`, schema
   allowlists, and artifact promotion/export contract tests.
+- New membership resource type: add a fail-closed domain adapter, validate
+  resource access through the owning domain API, update schemas/tests, and keep
+  MCP/root/path trust decisions outside generic membership.
 
 ## Extension Points
 
@@ -158,6 +191,9 @@ holds focused core helpers used by those flows.
 - `tests/Workspaces/test_workspace_source_status_api.py`
 - `tests/Workspaces/test_workspace_source_preview_context_api.py`
 - `tests/Workspaces/test_workspace_sub_resources_api.py`
+- `tests/Workspaces/test_workspace_membership_adapters.py`
+- `tests/Workspaces/test_workspace_memberships_api.py`
+- `tests/Workspaces/test_workspace_context_membership_summary.py`
 - `tests/Workspaces/test_workspace_migration_api.py`
 - `tests/Workspaces/test_workspace_rate_limit_contract.py`
 - `tests/Agent_Orchestration/test_artifact_promotion_contract.py`

@@ -1,7 +1,7 @@
 ---
 id: TASK-2315
 title: Design Workspace cross-resource membership foundation
-status: In Progress
+status: Done
 labels:
 - workspaces
 - project-workspace
@@ -30,11 +30,11 @@ Create a focused design/spec for GitHub issue #1990 cross-resource Workspace mem
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design defines a canonical membership model covering resource types, owner/user scoping, membership roles, provenance, soft-delete/archive behavior, and global visibility guardrails.
-- [ ] #2 Design distinguishes server-backed membership from Research Workspace source selection, MCP trusted root bindings, ACP execution workspaces, and Sandbox project roots.
-- [ ] #3 Design proposes API/read-model slices and migration/backfill behavior without destructive reassignment of existing resources.
-- [ ] #4 Design includes a sequential implementation roadmap with parallelizable tasks, tests, validation, and failure states.
-- [ ] #5 Design verification is recorded; Bandit applicability is documented for docs-only scope.
+- [x] #1 Design defines a canonical membership model covering resource types, owner/user scoping, membership roles, provenance, soft-delete/archive behavior, and global visibility guardrails.
+- [x] #2 Design distinguishes server-backed membership from Research Workspace source selection, MCP trusted root bindings, ACP execution workspaces, and Sandbox project roots.
+- [x] #3 Design proposes API/read-model slices and migration/backfill behavior without destructive reassignment of existing resources.
+- [x] #4 Design includes a sequential implementation roadmap with parallelizable tasks, tests, validation, and failure states.
+- [x] #5 Design verification is recorded; Bandit applicability is documented for docs-only scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,21 +46,22 @@ Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementa
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Design authority lives in `Docs/superpowers/specs/2026-06-07-workspace-cross-resource-membership-design.md`, with the sequential implementation roadmap in `Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md`. Runtime implementation and verification were intentionally tracked under TASK-2316, not this design task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Drafted, reviewed, and refined the Workspace cross-resource membership design and implementation plan for GitHub issue #1990. The design recommends a generic server-backed membership table plus fail-closed resource adapters, keeps Research Workspace source selection and Project Workspace root/runtime bindings separate, defines API/read-model/backfill behavior, distinguishes scoped workspace_note from future global note membership, and records a sequential implementation plan with TDD checkpoints and parallelizable slices. Follow-up review refinements clarified soft-delete restore semantics, archived workspace write rejection, deterministic cursor ordering, distinct reverse-lookup cursor shape, and the boundary between generic membership and MCP effective permission preview/path admission. Verification: git diff --check passed for the committed design baseline; final plan verification is recorded in the current planning commit. Bandit is not applicable because this task only changes Markdown design/tracking files.
+Implementation proceeded under TASK-2316 after the design artifacts were established; TASK-2315 remains the authoritative design record for that implementation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
