@@ -135,6 +135,43 @@ def test_precomputed_query_retries_transient_hnsw_segment_error(mock_chroma_clie
     retry_collection.query.assert_called_once()
 
 
+def test_precomputed_query_retries_repeated_transient_hnsw_segment_errors(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    transient_error = InternalError(
+        "Error executing plan: Internal error: Error creating hnsw segment reader: Nothing found on disk"
+    )
+    first_collection = MagicMock()
+    first_collection.name = "retry_collection"
+    first_collection.query.side_effect = transient_error
+    second_collection = MagicMock()
+    second_collection.name = "retry_collection"
+    second_collection.query.side_effect = transient_error
+    third_collection = MagicMock()
+    third_collection.name = "retry_collection"
+    retry_result = {"ids": [["doc_1"]], "documents": [["hello"]], "metadatas": [[{"i": 1}]], "distances": [[0.0]]}
+    third_collection.query.return_value = retry_result
+    mock_chroma_client.get_or_create_collection.side_effect = [
+        first_collection,
+        second_collection,
+        third_collection,
+    ]
+    monkeypatch.setattr(cdl.time, "sleep", lambda _seconds: None)
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+
+    result = mgr.query_collection_with_precomputed_embeddings(
+        collection_name="retry_collection",
+        query_embeddings=[[0.1, 0.2, 0.3]],
+    )
+
+    assert result == retry_result
+    assert mock_chroma_client.get_or_create_collection.call_count == 3
+    first_collection.query.assert_called_once()
+    second_collection.query.assert_called_once()
+    third_collection.query.assert_called_once()
+
+
 def test_store_retries_transient_hnsw_segment_error(mock_chroma_client, tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
 

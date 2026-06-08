@@ -361,7 +361,9 @@ class TestUnifiedPipeline:
 
             with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever') as mock_retriever:
                 mock_retriever_instance = MagicMock()
-                mock_retriever_instance.retrieve = AsyncMock(return_value=[])
+                mock_retriever_instance.retrieve = AsyncMock(return_value=[
+                    Document(id="streaming_doc", content="Context for the complete answer.", metadata={}, source=DataSource.MEDIA_DB, score=0.9)
+                ])
                 mock_retriever.return_value = mock_retriever_instance
 
                 with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.AnswerGenerator') as mock_generator:
@@ -951,7 +953,10 @@ class TestStreamingSupport:
 
                 # Normalize
                 ans = getattr(result, 'generated_answer', None) if not isinstance(result, dict) else result.get('generated_answer') or result.get('answer')
-                assert ans == "Complete answer"
+                assert ans is None
+                md = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+                assert md.get("answer_generation_skipped") == "no_documents"
+                mock_generator_instance.generate.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_streaming_enabled(self):

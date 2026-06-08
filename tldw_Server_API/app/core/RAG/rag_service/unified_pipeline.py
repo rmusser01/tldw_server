@@ -5507,6 +5507,15 @@ async def unified_rag_pipeline(
 
         effective_enable_generation = _resolve_effective_enable_generation()
 
+        if (
+            effective_enable_generation
+            and not result.documents
+            and _skip_retrieval_reason != "classification_skip_search"
+        ):
+            result.generated_answer = None
+            result.metadata["answer_generation_skipped"] = "no_documents"
+            effective_enable_generation = False
+
         if not effective_enable_generation:
             retrieval_only_result = build_retrieval_only_result(
                 resolved_request=resolved_request,

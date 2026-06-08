@@ -76,6 +76,7 @@ def _create_chacha_source_db(path: Path) -> None:
             CREATE TABLE conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 character_id INTEGER,
+                source TEXT DEFAULT '',
                 deleted BOOLEAN DEFAULT 0
             )
             """

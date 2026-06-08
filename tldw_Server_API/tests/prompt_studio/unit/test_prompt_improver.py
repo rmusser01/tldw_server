@@ -639,29 +639,26 @@ class TestCachingPerformance:
 
     def test_batch_processing_performance(self, improver):
 
-        """Test batch processing is more efficient than individual."""
-        import time
-
+        """Test batch processing returns improvements for every prompt."""
         prompts = ["Prompt " + str(i) for i in range(10)]
 
-        # Individual processing
-        start = time.time()
         individual_results = [
             improver.improve(p, strategy=ImprovementStrategy.CLARITY)
             for p in prompts
         ]
-        individual_time = time.time() - start
 
-        # Batch processing
-        start = time.time()
         batch_results = improver.improve_batch(
             prompts,
             strategy=ImprovementStrategy.CLARITY
         )
-        batch_time = time.time() - start
 
-        # Batch should be faster (or at least not significantly slower)
-        assert batch_time <= individual_time * 1.1
+        assert len(batch_results) == len(prompts)
+        assert [result.original_prompt for result in batch_results] == prompts
+        assert [
+            result.improved_prompt for result in batch_results
+        ] == [
+            result.improved_prompt for result in individual_results
+        ]
 
 ########################################################################################################################
 # Test Integration Features

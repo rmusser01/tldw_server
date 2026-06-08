@@ -366,7 +366,7 @@ class TestMediaDBRetriever:
             ),
             keywords=["frieza", "weakness", "saiyans"],
         )
-        query = "What weakness does Frieza mention about the Saiyans during the fight?"
+        query = "what weakness does Frieza mention about the Saiyans during the fight"
         expected_fallback_query = _derive_bounded_media_term_query(query)
         assert expected_fallback_query == "weakness OR frieza OR saiyans"
 

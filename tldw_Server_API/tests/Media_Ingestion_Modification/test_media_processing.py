@@ -1472,9 +1472,26 @@ class TestProcessDocuments:
 
     # --- Error Handling Tests ---
 
-    def test_process_doc_multi_status_mixed(self, client, dummy_headers):
+    def test_process_doc_multi_status_mixed(self, client, dummy_headers, monkeypatch):
 
         """Test processing one valid URL and one invalid URL -> 207."""
+        async def fake_download_url_async(
+            client,
+            url,
+            target_dir,
+            *_args,
+            **_kwargs,
+        ):
+            if url == INVALID_URL:
+                raise ValueError(f"Invalid test URL: {url}")
+            target_path = Path(target_dir) / "downloaded_fixture.txt"
+            target_path.write_text("Sample TXT for mixed URL processing.", encoding="utf-8")
+            return target_path
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.media.process_documents.core_download_url_async",
+            fake_download_url_async,
+        )
         form_data = {"urls": [VALID_TXT_URL, INVALID_URL], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 

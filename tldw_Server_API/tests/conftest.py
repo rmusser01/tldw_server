@@ -28,6 +28,9 @@ except Exception:
     _ = None
 # Force test-friendly env knobs
 os.environ["MPLBACKEND"] = "Agg"
+# Full-app TestClient fixtures should not trigger CI embedding model preloads.
+# Tests that exercise model downloads can opt in explicitly.
+os.environ.setdefault("AUTO_DOWNLOAD_MODELS", "false")
 # Provide an explicit, deterministic API key for tests that rely on single-user/test-mode shortcuts.
 # Production code no longer assumes a default for SINGLE_USER_TEST_API_KEY.
 os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")

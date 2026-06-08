@@ -447,6 +447,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "ai-chunking-core",
             "ai-chunking-semantic-security",
             "ai-chunking-templates",
+            "ai-embeddings-async",
+            "ai-embeddings-backpressure",
+            "ai-embeddings-chromadb-core",
             "ai-embeddings-core",
             "ai-embeddings-dlq-config",
             "ai-embeddings-hyde-ledger",
@@ -456,7 +459,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "ai-embeddings-policy",
             "ai-embeddings-v5-core",
             "ai-embeddings-v5-integration",
-            "vector-stores",
+            "vector-stores-api",
+            "vector-stores-integration",
+            "vector-stores-unit",
             "paper-search",
             "rag-legacy",
             "research-websearch",
@@ -524,6 +529,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             name: set(str(paths).split()) for name, paths in shard_paths.items()
         }
         assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings-core"]
+        assert "vector-stores" not in shard_names
         assert shard_path_sets["ai-chromadb"] == {"tldw_Server_API/tests/ChromaDB"}
         assert "tldw_Server_API/tests/Admin" not in shard_path_sets["core-server-smoke"]
         assert "tldw_Server_API/tests/RAG_NEW" not in shard_path_sets["rag-legacy"]
@@ -799,6 +805,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             )
 
         embedding_shards = {
+            "ai-embeddings-async",
+            "ai-embeddings-backpressure",
+            "ai-embeddings-chromadb-core",
             "ai-embeddings-core",
             "ai-embeddings-dlq-config",
             "ai-embeddings-hyde-ledger",
@@ -831,6 +840,42 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
                     covered_embedding_files[filename] = shard_name
 
         assert set(covered_embedding_files) == embedding_files
+
+        vector_store_shards = {
+            "vector-stores-api",
+            "vector-stores-integration",
+            "vector-stores-unit",
+        }
+        vector_store_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/VectorStores").glob("**/test*.py")
+        }
+        covered_vector_store_files: dict[str, str] = {}
+        for shard_name in vector_store_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/VectorStores/")
+                if Path(pattern).is_dir():
+                    prefix = f"{pattern.rstrip('/')}/"
+                    matches = {
+                        filename
+                        for filename in vector_store_files
+                        if filename.startswith(prefix)
+                    }
+                else:
+                    matches = {
+                        filename
+                        for filename in vector_store_files
+                        if fnmatch.fnmatch(filename, pattern)
+                    }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_vector_store_files, (
+                        f"{filename} matched both "
+                        f"{covered_vector_store_files[filename]} and {shard_name}"
+                    )
+                    covered_vector_store_files[filename] = shard_name
+
+        assert set(covered_vector_store_files) == vector_store_files
 
         rag_new_files = {
             str(path)

@@ -37,6 +37,7 @@ def test_normalize_output_storage_path_expands_user(monkeypatch, tmp_path):
     base.mkdir()
     _patch_outputs_dir(monkeypatch, base)
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     storage_path = os.path.join("~", "outputs", "report.md")
     assert normalize_output_storage_path(1, storage_path) == "report.md"

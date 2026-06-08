@@ -4,15 +4,28 @@ import os
 import time
 from typing import Any, Dict
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from tldw_Server_API.app.main import app
 
 
 def _client(monkeypatch, ttl_sec: int | None = None) -> TestClient:
     monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "true")
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "false")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
     if ttl_sec is not None:
         monkeypatch.setenv("SANDBOX_IDEMPOTENCY_TTL_SEC", str(ttl_sec))
+    existing_enable = os.environ.get("ROUTES_ENABLE", "")
+    parts = [p.strip().lower() for p in existing_enable.split(",") if p.strip()]
+    if "sandbox" not in parts:
+        parts.append("sandbox")
+    monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
+
+    from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
+
+    app = FastAPI()
+    app.include_router(sandbox_router, prefix="/api/v1")
     return TestClient(app)
 
 

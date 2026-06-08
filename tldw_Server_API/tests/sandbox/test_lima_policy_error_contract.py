@@ -1,20 +1,32 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
+import os
 
-from tldw_Server_API.app.main import app
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 def _client(monkeypatch) -> TestClient:
     monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("ROUTES_ENABLE", "sandbox")
-    monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_DENY_ALL_READY", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY", "0")
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    existing_enable = os.environ.get("ROUTES_ENABLE", "")
+    parts = [p.strip().lower() for p in existing_enable.split(",") if p.strip()]
+    if "sandbox" not in parts:
+        parts.append("sandbox")
+    monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
+
+    from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
+
+    app = FastAPI()
+    app.include_router(sandbox_router, prefix="/api/v1")
     return TestClient(app)
 
 
 def test_lima_policy_unsupported_includes_reasons(monkeypatch) -> None:
+    monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_DENY_ALL_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY", "0")
+
     payload = {
         "spec_version": "1.0",
         "runtime": "lima",
@@ -34,8 +46,6 @@ def test_lima_policy_unsupported_includes_reasons(monkeypatch) -> None:
 
 
 def test_lima_runtime_unavailable_includes_permission_denied_reason(monkeypatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("ROUTES_ENABLE", "sandbox")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_PERMISSION_DENIED", "1")
 
@@ -46,7 +56,7 @@ def test_lima_runtime_unavailable_includes_permission_denied_reason(monkeypatch)
         "command": ["echo", "ok"],
         "network_policy": "deny_all",
     }
-    with TestClient(app) as client:
+    with _client(monkeypatch) as client:
         resp = client.post("/api/v1/sandbox/runs", json=payload)
         assert resp.status_code == 503
         data = resp.json()

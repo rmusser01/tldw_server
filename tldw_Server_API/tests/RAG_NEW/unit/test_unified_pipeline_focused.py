@@ -148,8 +148,10 @@ class TestUnifiedPipelineCore:
                 )
 
                 assert result is not None
-                assert result.generated_answer is not None
+                assert result.generated_answer is None
+                assert result.metadata.get("answer_generation_skipped") == "no_documents"
                 assert len(result.documents) == 0
+                mock_gen_instance.generate.assert_not_awaited()
 
 
 @pytest.mark.unit
