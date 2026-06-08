@@ -28,7 +28,7 @@ Implement the approved first server-backed Workspace cross-resource membership s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ChaChaNotes persists `workspace_resource_memberships` with SQLite/PostgreSQL schema support, idempotent create, conflict handling, soft-delete, restore, deterministic workspace listing, and reverse resource lookup.
+- [x] #1 ChaChaNotes persists `workspace_resource_memberships` with SQLite/PostgreSQL schema support, idempotent create, conflict handling, soft-delete, restore, deterministic workspace listing, and reverse resource lookup.
 - [ ] #2 Workspace membership models, schemas, adapters, service, and API endpoints implement the approved first slice for `workspace_note`, `media`, `workspace_source`, `workspace_artifact`, and `chat`.
 - [ ] #3 Backfill helper is explicit and idempotent; Workspace context exposes compact membership totals without making membership a global Library/Notes/search filter.
 - [ ] #4 MCP permission preview/path admission remains driven by MCP policy/root bindings, not generic membership.
@@ -45,6 +45,16 @@ Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementa
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Execution started with subagent-driven Task 1: persistence and DB contract.
+
+Task 1 completed and reviewed:
+- `f215366949` added `workspace_resource_memberships` persistence and focused DB tests.
+- `227a54fa83` fixed `limit + 1` pagination behavior and added missing delete/backend-error coverage.
+- `924aafeb0a` made restore/delete state transitions race-idempotent with state-predicated updates and rowcount handling.
+- Spec compliance review approved the DB contract after follow-up.
+- Code quality review approved the concurrency fix and found no remaining Task 1 issues.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py -q` passed with `21 passed, 6 warnings`.
+- Verification: `git diff --check 243e0b63c9..924aafeb0a66919201b60b4c19414a399f2b81bf` passed.
+- Worker Bandit touched-scope scan reported zero findings for `ChaChaNotes_DB.py`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
