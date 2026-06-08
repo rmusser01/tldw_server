@@ -228,9 +228,17 @@ vi.mock('@/hooks/useFeatureFlags', () => ({
   useChatSidebar: () => [featureFlagState.showChatSidebar],
 }));
 
-vi.mock('@/hooks/useMediaQuery', () => ({
-  useMobile: () => false,
-}));
+vi.mock('@/hooks/useMediaQuery', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/useMediaQuery')>(
+    '@/hooks/useMediaQuery'
+  );
+
+  return {
+    ...actual,
+    useDesktop: () => false,
+    useMobile: () => false,
+  };
+});
 
 vi.mock('@/hooks/useSetting', () => ({
   useSetting: () => [''],
@@ -421,5 +429,12 @@ describe('WebLayout /chat scroll contract', () => {
     );
 
     expect(await screen.findByTestId('tutorial-runner')).toBeInTheDocument();
+  });
+
+  it('preserves non-overridden media query exports in the test mock', async () => {
+    const mediaQueryModule = await import('@/hooks/useMediaQuery');
+
+    expect(mediaQueryModule.useTablet).toEqual(expect.any(Function));
+    expect(mediaQueryModule.useMediaQuery).toEqual(expect.any(Function));
   });
 });
