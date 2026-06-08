@@ -43,6 +43,27 @@ const workspaceResponse = {
   version: 2
 }
 
+const workspaceAssistantDefaultsResponse = {
+  ...workspaceResponse,
+  assistant_defaults: {
+    assistant_kind: "persona",
+    assistant_id: "persona-1",
+    persona_memory_mode: "read_only",
+    voice: null,
+    style: null,
+    tool_policy_profile_id: null
+  },
+  effective_assistant_default: {
+    status: "available",
+    source: "workspace",
+    assistant_kind: "persona",
+    assistant_id: "persona-1",
+    label: "Literature Review Assistant",
+    persona_memory_mode: "read_only",
+    degraded_reason: null
+  }
+}
+
 const rootsResponse = {
   workspace_id: "ws-1",
   workspace_profile: "project",
@@ -520,6 +541,60 @@ describe("workspace API domain contract", () => {
           archived: true,
           workspace_profile: "project",
           version: 1
+        }
+      })
+    )
+  })
+
+  it("maps workspace assistant defaults response fields and serializes patch payloads", async () => {
+    mocks.bgRequest.mockResolvedValue(workspaceAssistantDefaultsResponse)
+
+    const response = await workspaceApiMethods.patchWorkspace("ws-1", {
+      version: 2,
+      assistantDefaults: {
+        assistantKind: "persona",
+        assistantId: "persona-2",
+        personaMemoryMode: "read_write",
+        voice: null,
+        style: null,
+        toolPolicyProfileId: null
+      },
+      confirmReadWriteAssistantDefault: true
+    })
+
+    expect(response.assistantDefaults).toEqual({
+      assistantKind: "persona",
+      assistantId: "persona-1",
+      personaMemoryMode: "read_only",
+      voice: null,
+      style: null,
+      toolPolicyProfileId: null
+    })
+    expect(response.effectiveAssistantDefault).toEqual({
+      status: "available",
+      source: "workspace",
+      assistantKind: "persona",
+      assistantId: "persona-1",
+      label: "Literature Review Assistant",
+      personaMemoryMode: "read_only",
+      degradedReason: null
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/workspaces/ws-1",
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          version: 2,
+          assistant_defaults: {
+            assistant_kind: "persona",
+            assistant_id: "persona-2",
+            persona_memory_mode: "read_write",
+            voice: null,
+            style: null,
+            tool_policy_profile_id: null
+          },
+          confirm_read_write_assistant_default: true
         }
       })
     )

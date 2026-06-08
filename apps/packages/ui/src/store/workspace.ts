@@ -38,9 +38,11 @@ import type {
   ArtifactType,
   AudioGenerationSettings,
   AudioTtsProvider,
+  EffectiveWorkspaceAssistantDefault,
   GeneratedArtifact,
   StudyMaterialsPolicy,
   SavedWorkspace,
+  WorkspaceAssistantDefaults,
   WorkspaceBanner,
   WorkspaceBannerImage,
   WorkspaceBannerImageMimeType,
@@ -2007,6 +2009,8 @@ interface WorkspaceIdentityState {
   workspaceName: string
   workspaceTag: string // Format: "workspace:<slug>"
   studyMaterialsPolicy: StudyMaterialsPolicy | null
+  assistantDefaults: WorkspaceAssistantDefaults | null
+  effectiveAssistantDefault: EffectiveWorkspaceAssistantDefault | null
   workspaceCreatedAt: Date | null
   workspaceChatReferenceId: string
 }
@@ -2060,6 +2064,7 @@ interface WorkspaceSnapshot {
   workspaceName: string
   workspaceTag: string
   studyMaterialsPolicy: StudyMaterialsPolicy | null
+  assistantDefaults: WorkspaceAssistantDefaults | null
   workspaceCreatedAt: Date | null
   workspaceChatReferenceId: string
   sources: WorkspaceSource[]
@@ -2105,6 +2110,8 @@ export interface WorkspaceUndoSnapshot {
   workspaceName: string
   workspaceTag: string
   studyMaterialsPolicy: StudyMaterialsPolicy | null
+  assistantDefaults: WorkspaceAssistantDefaults | null
+  effectiveAssistantDefault: EffectiveWorkspaceAssistantDefault | null
   workspaceCreatedAt: Date | null
   workspaceChatReferenceId: string
   sources: WorkspaceSource[]
@@ -2387,6 +2394,8 @@ const initialIdentityState: WorkspaceIdentityState = {
   workspaceName: "",
   workspaceTag: "",
   studyMaterialsPolicy: null,
+  assistantDefaults: null,
+  effectiveAssistantDefault: null,
   workspaceCreatedAt: null,
   workspaceChatReferenceId: ""
 }
@@ -2921,6 +2930,38 @@ export const reviveSavedWorkspace = (workspace: SavedWorkspace): SavedWorkspace 
   lastAccessedAt: reviveDateOrNull(workspace.lastAccessedAt) || new Date()
 })
 
+export const coerceWorkspaceAssistantDefaultsForRehydrate = (
+  candidate: unknown
+): WorkspaceAssistantDefaults | null => {
+  if (!isRecord(candidate)) return null
+  const assistantKind =
+    candidate.assistantKind === "persona" || candidate.assistant_kind === "persona"
+      ? "persona"
+      : null
+  if (!assistantKind) return null
+
+  const assistantId =
+    typeof candidate.assistantId === "string"
+      ? candidate.assistantId.trim()
+      : typeof candidate.assistant_id === "string"
+        ? candidate.assistant_id.trim()
+        : ""
+  if (!assistantId) return null
+
+  return {
+    assistantKind,
+    assistantId,
+    personaMemoryMode:
+      candidate.personaMemoryMode === "read_write" ||
+      candidate.persona_memory_mode === "read_write"
+        ? "read_write"
+        : "read_only",
+    voice: null,
+    style: null,
+    toolPolicyProfileId: null
+  }
+}
+
 export const reviveWorkspaceSnapshot = (
   workspaceId: string,
   snapshot: WorkspaceSnapshot
@@ -2948,6 +2989,9 @@ export const reviveWorkspaceSnapshot = (
     ...snapshot,
     workspaceId: snapshot.workspaceId || workspaceId,
     studyMaterialsPolicy: resolvedStudyMaterialsPolicy,
+    assistantDefaults: coerceWorkspaceAssistantDefaultsForRehydrate(
+      snapshot.assistantDefaults
+    ),
     workspaceCreatedAt: createdAt,
     workspaceChatReferenceId:
       snapshot.workspaceChatReferenceId ||
@@ -3294,6 +3338,9 @@ const buildLegacyTopLevelSnapshotForMigration = (
     workspaceName: resolvedWorkspaceName,
     workspaceTag: resolvedWorkspaceTag,
     studyMaterialsPolicy: resolvedStudyMaterialsPolicy,
+    assistantDefaults: coerceWorkspaceAssistantDefaultsForRehydrate(
+      persisted.assistantDefaults
+    ),
     workspaceCreatedAt: reviveDateOrNull(
       persisted.workspaceCreatedAt as Date | string | null | undefined
     ),
@@ -3377,18 +3424,21 @@ export const createEmptyWorkspaceSnapshot = ({
   name,
   tag,
   createdAt,
-  studyMaterialsPolicy = null
+  studyMaterialsPolicy = null,
+  assistantDefaults = null
 }: {
   id: string
   name: string
   tag: string
   createdAt: Date
   studyMaterialsPolicy?: StudyMaterialsPolicy | null
+  assistantDefaults?: WorkspaceAssistantDefaults | null
 }): WorkspaceSnapshot => ({
   workspaceId: id,
   workspaceName: name,
   workspaceTag: tag,
   studyMaterialsPolicy: studyMaterialsPolicy ?? null,
+  assistantDefaults: assistantDefaults ?? null,
   workspaceCreatedAt: createdAt,
   workspaceChatReferenceId: id,
   sources: [],
@@ -3414,6 +3464,8 @@ export const applyWorkspaceSnapshot = (
   | "workspaceName"
   | "workspaceTag"
   | "studyMaterialsPolicy"
+  | "assistantDefaults"
+  | "effectiveAssistantDefault"
   | "workspaceCreatedAt"
   | "workspaceChatReferenceId"
   | "sources"
@@ -3434,6 +3486,8 @@ export const applyWorkspaceSnapshot = (
   workspaceName: snapshot.workspaceName,
   workspaceTag: snapshot.workspaceTag,
   studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
+  assistantDefaults: snapshot.assistantDefaults ?? null,
+  effectiveAssistantDefault: null,
   workspaceCreatedAt: snapshot.workspaceCreatedAt,
   workspaceChatReferenceId: snapshot.workspaceChatReferenceId,
   sources: snapshot.sources.map((source) => ({ ...source })),
@@ -3460,6 +3514,7 @@ export const buildWorkspaceSnapshot = (state: WorkspaceState): WorkspaceSnapshot
   workspaceName: state.workspaceName || "Untitled Workspace",
   workspaceTag: state.workspaceTag,
   studyMaterialsPolicy: state.studyMaterialsPolicy ?? null,
+  assistantDefaults: state.assistantDefaults ?? null,
   workspaceCreatedAt: state.workspaceCreatedAt,
   workspaceChatReferenceId: state.workspaceChatReferenceId || state.workspaceId,
   sources: state.sources.map((source) => ({ ...source })),
@@ -3551,6 +3606,7 @@ export const hydrateWorkspaceBundleSnapshot = (
     workspaceName,
     workspaceTag,
     studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
+    assistantDefaults: null,
     workspaceCreatedAt: new Date(),
     workspaceChatReferenceId: workspaceId,
     sources: revivedSources,
@@ -3589,6 +3645,8 @@ export const buildWorkspaceUndoSnapshot = (
     workspaceName: state.workspaceName,
     workspaceTag: state.workspaceTag,
     studyMaterialsPolicy: state.studyMaterialsPolicy ?? null,
+    assistantDefaults: state.assistantDefaults ?? null,
+    effectiveAssistantDefault: state.effectiveAssistantDefault ?? null,
     workspaceCreatedAt: state.workspaceCreatedAt,
     workspaceChatReferenceId:
       state.workspaceChatReferenceId || state.workspaceId,
@@ -3784,6 +3842,9 @@ export const duplicateWorkspaceSnapshot = (
     workspaceName: duplicateName,
     workspaceTag: duplicateTag,
     studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
+    assistantDefaults: coerceWorkspaceAssistantDefaultsForRehydrate(
+      snapshot.assistantDefaults
+    ),
     workspaceCreatedAt: new Date(),
     workspaceChatReferenceId: duplicateId,
     sources: duplicatedSources,

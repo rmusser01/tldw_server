@@ -1,5 +1,5 @@
 ---
-id: TASK-2276
+id: TASK-2318
 title: Plan Workspace Assistant Defaults implementation
 status: Done
 labels:

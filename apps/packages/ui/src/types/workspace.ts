@@ -299,6 +299,40 @@ export interface TraceableArtifactRedaction {
 
 export type StudyMaterialsPolicy = "general" | "workspace"
 
+export type WorkspaceAssistantKind = "persona"
+export type WorkspacePersonaMemoryMode = "read_only" | "read_write"
+export type EffectiveWorkspaceAssistantDefaultStatus =
+  | "available"
+  | "unavailable"
+  | "none"
+export type EffectiveWorkspaceAssistantDefaultSource = "workspace" | "none"
+export type WorkspaceAssistantDefaultDegradedReason =
+  | "persona_deleted"
+  | "persona_unavailable"
+  | "persona_feature_disabled"
+  | "permission_denied"
+  | "invalid_default"
+  | "unsupported_assistant_kind"
+
+export interface WorkspaceAssistantDefaults {
+  assistantKind: WorkspaceAssistantKind
+  assistantId: string
+  personaMemoryMode: WorkspacePersonaMemoryMode
+  voice: null
+  style: null
+  toolPolicyProfileId: null
+}
+
+export interface EffectiveWorkspaceAssistantDefault {
+  status: EffectiveWorkspaceAssistantDefaultStatus
+  source: EffectiveWorkspaceAssistantDefaultSource
+  assistantKind: WorkspaceAssistantKind | null
+  assistantId: string | null
+  label: string | null
+  personaMemoryMode: WorkspacePersonaMemoryMode | null
+  degradedReason: WorkspaceAssistantDefaultDegradedReason | null
+}
+
 export type WorkspaceStudyArtifactSource = {
   source_type: string
   source_id: string
