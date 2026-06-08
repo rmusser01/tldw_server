@@ -98,6 +98,7 @@ export interface NotesSidebarProps {
   isFetching: boolean
   hasListError?: boolean
   listErrorMessage?: string | null
+  isStaleResults?: boolean
   isOnline: boolean
   demoEnabled: boolean
   capsLoading: boolean
@@ -230,6 +231,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   isFetching,
   hasListError = false,
   listErrorMessage = null,
+  isStaleResults = false,
   isOnline,
   demoEnabled,
   capsLoading,
@@ -313,6 +315,20 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     keywordTokens.length +
     (selectedNotebookId != null ? 1 : 0) +
     (queryInput.trim() ? 1 : 0)
+  const headerCountLabel = hasListError
+    ? t('option:notesSearch.headerRefreshFailed', {
+        defaultValue: 'Refresh failed'
+      })
+    : hasActiveFilters
+      ? t('option:notesSearch.headerCount', {
+          defaultValue: '{{visible}} of {{total}}',
+          visible: filteredCount,
+          total
+        })
+      : t('option:notesSearch.headerCountFallback', {
+          defaultValue: '{{total}} total',
+          total
+        })
 
   const switchViewMode = React.useCallback(
     (mode: NotesListViewMode) => {
@@ -383,16 +399,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
                 </div>
                 <span className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle">
-                  {hasActiveFilters
-                    ? t('option:notesSearch.headerCount', {
-                        defaultValue: '{{visible}} of {{total}}',
-                        visible: filteredCount,
-                        total
-                      })
-                    : t('option:notesSearch.headerCountFallback', {
-                        defaultValue: '{{total}} total',
-                        total
-                      })}
+                  {headerCountLabel}
                 </span>
               </div>
               <Tooltip
@@ -876,7 +883,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         data-testid="notes-active-filter-summary"
                       >
                         <div className="text-[11px] font-medium text-text">
-                          {activeFilterSummary.countText}
+                          {hasListError
+                            ? t('option:notesSearch.headerRefreshFailed', {
+                                defaultValue: 'Refresh failed'
+                              })
+                            : activeFilterSummary.countText}
                         </div>
                         {activeFilterSummary.detailsText ? (
                           <div
@@ -1208,6 +1219,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 isFetching={isFetching}
                 hasError={hasListError}
                 errorMessage={listErrorMessage}
+                isStaleResults={isStaleResults}
                 demoEnabled={demoEnabled}
                 capsLoading={capsLoading}
                 capabilities={capabilities || null}
@@ -1215,6 +1227,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 total={total}
                 page={page}
                 pageSize={pageSize}
+                hasActiveFilters={hasActiveFilters}
                 selectedId={selectedId}
                 pinnedNoteIds={pinnedNoteIds}
                 onSelectNote={(id) => {
@@ -1256,6 +1269,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 onExportAllJson={() => {
                   void exportAllJSON()
                 }}
+                onClearFilters={handleClearFilters}
+                onRetry={retryList}
                 onImportNotes={openImportPicker}
                 onSyncFolder={onSyncFolder}
                 hasActiveFilters={hasActiveFilters}

@@ -221,14 +221,14 @@ Likely tests:
 - Browser check: `/notes` create -> search -> delete -> restore -> search again.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 2.
-- [ ] Add failing tests for stale delete/restore/list-refresh behavior.
-- [ ] Run the focused test command and confirm the intended failures.
-- [ ] Fix list state invalidation/refetch/update logic with the smallest local change.
-- [ ] Add or adjust empty/loading/error state rendering.
-- [ ] Run focused Notes tests.
-- [ ] Run browser verification on desktop and a narrow mobile viewport.
-- [ ] Update Backlog notes with changed files and verification.
+- [x] Create or update the Backlog subtask for PR 2.
+- [x] Add failing tests for stale delete/restore/list-refresh behavior.
+- [x] Run the focused test command and confirm the intended failures.
+- [x] Fix list state invalidation/refetch/update logic with the smallest local change.
+- [x] Add or adjust empty/loading/error state rendering.
+- [x] Run focused Notes tests.
+- [x] Run browser verification on desktop and a narrow mobile viewport.
+- [x] Update Backlog notes with changed files and verification.
 
 ---
 

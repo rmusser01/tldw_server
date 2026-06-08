@@ -281,7 +281,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
   }, [effectiveKeywordTokens, fetchFilteredNotesRaw, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, sortOption])
 
-  const { data, isFetching, refetch, isError, error } = useQuery({
+  const { data, error, isError, isFetching, isPlaceholderData, refetch } = useQuery({
     queryKey: [
       'notes',
       listMode,
@@ -936,7 +936,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     bulkSelectedIdSet, selectedBulkNotes,
     hasActiveFilters,
     // query data
-    data, isFetching, refetch, isError, error, listErrorMessage,
+    data, error, isError, isFetching, isPlaceholderData, refetch, listErrorMessage,
     // helpers
     fetchFilteredNotesRaw,
     clearSearchQueryTimeout,

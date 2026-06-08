@@ -2240,6 +2240,7 @@ const NotesManagerPage: React.FC = () => {
         isFetching={list.isFetching}
         hasListError={list.isError}
         listErrorMessage={list.listErrorMessage}
+        isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}
         isOnline={isOnline}
         demoEnabled={demoEnabled}
         capsLoading={capsLoading}
@@ -2268,6 +2269,9 @@ const NotesManagerPage: React.FC = () => {
           await ed.handleSelectNote(id)
         }}
         handleClearFilters={list.handleClearFilters}
+        retryList={() => {
+          void list.refetch()
+        }}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
         handleToggleBulkSelection={list.handleToggleBulkSelection}

@@ -15,8 +15,8 @@ type NotesListPanelEmptyStatesProps = {
   onOpenHealth: () => void
   onCreateNote: () => void
   onResetEditor: () => void
-  onRetry?: () => void
   onClearFilters?: () => void
+  onRetry?: () => void
 }
 
 const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
@@ -28,8 +28,8 @@ const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
   onOpenHealth,
   onCreateNote,
   onResetEditor,
-  onRetry,
   onClearFilters,
+  onRetry,
 }) => {
   const { t } = useTranslation(['option', 'settings'])
   const { checkOnce } = useConnectionActions()
