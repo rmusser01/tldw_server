@@ -42,6 +42,10 @@ export const SkillsWorkspace: React.FC = () => {
         defaultValue:
           "To use Skills, connect to your tldw server so skill definitions can be stored and executed."
       })}
+      unreachableDescription={t("option:skillsEmpty.unreachableDescription", {
+        defaultValue:
+          "To use Skills, reconnect to your tldw server so skill definitions can be stored and executed."
+      })}
     >
       {capsLoading ? (
         <PageShell>

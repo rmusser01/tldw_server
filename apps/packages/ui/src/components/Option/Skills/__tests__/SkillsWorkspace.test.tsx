@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   connectionState: {
     uxState: "connected_ok" as
       | "connected_ok"
+      | "connected_degraded"
       | "testing"
       | "configuring_url"
       | "configuring_auth"
@@ -110,6 +111,27 @@ describe("SkillsWorkspace capability states", () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it("renders the manager when the server is degraded but Skills are available", () => {
+    mocks.connectionState = {
+      uxState: "connected_degraded",
+      hasCompletedFirstRun: true
+    }
+    mocks.capabilitiesState = {
+      capabilities: { hasSkills: true },
+      loading: false,
+      refresh: vi.fn()
+    }
+
+    renderWorkspace()
+
+    expect(screen.getByTestId("skills-manager")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", {
+        name: "Skills are not available on this server"
+      })
+    ).not.toBeInTheDocument()
+  })
+
   it("keeps route-specific setup guidance when the server is not configured", () => {
     mocks.connectionState = {
       uxState: "unconfigured",
@@ -122,6 +144,27 @@ describe("SkillsWorkspace capability states", () => {
       screen.getByRole("heading", {
         name: "Finish setup before using Skills."
       })
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("skills-manager")).not.toBeInTheDocument()
+  })
+
+  it("keeps route-specific recovery guidance when the server is unreachable", () => {
+    mocks.connectionState = {
+      uxState: "error_unreachable",
+      hasCompletedFirstRun: true
+    }
+
+    renderWorkspace()
+
+    expect(
+      screen.getByRole("heading", {
+        name: "Can't reach your tldw server right now."
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "To use Skills, reconnect to your tldw server so skill definitions can be stored and executed."
+      )
     ).toBeInTheDocument()
     expect(screen.queryByTestId("skills-manager")).not.toBeInTheDocument()
   })

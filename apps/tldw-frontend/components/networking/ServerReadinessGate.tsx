@@ -1,6 +1,7 @@
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
+import { useConnectionStore } from "@tldw/ui/store/connection"
 import {
   StatePanel,
   type StatePanelDiagnostic
@@ -11,12 +12,6 @@ const _env: DeploymentEnv = {
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL
 }
 
-const _origin =
-  typeof window !== "undefined"
-    ? resolvePublicApiOrigin(_env, window.location.origin)
-    : resolvePublicApiOrigin(_env)
-
-const HEALTH_URL = `${_origin}/api/v1/health`
 const MAX_WAIT_MS = 15_000
 const HEALTH_CHECK_TIMEOUT_MS = 3_000
 const RETRY_INTERVAL_MS = 2_000
@@ -26,6 +21,33 @@ type GateState = "checking" | "ready" | "waiting" | "timeout"
 type HealthCheckResult =
   | { ok: true }
   | { ok: false; reason: "failed" | "stalled" }
+
+const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
+
+export function resolveReadinessHealthUrl({
+  configuredServerUrl,
+  env,
+  pageOrigin
+}: {
+  configuredServerUrl?: string | null
+  env: DeploymentEnv
+  pageOrigin?: string
+}): string {
+  const configured = String(configuredServerUrl || "").trim()
+  if (configured) {
+    return `${trimTrailingSlash(configured)}/api/v1/health`
+  }
+
+  try {
+    const fallbackOrigin =
+      typeof pageOrigin === "string"
+        ? resolvePublicApiOrigin(env, pageOrigin)
+        : resolvePublicApiOrigin(env)
+    return `${trimTrailingSlash(fallbackOrigin)}/api/v1/health`
+  } catch {
+    return "/api/v1/health"
+  }
+}
 
 function readStorageFlag(key: string): boolean {
   try {
@@ -45,7 +67,7 @@ function navigateTo(path: string): void {
   window.location.assign(path)
 }
 
-async function checkHealth(): Promise<HealthCheckResult> {
+async function checkHealth(healthUrl: string): Promise<HealthCheckResult> {
   const controller = new AbortController()
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   const stalled = new Promise<HealthCheckResult>((resolve) => {
@@ -56,7 +78,7 @@ async function checkHealth(): Promise<HealthCheckResult> {
   })
   const request = (async (): Promise<HealthCheckResult> => {
     try {
-      const res = await fetch(HEALTH_URL, {
+      const res = await fetch(healthUrl, {
         method: "GET",
         signal: controller.signal
       })
@@ -82,16 +104,16 @@ async function checkHealth(): Promise<HealthCheckResult> {
 }
 
 function ReadinessRecoveryPanel({
-  children,
+  healthUrl,
   onRetry
 }: {
-  children: React.ReactNode
+  healthUrl: string
   onRetry: () => void
 }) {
   const diagnostics: StatePanelDiagnostic[] = [
     {
       label: "Health endpoint",
-      value: HEALTH_URL,
+      value: healthUrl,
       code: true
     },
     {
@@ -101,32 +123,29 @@ function ReadinessRecoveryPanel({
   ]
 
   return (
-    <>
-      <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text">
-        <StatePanel
-          state="unavailable"
-          title="Backend readiness check failed"
-          message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
-          diagnostics={diagnostics}
-          primaryAction={{ label: "Retry", onClick: onRetry }}
-          secondaryActions={[
-            {
-              label: "Health & diagnostics",
-              onClick: () => navigateTo("/settings/health")
-            },
-            {
-              label: "Server settings",
-              onClick: () => navigateTo("/settings/tldw")
-            }
-          ]}
-          role="alert"
-          aria-live="assertive"
-          className="w-full max-w-3xl"
-          data-testid="server-readiness-recovery"
-        />
-      </main>
-      <div data-testid="server-readiness-route-content">{children}</div>
-    </>
+    <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text">
+      <StatePanel
+        state="unavailable"
+        title="Backend readiness check failed"
+        message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
+        diagnostics={diagnostics}
+        primaryAction={{ label: "Retry", onClick: onRetry }}
+        secondaryActions={[
+          {
+            label: "Health & diagnostics",
+            onClick: () => navigateTo("/settings/health")
+          },
+          {
+            label: "Server settings",
+            onClick: () => navigateTo("/settings/tldw")
+          }
+        ]}
+        role="alert"
+        aria-live="assertive"
+        className="w-full max-w-3xl"
+        data-testid="server-readiness-recovery"
+      />
+    </main>
   )
 }
 
@@ -134,10 +153,25 @@ export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   bypass?: boolean
 }> = ({ children, bypass = false }) => {
+  const configuredServerUrl = useConnectionStore((s) => s.state.serverUrl)
+  const lastConfigUpdatedAt = useConnectionStore(
+    (s) => s.state.lastConfigUpdatedAt
+  )
   const [gate, setGate] = React.useState<GateState>(() =>
     shouldBypassReadinessForOffline() ? "ready" : "checking"
   )
   const [retryVersion, setRetryVersion] = React.useState(0)
+  const pageOrigin =
+    typeof window !== "undefined" ? window.location.origin : undefined
+  const healthUrl = React.useMemo(
+    () =>
+      resolveReadinessHealthUrl({
+        configuredServerUrl,
+        env: _env,
+        pageOrigin
+      }),
+    [configuredServerUrl, pageOrigin]
+  )
 
   const retryNow = React.useCallback(() => {
     setRetryVersion((version) => version + 1)
@@ -167,7 +201,7 @@ export const ServerReadinessGate: React.FC<{
     }, MAX_WAIT_MS)
 
     const attempt = async () => {
-      const health = await checkHealth()
+      const health = await checkHealth(healthUrl)
       if (cancelled) return
 
       if (health.ok) {
@@ -196,14 +230,14 @@ export const ServerReadinessGate: React.FC<{
       if (retryTimer) window.clearTimeout(retryTimer)
       if (deadlineTimer) window.clearTimeout(deadlineTimer)
     }
-  }, [bypass, retryVersion])
+  }, [bypass, healthUrl, lastConfigUpdatedAt, retryVersion])
 
   if (bypass || gate === "ready") {
     return <>{children}</>
   }
 
   if (gate === "timeout") {
-    return <ReadinessRecoveryPanel onRetry={retryNow}>{children}</ReadinessRecoveryPanel>
+    return <ReadinessRecoveryPanel healthUrl={healthUrl} onRetry={retryNow} />
   }
 
   const isRetrying = gate === "waiting"
