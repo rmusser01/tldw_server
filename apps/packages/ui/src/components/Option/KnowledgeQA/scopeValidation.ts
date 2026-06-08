@@ -53,6 +53,7 @@ export type KnowledgeResultScopeValidation = {
 }
 
 type SourceCategory = RagSource | "web" | null
+type LocalSourceCategory = RagSource | null
 
 function normalizeSourceType(result: RagResult): string | null {
   const candidates = [
@@ -100,17 +101,16 @@ function isWebFallbackResult(
 }
 
 function sourceTypeMatchesSelectedCategory(
-  sourceCategory: SourceCategory,
+  sourceCategory: LocalSourceCategory,
   selectedSources: RagSource[]
 ): boolean {
   if (!sourceCategory || selectedSources.length === 0) return true
-  if (sourceCategory === "web") return false
   return selectedSources.includes(sourceCategory)
 }
 
 function isExactSourceAllowed(
   result: RagResult,
-  sourceCategory: SourceCategory,
+  sourceCategory: LocalSourceCategory,
   selectedMediaIds: number[],
   selectedNoteIds: string[]
 ): boolean {
@@ -153,14 +153,16 @@ export function validateKnowledgeResultScope({
     const sourceId = getResultSourceId(result) ?? "unknown"
     const explicitScopeBroadening = hasExplicitScopeBroadening(result)
     const webFallbackResult = isWebFallbackResult(result, sourceCategory)
+    const localSourceCategory: LocalSourceCategory =
+      sourceCategory === "web" ? null : sourceCategory
     const sourceAllowed =
       explicitScopeBroadening ||
       (webFallbackResult && webFallbackEnabled) ||
       (!webFallbackResult &&
-        sourceTypeMatchesSelectedCategory(sourceCategory, selectedSources) &&
+        sourceTypeMatchesSelectedCategory(localSourceCategory, selectedSources) &&
         isExactSourceAllowed(
           result,
-          sourceCategory,
+          localSourceCategory,
           selectedMediaIds,
           selectedNoteIds
         ))

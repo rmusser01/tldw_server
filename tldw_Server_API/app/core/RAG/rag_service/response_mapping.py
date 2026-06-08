@@ -7,7 +7,7 @@ from typing import Any
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
 
 from .result_model import RAGResult
-from .trust_contracts import classify_knowledge_answer_trust
+from .trust_contracts import EVIDENCE_TEXT_KEYS, classify_knowledge_answer_trust
 
 EVIDENCE_METADATA_KEYS = (
     "source_id",
@@ -17,9 +17,6 @@ EVIDENCE_METADATA_KEYS = (
     "source_status",
     "unavailable_reason",
 )
-
-EVIDENCE_TEXT_KEYS = ("content", "excerpt", "text", "chunk")
-
 
 def _result_field(result: Any, key: str, default: Any = None) -> Any:
     """Read a top-level field from attr-based or dict-shaped result objects."""
@@ -97,6 +94,7 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
 
 
 def _web_fallback_used(metadata: dict[str, Any], documents: list[dict[str, Any]]) -> bool:
+    """Return whether metadata or normalized evidence indicates web fallback use."""
     web_fallback_metadata = metadata.get("web_fallback")
     if isinstance(web_fallback_metadata, dict) and any(
         bool(web_fallback_metadata.get(key)) for key in ("triggered", "used")

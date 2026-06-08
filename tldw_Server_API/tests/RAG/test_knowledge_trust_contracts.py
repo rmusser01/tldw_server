@@ -1,3 +1,5 @@
+import pytest
+
 from tldw_Server_API.app.core.RAG.rag_service.trust_contracts import (
     classify_knowledge_answer_trust,
 )
@@ -5,6 +7,8 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_to_response,
 )
 from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
+
+pytestmark = pytest.mark.unit
 
 
 def test_uncited_answer_is_degraded():

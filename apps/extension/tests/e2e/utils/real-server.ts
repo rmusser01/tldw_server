@@ -187,7 +187,14 @@ export const loadKnowledgeQaLiveManifest = (): KnowledgeQaLiveManifest => {
     )
   }
 
-  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown
+  } catch (error) {
+    throw new Error(
+      `Knowledge QA extension live fixture manifest at ${manifestPath} is not valid JSON: ${String(error)}`
+    )
+  }
   assertKnowledgeQaLiveManifest(parsed, manifestPath)
   return parsed
 }

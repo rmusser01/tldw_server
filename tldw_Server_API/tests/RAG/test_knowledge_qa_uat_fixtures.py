@@ -5,8 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from Helper_Scripts import seed_knowledge_qa_uat
 from tldw_Server_API.tests.RAG import knowledge_qa_uat_fixtures as fixtures
+
+pytestmark = pytest.mark.unit
 
 
 def test_knowledge_qa_uat_fixture_strings_are_distinct_and_deterministic() -> None:

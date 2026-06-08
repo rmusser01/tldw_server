@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
 import type { RagSource } from "@/services/rag/unified-rag"
-import type { KnowledgeAnswerTrustState, KnowledgeSourceHealthState } from "../types"
+import type {
+  EvidenceOrigin,
+  KnowledgeAnswerTrustState,
+  KnowledgeSourceHealthState,
+  KnowledgeTrustReasonCode,
+  RagResult,
+} from "../types"
 
 const submitExplicitFeedbackMock = vi.fn()
 const messageOpenMock = vi.fn()
@@ -104,12 +110,12 @@ const createSettings = (): AnswerPanelTestSettings => ({
 const state = {
   answer: null as string | null,
   answerTrustState: "cited_answer" as KnowledgeAnswerTrustState,
-  answerTrustReasonCodes: [] as string[],
-  answerEvidenceOrigin: null as string | null,
+  answerTrustReasonCodes: [] as KnowledgeTrustReasonCode[],
+  answerEvidenceOrigin: null as EvidenceOrigin | null,
   citations: [] as Array<{ index: number }>,
   isSearching: false,
   error: null as string | null,
-  results: [] as Array<{ id: string; score?: number; metadata?: { title?: string } }>,
+  results: [] as RagResult[],
   setSettingsPanelOpen: vi.fn(),
   updateSetting: vi.fn(),
   settings: createSettings(),

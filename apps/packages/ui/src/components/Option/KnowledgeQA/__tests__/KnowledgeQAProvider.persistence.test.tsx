@@ -170,7 +170,13 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
         {
           id: "doc-unsynced-1",
           content: "Unsynced evidence",
-          metadata: { title: "Unsynced source" },
+          metadata: {
+            title: "Unsynced source",
+            source_id: "doc-unsynced-1",
+            source_type: "media_db",
+            evidence_origin: "local_library",
+            source_status: "searched",
+          },
           score: 0.9,
         },
       ],
@@ -209,8 +215,10 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     addChatMessageMock
       .mockResolvedValueOnce({ id: "msg-user-synced" })
       .mockResolvedValueOnce({ id: "msg-assistant-synced" })
-    fetchWithAuthMock.mockImplementation(async (path: string) => {
+    let retryPersistedRagContextBody: Record<string, any> | null = null
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path.includes("/rag-context")) {
+        retryPersistedRagContextBody = JSON.parse(String(init?.body || "{}"))
         return {
           ok: true,
           status: 200,
@@ -243,6 +251,12 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
       expect(latestContext!.extensionFailureState).toBeNull()
       expect(latestContext!.isLocalOnlyThread).toBe(false)
       expect(latestContext!.answerTrustState).toBe("cited_answer")
+    })
+    expect(retryPersistedRagContextBody).not.toBeNull()
+    expect(retryPersistedRagContextBody!.rag_context).toMatchObject({
+      trust_state: "cited_answer",
+      trust_reason_codes: [],
+      trust_evidence_origin: "local_library",
     })
   })
 

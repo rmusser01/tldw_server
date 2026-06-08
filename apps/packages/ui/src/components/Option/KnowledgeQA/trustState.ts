@@ -137,6 +137,23 @@ function trustResult(
   return { state, reasonCodes, evidenceOrigin }
 }
 
+function inferEvidenceOriginFromResults(results: RagResult[]): EvidenceOrigin {
+  const origins = new Set(
+    results
+      .map((result) =>
+        normalizeEvidenceOrigin(
+          result.evidenceOrigin ?? result.metadata?.evidence_origin
+        )
+      )
+      .filter((origin) => origin !== "unknown_origin")
+  )
+  if (origins.has("mixed")) return "mixed"
+  if (origins.has("local_library") && origins.has("web_fallback")) return "mixed"
+  if (origins.has("web_fallback")) return "web_fallback"
+  if (origins.has("local_library")) return "local_library"
+  return "unknown_origin"
+}
+
 export function normalizeKnowledgeAnswerTrust(
   input: KnowledgeTrustInput
 ): KnowledgeTrustResult {
@@ -151,13 +168,25 @@ export function normalizeKnowledgeAnswerTrust(
     return trustResult("no_results", ["no_evidence"], "local_library")
   }
   if (input.weakEvidence && !input.answer) {
-    return trustResult("no_answer_insufficient_evidence", ["low_relevance"])
+    return trustResult(
+      "no_answer_insufficient_evidence",
+      ["low_relevance"],
+      inferEvidenceOriginFromResults(input.results)
+    )
   }
   if (input.answer && input.citations.length === 0) {
-    return trustResult("uncited_degraded_answer", ["missing_citations"])
+    return trustResult(
+      "uncited_degraded_answer",
+      ["missing_citations"],
+      inferEvidenceOriginFromResults(input.results)
+    )
   }
   if (input.answer && input.citations.length > 0) {
-    return trustResult("cited_answer")
+    return trustResult(
+      "cited_answer",
+      [],
+      inferEvidenceOriginFromResults(input.results)
+    )
   }
   return trustResult("unknown_trust", ["unclassified"])
 }

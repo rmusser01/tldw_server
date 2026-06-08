@@ -2242,16 +2242,28 @@ async def unified_rag_pipeline(
             if explicit_include_sources:
                 original_retrieval_sources = list(retrieval_sources)
                 requested_sources = set(resolved_data_sources)
-                resolved_data_sources = [
+                scoped_data_sources = [
                     source
                     for source in explicit_include_sources
                     if source in requested_sources
                 ]
+                scope_intersection_empty = not scoped_data_sources
+                resolved_data_sources = (
+                    list(explicit_include_sources)
+                    if scope_intersection_empty
+                    else scoped_data_sources
+                )
                 retrieval_sources = [
                     _DATASOURCE_TO_CANONICAL_SOURCE[source]
                     for source in resolved_data_sources
                 ]
                 resolved_request.payload["sources"] = list(retrieval_sources)
+                cache_disabled_for_scope = bool(enable_cache)
+                if cache_disabled_for_scope:
+                    enable_cache = False
+                    result.metadata["cache_bypassed"] = {
+                        "reason": "explicit_source_selection",
+                    }
                 if retrieval_plan is not None:
                     scoped_retrieval_plan = replace(
                         retrieval_plan,
@@ -2269,6 +2281,8 @@ async def unified_rag_pipeline(
                     "resolved_sources": list(retrieval_sources),
                     "include_media_ids_count": len(include_media_ids or []),
                     "include_note_ids_count": len(include_note_ids or []),
+                    "scope_intersection_empty": scope_intersection_empty,
+                    "cache_disabled": cache_disabled_for_scope,
                 }
             result.metadata["sources_requested"] = list(retrieval_sources)
         except ValueError as exc:
@@ -3920,7 +3934,7 @@ async def unified_rag_pipeline(
                     (not result.documents)
                     and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
                     and (media_db_path or media_db is not None)
-                    and search_mode in ("fts", "hybrid")
+                    and retrieval_search_mode in ("fts", "hybrid")
                 ):
                     try:
                         from .database_retrievers import MediaDBRetriever as _MDBR
@@ -5588,7 +5602,11 @@ async def unified_rag_pipeline(
 
         effective_enable_generation = _resolve_effective_enable_generation()
 
-        if effective_enable_generation and not result.documents:
+        if (
+            effective_enable_generation
+            and not result.documents
+            and _skip_retrieval_reason != "classification_skip_search"
+        ):
             result.generated_answer = None
             result.metadata["answer_generation_skipped"] = "no_documents"
             effective_enable_generation = False

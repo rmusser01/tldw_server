@@ -5,16 +5,20 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.RAG.rag_service import database_retrievers as database_retrievers_module
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     ChatHistoryRetriever,
     MediaDBRetriever,
+    NotesDBRetriever,
     RetrievalConfig,
 )
 from tldw_Server_API.app.core.RAG.rag_service.generation import (
     FallbackGenerator,
     GenerationConfig,
 )
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as unified_pipeline_module
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.tests.RAG.knowledge_qa_uat_fixtures import (
     KNOWN_NOTE_SOURCE_BODY,
@@ -124,6 +128,10 @@ async def test_selected_note_scope_returns_selected_note_when_query_is_natural_l
         in str(document.get("content") if isinstance(document, dict) else document.content)
     ]
     assert matched_documents
+    matched_metadata = _document_metadata(matched_documents[0])
+    assert matched_metadata["note_id"] == str(note_id)
+    assert matched_metadata["source_id"] == str(note_id)
+    assert matched_metadata["source_type"] == "notes"
 
 
 @pytest.mark.unit
@@ -155,6 +163,51 @@ async def test_selected_note_scope_survives_webui_chunk_type_filter(
 
     assert result.metadata.get("sources_searched") == ["notes"]
     assert result.metadata.get("chunk_type_filter_after") != 0
+    assert any(
+        str(_document_id(document)).replace("note_", "") == str(note_id)
+        for document in result.documents
+    )
+    selected_document = next(
+        document
+        for document in result.documents
+        if str(_document_id(document)).replace("note_", "") == str(note_id)
+    )
+    selected_metadata = _document_metadata(selected_document)
+    assert selected_metadata["note_id"] == str(note_id)
+    assert selected_metadata["source_id"] == str(note_id)
+    assert selected_metadata["source_type"] == "notes"
+    assert selected_metadata["chunk_type"] == "text"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_explicit_note_scope_does_not_collapse_when_default_sources_omit_notes(
+    tmp_path: Path,
+) -> None:
+    notes_db_path = tmp_path / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=str(notes_db_path), client_id="pytest")
+    note_id = chacha_db.add_note(
+        title=KNOWN_NOTE_SOURCE_TITLE,
+        content=KNOWN_NOTE_SOURCE_BODY,
+    )
+
+    result = await unified_rag_pipeline(
+        query=SCOPED_INCLUDED_QUERY,
+        sources=["media_db"],
+        notes_db_path=str(notes_db_path),
+        chacha_db=chacha_db,
+        search_mode="hybrid",
+        top_k=5,
+        min_score=0.0,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_cache=True,
+        include_note_ids=[note_id],
+    )
+
+    assert result.metadata.get("sources_searched") == ["notes"]
+    assert result.metadata.get("explicit_source_selection", {}).get("scope_intersection_empty") is True
+    assert result.metadata.get("cache_bypassed", {}).get("reason") == "explicit_source_selection"
     assert any(
         str(_document_id(document)).replace("note_", "") == str(note_id)
         for document in result.documents
@@ -211,6 +264,81 @@ async def test_explicit_note_selection_excludes_unselected_media_sources(
         str(_document_id(document)).replace("note_", "") == str(note_id)
         for document in result.documents
     )
+
+
+@pytest.mark.unit
+def test_selected_note_sql_allowlist_is_bounded_by_max_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retriever = NotesDBRetriever(
+        str(tmp_path / "ChaChaNotes.db"),
+        config=RetrievalConfig(max_results=2),
+        chacha_db=None,
+    )
+    captured_params: tuple[object, ...] | None = None
+
+    def fake_execute_query(sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+        nonlocal captured_params
+        captured_params = params
+        return []
+
+    monkeypatch.setattr(retriever, "_execute_query", fake_execute_query)
+
+    retriever._retrieve_allowed_notes_via_sql(["1", "2", "3", "4"], notebook_id=None)
+
+    assert captured_params == ("1", "2", 2)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_selected_note_retrieval_uses_thread_offload_for_sync_adapter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    notes_db_path = tmp_path / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=str(notes_db_path), client_id="pytest")
+    note_id = chacha_db.add_note(
+        title=KNOWN_NOTE_SOURCE_TITLE,
+        content=KNOWN_NOTE_SOURCE_BODY,
+    )
+    retriever = NotesDBRetriever(
+        str(notes_db_path),
+        config=RetrievalConfig(max_results=5),
+        chacha_db=chacha_db,
+    )
+    offloaded_functions: list[str] = []
+
+    async def fake_to_thread(function: object, *args: object, **kwargs: object) -> object:
+        offloaded_functions.append(getattr(function, "__name__", "unknown"))
+        return function(*args, **kwargs)  # type: ignore[misc]
+
+    monkeypatch.setattr(database_retrievers_module.asyncio, "to_thread", fake_to_thread)
+
+    documents = await retriever.retrieve(SCOPED_INCLUDED_QUERY, allowed_note_ids=[note_id])
+
+    assert offloaded_functions == ["_retrieve_allowed_notes_via_chacha"]
+    assert any(str(_document_id(document)).replace("note_", "") == str(note_id) for document in documents)
+
+
+@pytest.mark.unit
+def test_chat_history_excluded_source_lookup_is_cached(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retriever = ChatHistoryRetriever(str(tmp_path / "ChaChaNotes.db"))
+    query_count = 0
+
+    def fake_execute_query(sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+        nonlocal query_count
+        query_count += 1
+        return [{"source": "knowledge_qa"}]
+
+    monkeypatch.setattr(retriever, "_execute_query", fake_execute_query)
+
+    assert retriever._is_excluded_conversation_source("conversation-1") is True
+    assert retriever._is_excluded_conversation_source("conversation-1") is True
+    assert query_count == 1
 
 
 @pytest.mark.unit
@@ -370,3 +498,55 @@ async def test_no_match_pipeline_does_not_generate_empty_context_answer(
 
     assert result.documents == []
     assert not result.generated_answer
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retrieval_error_fallback_uses_effective_retrieval_search_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_db_path = tmp_path / "Media_DB_v2.db"
+    media_db = MediaDatabase(db_path=str(media_db_path), client_id="pytest")
+    media_db.add_media_with_keywords(
+        title="Knowledge QA fallback mode fixture",
+        media_type="document",
+        content="effective retrieval fallback needle phrase",
+        keywords=["knowledge-qa-live-regression"],
+    )
+
+    async def fail_primary_retrieval(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("primary retrieval unavailable")
+
+    monkeypatch.setattr(
+        unified_pipeline_module,
+        "execute_retrieval_phase",
+        fail_primary_retrieval,
+    )
+
+    result = await unified_rag_pipeline(
+        query="effective retrieval fallback needle phrase",
+        sources=["media_db"],
+        media_db_path=str(media_db_path),
+        media_db=media_db,
+        search_mode="vector",
+        retrieval_plan=RetrievalPlan(
+            query="effective retrieval fallback needle phrase",
+            sources=("media_db",),
+            search_mode="fts",
+            top_k=5,
+            min_score=0.0,
+            index_namespace=None,
+        ),
+        top_k=5,
+        min_score=0.0,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_cache=False,
+    )
+
+    assert any(
+        "effective retrieval fallback needle phrase"
+        in str(document.get("content") if isinstance(document, dict) else document.content)
+        for document in result.documents
+    )

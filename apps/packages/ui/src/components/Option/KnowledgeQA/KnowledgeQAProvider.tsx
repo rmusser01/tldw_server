@@ -2026,6 +2026,33 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         return false
       }
 
+      const postSyncTrust = normalizeKnowledgeAnswerTrust({
+        answer: state.answer,
+        results: state.results,
+        citations: state.citations,
+        hasRequiredMetadata: true,
+        weakEvidence: hasWeakEvidence(
+          state.results,
+          state.settings.strip_min_relevance
+        ),
+      })
+      const postSyncEvidenceOrigin =
+        postSyncTrust.evidenceOrigin === "unknown_origin"
+          ? undefined
+          : postSyncTrust.evidenceOrigin
+      const syncRagContextTrust = (ragContext: RagContextData): RagContextData => ({
+        ...ragContext,
+        trust_state: postSyncTrust.state,
+        trust_reason_codes: postSyncTrust.reasonCodes,
+        trust_evidence_origin: postSyncEvidenceOrigin,
+        knowledge_trust: {
+          ...(ragContext.knowledge_trust || {}),
+          state: postSyncTrust.state,
+          reasonCodes: postSyncTrust.reasonCodes,
+          evidenceOrigin: postSyncTrust.evidenceOrigin,
+        },
+      })
+
       const syncedMessages: KnowledgeQAMessage[] = []
       let parentMessageId: string | null = null
       for (const messageToSync of messagesToSync) {
@@ -2041,10 +2068,14 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         }
         parentMessageId = persisted.id
 
+        const syncedRagContext =
+          messageToSync.role === "assistant" && messageToSync.ragContext
+            ? syncRagContextTrust(messageToSync.ragContext)
+            : messageToSync.ragContext
         if (messageToSync.role === "assistant" && messageToSync.ragContext) {
           const persistedContext = await persistRagContext(
             persisted.id,
-            messageToSync.ragContext
+            syncedRagContext as RagContextData
           )
           if (!persistedContext) {
             dispatch({ type: "MARK_SYNC_FAILED" })
@@ -2057,19 +2088,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           id: persisted.id,
           conversationId: targetThreadId,
           timestamp: persisted.timestamp || messageToSync.timestamp,
+          ragContext: syncedRagContext,
         })
       }
-
-      const postSyncTrust = normalizeKnowledgeAnswerTrust({
-        answer: state.answer,
-        results: state.results,
-        citations: state.citations,
-        hasRequiredMetadata: true,
-        weakEvidence: hasWeakEvidence(
-          state.results,
-          state.settings.strip_min_relevance
-        ),
-      })
 
       dispatch({ type: "SET_THREAD_ID", payload: targetThreadId })
       dispatch({ type: "SET_MESSAGES", payload: syncedMessages })
