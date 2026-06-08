@@ -37,8 +37,8 @@ Implement the frontend-only Phase 2A /scheduled-tasks Create framework from the 
 - [ ] #2 Template registry and matcher keep Reminder as the only fully available template and keep Watch/Ingest/Advanced handoff-only while RAG/Agent remain planned.
 - [x] #3 Create panel renders templates by intent, not source vendor, and uses handoff panels without claiming a task was created.
 - [x] #4 ScheduledTasksPage integrates tabs, create flow, detail deep links, invalid route states, and created reminder detail navigation while preserving Phase 1 overview/table/detail behavior.
-- [ ] #5 Focused ScheduledTasks and route tests pass; extension route smoke is updated or skip rationale is recorded.
-- [ ] #6 No backend files are changed; Bandit is run only if backend Python changes unexpectedly, otherwise skip rationale is recorded.
+- [x] #5 Focused ScheduledTasks and route tests pass; extension route smoke is updated or skip rationale is recorded.
+- [x] #6 No backend files are changed; Bandit is run only if backend Python changes unexpectedly, otherwise skip rationale is recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -96,6 +96,12 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 5 CreatePanel regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 tests.
 - Task 5 diff check: `git diff --check` passed.
 - Bandit skip: Task 5 changed frontend TypeScript/TSX tests/components and Backlog tracking only; no backend Python files were touched.
+- Task 6: Inspected the extension E2E smoke test and scheduled-tasks route parity test. The current Scheduled Tasks page still renders the `Track reminders, Watchlist monitors...` description asserted by the extension smoke, and both web and extension route shells still import the shared `ScheduledTasksPage`, so no route or extension test edits were needed.
+- Task 6 touched files: Backlog tracking only. `apps/extension/tests/e2e/integrations-and-scheduled-tasks.spec.ts` and `apps/packages/ui/src/routes/__tests__/scheduled-tasks-route.test.tsx` were intentionally left unchanged.
+- Task 6 route verification: `cd apps/packages/ui && bunx vitest run src/routes/__tests__/scheduled-tasks-route.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 1 test file and 3 tests.
+- Task 6 focused verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-route-state.test.ts src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx src/components/Option/ScheduledTasks/__tests__/scheduled-task-status.test.ts src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts src/routes/__tests__/scheduled-tasks-route.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 7 test files and 92 tests.
+- Task 6 extension E2E execution skip: not run for this parity task because the required instructions only requested inspection plus Vitest route/focused groups; the smoke assertion did not require a copy update.
+- Task 6 Bandit skip: no backend Python files were changed; Task 6 touched Backlog tracking only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
