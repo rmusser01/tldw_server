@@ -156,6 +156,37 @@ profile with `write` can use `fs.write` and patch-created files when policy also
 allows creation. Deny grants take precedence over broader allow grants, so a
 private subtree can remain read-only or blocked under a writable parent.
 
+Operators that prefer inherited policy authoring can keep the executable
+runtime contract flat by compiling `path_grant_authoring` into `path_grants`.
+The supported authoring levels are `org`, `workspace`, `folders`, and `files`;
+each rule still uses workspace-relative `prefix` or `path`, explicit `actions`,
+and optional `effect`:
+
+```json
+{
+  "path_grant_authoring": {
+    "org": [
+      {"prefix": ".", "actions": ["read"]}
+    ],
+    "workspace": [
+      {"prefix": "documents", "actions": ["read", "edit", "write"]}
+    ],
+    "folders": [
+      {"prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny"}
+    ],
+    "files": [
+      {"path": "downloads/report.md", "actions": ["read"]}
+    ]
+  }
+}
+```
+
+The compiler emits normalized flat grants and validation diagnostics. Explicit
+`path_grants` remain the authoritative runtime form; when both flat and
+authored grants are present, flat `path_grants` win. Invalid authored grants are
+not treated as legacy allowlists, so malformed authored policy fails closed
+rather than widening access.
+
 Denials and permission-decision metadata should be safe to show to operators:
 reason code, requested action, workspace-relative path, grant outcome, grant
 source, and redaction status. They should not include raw file content, read

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-import re
 from typing import Any
 
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
+from mcp_unified.profiles.path_grants import compile_policy_path_grants, has_path_grant_policy
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
@@ -175,31 +176,9 @@ def _policy_allowlist_prefixes(effective_policy: dict[str, Any] | None) -> list[
 
 def _policy_path_grants(effective_policy: dict[str, Any] | None) -> list[dict[str, Any]] | None:
     policy_document = _as_dict((effective_policy or {}).get("policy_document"))
-    if "path_grants" not in policy_document:
+    if not has_path_grant_policy(policy_document):
         return None
-    raw_grants = policy_document.get("path_grants")
-    if not isinstance(raw_grants, Iterable) or isinstance(raw_grants, (str, bytes, bytearray, dict)):
-        return []
-    grants: list[dict[str, Any]] = []
-    seen: set[tuple[str, tuple[str, ...], str]] = set()
-    for raw_grant in raw_grants:
-        if not isinstance(raw_grant, Mapping):
-            continue
-        prefix = _normalize_allowlist_prefix(raw_grant.get("prefix", raw_grant.get("path")))
-        if not prefix:
-            continue
-        actions = sorted({action for action in _as_str_list(raw_grant.get("actions")) if action in _PATH_GRANT_ACTIONS})
-        if not actions:
-            continue
-        effect = str(raw_grant.get("effect") or "allow").strip().lower()
-        if effect not in _PATH_GRANT_EFFECTS:
-            continue
-        key = (prefix, tuple(actions), effect)
-        if key in seen:
-            continue
-        seen.add(key)
-        grants.append({"prefix": prefix, "actions": actions, "effect": effect})
-    return sorted(grants, key=lambda grant: (str(grant["prefix"]), str(grant["effect"])))
+    return compile_policy_path_grants(policy_document).path_grants
 
 
 def _allowlist_roots(*, workspace_root: Path, allowlist_prefixes: list[str]) -> list[Path]:
@@ -323,6 +302,8 @@ def _relative_path_for_decision(root: Path, candidate: Path) -> str | None:
 
 
 def _grant_prefix_matches(relative_path: str, prefix: str) -> bool:
+    if prefix == ".":
+        return True
     return relative_path == prefix or relative_path.startswith(f"{prefix}/")
 
 
