@@ -545,14 +545,16 @@ Likely tests:
 - Backend tests for `/api/v1/notes/import`, `/api/v1/notes/export`, and `/api/v1/notes/export.csv` only if backend behavior changes.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 10.
-- [ ] Add failing tests for any missing import/export/offline feedback or recovery behavior.
-- [ ] Clarify import/export/offline copy and status presentation.
-- [ ] Fix data-loss or overwrite-risk behavior before visual polish.
-- [ ] Run focused import/export/offline tests.
-- [ ] Run backend tests and Bandit if `notes.py` changes.
-- [ ] Run browser smoke for import/export/offline status where feasible.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 10.
+- [x] Add failing tests for any missing import/export/offline feedback or recovery behavior.
+- [x] Clarify import/export/offline copy and status presentation.
+- [x] Fix data-loss or overwrite-risk behavior before visual polish.
+- [x] Run focused import/export/offline tests.
+- [x] Run backend tests and Bandit if `notes.py` changes.
+- [x] Assess browser smoke for import/export/offline status.
+- [x] Update Backlog notes with verification.
+
+**Verification notes:** Focused PR 10 tests passed for `NotesManagerPage.stage30.export-progress.test.tsx`, `NotesManagerPage.stage31.single-note-export-copy.test.tsx`, `NotesManagerPage.stage35.export-preflight.test.tsx`, `NotesManagerPage.stage36.import-workflow.test.tsx`, `NotesManagerPage.stage37.print-export.test.tsx`, and `NotesManagerPage.stage41.offline-drafting-sync.test.tsx` with 13 tests total. A full Notes component sweep was also run: 66 of 67 files passed and 205 of 206 tests passed; the remaining deterministic failure is the unrelated `NotesManagerPage.stage10.ai-title.test.tsx` strategy dropdown option lookup (`LLM (quality)`). Browser smoke remains needs-verification because no live API/WebUI stack was started for this component-level import guard slice. No Python files were touched, so backend tests and Bandit were not applicable.
 
 ---
 
