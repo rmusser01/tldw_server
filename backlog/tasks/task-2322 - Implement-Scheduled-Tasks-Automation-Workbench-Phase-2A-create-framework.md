@@ -55,6 +55,8 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 2 red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` failed because `../scheduled-task-templates` did not exist.
 - Task 2 verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 10 tests.
 - Bandit skip: Task 2 changed frontend TypeScript tests/helpers and Backlog tracking only; no backend Python files were touched.
+- Task 2 spec-review follow-up: Removed the extra Ingest matcher keyword `channel`; the focused template test still matches `keep this channel searchable` through the required `searchable` keyword.
+- Task 2 follow-up verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 10 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

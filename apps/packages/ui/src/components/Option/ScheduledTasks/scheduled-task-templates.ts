@@ -94,8 +94,7 @@ export const SCHEDULED_TASK_TEMPLATES: readonly ScheduledTaskTemplate[] = [
       "download",
       "index",
       "searchable",
-      "library",
-      "channel"
+      "library"
     ]
   },
   {
