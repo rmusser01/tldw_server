@@ -257,6 +257,52 @@ def test_workspace_membership_create_request_rejects_non_finite_json_values(fiel
         WorkspaceMembershipCreateRequest(**payload)
 
 
+@pytest.mark.parametrize("field_name", ["provenance", "metadata"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_membership_service_rejects_non_finite_json_values(field_name: str, value: float) -> None:
+    db = FakeChaChaDB()
+    adapter = RecordingAdapter()
+    service = WorkspaceMembershipService(db, adapters={"media": adapter})
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.link_membership(
+            "workspace-1",
+            {
+                "resource_type": "media",
+                "resource_id": "42",
+                "role": "source",
+                field_name: {"value": value},
+            },
+            media_db=object(),
+        )
+
+    assert exc_info.value.code == "invalid_membership_request"
+    assert exc_info.value.status_code == 400
+    assert adapter.validated == []
+    assert db.last_add_data is None
+
+
+@pytest.mark.parametrize("field_name", ["provenance", "metadata"])
+def test_membership_service_rejects_oversized_json_values(field_name: str) -> None:
+    db = FakeChaChaDB()
+    service = WorkspaceMembershipService(db, adapters={"media": RecordingAdapter()})
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.link_membership(
+            "workspace-1",
+            {
+                "resource_type": "media",
+                "resource_id": "42",
+                "role": "source",
+                field_name: {"value": "x" * (16 * 1024 + 1)},
+            },
+            media_db=object(),
+        )
+
+    assert exc_info.value.code == "invalid_membership_request"
+    assert db.last_add_data is None
+
+
 def test_workspace_membership_list_response_constructs_grouped_totals() -> None:
     item = WorkspaceMembershipResponse(
         workspace_id="workspace-1",
@@ -331,16 +377,39 @@ class FakeChaChaDB:
     def get_workspace(self, workspace_id: str) -> dict[str, object] | None:
         return self.workspaces.get(workspace_id)
 
-    def get_workspace_note(self, workspace_id: str, note_id: int) -> dict[str, object] | None:
+    def get_workspace_note(
+        self,
+        workspace_id: str,
+        note_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, object] | None:
         return self.notes.get((workspace_id, note_id))
 
-    def get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, object] | None:
+    def get_workspace_source(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, object] | None:
         return self.sources.get((workspace_id, source_id))
 
-    def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, object] | None:
+    def get_workspace_artifact(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, object] | None:
         return self.artifacts.get((workspace_id, artifact_id))
 
-    def get_conversation_for_workspace_membership(self, conversation_id: str) -> dict[str, object] | None:
+    def get_conversation_for_workspace_membership(
+        self,
+        conversation_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, object] | None:
         return self.conversations.get(conversation_id)
 
     def add_workspace_resource_membership(
@@ -734,6 +803,120 @@ def test_generic_summarize_failure_uses_safe_unresolved_message() -> None:
     assert message == "Workspace resource summary is unavailable."
     assert "/tmp/secret-token" not in message
     assert "sk-test" not in message
+
+
+@pytest.mark.parametrize(
+    "resource_type,resource_id,store_key,row",
+    [
+        (
+            "workspace_note",
+            "7",
+            ("workspace-1", 7),
+            {"id": 7, "workspace_id": "workspace-1", "title": "Deleted note", "deleted": 1},
+        ),
+        (
+            "workspace_source",
+            "source-1",
+            ("workspace-1", "source-1"),
+            {
+                "id": "source-1",
+                "workspace_id": "workspace-1",
+                "title": "Deleted source",
+                "source_type": "pdf",
+                "deleted": 1,
+            },
+        ),
+        (
+            "workspace_artifact",
+            "artifact-1",
+            ("workspace-1", "artifact-1"),
+            {
+                "id": "artifact-1",
+                "workspace_id": "workspace-1",
+                "title": "Deleted artifact",
+                "artifact_type": "report",
+                "deleted": 1,
+            },
+        ),
+    ],
+)
+def test_deleted_workspace_subresource_summary_reports_deleted_state(
+    resource_type: str,
+    resource_id: str,
+    store_key: tuple[object, ...],
+    row: dict[str, object],
+) -> None:
+    db = FakeChaChaDB()
+    if resource_type == "workspace_note":
+        db.notes[store_key] = row
+    elif resource_type == "workspace_source":
+        db.sources[store_key] = row
+    else:
+        db.artifacts[store_key] = row
+    db.memberships[("workspace-1", resource_type, resource_id)] = _membership_row(
+        resource_type=resource_type,
+        resource_id=resource_id,
+    )
+    service = WorkspaceMembershipService(db)
+
+    payload = service.list_workspace_memberships("workspace-1")
+
+    summary = payload["items"][0]["summary"]
+    assert summary["state"] == "deleted"
+    assert summary["title"] == row["title"]
+
+
+def test_deleted_chat_summary_reports_deleted_state() -> None:
+    db = FakeChaChaDB()
+    db.conversations["chat-1"] = {
+        "id": "chat-1",
+        "title": "Deleted chat",
+        "scope_type": "workspace",
+        "workspace_id": "workspace-1",
+        "deleted": 1,
+    }
+    db.memberships[("workspace-1", "chat", "chat-1")] = _membership_row(
+        resource_type="chat",
+        resource_id="chat-1",
+        role="conversation",
+    )
+    service = WorkspaceMembershipService(db)
+
+    payload = service.list_workspace_memberships("workspace-1")
+
+    summary = payload["items"][0]["summary"]
+    assert summary["state"] == "deleted"
+    assert summary["title"] == "Deleted chat"
+
+
+def test_deleted_media_summary_reports_deleted_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "42")] = _membership_row()
+    media_db = object()
+    calls: list[tuple[int, bool, bool]] = []
+
+    def fake_get_media_by_id(
+        passed_db: object,
+        media_id: int,
+        *,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> dict[str, object] | None:
+        assert passed_db is media_db
+        calls.append((media_id, include_deleted, include_trash))
+        if include_deleted and include_trash:
+            return {"id": media_id, "title": "Deleted media", "deleted": 1}
+        return None
+
+    monkeypatch.setattr(membership_adapters.media_db_api, "get_media_by_id", fake_get_media_by_id)
+    service = WorkspaceMembershipService(db)
+
+    payload = service.list_workspace_memberships("workspace-1", media_db=media_db)
+
+    summary = payload["items"][0]["summary"]
+    assert summary["state"] == "deleted"
+    assert summary["title"] == "Deleted media"
+    assert calls == [(42, True, True)]
 
 
 class RecordingAdapter:

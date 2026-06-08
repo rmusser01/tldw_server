@@ -7,14 +7,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
 
+from tldw_Server_API.app.core.Workspaces.membership_models import (
+    WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+    WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+    normalize_membership_json_object,
+)
 
 WORKSPACE_MIGRATION_MAX_MANIFEST_BYTES = 256 * 1024
 WORKSPACE_MIGRATION_MAX_DIAGNOSTICS_BYTES = 64 * 1024
 WORKSPACE_MIGRATION_MAX_CHUNK_METADATA_BYTES = 64 * 1024
 WORKSPACE_MIGRATION_MAX_CHUNK_BYTES = 2 * 1024 * 1024
 WORKSPACE_MIGRATION_MAX_DECLARED_CHUNKS = 512
-WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES = 16 * 1024
-WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES = 16 * 1024
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 WorkspaceProfile = Literal["research", "project"]
@@ -235,20 +238,26 @@ class WorkspaceMembershipCreateRequest(BaseModel):
     @field_validator("provenance")
     @classmethod
     def _validate_provenance_size(cls, value: dict[str, Any]) -> dict[str, Any]:
-        return _validate_json_size(
-            value,
-            field_name="provenance",
-            max_bytes=WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
-        )
+        try:
+            return normalize_membership_json_object(
+                value,
+                field_name="provenance",
+                max_bytes=WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
     @field_validator("metadata")
     @classmethod
     def _validate_membership_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]:
-        return _validate_json_size(
-            value,
-            field_name="metadata",
-            max_bytes=WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
-        )
+        try:
+            return normalize_membership_json_object(
+                value,
+                field_name="metadata",
+                max_bytes=WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class WorkspaceMembershipSummaryResponse(BaseModel):

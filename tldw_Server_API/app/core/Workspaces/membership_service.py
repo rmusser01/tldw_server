@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.Workspaces.membership_adapters import (
     get_workspace_membership_adapter,
 )
 from tldw_Server_API.app.core.Workspaces.membership_models import (
+    WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+    WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
     WORKSPACE_MEMBERSHIP_ROLES,
     WORKSPACE_MEMBERSHIP_TRANSFER_POLICIES,
     WorkspaceMembershipCursor,
@@ -22,6 +24,7 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
     decode_resource_membership_cursor,
     encode_membership_cursor,
     encode_resource_membership_cursor,
+    normalize_membership_json_object,
 )
 
 
@@ -764,8 +767,16 @@ class WorkspaceMembershipService:
             "role": str(raw.get("role") or "member"),
             "label": raw.get("label"),
             "transfer_policy": str(raw.get("transfer_policy") or "link"),
-            "provenance": self._mapping_value(raw.get("provenance")),
-            "metadata": self._mapping_value(raw.get("metadata")),
+            "provenance": self._membership_json_value(
+                raw.get("provenance"),
+                field_name="provenance",
+                max_bytes=WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+            ),
+            "metadata": self._membership_json_value(
+                raw.get("metadata"),
+                field_name="metadata",
+                max_bytes=WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+            ),
         }
         if data["role"] not in WORKSPACE_MEMBERSHIP_ROLES:
             raise WorkspaceMembershipServiceError(
@@ -782,6 +793,17 @@ class WorkspaceMembershipService:
         if data["label"] is not None:
             data["label"] = str(data["label"])
         return data
+
+    @staticmethod
+    def _membership_json_value(value: Any, *, field_name: str, max_bytes: int) -> dict[str, Any]:
+        try:
+            return normalize_membership_json_object(value, field_name=field_name, max_bytes=max_bytes)
+        except ValueError as exc:
+            raise WorkspaceMembershipServiceError(
+                "invalid_membership_request",
+                str(exc),
+                status_code=400,
+            ) from exc
 
     @staticmethod
     def _non_empty_string(value: Any, field_name: str) -> str:

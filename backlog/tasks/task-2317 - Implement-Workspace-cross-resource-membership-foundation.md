@@ -1,5 +1,5 @@
 ---
-id: TASK-2316
+id: TASK-2317
 title: Implement Workspace cross-resource membership foundation
 status: Done
 labels:
@@ -31,7 +31,7 @@ modified_files:
 - tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py
 - tldw_Server_API/app/core/Workspaces/README.md
 - backlog/tasks/task-2315 - Design-Workspace-cross-resource-membership-foundation.md
-- backlog/tasks/task-2316 - Implement-Workspace-cross-resource-membership-foundation.md
+- backlog/tasks/task-2317 - Implement-Workspace-cross-resource-membership-foundation.md
 ---
 
 ## Description
@@ -125,7 +125,7 @@ Task 4 completed by Worker 4:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `11 passed, 6 warnings`.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
-- Bandit touched-scope scan reported zero findings for `workspaces.py`, `workspace_memberships.py`, and `workspace_schemas.py` (`/tmp/bandit_workspace_membership_api_task2316.json`).
+- Bandit touched-scope scan reported zero findings for `workspaces.py`, `workspace_memberships.py`, and `workspace_schemas.py` (`/tmp/bandit_workspace_membership_api_task2317.json`).
 Task 4 spec-review fix:
 - Fixed unsupported POST resource types reaching FastAPI/Pydantic literal validation before the service by changing `WorkspaceMembershipCreateRequest.resource_type` to a raw non-empty string while keeping response schemas typed.
 - Added POST regression coverage for `resource_type="note"` returning `400` with `detail.code == "unsupported_resource_type"`.
@@ -166,18 +166,17 @@ Task 5 reviews after follow-up:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first server-backed Workspace cross-resource membership foundation under the design in TASK-2315. The implementation added ChaChaNotes `workspace_resource_memberships` persistence, typed membership/cursor models, fail-closed adapters for `workspace_note`, `media`, `workspace_source`, `workspace_artifact`, and `chat`, Workspace membership service orchestration, workspace-scoped and reverse resource lookup API routes, explicit idempotent backfill, and compact Workspace context membership totals while preserving the boundary that membership is association rather than ownership transfer, global filtering, or MCP trust/path admission.
+Implemented the first server-backed Workspace cross-resource membership foundation under the design in TASK-2315 and remediated the pre-merge review feedback on PR #2312. The PR branch was rebased onto current origin/dev, removing the stale Knowledge QA/RAG trust files from the comparison. The implementation task was renumbered from the colliding TASK-2316 to TASK-2317 so dev's existing PR #2309 task remains canonical.
 
-Task 6 documented the membership boundary in `tldw_Server_API/app/core/Workspaces/README.md`, including `workspace_sources` as Research Workspace source selection/readiness, MCP permission/path admission as MCP policy/root binding-owned, future adapter validation through domain adapters, and explicit non-automatic backfill.
+Review remediation added shared strict membership JSON normalization in `membership_models.py` and routed membership provenance/metadata validation through it from API schemas, WorkspaceMembershipService, and ChaChaNotes DB writes. Direct service and DB callers now reject non-finite JSON values and 16 KiB-plus provenance/metadata before adapter validation or durable writes. Existing linked resources that later become deleted/trash/archived now summarize truthfully through deleted-inclusive adapter summary reads while `validate_access` remains active-record-only and fail-closed for new links.
 
 Final verification on 2026-06-07:
-- Focused selected suite: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py tldw_Server_API/tests/Workspaces/test_workspace_sub_resources_api.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py -q` passed with `194 passed, 6 warnings`.
-- Broader Workspace regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces -q` passed with `370 passed, 8 warnings`.
-- Bandit touched Python paths: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Workspaces/membership_models.py tldw_Server_API/app/core/Workspaces/membership_adapters.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/endpoints/workspace_memberships.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py -f json -o /tmp/bandit_workspace_memberships.json` exited 0 with zero findings. The JSON summary reported `results: 0` and `skipped_tests: 76` from existing `# nosec` suppressions in scanned files.
+- Focused regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py -q` passed with `96 passed, 6 warnings`.
+- Broader Workspace regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py -q` passed with `412 passed, 8 warnings`.
+- Bandit touched Python paths: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Workspaces/membership_models.py tldw_Server_API/app/core/Workspaces/membership_adapters.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/endpoints/workspace_memberships.py -f json -o /tmp/bandit_workspace_membership_pr_review.json` exited 0 with `results: 0`.
 - `git diff --check` passed.
-- `git status --short --branch` before Backlog finalization showed only the intended README edit; final status is recorded in the closing commit.
 
-Known skips/blockers: none. The broader Workspace regression was run and passed, so there are no unrelated Workspace failures to record for this task.
+Known skips/blockers: none in the exercised Workspace membership scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

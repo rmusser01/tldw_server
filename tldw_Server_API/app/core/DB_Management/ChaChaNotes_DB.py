@@ -123,6 +123,11 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa:
     normalize_inventory_counts,
     sort_inventory_relative_paths,
 )
+from tldw_Server_API.app.core.Workspaces.membership_models import (  # noqa: E402
+    WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+    WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+    dump_membership_json_object,
+)
 from tldw_Server_API.app.core.Workspaces.operations import (  # noqa: E402
     WORKSPACE_OPERATION_ACTIVE_STATUSES,
     WORKSPACE_OPERATION_STATUSES,
@@ -18111,7 +18116,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ) from exc
         return self._get_workspace_source(workspace_id, source_id)  # type: ignore[return-value]
 
-    def _get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:
+    def _get_workspace_source(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
         cursor = self.execute_query(
             "SELECT * FROM workspace_sources WHERE workspace_id = ? AND id = ?",
             (workspace_id, source_id),
@@ -18119,9 +18130,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:
+    def get_workspace_source(
+        self,
+        workspace_id: str,
+        source_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
         """Fetch a workspace source by id."""
-        return self._get_workspace_source(workspace_id, source_id)
+        return self._get_workspace_source(workspace_id, source_id, include_deleted=include_deleted)
 
     def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all sources for a workspace ordered by position."""
@@ -18227,29 +18244,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @classmethod
     def _normalize_workspace_membership_json_object(cls, value: Any, field_name: str) -> tuple[dict[str, Any], str]:
-        if value is None:
-            normalized: dict[str, Any] = {}
-        elif isinstance(value, str):
-            if not value.strip():
-                normalized = {}
-            else:
-                try:
-                    parsed = json.loads(value)
-                except json.JSONDecodeError as exc:
-                    raise InputError(f"{field_name} must be valid JSON.") from exc  # noqa: TRY003
-                if not isinstance(parsed, dict):
-                    raise InputError(f"{field_name} must be a JSON object.")  # noqa: TRY003
-                normalized = parsed
-        elif isinstance(value, Mapping):
-            normalized = dict(value)
-        else:
-            raise InputError(f"{field_name} must be a JSON object.")  # noqa: TRY003
-
+        max_bytes = (
+            WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES
+            if field_name == "provenance"
+            else WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES
+        )
         try:
-            dumped = json.dumps(normalized, ensure_ascii=True, sort_keys=True)
-        except TypeError as exc:
-            raise InputError(f"{field_name} must be JSON-serializable.") from exc  # noqa: TRY003
-        return normalized, dumped
+            return dump_membership_json_object(value, field_name=field_name, max_bytes=max_bytes)
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc  # noqa: TRY003
 
     @classmethod
     def _load_workspace_membership_json_object(cls, value: Any, *, field_name: str) -> dict[str, Any]:
@@ -18805,15 +18808,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             raise self._workspace_membership_write_error(exc) from exc
 
-    def get_conversation_for_workspace_membership(self, conversation_id: str) -> dict[str, Any] | None:
+    def get_conversation_for_workspace_membership(
+        self,
+        conversation_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
         """Fetch the compact conversation row needed by Workspace membership adapters."""
         normalized_conversation_id = self._normalize_workspace_membership_required_string(
             conversation_id,
             "conversation_id",
         )
+        deleted_clause = "" if include_deleted else " AND deleted = 0"
         cursor = self.execute_query(
-            "SELECT id, title, workspace_id, scope_type, last_modified, version "
-            "FROM conversations WHERE id = ? AND deleted = 0",
+            "SELECT id, title, workspace_id, scope_type, last_modified, deleted, version "
+            f"FROM conversations WHERE id = ?{deleted_clause}",  # nosec B608
             (normalized_conversation_id,),
         )
         row = cursor.fetchone()
@@ -19032,7 +19041,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
 
-    def _get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
+    def _get_workspace_artifact(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
         cursor = self.execute_query(
             "SELECT * FROM workspace_artifacts WHERE workspace_id = ? AND id = ?",
             (workspace_id, artifact_id),
@@ -19040,9 +19055,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         return self._normalize_workspace_artifact_row(row)
 
-    def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
+    def get_workspace_artifact(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
         """Fetch a workspace artifact by id."""
-        return self._get_workspace_artifact(workspace_id, artifact_id)
+        return self._get_workspace_artifact(workspace_id, artifact_id, include_deleted=include_deleted)
 
     def list_workspace_artifacts(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all artifacts for a workspace."""
@@ -19336,17 +19357,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             note_id = cursor.lastrowid
         return self._get_workspace_note(workspace_id, note_id)  # type: ignore[return-value]
 
-    def _get_workspace_note(self, workspace_id: str, note_id: int) -> dict[str, Any] | None:
+    def _get_workspace_note(
+        self,
+        workspace_id: str,
+        note_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        deleted_clause = "" if include_deleted else " AND deleted = 0"
         cursor = self.execute_query(
-            "SELECT * FROM workspace_notes WHERE workspace_id = ? AND id = ? AND deleted = 0",
+            f"SELECT * FROM workspace_notes WHERE workspace_id = ? AND id = ?{deleted_clause}",  # nosec B608
             (workspace_id, note_id),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def get_workspace_note(self, workspace_id: str, note_id: int) -> dict[str, Any] | None:
-        """Fetch a non-deleted workspace note by id."""
-        return self._get_workspace_note(workspace_id, note_id)
+    def get_workspace_note(
+        self,
+        workspace_id: str,
+        note_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Fetch a workspace note by id."""
+        return self._get_workspace_note(workspace_id, note_id, include_deleted=include_deleted)
 
     def list_workspace_notes(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all non-deleted notes for a workspace."""

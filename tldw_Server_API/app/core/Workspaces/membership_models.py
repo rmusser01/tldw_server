@@ -30,6 +30,8 @@ WORKSPACE_MEMBERSHIP_ROLES = frozenset(
 )
 WORKSPACE_MEMBERSHIP_TRANSFER_POLICIES = frozenset({"link", "copy", "promote", "import"})
 WORKSPACE_MEMBERSHIP_CURSOR_MAX_BYTES = 2048
+WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES = 16 * 1024
+WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES = 16 * 1024
 
 _CURSOR_VERSION = 1
 _MEMBERSHIP_CURSOR_KEYS = frozenset({"v", "updated_at", "resource_type", "resource_id"})
@@ -114,6 +116,53 @@ def decode_resource_membership_cursor(value: str) -> WorkspaceResourceMembership
         updated_at=_require_non_empty_string(payload.get("updated_at"), "updated_at"),
         workspace_id=_require_non_empty_string(payload.get("workspace_id"), "workspace_id"),
     )
+
+
+def normalize_membership_json_object(value: Any, *, field_name: str, max_bytes: int) -> dict[str, Any]:
+    """Normalize and strictly bound membership provenance/metadata JSON objects."""
+    if value is None:
+        normalized: dict[str, Any] = {}
+    elif isinstance(value, str):
+        if not value.strip():
+            normalized = {}
+        else:
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{field_name} must be valid JSON") from exc
+            if not isinstance(parsed, Mapping):
+                raise ValueError(f"{field_name} must be a JSON object")
+            normalized = dict(parsed)
+    elif isinstance(value, Mapping):
+        normalized = dict(value)
+    else:
+        raise ValueError(f"{field_name} must be a JSON object")
+
+    _dump_membership_json_object(normalized, field_name=field_name, max_bytes=max_bytes)
+    return normalized
+
+
+def dump_membership_json_object(value: Any, *, field_name: str, max_bytes: int) -> tuple[dict[str, Any], str]:
+    """Normalize and dump a bounded membership JSON object for durable storage."""
+    normalized = normalize_membership_json_object(value, field_name=field_name, max_bytes=max_bytes)
+    dumped = _dump_membership_json_object(normalized, field_name=field_name, max_bytes=max_bytes)
+    return normalized, dumped
+
+
+def _dump_membership_json_object(value: Mapping[str, Any], *, field_name: str, max_bytes: int) -> str:
+    try:
+        dumped = json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be JSON serializable") from exc
+    if len(dumped.encode("utf-8")) > max_bytes:
+        raise ValueError(f"{field_name} exceeds {max_bytes} bytes")
+    return dumped
 
 
 def _encode_cursor_payload(payload: Mapping[str, Any]) -> str:

@@ -46,14 +46,14 @@ Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementa
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Design authority lives in `Docs/superpowers/specs/2026-06-07-workspace-cross-resource-membership-design.md`, with the sequential implementation roadmap in `Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md`. Runtime implementation and verification were intentionally tracked under TASK-2316, not this design task.
+Design authority lives in `Docs/superpowers/specs/2026-06-07-workspace-cross-resource-membership-design.md`, with the sequential implementation roadmap in `Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md`. Runtime implementation and verification were intentionally tracked under TASK-2317, not this design task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Drafted, reviewed, and refined the Workspace cross-resource membership design and implementation plan for GitHub issue #1990. The design recommends a generic server-backed membership table plus fail-closed resource adapters, keeps Research Workspace source selection and Project Workspace root/runtime bindings separate, defines API/read-model/backfill behavior, distinguishes scoped workspace_note from future global note membership, and records a sequential implementation plan with TDD checkpoints and parallelizable slices. Follow-up review refinements clarified soft-delete restore semantics, archived workspace write rejection, deterministic cursor ordering, distinct reverse-lookup cursor shape, and the boundary between generic membership and MCP effective permission preview/path admission. Verification: git diff --check passed for the committed design baseline; final plan verification is recorded in the current planning commit. Bandit is not applicable because this task only changes Markdown design/tracking files.
-Implementation proceeded under TASK-2316 after the design artifacts were established; TASK-2315 remains the authoritative design record for that implementation.
+Implementation proceeded under TASK-2317 after the design artifacts were established; TASK-2315 remains the authoritative design record for that implementation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

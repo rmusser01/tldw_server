@@ -1,6 +1,7 @@
 """Workspace resource membership adapter registry and pilot adapters."""
 from __future__ import annotations
 
+import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -66,16 +67,29 @@ class WorkspaceNoteMembershipAdapter:
         row = context.chacha_db.get_workspace_note(context.workspace_id, note_id)
         if not row or _is_deleted(row) or _row_workspace_mismatch(row, context.workspace_id):
             raise _resource_not_found(self.resource_type, str(note_id))
+        return self._ref(row, note_id)
+
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        note_id = _parse_int_resource_id(resource_id, resource_type=self.resource_type)
+        row = _call_with_optional_include_deleted(
+            context.chacha_db.get_workspace_note,
+            context.workspace_id,
+            note_id,
+            include_deleted=True,
+        )
+        if not row or _row_workspace_mismatch(row, context.workspace_id):
+            raise _resource_not_found(self.resource_type, str(note_id))
+        return self._ref(row, note_id, state=_resource_state(row))
+
+    def _ref(self, row: Mapping[str, Any], note_id: int, *, state: str = "available") -> WorkspaceResourceRef:
         title = _first_non_empty(row, "title") or f"Workspace note {note_id}"
         return WorkspaceResourceRef(
             resource_type=self.resource_type,
             resource_id=str(row.get("id") or note_id),
             title=title,
             updated_at=_first_non_empty(row, "last_modified", "updated_at", "created_at"),
+            state=state,
         )
-
-    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
-        return self.validate_access(resource_id, context)
 
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         return None
@@ -92,6 +106,21 @@ class WorkspaceSourceMembershipAdapter:
         row = context.chacha_db.get_workspace_source(context.workspace_id, canonical_id)
         if not row or _is_deleted(row) or _row_workspace_mismatch(row, context.workspace_id):
             raise _resource_not_found(self.resource_type, canonical_id)
+        return self._ref(row, canonical_id)
+
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        canonical_id = _require_resource_id(resource_id)
+        row = _call_with_optional_include_deleted(
+            context.chacha_db.get_workspace_source,
+            context.workspace_id,
+            canonical_id,
+            include_deleted=True,
+        )
+        if not row or _row_workspace_mismatch(row, context.workspace_id):
+            raise _resource_not_found(self.resource_type, canonical_id)
+        return self._ref(row, canonical_id, state=_resource_state(row))
+
+    def _ref(self, row: Mapping[str, Any], canonical_id: str, *, state: str = "available") -> WorkspaceResourceRef:
         source_type = _first_non_empty(row, "source_type")
         metadata = _compact_metadata(row, "source_type", "media_id")
         return WorkspaceResourceRef(
@@ -101,10 +130,8 @@ class WorkspaceSourceMembershipAdapter:
             subtitle=source_type,
             updated_at=_first_non_empty(row, "last_modified", "updated_at", "added_at", "created_at"),
             metadata=metadata,
+            state=state,
         )
-
-    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
-        return self.validate_access(resource_id, context)
 
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         return None
@@ -121,6 +148,21 @@ class WorkspaceArtifactMembershipAdapter:
         row = context.chacha_db.get_workspace_artifact(context.workspace_id, canonical_id)
         if not row or _is_deleted(row) or _row_workspace_mismatch(row, context.workspace_id):
             raise _resource_not_found(self.resource_type, canonical_id)
+        return self._ref(row, canonical_id)
+
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        canonical_id = _require_resource_id(resource_id)
+        row = _call_with_optional_include_deleted(
+            context.chacha_db.get_workspace_artifact,
+            context.workspace_id,
+            canonical_id,
+            include_deleted=True,
+        )
+        if not row or _row_workspace_mismatch(row, context.workspace_id):
+            raise _resource_not_found(self.resource_type, canonical_id)
+        return self._ref(row, canonical_id, state=_resource_state(row))
+
+    def _ref(self, row: Mapping[str, Any], canonical_id: str, *, state: str = "available") -> WorkspaceResourceRef:
         artifact_type = _first_non_empty(row, "artifact_type")
         metadata = _compact_metadata(row, "artifact_type", "review_state", "status")
         return WorkspaceResourceRef(
@@ -130,10 +172,8 @@ class WorkspaceArtifactMembershipAdapter:
             subtitle=artifact_type,
             updated_at=_first_non_empty(row, "last_modified", "updated_at", "completed_at", "created_at"),
             metadata=metadata,
+            state=state,
         )
-
-    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
-        return self.validate_access(resource_id, context)
 
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         return None
@@ -168,6 +208,34 @@ class MediaMembershipAdapter:
             ) from exc
         if not row:
             raise _resource_not_found(self.resource_type, str(media_id))
+        return self._ref(row, media_id)
+
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        media_id = _parse_int_resource_id(resource_id, resource_type=self.resource_type)
+        if context.media_db is None:
+            raise WorkspaceMembershipAdapterError(
+                "media_db_unavailable",
+                "Media DB is required to summarize media workspace membership.",
+                status_code=503,
+            )
+        try:
+            row = media_db_api.get_media_by_id(
+                context.media_db,
+                media_id,
+                include_deleted=True,
+                include_trash=True,
+            )
+        except Exception as exc:  # pragma: no cover - defensive adapter boundary.
+            raise WorkspaceMembershipAdapterError(
+                "media_lookup_failed",
+                "Media lookup failed while summarizing workspace membership.",
+                status_code=503,
+            ) from exc
+        if not row:
+            raise _resource_not_found(self.resource_type, str(media_id))
+        return self._ref(row, media_id, state=_resource_state(row))
+
+    def _ref(self, row: Mapping[str, Any], media_id: int, *, state: str = "available") -> WorkspaceResourceRef:
         canonical_id = str(row.get("id") or media_id)
         subtitle = _first_non_empty(row, "media_type", "type", "content_type")
         metadata = _compact_metadata(row, "media_type", "type", "content_type", "url")
@@ -179,10 +247,8 @@ class MediaMembershipAdapter:
             href=_media_href(canonical_id),
             updated_at=_first_non_empty(row, "last_modified", "updated_at", "created_at"),
             metadata=metadata,
+            state=state,
         )
-
-    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
-        return self.validate_access(resource_id, context)
 
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         return None
@@ -199,7 +265,27 @@ class ChatMembershipAdapter:
         row = context.chacha_db.get_conversation_for_workspace_membership(canonical_id)
         if not row or _is_deleted(row):
             raise _resource_not_found(self.resource_type, canonical_id)
+        return self._ref(row, canonical_id, context)
 
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        canonical_id = _require_resource_id(resource_id)
+        row = _call_with_optional_include_deleted(
+            context.chacha_db.get_conversation_for_workspace_membership,
+            canonical_id,
+            include_deleted=True,
+        )
+        if not row:
+            raise _resource_not_found(self.resource_type, canonical_id)
+        return self._ref(row, canonical_id, context, state=_resource_state(row))
+
+    def _ref(
+        self,
+        row: Mapping[str, Any],
+        canonical_id: str,
+        context: WorkspaceMembershipContext,
+        *,
+        state: str = "available",
+    ) -> WorkspaceResourceRef:
         scope_type = str(row.get("scope_type") or "").strip().lower()
         row_workspace_id = row.get("workspace_id")
         if scope_type == "workspace" and str(row_workspace_id or "") != context.workspace_id:
@@ -218,10 +304,8 @@ class ChatMembershipAdapter:
             subtitle="chat",
             updated_at=_first_non_empty(row, "last_modified", "updated_at", "created_at"),
             metadata=metadata,
+            state=state,
         )
-
-    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
-        return self.validate_access(resource_id, context)
 
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         return None
@@ -310,6 +394,35 @@ def _is_deleted(row: Mapping[str, Any]) -> bool:
 def _row_workspace_mismatch(row: Mapping[str, Any], workspace_id: str) -> bool:
     row_workspace_id = row.get("workspace_id")
     return row_workspace_id is not None and str(row_workspace_id) != workspace_id
+
+
+def _is_archived(row: Mapping[str, Any]) -> bool:
+    return row.get("archived") in (True, 1, "1", "true", "True")
+
+
+def _is_trash(row: Mapping[str, Any]) -> bool:
+    return row.get("is_trash") in (True, 1, "1", "true", "True")
+
+
+def _resource_state(row: Mapping[str, Any]) -> str:
+    if _is_deleted(row) or _is_trash(row):
+        return "deleted"
+    if _is_archived(row):
+        return "archived"
+    return "available"
+
+
+def _call_with_optional_include_deleted(func: Any, *args: Any, include_deleted: bool) -> Any:
+    try:
+        parameters = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        try:
+            return func(*args, include_deleted=include_deleted)
+        except TypeError:
+            return func(*args)
+    if "include_deleted" in parameters:
+        return func(*args, include_deleted=include_deleted)
+    return func(*args)
 
 
 def _first_non_empty(row: Mapping[str, Any], *keys: str) -> str | None:

@@ -7,6 +7,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
+    InputError,
 )
 
 
@@ -143,6 +144,33 @@ def test_duplicate_workspace_resource_membership_conflict_raises(db, updates):
         )
 
     assert exc_info.value.entity == "workspace_resource_memberships"
+
+
+@pytest.mark.parametrize("field_name", ["provenance", "metadata"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_workspace_resource_membership_rejects_non_finite_json_values(db, field_name, value):
+    with pytest.raises(InputError, match=f"{field_name} must be JSON serializable"):
+        db.add_workspace_resource_membership(
+            "ws-1",
+            {
+                "resource_type": "media",
+                "resource_id": "42",
+                field_name: {"value": value},
+            },
+        )
+
+
+@pytest.mark.parametrize("field_name", ["provenance", "metadata"])
+def test_workspace_resource_membership_rejects_oversized_json_values(db, field_name):
+    with pytest.raises(InputError, match=f"{field_name} exceeds"):
+        db.add_workspace_resource_membership(
+            "ws-1",
+            {
+                "resource_type": "media",
+                "resource_id": "42",
+                field_name: {"value": "x" * (16 * 1024 + 1)},
+            },
+        )
 
 
 def test_delete_workspace_resource_membership_soft_deletes_and_default_reads_hide(db):
