@@ -301,6 +301,7 @@ Mapping rules:
 - status contains `found`, `match`, `matched`, `result`, or `output` -> `Found results`.
 - any positive `source_ref.result_count`, `source_ref.results_count`, `source_ref.output_count`, `source_ref.outputs_count`, `source_ref.latest_output_id`, or `source_ref.output_id` -> `Found results`.
 - status contains `fail`, `error`, or `missed` -> `Needs attention`.
+- If one status contains both result-like and failure-like tokens, failure-like tokens take precedence so an errored output state does not appear successful.
 - status contains `paused` -> `Paused`.
 - status contains `complete`, `success`, `done`, or `finished` -> `Completed last run`.
 - otherwise enabled scheduled task -> `Waiting for next run`.

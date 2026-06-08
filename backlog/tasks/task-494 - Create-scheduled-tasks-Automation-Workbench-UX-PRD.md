@@ -2,12 +2,16 @@
 id: TASK-494
 title: Create scheduled tasks Automation Workbench UX PRD
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: 2026-06-07 23:49
 labels:
 - prd
 - ux
 - scheduled-tasks
 - webui
 - extension
+dependencies: []
 priority: High
 documentation:
 - Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md

@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Spin, Typography, message } from "antd"
+import { Alert, Button, Empty, Space, Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
@@ -16,8 +16,20 @@ import {
 } from "@/services/scheduled-tasks-control-plane"
 import { ScheduledTaskTable } from "./ScheduledTaskTable"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
+import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
+import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
+const SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS = 8000
+
+const LoadingState: React.FC = () => (
+  <div role="status" aria-live="polite">
+    <Space>
+      <Spin size="small" />
+      <Typography.Text type="secondary">Loading tasks and latest run state</Typography.Text>
+    </Space>
+  </div>
+)
 
 export const ScheduledTasksPage: React.FC = () => {
   const navigate = useNavigate()
@@ -26,6 +38,7 @@ export const ScheduledTasksPage: React.FC = () => {
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [scheduledTasksSupported, setScheduledTasksSupported] = useState<
     boolean | null
@@ -41,10 +54,16 @@ export const ScheduledTasksPage: React.FC = () => {
     }
 
     let cancelled = false
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => {
+      controller.abort()
+    }, SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS)
 
     const probeScheduledTasksSupport = async () => {
       try {
-        const response = await fetch(`${serverUrl}/openapi.json`)
+        const response = await fetch(`${serverUrl}/openapi.json`, {
+          signal: controller.signal
+        })
         if (!response.ok) {
           if (!cancelled) {
             setScheduledTasksSupported(true)
@@ -65,6 +84,8 @@ export const ScheduledTasksPage: React.FC = () => {
         if (!cancelled) {
           setScheduledTasksSupported(true)
         }
+      } finally {
+        window.clearTimeout(timeoutId)
       }
     }
 
@@ -72,6 +93,8 @@ export const ScheduledTasksPage: React.FC = () => {
 
     return () => {
       cancelled = true
+      window.clearTimeout(timeoutId)
+      controller.abort()
     }
   }, [connectionConfig?.serverUrl, connectionConfigLoading])
 
@@ -82,16 +105,44 @@ export const ScheduledTasksPage: React.FC = () => {
   })
 
   const tasks = tasksQuery.data?.items ?? []
+  const selectedTask = React.useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
+    [selectedTaskId, tasks]
+  )
+  const hasLoadedTasks = Boolean(tasksQuery.data)
+  const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
+  const isLoadingTasks =
+    connectionConfigLoading ||
+    scheduledTasksSupported === null ||
+    (scheduledTasksSupported === true && tasksQuery.isLoading)
+  const canShowScheduledTasksWorkbench =
+    scheduledTasksSupported !== false && !isLoadingTasks && !tasksQuery.isError
+
+  React.useEffect(() => {
+    if (selectedTaskId === null || !hasLoadedTasks) return
+    if (tasks.some((task) => task.id === selectedTaskId)) return
+
+    setSelectedTaskId(null)
+  }, [hasLoadedTasks, selectedTaskId, tasks])
+
+  const closeTaskDetail = () => {
+    if (selectedTaskId === null) return
+    setSelectedTaskId(null)
+  }
 
   const openCreateReminder = () => {
+    closeTaskDetail()
     setEditingTask(null)
     setEditorOpen(true)
   }
 
   const openEditReminder = (task: ScheduledTask) => {
+    closeTaskDetail()
     setEditingTask(task)
     setEditorOpen(true)
   }
+
+  const openTaskDetail = (task: ScheduledTask) => setSelectedTaskId(task.id)
 
   const closeEditor = () => {
     setEditorOpen(false)
@@ -127,6 +178,7 @@ export const ScheduledTasksPage: React.FC = () => {
     try {
       await deleteScheduledTaskReminder(task.id)
       message.success("Reminder task deleted")
+      closeTaskDetail()
       await refreshTasks()
     } catch (error: any) {
       message.error(error?.message || "Unable to delete reminder task")
@@ -162,7 +214,8 @@ export const ScheduledTasksPage: React.FC = () => {
         method: "GET",
         serverUrl: connectionConfig?.serverUrl,
         reason: "partial",
-        partialErrors
+        partialErrors,
+        message: "Some scheduled-task data loaded while one dependency could not be reached."
       })
     : null
   const scheduledTasksFeatureName = t("scheduledTasks:title", "Scheduled tasks")
@@ -176,12 +229,12 @@ export const ScheduledTasksPage: React.FC = () => {
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
           {t(
             "scheduledTasks:description",
-            "Review reminder tasks here. Watchlist jobs remain managed from Watchlists."
+            "Track reminders, Watchlist monitors, and recurring automation from one place. Use domain workspaces like Watchlists for deep source and output configuration."
           )}
         </Typography.Paragraph>
       </div>
 
-      {connectionConfigLoading || scheduledTasksSupported === null ? <Spin /> : null}
+      {isLoadingTasks ? <LoadingState /> : null}
       {scheduledTasksSupported === false ? (
         <RecoveryCallout
           state={unsupportedState?.state ?? "unavailable"}
@@ -197,7 +250,6 @@ export const ScheduledTasksPage: React.FC = () => {
           }}
         />
       ) : null}
-      {tasksQuery.isLoading ? <Spin /> : null}
       {tasksQuery.isError ? (
         <RecoveryCallout
           state={loadErrorState?.state ?? "error"}
@@ -239,14 +291,51 @@ export const ScheduledTasksPage: React.FC = () => {
         />
       ) : null}
 
-      {scheduledTasksSupported === false ? null : (
+      {canShowScheduledTasksWorkbench ? (
         <>
-          <ScheduledTaskTable
-            tasks={tasks}
-            onCreateReminder={openCreateReminder}
-            onEditReminder={openEditReminder}
-            onDeleteReminder={handleDeleteReminder}
-          />
+          {hasLoadedTasks ? (
+            <ScheduledTaskOverview
+              tasks={tasks}
+              partial={Boolean(tasksQuery.data?.partial)}
+            />
+          ) : null}
+
+          {hasLoadedTasks && hasWatchlistJob ? (
+            <Alert
+              type="info"
+              showIcon
+              title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
+            />
+          ) : null}
+
+          {hasLoadedTasks && tasks.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <Typography.Text strong>No scheduled tasks yet.</Typography.Text>
+                  <Typography.Text type="secondary">
+                    Create a reminder now. Automation templates for GitHub, YouTube, RAG, and
+                    agents are planned follow-up phases.
+                  </Typography.Text>
+                </div>
+              }
+            >
+              <Button type="primary" onClick={openCreateReminder}>
+                Create scheduled task
+              </Button>
+            </Empty>
+          ) : null}
+
+          {hasLoadedTasks && tasks.length > 0 ? (
+            <ScheduledTaskTable
+              tasks={tasks}
+              onCreateReminder={openCreateReminder}
+              onInspectTask={openTaskDetail}
+              onEditReminder={openEditReminder}
+              onDeleteReminder={handleDeleteReminder}
+            />
+          ) : null}
 
           <ReminderTaskEditor
             open={editorOpen}
@@ -255,8 +344,15 @@ export const ScheduledTasksPage: React.FC = () => {
             onClose={closeEditor}
             onSubmit={handleSubmit}
           />
+          <ScheduledTaskDetailDrawer
+            open={Boolean(selectedTask)}
+            task={selectedTask}
+            onClose={closeTaskDetail}
+            onEditReminder={openEditReminder}
+            onDeleteReminder={handleDeleteReminder}
+          />
         </>
-      )}
+      ) : null}
     </div>
   )
 }
