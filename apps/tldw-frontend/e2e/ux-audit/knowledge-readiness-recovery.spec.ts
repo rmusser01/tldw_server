@@ -47,7 +47,8 @@ const expectKnowledgeRecovery = async (page: Page) => {
   await expect(recovery.getByRole("button", { name: "Retry" })).toBeVisible()
   await expect(recovery.getByRole("button", { name: "Health & diagnostics" })).toBeVisible()
   await expect(recovery.getByRole("button", { name: "Server settings" })).toBeVisible()
-  await expect(page.getByTestId("server-readiness-route-content")).toBeAttached()
+  await expect(page.getByTestId("server-readiness-route-content")).toHaveCount(0)
+  await expect(page.locator("main")).toHaveCount(1)
   await expect
     .poll(async () => {
       const text = await recovery.textContent()

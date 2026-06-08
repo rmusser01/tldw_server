@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   connectionState: {
     uxState: "connected_ok" as
       | "connected_ok"
+      | "connected_degraded"
       | "testing"
       | "configuring_url"
       | "configuring_auth"
@@ -130,5 +131,37 @@ describe("SkillsWorkspace capability states", () => {
     renderWorkspace()
 
     expect(screen.getByTestId("skills-manager")).toBeInTheDocument()
+  })
+
+  it("keeps Skills usable when the connected server is degraded", () => {
+    mocks.connectionState = {
+      uxState: "connected_degraded",
+      hasCompletedFirstRun: true
+    }
+
+    renderWorkspace()
+
+    expect(screen.getByTestId("skills-manager")).toBeInTheDocument()
+  })
+
+  it("uses Skills-specific recovery guidance when the server is unreachable", () => {
+    mocks.connectionState = {
+      uxState: "error_unreachable",
+      hasCompletedFirstRun: true
+    }
+
+    renderWorkspace()
+
+    expect(
+      screen.getByRole("heading", {
+        name: "Can't reach your tldw server right now."
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "To use Skills, reconnect to your tldw server so skill definitions can be stored and executed."
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("skills-manager")).not.toBeInTheDocument()
   })
 })
