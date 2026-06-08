@@ -456,10 +456,18 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         renderEmptyStateSurface('error')
       ) : Array.isArray(notes) && notes.length > 0 ? (
         <>
-          <div className="divide-y divide-border" role="listbox">
+          <div
+            className="divide-y divide-border"
+            role="list"
+            data-notes-list
+            aria-label={t('option:notesSearch.notesListAriaLabel', {
+              defaultValue: 'Notes'
+            })}
+          >
             {notes.map((item) => (
               (() => {
                 const itemIdText = String(item.id)
+                const noteTitle = item.title || `Note ${item.id}`
                 const isBulkSelected = bulkSelectedIdSet.has(itemIdText)
                 const isSelectedNote =
                   selectedId != null && String(selectedId) === itemIdText
@@ -477,6 +485,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             : 'px-4 hover:bg-surface2'
                     }`}
                     data-testid={isTrashView ? `notes-trash-row-${itemIdText}` : undefined}
+                    role="listitem"
                   >
                 {!isTrashView && (
                   <div className="flex items-start gap-2">
@@ -521,12 +530,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                     </button>
                     <button
                       type="button"
+                      aria-label={t('option:notesSearch.openNoteAria', {
+                        defaultValue: 'Open note {{title}}',
+                        title: noteTitle
+                      }).replace('{{title}}', noteTitle)}
                       onClick={() => {
                         onSelectNote(item.id)
                       }}
                       className="w-full text-left"
-                      role="option"
-                      aria-selected={isSelectedNote}
                       aria-current={isSelectedNote ? "true" : undefined}
                       data-testid={`notes-open-button-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
                       data-notes-list-item
@@ -534,7 +545,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                           e.preventDefault()
                           const buttons = Array.from(
-                            e.currentTarget.closest('[data-testid="notes-list-region"]')
+                            e.currentTarget.closest('[data-notes-list]')
                               ?.querySelectorAll<HTMLButtonElement>('[data-notes-list-item]') ?? []
                           )
                           const idx = buttons.indexOf(e.currentTarget as HTMLButtonElement)
