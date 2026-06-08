@@ -88,6 +88,11 @@ Task 3 completed by Worker 3:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `48 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
 - Bandit touched-scope scan reported zero findings for `membership_adapters.py` and `membership_service.py`.
+Task 3 spec-review coverage follow-up:
+- Added missing-workspace service coverage for `workspace_not_found` / 404.
+- Added unlink coverage for successful soft-delete hook invocation and missing/already-deleted no-op behavior.
+- Added reverse lookup fail-closed coverage for unsupported resource types.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `52 passed, 6 warnings`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

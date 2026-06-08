@@ -674,6 +674,16 @@ def test_archived_workspace_rejects_link_membership() -> None:
     assert exc_info.value.status_code == 409
 
 
+def test_missing_workspace_rejects_membership_read_path() -> None:
+    service = WorkspaceMembershipService(FakeChaChaDB())
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.list_workspace_memberships("workspace-missing")
+
+    assert exc_info.value.code == "workspace_not_found"
+    assert exc_info.value.status_code == 404
+
+
 def test_list_workspace_memberships_resolve_false_omits_adapter_summary() -> None:
     db = FakeChaChaDB()
     db.memberships[("workspace-1", "media", "42")] = _membership_row()
@@ -720,6 +730,7 @@ class RecordingAdapter:
     def __init__(self) -> None:
         self.validated: list[str] = []
         self.linked: list[dict[str, object]] = []
+        self.unlinked: list[dict[str, object]] = []
 
     def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         self.validated.append(resource_id)
@@ -732,7 +743,7 @@ class RecordingAdapter:
         self.linked.append(dict(membership))
 
     def on_unlink(self, membership: dict[str, object], context: WorkspaceMembershipContext) -> None:
-        return None
+        self.unlinked.append(dict(membership))
 
 
 def test_link_membership_restores_deleted_row_after_adapter_validation() -> None:
@@ -768,6 +779,44 @@ def test_list_resource_memberships_canonicalizes_resource_id_before_listing() ->
     assert payload["resource_type"] == "media"
     assert payload["resource_id"] == "42"
     assert payload["items"][0]["resource_id"] == "42"
+
+
+def test_list_resource_memberships_unsupported_type_fails_closed() -> None:
+    service = WorkspaceMembershipService(FakeChaChaDB())
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.list_resource_memberships("note", "1")
+
+    assert exc_info.value.code == "unsupported_resource_type"
+    assert exc_info.value.status_code == 400
+
+
+def test_unlink_membership_soft_deletes_active_membership_and_calls_adapter_hook() -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "42")] = _membership_row()
+    adapter = RecordingAdapter()
+    service = WorkspaceMembershipService(db, adapters={"media": adapter})
+
+    payload = service.unlink_membership("workspace-1", "media", "0042", user_id="user-1", media_db=object())
+
+    assert payload is not None
+    assert payload["deleted"] is True
+    assert db.memberships[("workspace-1", "media", "42")]["deleted"] is True
+    assert adapter.unlinked == [db.memberships[("workspace-1", "media", "42")]]
+
+
+def test_unlink_membership_noops_without_adapter_hook_for_missing_or_deleted_membership() -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "42")] = _membership_row(deleted=True)
+    adapter = RecordingAdapter()
+    service = WorkspaceMembershipService(db, adapters={"media": adapter})
+
+    missing_payload = service.unlink_membership("workspace-1", "media", "43", user_id="user-1", media_db=object())
+    deleted_payload = service.unlink_membership("workspace-1", "media", "42", user_id="user-1", media_db=object())
+
+    assert missing_payload is None
+    assert deleted_payload is None
+    assert adapter.unlinked == []
 
 
 def test_workspace_membership_summary_returns_active_compact_totals() -> None:
