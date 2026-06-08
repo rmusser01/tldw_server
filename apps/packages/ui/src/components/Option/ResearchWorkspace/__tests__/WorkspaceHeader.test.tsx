@@ -47,7 +47,13 @@ const workspaceContextMocks = vi.hoisted(() => ({
 const translationMock = vi.hoisted(() => ({
   keys: [] as string[]
 }))
-const { mockStartTutorial, mockMessageApi } = vi.hoisted(() => ({
+const {
+  mockStartTutorial,
+  mockMessageApi,
+  mockListPersonaProfiles,
+  mockGetWorkspace,
+  mockPatchWorkspace
+} = vi.hoisted(() => ({
   mockStartTutorial: vi.fn(),
   mockMessageApi: {
     success: vi.fn(),
@@ -56,7 +62,10 @@ const { mockStartTutorial, mockMessageApi } = vi.hoisted(() => ({
     warning: vi.fn(),
     open: vi.fn(),
     destroy: vi.fn()
-  }
+  },
+  mockListPersonaProfiles: vi.fn(),
+  mockGetWorkspace: vi.fn(),
+  mockPatchWorkspace: vi.fn()
 }))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
@@ -87,6 +96,8 @@ const mockStoreState = {
       url: "https://example.com/alpha-whitepaper"
     }
   ],
+  assistantDefaults: null,
+  effectiveAssistantDefault: null,
   setWorkspaceName: mockSetWorkspaceName,
   setWorkspaceBanner: mockSetWorkspaceBanner,
   clearWorkspaceBannerImage: mockClearWorkspaceBannerImage,
@@ -237,6 +248,38 @@ const makeActiveWorkspaceContext = (
     message: "Workspace action is available.",
     nextStepLabel: null,
     nextStepHref: null
+  },
+  ...overrides
+})
+
+const createWorkspaceApiResponse = (
+  overrides: Record<string, unknown> = {}
+) => ({
+  id: "workspace-alpha",
+  name: "Alpha Research",
+  archived: false,
+  studyMaterialsPolicy: "workspace",
+  workspaceProfile: "research",
+  deleted: false,
+  bannerTitle: "Alpha Banner",
+  bannerSubtitle: "Alpha subtitle",
+  bannerColor: null,
+  audioProvider: null,
+  audioModel: null,
+  audioVoice: null,
+  audioSpeed: null,
+  createdAt: "2026-02-10T10:00:00.000Z",
+  lastModified: "2026-02-18T12:00:00.000Z",
+  version: 7,
+  assistantDefaults: null,
+  effectiveAssistantDefault: {
+    status: "none",
+    source: "none",
+    assistantKind: null,
+    assistantId: null,
+    label: null,
+    personaMemoryMode: null,
+    degradedReason: null
   },
   ...overrides
 })
@@ -398,6 +441,14 @@ vi.mock("@/utils/research-workspace-telemetry", async () => {
   }
 })
 
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    listPersonaProfiles: (...args: unknown[]) => mockListPersonaProfiles(...args),
+    getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
+    patchWorkspace: (...args: unknown[]) => mockPatchWorkspace(...args)
+  }
+}))
+
 if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
   ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
     observe() {}
@@ -443,6 +494,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
     clearWorkspaceUndoActionsForTests()
     registryStateOverrides.missingDegraded = false
     registryStateOverrides.degradedLabel = "Degraded"
+    mockStoreState.assistantDefaults = null
+    mockStoreState.effectiveAssistantDefault = null
     connectionConfigState.loading = false
     connectionConfigState.config = {
       serverUrl: "http://127.0.0.1:8000",
@@ -632,6 +685,33 @@ describe("WorkspaceHeader workspace browser modal", () => {
       bytes: 16000,
       updatedAt: new Date("2026-02-25T10:00:00.000Z")
     })
+    mockListPersonaProfiles.mockResolvedValue([
+      {
+        id: "persona-lit-reviewer",
+        name: "Literature Reviewer",
+        character_card_id: null,
+        origin_character_id: null,
+        buddy_summary: null,
+        metadata: null
+      },
+      {
+        id: "persona-methods",
+        name: "Methods Auditor",
+        character_card_id: null,
+        origin_character_id: null,
+        buddy_summary: null,
+        metadata: null
+      }
+    ])
+    mockGetWorkspace.mockResolvedValue(createWorkspaceApiResponse())
+    mockPatchWorkspace.mockImplementation(
+      async (_workspaceId: string, payload: Record<string, unknown>) =>
+        createWorkspaceApiResponse({
+          version: 8,
+          assistantDefaults:
+            "assistantDefaults" in payload ? payload.assistantDefaults : null
+        })
+    )
     connectionConfigState.config = {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
@@ -1056,6 +1136,203 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     expect(mockSaveCurrentWorkspace).toHaveBeenCalledTimes(1)
     expect(mockNavigate).toHaveBeenCalledWith("/workspaces")
+  })
+
+  it("opens default assistant settings and saves a read-only Persona default", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Default assistant"))
+
+    const modal = await screen.findByTestId("workspace-default-assistant-modal")
+    expect(within(modal).getByText("No default assistant")).toBeInTheDocument()
+    expect(mockGetWorkspace).toHaveBeenCalledWith("workspace-alpha")
+    expect(mockListPersonaProfiles).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(
+      within(modal).getByTestId("workspace-default-assistant-select"),
+      { target: { value: "persona-lit-reviewer" } }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save default" }))
+
+    await waitFor(() => {
+      expect(mockPatchWorkspace).toHaveBeenCalledWith(
+        "workspace-alpha",
+        expect.objectContaining({
+          version: 7,
+          assistantDefaults: {
+            assistantKind: "persona",
+            assistantId: "persona-lit-reviewer",
+            personaMemoryMode: "read_only",
+            voice: null,
+            style: null,
+            toolPolicyProfileId: null
+          }
+        })
+      )
+    })
+  })
+
+  it("requires confirmation before saving a read-write Persona default", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Default assistant"))
+
+    const modal = await screen.findByTestId("workspace-default-assistant-modal")
+    fireEvent.change(
+      within(modal).getByTestId("workspace-default-assistant-select"),
+      { target: { value: "persona-methods" } }
+    )
+    fireEvent.change(
+      within(modal).getByTestId("workspace-default-assistant-memory-mode"),
+      { target: { value: "read_write" } }
+    )
+
+    expect(
+      within(modal).getByTestId("workspace-default-assistant-read-write-confirm")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save default" })).toBeDisabled()
+
+    fireEvent.click(
+      within(modal).getByTestId("workspace-default-assistant-read-write-confirm")
+    )
+    expect(screen.getByRole("button", { name: "Save default" })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save default" }))
+
+    await waitFor(() => {
+      expect(mockPatchWorkspace).toHaveBeenCalledWith(
+        "workspace-alpha",
+        expect.objectContaining({
+          version: 7,
+          assistantDefaults: expect.objectContaining({
+            assistantKind: "persona",
+            assistantId: "persona-methods",
+            personaMemoryMode: "read_write"
+          }),
+          confirmReadWriteAssistantDefault: true
+        })
+      )
+    })
+  })
+
+  it("clears the Workspace default assistant", async () => {
+    mockGetWorkspace.mockResolvedValueOnce(
+      createWorkspaceApiResponse({
+        version: 11,
+        assistantDefaults: {
+          assistantKind: "persona",
+          assistantId: "persona-lit-reviewer",
+          personaMemoryMode: "read_only",
+          voice: null,
+          style: null,
+          toolPolicyProfileId: null
+        },
+        effectiveAssistantDefault: {
+          status: "available",
+          source: "workspace",
+          assistantKind: "persona",
+          assistantId: "persona-lit-reviewer",
+          label: "Literature Reviewer",
+          personaMemoryMode: "read_only",
+          degradedReason: null
+        }
+      })
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Default assistant"))
+
+    await screen.findByTestId("workspace-default-assistant-modal")
+    fireEvent.click(screen.getByRole("button", { name: "Clear default" }))
+
+    await waitFor(() => {
+      expect(mockPatchWorkspace).toHaveBeenCalledWith("workspace-alpha", {
+        version: 11,
+        assistantDefaults: null
+      })
+    })
+  })
+
+  it("redacts unavailable default assistant labels", async () => {
+    mockListPersonaProfiles.mockResolvedValueOnce([
+      {
+        id: "persona-hidden",
+        name: "Hidden Persona",
+        character_card_id: null,
+        origin_character_id: null,
+        buddy_summary: null,
+        metadata: null
+      }
+    ])
+    mockGetWorkspace.mockResolvedValueOnce(
+      createWorkspaceApiResponse({
+        assistantDefaults: {
+          assistantKind: "persona",
+          assistantId: "persona-hidden",
+          personaMemoryMode: "read_only",
+          voice: null,
+          style: null,
+          toolPolicyProfileId: null
+        },
+        effectiveAssistantDefault: {
+          status: "unavailable",
+          source: "workspace",
+          assistantKind: "persona",
+          assistantId: "persona-hidden",
+          label: null,
+          personaMemoryMode: "read_only",
+          degradedReason: "permission_denied"
+        }
+      })
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Default assistant"))
+
+    const modal = await screen.findByTestId("workspace-default-assistant-modal")
+    expect(within(modal).getByText("Default unavailable")).toBeInTheDocument()
+    expect(within(modal).getByText("Permission denied")).toBeInTheDocument()
+    expect(within(modal).queryByText("Hidden Persona")).not.toBeInTheDocument()
+
+    fireEvent.change(
+      within(modal).getByTestId("workspace-default-assistant-select"),
+      { target: { value: "" } }
+    )
+    expect(within(modal).queryByText("Hidden Persona")).not.toBeInTheDocument()
   })
 
   it("raises split workspace intent from the settings menu", async () => {

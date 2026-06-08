@@ -40,10 +40,18 @@ import {
   Search
 } from "lucide-react"
 import type {
+  EffectiveWorkspaceAssistantDefault,
   SavedWorkspace,
+  WorkspaceAssistantDefaults,
   WorkspaceBannerImage,
-  WorkspaceCollection
+  WorkspaceCollection,
+  WorkspacePersonaMemoryMode
 } from "@/types/workspace"
+import {
+  tldwClient,
+  type PersonaProfileSummary
+} from "@/services/tldw/TldwApiClient"
+import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useConnectionStore } from "@/store/connection"
 import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
@@ -222,6 +230,21 @@ const getServerWorkspaceContextStatusCopy = (
   }
 }
 
+const DEFAULT_ASSISTANT_DEGRADED_REASON_LABELS: Record<string, string> = {
+  persona_deleted: "Persona deleted",
+  persona_unavailable: "Persona unavailable",
+  persona_feature_disabled: "Persona feature disabled",
+  permission_denied: "Permission denied",
+  invalid_default: "Invalid default",
+  unsupported_assistant_kind: "Unsupported assistant kind"
+}
+
+const formatDefaultAssistantDegradedReason = (reason: string | null | undefined) =>
+  reason ? DEFAULT_ASSISTANT_DEGRADED_REASON_LABELS[reason] ?? "Unavailable" : "Unavailable"
+
+const getPersonaProfileLabel = (profile: PersonaProfileSummary) =>
+  profile.name?.trim() || profile.id
+
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   leftPaneOpen,
   rightPaneOpen,
@@ -316,6 +339,25 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [bannerModalError, setBannerModalError] = React.useState<string | null>(
     null
   )
+  const [defaultAssistantModalOpen, setDefaultAssistantModalOpen] =
+    React.useState(false)
+  const [defaultAssistantLoading, setDefaultAssistantLoading] =
+    React.useState(false)
+  const [defaultAssistantSaving, setDefaultAssistantSaving] =
+    React.useState(false)
+  const [defaultAssistantError, setDefaultAssistantError] =
+    React.useState<string | null>(null)
+  const [defaultAssistantWorkspace, setDefaultAssistantWorkspace] =
+    React.useState<WorkspaceApiResponse | null>(null)
+  const [personaProfiles, setPersonaProfiles] = React.useState<
+    PersonaProfileSummary[]
+  >([])
+  const [defaultAssistantPersonaId, setDefaultAssistantPersonaId] =
+    React.useState("")
+  const [defaultAssistantMemoryMode, setDefaultAssistantMemoryMode] =
+    React.useState<WorkspacePersonaMemoryMode>("read_only")
+  const [defaultAssistantConfirmReadWrite, setDefaultAssistantConfirmReadWrite] =
+    React.useState(false)
   const lastConnectivityStatusRef = React.useRef<string | null>(null)
   const importFileInputRef = React.useRef<HTMLInputElement | null>(null)
   const bannerFileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -636,6 +678,151 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleCloseAcpHistoryModal = () => {
     setAcpHistoryModalOpen(false)
+  }
+
+  const applyDefaultAssistantWorkspaceState = (
+    workspace: WorkspaceApiResponse
+  ) => {
+    setDefaultAssistantWorkspace(workspace)
+    setDefaultAssistantPersonaId(workspace.assistantDefaults?.assistantId ?? "")
+    setDefaultAssistantMemoryMode(
+      workspace.assistantDefaults?.personaMemoryMode ?? "read_only"
+    )
+    setDefaultAssistantConfirmReadWrite(false)
+  }
+
+  const handleOpenDefaultAssistantModal = async () => {
+    if (!workspaceId) return
+
+    setDefaultAssistantModalOpen(true)
+    setDefaultAssistantLoading(true)
+    setDefaultAssistantError(null)
+    try {
+      const [workspace, personas] = await Promise.all([
+        tldwClient.getWorkspace(workspaceId),
+        tldwClient.listPersonaProfiles()
+      ])
+      applyDefaultAssistantWorkspaceState(workspace)
+      setPersonaProfiles(personas)
+    } catch {
+      setDefaultAssistantError(
+        t(
+          "playground:workspace.defaultAssistantLoadError",
+          "Could not load default assistant settings."
+        )
+      )
+    } finally {
+      setDefaultAssistantLoading(false)
+    }
+  }
+
+  const handleCloseDefaultAssistantModal = () => {
+    setDefaultAssistantModalOpen(false)
+    setDefaultAssistantError(null)
+    setDefaultAssistantSaving(false)
+  }
+
+  const handleDefaultAssistantMemoryModeChange = (
+    event: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const nextMode = event.target.value as WorkspacePersonaMemoryMode
+    setDefaultAssistantMemoryMode(nextMode)
+    if (nextMode !== "read_write") {
+      setDefaultAssistantConfirmReadWrite(false)
+    }
+  }
+
+  const buildDefaultAssistantPayload = (): WorkspaceAssistantDefaults => ({
+    assistantKind: "persona",
+    assistantId: defaultAssistantPersonaId.trim(),
+    personaMemoryMode: defaultAssistantMemoryMode,
+    voice: null,
+    style: null,
+    toolPolicyProfileId: null
+  })
+
+  const handleSaveDefaultAssistant = async () => {
+    if (!workspaceId || !defaultAssistantWorkspace) return
+    if (!defaultAssistantPersonaId.trim()) {
+      setDefaultAssistantError(
+        t(
+          "playground:workspace.defaultAssistantSelectRequired",
+          "Select a Persona before saving."
+        )
+      )
+      return
+    }
+    if (
+      defaultAssistantMemoryMode === "read_write" &&
+      !defaultAssistantConfirmReadWrite
+    ) {
+      setDefaultAssistantError(
+        t(
+          "playground:workspace.defaultAssistantReadWriteConfirmRequired",
+          "Confirm read-write memory access before saving."
+        )
+      )
+      return
+    }
+
+    setDefaultAssistantSaving(true)
+    setDefaultAssistantError(null)
+    try {
+      const updatedWorkspace = await tldwClient.patchWorkspace(workspaceId, {
+        version: defaultAssistantWorkspace.version,
+        assistantDefaults: buildDefaultAssistantPayload(),
+        ...(defaultAssistantMemoryMode === "read_write"
+          ? { confirmReadWriteAssistantDefault: true }
+          : {})
+      })
+      applyDefaultAssistantWorkspaceState(updatedWorkspace)
+      setDefaultAssistantModalOpen(false)
+      messageApi.success(
+        t(
+          "playground:workspace.defaultAssistantSaved",
+          "Default assistant updated"
+        )
+      )
+    } catch {
+      setDefaultAssistantError(
+        t(
+          "playground:workspace.defaultAssistantSaveError",
+          "Could not save default assistant settings."
+        )
+      )
+    } finally {
+      setDefaultAssistantSaving(false)
+    }
+  }
+
+  const handleClearDefaultAssistant = async () => {
+    if (!workspaceId || !defaultAssistantWorkspace) return
+
+    setDefaultAssistantSaving(true)
+    setDefaultAssistantError(null)
+    try {
+      const updatedWorkspace = await tldwClient.patchWorkspace(workspaceId, {
+        version: defaultAssistantWorkspace.version,
+        assistantDefaults: null
+      })
+      applyDefaultAssistantWorkspaceState(updatedWorkspace)
+      setDefaultAssistantModalOpen(false)
+      messageApi.success(
+        t(
+          "playground:workspace.defaultAssistantCleared",
+          "Default assistant cleared"
+        )
+      )
+    } catch {
+      setDefaultAssistantError(
+        t(
+          "playground:workspace.defaultAssistantClearError",
+          "Could not clear default assistant settings."
+        )
+      )
+    } finally {
+      setDefaultAssistantSaving(false)
+    }
   }
 
   const handleOpenAgentTasksPage = () => {
@@ -1734,6 +1921,17 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             onClick: () => setSandboxDiagnosticsOpen(true)
           },
           {
+            key: "default-assistant",
+            icon: <Bot className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.defaultAssistant",
+              "Default assistant"
+            ),
+            onClick: () => {
+              void handleOpenDefaultAssistantModal()
+            }
+          },
+          {
             key: "duplicate-current",
             icon: <Copy className="h-4 w-4" />,
             label: t(
@@ -1847,6 +2045,65 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       onClick: handleGoToSimpleChat
     }
   ]
+
+  const effectiveDefaultAssistant: EffectiveWorkspaceAssistantDefault | null =
+    defaultAssistantWorkspace?.effectiveAssistantDefault ?? null
+  const storedDefaultAssistant = defaultAssistantWorkspace?.assistantDefaults ?? null
+  const redactedDefaultAssistantId =
+    effectiveDefaultAssistant?.status === "unavailable"
+      ? storedDefaultAssistant?.assistantId ?? null
+      : null
+  const selectedDefaultAssistantIsRedacted =
+    Boolean(redactedDefaultAssistantId) &&
+    redactedDefaultAssistantId === defaultAssistantPersonaId
+  const personaProfileOptions = redactedDefaultAssistantId
+    ? personaProfiles.filter((profile) => profile.id !== redactedDefaultAssistantId)
+    : personaProfiles
+  const selectedDefaultAssistantProfile = personaProfiles.find(
+    (profile) =>
+      !selectedDefaultAssistantIsRedacted &&
+      profile.id === defaultAssistantPersonaId
+  )
+  const selectedDefaultAssistantAvailable =
+    !defaultAssistantPersonaId || Boolean(selectedDefaultAssistantProfile)
+  const defaultAssistantStatusTitle =
+    effectiveDefaultAssistant?.status === "available"
+      ? effectiveDefaultAssistant.label ||
+        selectedDefaultAssistantProfile?.name ||
+        t(
+          "playground:workspace.defaultAssistantPersonaDefault",
+          "Persona default"
+        )
+      : effectiveDefaultAssistant?.status === "unavailable"
+        ? t(
+            "playground:workspace.defaultAssistantUnavailable",
+            "Default unavailable"
+          )
+        : t(
+            "playground:workspace.defaultAssistantNone",
+            "No default assistant"
+          )
+  const defaultAssistantStatusDetail =
+    effectiveDefaultAssistant?.status === "available"
+      ? t(
+          "playground:workspace.defaultAssistantAvailableDetail",
+          "New workspace chats can inherit this Persona when no assistant is selected."
+        )
+      : effectiveDefaultAssistant?.status === "unavailable"
+        ? formatDefaultAssistantDegradedReason(
+            effectiveDefaultAssistant.degradedReason
+          )
+        : t(
+            "playground:workspace.defaultAssistantNoneDetail",
+            "New workspace chats start without a default Persona."
+          )
+  const defaultAssistantSaveDisabled =
+    defaultAssistantLoading ||
+    defaultAssistantSaving ||
+    !defaultAssistantPersonaId.trim() ||
+    !selectedDefaultAssistantAvailable ||
+    (defaultAssistantMemoryMode === "read_write" &&
+      !defaultAssistantConfirmReadWrite)
 
   return (
     <header
@@ -2137,6 +2394,165 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             )}
           </p>
         )}
+      </Modal>
+
+      <Modal
+        title={t(
+          "playground:workspace.defaultAssistantTitle",
+          "Default assistant"
+        )}
+        open={defaultAssistantModalOpen}
+        onCancel={handleCloseDefaultAssistantModal}
+        width={620}
+        destroyOnHidden
+        footer={[
+          <Button
+            key="clear-default-assistant"
+            danger
+            disabled={
+              defaultAssistantLoading ||
+              defaultAssistantSaving ||
+              !storedDefaultAssistant
+            }
+            onClick={() => void handleClearDefaultAssistant()}
+          >
+            {t(
+              "playground:workspace.defaultAssistantClear",
+              "Clear default"
+            )}
+          </Button>,
+          <Button
+            key="cancel-default-assistant"
+            onClick={handleCloseDefaultAssistantModal}
+          >
+            {t("common:cancel", "Cancel")}
+          </Button>,
+          <Button
+            key="save-default-assistant"
+            type="primary"
+            loading={defaultAssistantSaving}
+            disabled={defaultAssistantSaveDisabled}
+            onClick={() => void handleSaveDefaultAssistant()}
+          >
+            {t("playground:workspace.defaultAssistantSave", "Save default")}
+          </Button>
+        ]}
+      >
+        <div
+          data-testid="workspace-default-assistant-modal"
+          className="space-y-4"
+        >
+          <div className="rounded-lg border border-border bg-surface2 px-3 py-2">
+            <p className="text-xs font-semibold uppercase text-text-muted">
+              {t(
+                "playground:workspace.defaultAssistantCurrent",
+                "Current default"
+              )}
+            </p>
+            <p className="mt-1 text-sm font-medium text-text">
+              {defaultAssistantStatusTitle}
+            </p>
+            <p className="mt-1 text-xs text-text-muted">
+              {defaultAssistantLoading
+                ? t(
+                    "playground:workspace.defaultAssistantLoading",
+                    "Loading default assistant settings..."
+                  )
+                : defaultAssistantStatusDetail}
+            </p>
+          </div>
+
+          <label className="block space-y-1 text-sm text-text">
+            <span className="font-medium">
+              {t("playground:workspace.defaultAssistantPersona", "Persona")}
+            </span>
+            <select
+              data-testid="workspace-default-assistant-select"
+              value={defaultAssistantPersonaId}
+              disabled={defaultAssistantLoading || defaultAssistantSaving}
+              onChange={(event) =>
+                setDefaultAssistantPersonaId(event.target.value)
+              }
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
+            >
+              <option value="">
+                {t(
+                  "playground:workspace.defaultAssistantSelectPersona",
+                  "Select a Persona"
+                )}
+              </option>
+              {defaultAssistantPersonaId && !selectedDefaultAssistantAvailable && (
+                <option value={defaultAssistantPersonaId}>
+                  {t(
+                    "playground:workspace.defaultAssistantUnavailablePersona",
+                    "Unavailable Persona"
+                  )}
+                </option>
+              )}
+              {personaProfileOptions.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {getPersonaProfileLabel(profile)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block space-y-1 text-sm text-text">
+            <span className="font-medium">
+              {t(
+                "playground:workspace.defaultAssistantMemoryMode",
+                "Memory access"
+              )}
+            </span>
+            <select
+              data-testid="workspace-default-assistant-memory-mode"
+              value={defaultAssistantMemoryMode}
+              disabled={defaultAssistantLoading || defaultAssistantSaving}
+              onChange={handleDefaultAssistantMemoryModeChange}
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
+            >
+              <option value="read_only">
+                {t(
+                  "playground:workspace.defaultAssistantReadOnly",
+                  "Read only"
+                )}
+              </option>
+              <option value="read_write">
+                {t(
+                  "playground:workspace.defaultAssistantReadWrite",
+                  "Read and write"
+                )}
+              </option>
+            </select>
+          </label>
+
+          {defaultAssistantMemoryMode === "read_write" && (
+            <label className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-text">
+              <input
+                data-testid="workspace-default-assistant-read-write-confirm"
+                type="checkbox"
+                checked={defaultAssistantConfirmReadWrite}
+                disabled={defaultAssistantSaving}
+                onChange={(event) =>
+                  setDefaultAssistantConfirmReadWrite(event.target.checked)
+                }
+                className="mt-0.5"
+              />
+              <span>
+                {t(
+                  "playground:workspace.defaultAssistantReadWriteConfirm",
+                  "Allow this Persona default to write memory in this workspace."
+                )}
+              </span>
+            </label>
+          )}
+
+          {defaultAssistantError && (
+            <p className="rounded border border-error/40 bg-error/10 px-3 py-2 text-sm text-error">
+              {defaultAssistantError}
+            </p>
+          )}
+        </div>
       </Modal>
 
       <input
