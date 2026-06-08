@@ -1,7 +1,10 @@
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
-import { StatePanel } from "@tldw/ui/components/ui/state"
+import {
+  StatePanel,
+  type StatePanelDiagnostic,
+} from "@tldw/ui/components/ui/state"
 import { ServerHealthWarningBanner } from "./ServerHealthWarningBanner"
 
 const _env: DeploymentEnv = {
@@ -191,6 +194,81 @@ function emitServerReadinessState(detail: ServerReadinessPublishedState) {
   )
 }
 
+function navigateTo(path: string): void {
+  if (typeof window === "undefined") return
+  window.location.assign(path)
+}
+
+function ReadinessRecoveryPanel({
+  children,
+  diagnostics,
+  onRetry,
+}: {
+  children: React.ReactNode
+  diagnostics: ServerReadinessPublishedState | null
+  onRetry: () => void
+}) {
+  const panelDiagnostics: StatePanelDiagnostic[] = [
+    {
+      label: "Health endpoint",
+      value: HEALTH_URL,
+      code: true,
+    },
+    {
+      label: "Waited",
+      value: `${Math.round(MAX_WAIT_MS / 1000)} seconds`,
+    },
+  ]
+
+  if (diagnostics?.httpStatus != null) {
+    panelDiagnostics.push({
+      label: "HTTP status",
+      value: String(diagnostics.httpStatus),
+    })
+  }
+  if (diagnostics?.healthStatus) {
+    panelDiagnostics.push({
+      label: "Health status",
+      value: diagnostics.healthStatus,
+    })
+  }
+  if (diagnostics?.degradedChecks.length) {
+    panelDiagnostics.push({
+      label: "Degraded checks",
+      value: diagnostics.degradedChecks.join(", "),
+    })
+  }
+
+  return (
+    <>
+      <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text">
+        <StatePanel
+          state="unavailable"
+          title="Backend readiness check failed"
+          message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
+          diagnostics={panelDiagnostics}
+          primaryAction={{ label: "Retry", onClick: onRetry }}
+          secondaryActions={[
+            {
+              label: "Health & diagnostics",
+              onClick: () => navigateTo("/settings/health"),
+            },
+            {
+              label: "Server settings",
+              onClick: () => navigateTo("/settings/tldw"),
+            },
+          ]}
+          role="alert"
+          aria-live="assertive"
+          className="w-full max-w-3xl"
+          data-testid="server-readiness-recovery"
+        />
+      </main>
+      <div data-testid="server-readiness-route-content">{children}</div>
+    </>
+  )
+}
+
 export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
@@ -202,6 +280,11 @@ export const ServerReadinessGate: React.FC<{
   const [degradedChecks, setDegradedChecks] = React.useState<string[]>([])
   const [lastReadinessState, setLastReadinessState] =
     React.useState<ServerReadinessPublishedState | null>(null)
+  const [retryVersion, setRetryVersion] = React.useState(0)
+
+  const retryNow = React.useCallback(() => {
+    setRetryVersion((version) => version + 1)
+  }, [])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
@@ -255,7 +338,7 @@ export const ServerReadinessGate: React.FC<{
       cancelled = true
       if (retryTimer) window.clearTimeout(retryTimer)
     }
-  }, [allowDegraded, bypass])
+  }, [allowDegraded, bypass, retryVersion])
 
   React.useEffect(() => {
     if (typeof window === "undefined" || bypass) return
@@ -292,7 +375,7 @@ export const ServerReadinessGate: React.FC<{
     }
   }, [bypass, degradedChecks, gate, lastReadinessState])
 
-  if (bypass || gate === "ready" || gate === "timeout") {
+  if (bypass || gate === "ready") {
     return <>{children}</>
   }
 
@@ -307,6 +390,17 @@ export const ServerReadinessGate: React.FC<{
           {children}
         </div>
       </div>
+    )
+  }
+
+  if (gate === "timeout") {
+    return (
+      <ReadinessRecoveryPanel
+        diagnostics={lastReadinessState}
+        onRetry={retryNow}
+      >
+        {children}
+      </ReadinessRecoveryPanel>
     )
   }
 

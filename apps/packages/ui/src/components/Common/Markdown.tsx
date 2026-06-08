@@ -38,6 +38,7 @@ const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
 const FENCE_START = /^(\s*)(`{3,}|~{3,})([^\n]*)$/
 const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/
+const INDENTED_CODE_LINE = /^(?: {4}|\t)\s*\S/
 
 type ClosedMermaidFenceSource = {
   blockIndex: number
@@ -76,16 +77,40 @@ const transformMarkdownUrl = (url: string): string => {
 const getFenceLanguage = (infoString: string): string =>
   infoString.trim().split(/\s+/)[0]?.toLowerCase() || ""
 
+const isIndentedCodeLine = (line: string): boolean =>
+  INDENTED_CODE_LINE.test(line)
+
+const findIndentedCodeBlockEnd = (lines: string[], startIndex: number): number => {
+  let endIndex = startIndex
+
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index]
+    if (line.trim() === "" || isIndentedCodeLine(line)) {
+      endIndex = index
+      continue
+    }
+    break
+  }
+
+  return endIndex
+}
+
 const collectClosedMermaidFenceSources = (
   markdown: string
 ): ClosedMermaidFenceSource[] => {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n")
   const sources: ClosedMermaidFenceSource[] = []
-  let fencedBlockIndex = 0
+  let codeBlockIndex = 0
 
   for (let index = 0; index < lines.length; index += 1) {
     const startMatch = FENCE_START.exec(lines[index])
-    if (!startMatch) continue
+    if (!startMatch) {
+      if (isIndentedCodeLine(lines[index])) {
+        codeBlockIndex += 1
+        index = findIndentedCodeBlockEnd(lines, index)
+      }
+      continue
+    }
 
     const openingFence = startMatch[2]
     const fenceMarker = openingFence[0]
@@ -106,7 +131,7 @@ const collectClosedMermaidFenceSources = (
 
       if (language === "mermaid") {
         sources.push({
-          blockIndex: fencedBlockIndex,
+          blockIndex: codeBlockIndex,
           closingLine: closeIndex + 1,
           openingLine: index + 1,
           source: lines
@@ -115,7 +140,7 @@ const collectClosedMermaidFenceSources = (
             .replace(/\n$/, "")
         })
       }
-      fencedBlockIndex += 1
+      codeBlockIndex += 1
       index = closeIndex
       break
     }
@@ -304,8 +329,6 @@ export function Markdown({
         : [],
     [enableMermaidDiagrams, processedMessage]
   )
-  const closedMermaidFenceCursorRef = React.useRef(0)
-  closedMermaidFenceCursorRef.current = 0
   const shouldUseComponentMermaid = closedMermaidFenceSources.length > 0
 
   if (
@@ -362,8 +385,7 @@ export function Markdown({
             const hasNodeLinePosition =
               Number.isFinite(startLine) && Number.isFinite(endLine)
             const closedMermaidFenceIndex = closedMermaidFenceSources.findIndex(
-              (fence, fenceIndex) => {
-                if (fenceIndex < closedMermaidFenceCursorRef.current) return false
+              (fence) => {
                 if (fence.source !== value) return false
                 if (hasNodeLinePosition) {
                   return (
@@ -374,18 +396,21 @@ export function Markdown({
                 return fence.blockIndex === blockIndex
               }
             )
+            const matchedMermaidFence =
+              closedMermaidFenceIndex === -1
+                ? undefined
+                : closedMermaidFenceSources[closedMermaidFenceIndex]
 
             if (
               enableMermaidDiagrams &&
               rawLanguage.trim().toLowerCase() === "mermaid" &&
               normalizedLanguage === "mermaid" &&
-              closedMermaidFenceIndex !== -1
+              matchedMermaidFence
             ) {
-              closedMermaidFenceCursorRef.current = closedMermaidFenceIndex + 1
               return (
                 <MermaidDiagramBlock
                   artifactContextId={artifactContextId}
-                  blockIndex={blockIndex}
+                  blockIndex={matchedMermaidFence.blockIndex}
                   enableArtifactAction={enableMermaidArtifactActions}
                   source={value}
                 />
@@ -409,13 +434,21 @@ export function Markdown({
                           fontFamily: "var(--font-mono)",
                         }}
                       >
-                        {tokens.map((line, i) => (
-                          <div key={i} {...getLineProps({ line, key: i })}>
-                            {line.map((token, key) => (
-                              <span key={key} {...getTokenProps({ token, key })} />
-                            ))}
-                          </div>
-                        ))}
+                        {tokens.map((line, i) => {
+                          const { key: _lineKey, ...lineProps } = getLineProps({
+                            line,
+                            key: i
+                          })
+                          return (
+                            <div key={i} {...lineProps}>
+                              {line.map((token, key) => {
+                                const { key: _tokenKey, ...tokenProps } =
+                                  getTokenProps({ token, key })
+                                return <span key={key} {...tokenProps} />
+                              })}
+                            </div>
+                          )
+                        })}
                       </pre>
                     )}
                   </Highlight>
@@ -445,13 +478,21 @@ export function Markdown({
                           fontFamily: "var(--font-mono)"
                         }}
                       >
-                        {tokens.map((line, i) => (
-                          <div key={i} {...getLineProps({ line, key: i })}>
-                            {line.map((token, key) => (
-                              <span key={key} {...getTokenProps({ token, key })} />
-                            ))}
-                          </div>
-                        ))}
+                        {tokens.map((line, i) => {
+                          const { key: _lineKey, ...lineProps } = getLineProps({
+                            line,
+                            key: i
+                          })
+                          return (
+                            <div key={i} {...lineProps}>
+                              {line.map((token, key) => {
+                                const { key: _tokenKey, ...tokenProps } =
+                                  getTokenProps({ token, key })
+                                return <span key={key} {...tokenProps} />
+                              })}
+                            </div>
+                          )
+                        })}
                       </pre>
                     )}
                   </Highlight>

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
@@ -25,6 +26,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Sandbox.store import IdempotencyConflict, InMemoryStore
+from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Workspaces import root_binding_service
 
 
@@ -43,15 +46,21 @@ class _FailingJobManager:
         raise RuntimeError("jobs backend unavailable")
 
 
+class _ConflictingSandboxVolumeService:
+    def provision_workspace_volume(self, **kwargs: Any) -> None:
+        _ = kwargs
+        raise IdempotencyConflict("volume-previous", key="workspace-root:previous")
+
+
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path: Path) -> CharactersRAGDB:
     d = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     d.add_character_card({"name": "Test Char"})
     return d
 
 
 @pytest.fixture
-def workspace_fastapi_app():
+def workspace_fastapi_app() -> FastAPI:
     app = FastAPI()
     app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
     return app
@@ -61,7 +70,7 @@ def _get_workspace_roots_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -81,7 +90,7 @@ def _get_workspace_capabilities_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -110,7 +119,7 @@ def _get_workspace_context_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -140,7 +149,7 @@ def _put_workspace_primary_root_response(
     db_like: Any,
     payload: dict[str, Any],
     workspace_id: str = "ws-root",
-):
+) -> Response:
     async def _allow_rate_limit() -> None:
         return None
 
@@ -157,6 +166,63 @@ def _put_workspace_primary_root_response(
         workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
         workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+def _post_workspace_sandbox_root_response(
+    workspace_fastapi_app: FastAPI,
+    db_like: Any,
+    payload: dict[str, Any],
+    workspace_id: str = "ws-root",
+    idempotency_key: str | None = "root-key",
+    sandbox_service: Any | None = None,
+) -> Response:
+    async def _allow_rate_limit() -> None:
+        return None
+
+    sandbox_service = sandbox_service or SandboxWorkspaceVolumeService(store=InMemoryStore())
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
+    workspace_fastapi_app.dependency_overrides[
+        workspaces_endpoint.get_workspace_sandbox_volume_service
+    ] = lambda: sandbox_service
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    headers = {"Idempotency-Key": idempotency_key} if idempotency_key is not None else {}
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            return client.post(
+                f"/api/v1/workspaces/{workspace_id}/roots/primary/sandbox-volume",
+                json=payload,
+                headers=headers,
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(
+            workspaces_endpoint.get_workspace_sandbox_volume_service,
+            None,
+        )
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+def _get_workspace_operation_response(
+    workspace_fastapi_app: FastAPI,
+    db_like: Any,
+    workspace_id: str,
+    operation_id: str,
+) -> Response:
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db_like
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            return client.get(f"/api/v1/workspaces/{workspace_id}/operations/{operation_id}")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
 
 
 def test_root_path_hint_redacts_relative_path_segments() -> None:
@@ -302,6 +368,154 @@ def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fast
         workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
         workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_api_patches_assistant_defaults(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": {
+                        "assistant_kind": "persona",
+                        "assistant_id": "persona-1",
+                        "persona_memory_mode": "read_only",
+                    },
+                },
+            )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["assistant_defaults"]["assistant_kind"] == "persona"
+        assert payload["assistant_defaults"]["assistant_id"] == "persona-1"
+        assert payload["assistant_defaults"]["persona_memory_mode"] == "read_only"
+        assert payload["assistant_defaults"]["voice"] is None
+        assert payload["assistant_defaults"]["style"] is None
+        assert payload["assistant_defaults"]["tool_policy_profile_id"] is None
+        persisted = db.get_workspace("ws-assistant")
+        assert persisted is not None
+        assert persisted["assistant_defaults_json"] == {
+            "assistant_kind": "persona",
+            "assistant_id": "persona-1",
+            "persona_memory_mode": "read_only",
+        }
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_api_requires_confirmation_for_read_write_assistant_default(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            missing_confirmation = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": {
+                        "assistant_kind": "persona",
+                        "assistant_id": "persona-1",
+                        "persona_memory_mode": "read_write",
+                    },
+                },
+            )
+            assert missing_confirmation.status_code == 422, missing_confirmation.text
+
+            confirmed = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": {
+                        "assistant_kind": "persona",
+                        "assistant_id": "persona-1",
+                        "persona_memory_mode": "read_write",
+                    },
+                    "confirm_read_write_assistant_default": True,
+                },
+            )
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.json()["assistant_defaults"]["persona_memory_mode"] == "read_write"
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_api_rejects_confirmation_only_patch(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "confirm_read_write_assistant_default": True,
+                },
+            )
+        assert response.status_code == 422, response.text
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
 
@@ -720,6 +934,125 @@ def test_attach_workspace_primary_sandbox_volume_returns_not_configured_mount_st
 
 
 @pytest.mark.integration
+def test_provision_workspace_sandbox_root_requires_idempotency_key(workspace_fastapi_app, db):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+
+    response = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key=None,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "workspace_idempotency_key_required"
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_returns_active_operation_and_pollable_status(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
+
+    response = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+        sandbox_service=sandbox_service,
+    )
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["workspace_profile"] == "project"
+    assert payload["primary_root"]["backend"] == "sandbox_volume"
+    assert payload["primary_root"]["sandbox_mount_state"] == "not_configured"
+    assert payload["operation"]["status"] == "running"
+    assert payload["operation"]["retryable"] is True
+    operation_id = payload["operation"]["operation_id"]
+
+    retry = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+        sandbox_service=sandbox_service,
+    )
+    assert retry.status_code == 202, retry.text
+    assert retry.json()["operation"]["operation_id"] == operation_id
+
+    status_response = _get_workspace_operation_response(
+        workspace_fastapi_app,
+        db,
+        "ws-root",
+        operation_id,
+    )
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["operation_id"] == operation_id
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db, "ws-root")
+    assert context_response.status_code == 200, context_response.text
+    active_operations = context_response.json()["active_operations"]
+    assert [operation["operation_id"] for operation in active_operations] == [operation_id]
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_conflicts_for_changed_idempotent_request(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+    sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
+    first = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+        sandbox_service=sandbox_service,
+    )
+    assert first.status_code == 202, first.text
+
+    changed = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "vz_linux"},
+        idempotency_key="root-key",
+        sandbox_service=sandbox_service,
+    )
+
+    assert changed.status_code == 409, changed.text
+
+
+@pytest.mark.integration
+def test_provision_workspace_sandbox_root_maps_volume_idempotency_conflict_to_409(
+    workspace_fastapi_app: FastAPI,
+    db: CharactersRAGDB,
+) -> None:
+    db.upsert_workspace("ws-root", "Rooted Workspace")
+
+    response = _post_workspace_sandbox_root_response(
+        workspace_fastapi_app,
+        db,
+        {"display_name": "Project root", "requested_runtime": "docker"},
+        idempotency_key="root-key",
+        sandbox_service=_ConflictingSandboxVolumeService(),
+    )
+
+    assert response.status_code == 409, response.text
+    operation = db.get_workspace_operation_by_idempotency(
+        workspace_id="ws-root",
+        user_id="1",
+        command="provision_sandbox_root",
+        idempotency_key="root-key",
+    )
+    assert operation is not None
+    assert operation["status"] == "conflicted"
+    assert operation["diagnostics"]["code"] == "workspace_sandbox_volume_idempotency_conflict"
+
+
+@pytest.mark.integration
 def test_attached_host_local_primary_root_is_redacted_across_read_contracts(
     workspace_fastapi_app,
     db,
@@ -769,12 +1102,14 @@ def test_attached_host_local_primary_root_is_redacted_across_read_contracts(
         assert root["root_id"] == "primary"
         assert root["backend"] == "host_local"
         assert root["path_hint"] == project.name
+        assert root["file_inventory"]["available"] is True
         assert "absolute_root" not in root
 
     context_capability_root = context["capabilities"]["project_root"]
     assert context_capability_root["root_id"] == "primary"
     assert context_capability_root["backend"] == "host_local"
     assert context_capability_root["path_hint"] == project.name
+    assert context_capability_root["file_inventory"]["available"] is True
 
     serialized_payloads = [
         json.dumps(payload, sort_keys=True)
@@ -856,6 +1191,7 @@ def test_workspace_capabilities_and_context_include_file_inventory_summary(
         assert inventory["total_file_count"] == 7
         assert inventory["indexed_file_count"] == 0
         assert isinstance(inventory["updated_at"], str)
+        assert inventory["available"] is True
         assert payload["allowed_actions"]["scan_files"] == {
             "allowed": True,
             "reason_code": None,
@@ -905,6 +1241,9 @@ def test_sandbox_volume_primary_root_fails_closed_across_read_contracts(
     assert capabilities["project_root"]["sandbox_mount_state"] == "not_configured"
     assert context["project_root"]["sandbox_mount_state"] == "not_configured"
     assert context["capabilities"]["project_root"]["sandbox_mount_state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["attention_state"] == "needs_attention"
+    assert context["active_operations"] == []
 
     for payload in (capabilities, context):
         assert payload["workspace_kind"] == "project_workspace"
@@ -919,6 +1258,102 @@ def test_sandbox_volume_primary_root_fails_closed_across_read_contracts(
             action = payload["allowed_actions"][action_name]
             assert action["allowed"] is False
             assert action["reason_code"] == "sandbox_mount_not_configured"
+
+
+@pytest.mark.integration
+def test_workspace_context_manager_defaults_for_research_workspace(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Research Workspace", workspace_profile="research")
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["workspace_profile"] == "research"
+    assert context["attention_state"] == "ready"
+    assert context["project_root"]["state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["active_operations"] == []
+
+
+@pytest.mark.integration
+def test_workspace_context_project_shell_without_root_is_setup_pending(
+    workspace_fastapi_app,
+    db,
+):
+    db.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["workspace_profile"] == "project"
+    assert context["attention_state"] == "setup_pending"
+    assert context["project_root"]["state"] == "not_configured"
+    assert context["project_root"]["file_inventory"]["available"] is False
+    assert context["active_operations"] == []
+
+
+@pytest.mark.integration
+def test_workspace_context_project_inventory_scan_is_working(
+    workspace_fastapi_app,
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed = tmp_path / "allowed-project-roots"
+    project = allowed / "active-inventory"
+    project.mkdir(parents=True)
+    db.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
+    monkeypatch.setattr(
+        root_binding_service.config,
+        "get_workspace_project_root_allowed_roots",
+        lambda: (allowed,),
+        raising=True,
+    )
+    attach_response = _put_workspace_primary_root_response(
+        workspace_fastapi_app,
+        db,
+        {"backend": "host_local", "absolute_root": str(project)},
+    )
+    assert attach_response.status_code == 200, attach_response.text
+    root = db.get_workspace_primary_root("ws-root")
+    assert root is not None
+    db.begin_workspace_file_inventory_scan(
+        "ws-root",
+        str(root["root_id"]),
+        int(root["version"]),
+        "policy-fingerprint",
+        requested_by="test-user",
+    )
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["project_root"]["file_inventory"]["state"] == "queued"
+    assert context["project_root"]["file_inventory"]["available"] is True
+    assert context["attention_state"] == "working"
+    assert context["active_operations"] == []
+
+
+@pytest.mark.integration
+def test_workspace_context_archived_workspace_attention_state(
+    workspace_fastapi_app,
+    db,
+):
+    workspace = db.upsert_workspace("ws-root", "Archived Project", workspace_profile="project")
+    db.update_workspace("ws-root", {"archived": True}, expected_version=int(workspace["version"]))
+
+    context_response = _get_workspace_context_response(workspace_fastapi_app, db)
+
+    assert context_response.status_code == 200, context_response.text
+    context = context_response.json()
+    assert context["workspace"]["archived"] is True
+    assert context["attention_state"] == "archived"
+    assert context["active_operations"] == []
 
 
 @pytest.mark.integration

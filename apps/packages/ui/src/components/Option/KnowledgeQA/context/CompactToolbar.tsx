@@ -10,8 +10,11 @@ import { buildSourceHealthSummary } from "../sourceHealth"
 
 type CompactToolbarProps = {
   sources: RagSource[]
+  includeMediaIds?: number[]
+  includeNoteIds?: string[]
   preset: RagPresetName
   webEnabled: boolean
+  webFallbackAvailable?: boolean
   onToggleWeb: () => void
   onOpenSourceSelector: () => void
   onAddSources?: () => void
@@ -37,6 +40,21 @@ function summarizeSources(sources: RagSource[]): string {
   return `${sources.length} selected`
 }
 
+function summarizeSpecificSources(mediaIds: number[], noteIds: string[]): string | null {
+  const mediaCount = mediaIds.filter((id) => Number.isFinite(id) && id > 0).length
+  const noteCount = noteIds.filter((id) => typeof id === "string" && id.trim().length > 0).length
+  if (mediaCount === 0 && noteCount === 0) return null
+
+  const parts: string[] = []
+  if (mediaCount > 0) {
+    parts.push(`${mediaCount} doc${mediaCount === 1 ? "" : "s"}`)
+  }
+  if (noteCount > 0) {
+    parts.push(`${noteCount} note${noteCount === 1 ? "" : "s"}`)
+  }
+  return parts.join(" • ")
+}
+
 const PRESET_LABELS: Record<string, string> = {
   fast: "Fast",
   balanced: "Balanced",
@@ -46,8 +64,11 @@ const PRESET_LABELS: Record<string, string> = {
 
 export function CompactToolbar({
   sources,
+  includeMediaIds = [],
+  includeNoteIds = [],
   preset,
   webEnabled,
+  webFallbackAvailable = true,
   onToggleWeb,
   onOpenSourceSelector,
   onAddSources,
@@ -63,6 +84,12 @@ export function CompactToolbar({
   showAddSources = false,
   className,
 }: CompactToolbarProps) {
+  const sourceSummary = summarizeSources(sources)
+  const specificSourceSummary = summarizeSpecificSources(includeMediaIds, includeNoteIds)
+  const sourceControlLabel = `Open source scope and saved profiles. Sources: ${sourceSummary}${
+    specificSourceSummary ? `. Specific: ${specificSourceSummary}` : ""
+  }`
+
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
       {showAddSources ? (
@@ -80,10 +107,15 @@ export function CompactToolbar({
       <button
         type="button"
         onClick={onOpenSourceSelector}
+        aria-label={sourceControlLabel}
+        title="Open source scope and saved profiles"
         className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
       >
         <Layers className="h-3.5 w-3.5" />
-        Sources: {summarizeSources(sources)}
+        Sources: {sourceSummary}
+        {specificSourceSummary ? (
+          <span className="hidden sm:inline"> • Specific: {specificSourceSummary}</span>
+        ) : null}
         <ChevronDown className="h-3 w-3" />
       </button>
 
@@ -102,17 +134,27 @@ export function CompactToolbar({
       <button
         type="button"
         onClick={onToggleWeb}
+        disabled={!webFallbackAvailable}
         className={cn(
           "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
-          webEnabled
+          webEnabled && webFallbackAvailable
             ? "border-primary/40 bg-primary/10 text-primary"
-            : "border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text"
+            : "border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text",
+          !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-muted"
         )}
-        aria-pressed={webEnabled}
-        aria-label={`Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`}
-        title="Falls back to web search when local source relevance is below threshold."
+        aria-pressed={webEnabled && webFallbackAvailable}
+        aria-label={
+          webFallbackAvailable
+            ? `Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`
+            : "Web fallback is not available on this server."
+        }
+        title={
+          webFallbackAvailable
+            ? "Falls back to web search when local source relevance is below threshold."
+            : "Web fallback is not available on this server."
+        }
       >
-        <Globe className={cn("h-3.5 w-3.5", webEnabled ? "fill-current" : "")} />
+        <Globe className={cn("h-3.5 w-3.5", webEnabled && webFallbackAvailable ? "fill-current" : "")} />
         Web
       </button>
 

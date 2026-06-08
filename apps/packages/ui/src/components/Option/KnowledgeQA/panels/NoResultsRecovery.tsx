@@ -13,10 +13,13 @@ import type {
 import { getSourceHealthStatusLabel } from "../sourceHealth"
 
 type NoResultsRecoveryProps = {
+  onBroadenScope?: () => void
   onOpenQuickIngest: () => void
   onEnableWeb: () => void
   onShowNearestMatches: () => void
   webEnabled: boolean
+  webAvailable?: boolean
+  hasNearestMatches?: boolean
   selectedSources?: RagSource[]
   sourceHealth?: KnowledgeSourceHealthState
   sourceStatus?: Record<string, KnowledgeSourceStatus>
@@ -24,10 +27,13 @@ type NoResultsRecoveryProps = {
 }
 
 export function NoResultsRecovery({
+  onBroadenScope,
   onOpenQuickIngest,
   onEnableWeb,
   onShowNearestMatches,
   webEnabled,
+  webAvailable = true,
+  hasNearestMatches = false,
   selectedSources = [],
   sourceHealth,
   sourceStatus,
@@ -55,6 +61,9 @@ export function NoResultsRecovery({
       .map((sourceId) => sourceHealth.bySource[sourceId])
       .filter((source): source is KnowledgeSourceHealth => Boolean(source))
   }, [selectedSources, sourceHealth])
+  const canEnableWebFallback = webAvailable && !webEnabled
+  const shouldOfferNearestMatches =
+    hasNearestMatches || showNearestMatchesAvailable
 
   return (
     <div className="rounded-xl border border-border bg-surface p-6">
@@ -63,7 +72,7 @@ export function NoResultsRecovery({
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold">No results found</h2>
           <p className="mt-1 text-sm text-text-muted">
-            Try broader keywords, check source readiness and search diagnostics, or enable web fallback for recovery.
+            Try broader keywords, broaden the source scope, check source readiness and search diagnostics, or enable web fallback for recovery.
           </p>
           <p className="mt-1 text-sm text-text-muted">
             Web fallback uses your configured server default provider. Queries stay on your
@@ -128,15 +137,29 @@ export function NoResultsRecovery({
             >
               Open source page
             </Link>
-            <button
-              type="button"
-              onClick={onEnableWeb}
-              disabled={webEnabled}
-              className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle disabled:opacity-60 disabled:cursor-not-allowed hover:bg-hover hover:text-text transition-colors"
-            >
-              {webEnabled ? "Web fallback enabled" : "Enable web fallback"}
-            </button>
-            {showNearestMatchesAvailable ? (
+            {onBroadenScope ? (
+              <button
+                type="button"
+                onClick={onBroadenScope}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle hover:bg-hover hover:text-text transition-colors"
+              >
+                Broaden source scope
+              </button>
+            ) : null}
+            {canEnableWebFallback ? (
+              <button
+                type="button"
+                onClick={onEnableWeb}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle hover:bg-hover hover:text-text transition-colors"
+              >
+                Enable web fallback
+              </button>
+            ) : (
+              <span className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-muted">
+                {webAvailable ? "Web fallback enabled" : "Web fallback unavailable"}
+              </span>
+            )}
+            {shouldOfferNearestMatches ? (
               <button
                 type="button"
                 onClick={onShowNearestMatches}

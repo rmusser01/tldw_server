@@ -44,6 +44,7 @@ export function AnswerModelMenu({
   const [open, setOpen] = useState(false)
   const [providerCatalog, setProviderCatalog] =
     useState<LlmProvidersResponse | null>(null)
+  const [providerStatus, setProviderStatus] = useState<"loading" | "ready" | "error">("loading")
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -51,14 +52,17 @@ export function AnswerModelMenu({
 
     void (async () => {
       try {
+        setProviderStatus("loading")
         await tldwClient.initialize()
         const response = (await tldwClient.getProviders()) as LlmProvidersResponse
         if (!cancelled) {
           setProviderCatalog(response)
+          setProviderStatus("ready")
         }
       } catch {
         if (!cancelled) {
           setProviderCatalog(null)
+          setProviderStatus("error")
         }
       }
     })()
@@ -188,6 +192,18 @@ export function AnswerModelMenu({
               Applies to final answer generation for this search session.
             </p>
           </div>
+
+          {providerStatus === "loading" ? (
+            <p role="status" className="mb-2 rounded-md border border-border bg-surface2 px-2 py-1.5 text-xs text-text-muted">
+              Loading answer providers...
+            </p>
+          ) : null}
+
+          {providerStatus === "error" ? (
+            <p role="status" className="mb-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5 text-xs text-warn">
+              Provider list failed to load. You can still type a model manually.
+            </p>
+          ) : null}
 
           <label className="mb-2 block text-[11px] font-medium text-text-muted">
             Provider

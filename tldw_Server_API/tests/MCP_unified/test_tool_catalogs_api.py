@@ -144,6 +144,8 @@ def test_tool_catalogs_flow():
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
+    reset_lifecycle_state(app)
+
     # Disable HTTP security guard for this test (IP allowlist/mTLS)
     try:
         from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security as _ehs

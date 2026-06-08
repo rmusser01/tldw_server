@@ -12,7 +12,8 @@ import {
   MODERATION_RULES_PATH,
   PROTOTYPE_WORKSPACES_PATH,
   RESEARCH_WORKSPACE_PATH,
-  REPO2TXT_PATH
+  REPO2TXT_PATH,
+  WORKSPACES_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
@@ -180,6 +181,7 @@ const OptionRepo2Txt = lazy(() => import("./option-repo2txt"))
 const OptionSetup = lazy(() => import("./option-setup"))
 const OptionOnboardingTest = lazy(() => import("./option-onboarding-test"))
 const OptionResearchWorkspace = lazy(() => import("./option-research-workspace"))
+const OptionWorkspaces = lazy(() => import("./option-workspaces"))
 const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
 const OptionPrototypeWorkspaces = lazy(() => import("./option-prototype-workspaces"))
 const OptionSharedWithMe = lazy(() => import("./option-shared-with-me"))
@@ -469,6 +471,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: "/skills",
     element: <OptionSkills />,
+  },
+  {
+    kind: "options",
+    path: WORKSPACES_PATH,
+    element: <OptionWorkspaces />,
   },
   {
     kind: "options",

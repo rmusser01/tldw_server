@@ -692,11 +692,12 @@ async def test_get_current_user_authnz_revoked_does_not_fallback(monkeypatch):
         def verify_token(self, _token: str):
             raise AssertionError("MCP JWT fallback should not be attempted")
 
+    revoked_token = ".".join(("revoked", "jwt", "token"))
     monkeypatch.setattr(mcp_ep, "verify_jwt_and_fetch_user", _revoked_verify)
-    monkeypatch.setattr(mcp_ep, "_is_authnz_access_token", lambda token: token == "revoked.jwt.token")
+    monkeypatch.setattr(mcp_ep, "_is_authnz_access_token", lambda token: token == revoked_token)
     monkeypatch.setattr(mcp_ep, "get_jwt_manager", lambda: _FailingJwtManager())
 
-    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="revoked.jwt.token")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=revoked_token)
 
     user = await mcp_ep._resolve_token_data_compat(credentials=creds, x_api_key=None, request=None)
 

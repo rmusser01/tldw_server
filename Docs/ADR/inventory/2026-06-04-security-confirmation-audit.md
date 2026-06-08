@@ -1,10 +1,10 @@
 # Security Confirmation Audit - 2026-06-04
 
 **Related task:** TASK-2247
-**Follow-up:** TASK-2248
+**Follow-up:** TASK-2248, TASK-2311, TASK-2312, TASK-2313, TASK-2314
 **Inventory row:** INV-029
 **Source candidate:** `tldw_Server_API/app/core/Security/README.md`
-**Disposition:** Current governing, but too broad for one accepted ADR. Split before ADR backfill.
+**Disposition:** Current governing, but too broad for one accepted ADR. Request-edge middleware is backfilled by ADR-019; outbound egress/SSRF policy is backfilled by ADR-026; Security AES-GCM JSON envelopes are backfilled by ADR-027; restricted legacy pickle compatibility is backfilled by ADR-028; remaining `SecretManager` adoption stays inventory-only until narrower implementation-backed adoption work exists.
 
 ## Decision Candidate Under Review
 
@@ -12,7 +12,7 @@ INV-029 summarized the Security module convention as:
 
 > Security controls are centralized for egress policy, security headers, request IDs, setup CSP/access guard, URL validation, and secret management; production should keep security middleware enabled.
 
-The candidate describes current governing conventions, but it combines multiple security boundaries. Backfill should not turn the full row into one immutable ADR. The confirmed material should be split into bounded ADRs so request-edge middleware, outbound egress/SSRF policy, and secrets/serialization policy do not overclaim each other's behavior.
+The candidate describes current governing conventions, but it combines multiple security boundaries. Backfill should not turn the full row into one immutable ADR. The confirmed material is split into bounded ADRs so request-edge middleware, outbound egress/SSRF policy, and secrets/serialization policy do not overclaim each other's behavior.
 
 ## Confirmed Evidence
 
@@ -32,17 +32,19 @@ The candidate describes current governing conventions, but it combines multiple 
 - Do not create one broad "Security module" ADR that claims all security-sensitive behavior is centrally enforced. The module centralizes helpers and middleware, but feature modules still need to call egress helpers for outbound work.
 - Egress is a strong candidate for its own ADR, but the accepted claim should be "outbound integrations must use the central egress policy helpers" plus the current policy defaults. It should not claim universal historical coverage for every existing network path.
 - Request-edge middleware is a separate strong candidate: normal startup installs setup guard/CSP and security headers, and request ID plus drain gate are always installed. It should explicitly carry the test-mode skip, `ENABLE_SECURITY_HEADERS`, HSTS opt-in, and setup CSP relaxed/eval caveats.
-- Secret management and safe serialization should not be bundled into the first ADR unless a focused adoption audit confirms the repository-wide consumer behavior. Current evidence confirms the helpers and tests, not universal adoption.
+- Secret management and safe serialization should not be bundled into a broad ADR. TASK-2312 confirms helper availability and bounded crypto/restricted-pickle adoption, but not repository-wide `SecretManager` adoption or universal serialization coverage. ADR-027 records only the AES-GCM JSON envelope portion, and ADR-028 records only the restricted legacy pickle compatibility portion.
 - Setup CSP intentionally allows inline scripts and allows eval by default unless `TLDW_SETUP_NO_EVAL` is truthy. Do not write an ADR that says setup CSP is strict.
 
-## Recommended Next Action
+## Backfill Results
 
 Do not backfill INV-029 as a single accepted ADR.
 
-Recommended bounded ADR follow-ups:
+Bounded ADR follow-ups:
 
-1. Request-edge Security middleware ADR via TASK-2248: startup installs request ID, drain gate, setup access/CSP, and security headers with path-specific CSP and production-default header enablement.
-2. Outbound egress/SSRF policy ADR: outbound integrations must use central `egress.py`/`url_validation.py` helpers, which enforce scheme, host, port, allow/deny, environment profile, tenant webhook, DNS, and private/reserved-address checks.
-3. Optional later secrets/serialization ADR after a separate adoption audit: `SecretManager`, AES-GCM JSON helpers, and restricted pickle compatibility policy.
+1. Request-edge Security middleware ADR via TASK-2248: ADR-019 covers startup-installed request ID, drain gate, setup access/CSP, and security headers with path-specific CSP and production-default header enablement.
+2. Outbound egress/SSRF policy ADR via TASK-2311: ADR-026 covers the rule that outbound integrations must use central `egress.py`/`url_validation.py` helpers, which enforce scheme, host, port, allow/deny, environment profile, tenant webhook, DNS, and private/reserved-address checks.
+3. Secrets/serialization adoption audit via TASK-2312: `Docs/ADR/inventory/2026-06-07-security-secrets-serialization-adoption-audit.md` explains why the slice must remain split.
+4. AES-GCM JSON envelope ADR via TASK-2313: ADR-027 covers Security crypto envelope helpers and known configured encrypted-persistence consumers.
+5. Restricted legacy pickle compatibility ADR via TASK-2314: ADR-028 covers Security `safe_pickle` helpers and explicitly gated Web Scraping/Scheduler compatibility consumers. Future ADRs should split `SecretManager` adoption instead of creating one broad Security ADR.
 
 Update INV-029 to record TASK-2247 confirmation and keep ADR creation split by boundary.

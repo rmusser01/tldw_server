@@ -16,7 +16,7 @@ import { Highlight, themes } from "prism-react-renderer"
 import { browser } from "wxt/browser"
 import { useArtifactsStore } from "@/store/artifacts"
 import { useStoreMessageOption } from "@/store/option"
-import { Mermaid } from "@/components/Common/Mermaid"
+import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
 import type { DataTable, DataTableColumn, DataTableSource } from "@/types/data-tables"
 import { queueDataTablesPrefill } from "@/utils/data-tables-prefill"
 
@@ -172,9 +172,12 @@ export const ArtifactsPanel = () => {
     return null
   }
 
-  const isCodeArtifact = active.kind === "code" || active.kind === "diagram"
-  const highlightLanguage =
-    active.kind === "diagram" ? "markdown" : normalizedLanguage
+  const isMermaidDiagramArtifact =
+    active.kind === "diagram" && normalizedLanguage === "mermaid"
+  const isCodeArtifact =
+    active.kind === "code" ||
+    (active.kind === "diagram" && !isMermaidDiagramArtifact)
+  const highlightLanguage = normalizedLanguage
 
   const handleCopy = () => {
     navigator.clipboard.writeText(active.content)
@@ -300,10 +303,10 @@ export const ArtifactsPanel = () => {
         </div>
       </div>
       <div className="flex-1 overflow-auto px-4 py-3">
-        {active.kind === "diagram" ? (
-          <Mermaid
-            code={active.content}
-            className="rounded-xl border border-border bg-surface2/60 px-4 py-3"
+        {isMermaidDiagramArtifact ? (
+          <MermaidDiagramBlock
+            enableArtifactAction={false}
+            source={active.content}
           />
         ) : isCodeArtifact ? (
           <Highlight
@@ -323,21 +326,26 @@ export const ArtifactsPanel = () => {
                   ...style,
                   fontFamily: "var(--font-mono)"
                 }}>
-                {tokens.map((line, i) => (
-                  <div
-                    key={i}
-                    {...getLineProps({ line, key: i })}
-                    className="table w-full">
-                    <span className="table-cell select-none pr-3 text-right text-xs text-text-subtle">
-                      {i + 1}
-                    </span>
-                    <span className="table-cell whitespace-pre-wrap">
-                      {line.map((token, key) => (
-                        <span key={key} {...getTokenProps({ token, key })} />
-                      ))}
-                    </span>
-                  </div>
-                ))}
+                {tokens.map((line, i) => {
+                  const { key: _lineKey, ...lineProps } = getLineProps({
+                    line,
+                    key: i
+                  })
+                  return (
+                    <div key={i} {...lineProps} className="table w-full">
+                      <span className="table-cell select-none pr-3 text-right text-xs text-text-subtle">
+                        {i + 1}
+                      </span>
+                      <span className="table-cell whitespace-pre-wrap">
+                        {line.map((token, key) => {
+                          const { key: _tokenKey, ...tokenProps } =
+                            getTokenProps({ token, key })
+                          return <span key={key} {...tokenProps} />
+                        })}
+                      </span>
+                    </div>
+                  )
+                })}
               </pre>
             )}
           </Highlight>

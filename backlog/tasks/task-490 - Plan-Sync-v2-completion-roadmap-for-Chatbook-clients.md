@@ -1,7 +1,7 @@
 ---
 id: TASK-490
 title: Plan Sync v2 completion roadmap for Chatbook clients
-status: In Progress
+status: Done
 assignee:
 - '@Codex'
 labels:
@@ -14,11 +14,18 @@ priority: high
 documentation:
 - Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md
 - Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
+- Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md
+- Docs/superpowers/plans/2026-05-23-sync-v2-m3-polished-multi-device-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md
 - Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
+- Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md
+- Docs/superpowers/plans/2026-05-23-sync-v2-m3-polished-multi-device-implementation-plan.md
 - Docs/Design/Sync_V2_M1_Implementation_Decisions.md
+- Docs/Design/Sync_V2_M3_Polished_Multi_Device.md
 - Docs/API/Sync_V2_M1.md
+- Docs/API/Sync_V2_M2.md
+- Docs/API/Sync_V2_M3.md
 - backlog/tasks/task-490 - Plan-Sync-v2-completion-roadmap-for-Chatbook-clients.md
 - backlog/tasks/task-490.1 - Sync-v2-M1-Lock-implementation-decisions-and-API-docs.md
 - backlog/tasks/task-490.2 - Sync-v2-M1-Align-envelope-models-and-storage.md
@@ -43,10 +50,10 @@ Design and track the complete Sync v2 roadmap for tldw_server as the sync author
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Clarify the full roadmap to polished multi-device sync while keeping manual reliable sync as the first implementation milestone.
-- [ ] #2 Define Milestone 1 boundaries for personal dataset sync covering Notes and Chat, including minimal chat conversation/session metadata required for new-device restore.
-- [ ] #3 Identify server API/storage responsibilities, client integration expectations, encryption/key-recovery model, restore/selective-sync behavior, conflict handling, and verification strategy.
-- [ ] #4 Create and commit an approved PRD/design spec under Docs/superpowers/specs after brainstorming approval, then break implementation into Backlog child tasks during planning.
+- [x] #1 Clarify the full roadmap to polished multi-device sync while keeping manual reliable sync as the first implementation milestone.
+- [x] #2 Define Milestone 1 boundaries for personal dataset sync covering Notes and Chat, including minimal chat conversation/session metadata required for new-device restore.
+- [x] #3 Identify server API/storage responsibilities, client integration expectations, encryption/key-recovery model, restore/selective-sync behavior, conflict handling, and verification strategy.
+- [x] #4 Create and commit an approved PRD/design spec under Docs/superpowers/specs after brainstorming approval, then break implementation into Backlog child tasks during planning.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -105,15 +112,15 @@ M1 Task 1 completion:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Completed the Sync v2 roadmap planning and server-side implementation tracking through the M1, M2, and M3 milestones. The approved PRD/spec and implementation plans define Chatbook local-only, server-front-end, and offline-sync modes; personal Notes/Chat M1 sync; M2 blob/restore completeness; and M3 device lifecycle, background status, workspace datasets, broader domains, stricter encryption, retention/GC, diagnostics, and closeout verification. Child Backlog tasks TASK-490.1 through TASK-490.13.11 record the implementation slices, verification, review follow-ups, and known deferrals. Verification for this closeout: `python -m pytest tldw_Server_API/tests/Sync -q` => 435 passed, 8 warnings; `git diff --check` => clean. Bandit is not applicable for this closeout because it only updates roadmap/spec and Backlog documentation. Chatbook client-side integration remains a separate downstream client effort, but the tracked tldw_server Sync v2 roadmap effort is complete.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

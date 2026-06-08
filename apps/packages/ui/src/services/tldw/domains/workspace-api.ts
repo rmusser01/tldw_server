@@ -22,11 +22,43 @@ type SkillsListPayload = SkillsListResponse & {
 
 export type WorkspaceArtifactJsonRecord = Record<string, unknown>
 
+export type WorkspaceProfile = "research" | "project"
+export type WorkspaceAttentionState =
+  | "ready"
+  | "setup_pending"
+  | "working"
+  | "needs_attention"
+  | "blocked"
+  | "archived"
+
+export type WorkspaceOperationStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "conflicted"
+  | "expired"
+
+export type WorkspaceProjectRootBackend = "host_local" | "sandbox_volume"
+export type WorkspaceProjectRootState =
+  | "not_configured"
+  | "provisioning"
+  | "attached"
+  | "unavailable"
+  | "missing"
+  | "detached"
+  | "failed"
+  | "cleanup_pending"
+  | "archived"
+
+export type WorkspaceResolutionStatus = "complete" | "partial" | "failed"
+
 export interface WorkspaceApiResponse {
   id: string
   name: string | null
   archived: boolean
   study_materials_policy: "general" | "workspace"
+  workspace_profile: WorkspaceProfile
   deleted: boolean
   banner_title: string | null
   banner_subtitle: string | null
@@ -98,6 +130,7 @@ export interface WorkspaceSourceStatusApiResponse {
   media_id: number | null
   title: string
   source_type: string
+  url: string | null
   selected: boolean
   state: WorkspaceSourceLifecycleState
   status_reason: string
@@ -145,10 +178,60 @@ export interface WorkspaceAllowedAction {
   reason_code: string | null
 }
 
+export interface WorkspaceContextPartialError {
+  scope: string
+  code: string
+  message: string
+}
+
+export interface WorkspaceResolution {
+  status: WorkspaceResolutionStatus
+  partial_errors: WorkspaceContextPartialError[]
+}
+
+export interface WorkspaceFileInventory {
+  state: string | null
+  indexed_file_count: number | null
+  total_file_count: number | null
+  updated_at: string | null
+  available: boolean
+}
+
+export interface WorkspaceProjectRoot {
+  state: WorkspaceProjectRootState
+  root_id: string | null
+  backend: WorkspaceProjectRootBackend | null
+  display_name: string | null
+  path_hint: string | null
+  git_state: string | null
+  file_inventory_state: string | null
+  file_inventory: WorkspaceFileInventory
+  indexing_state: string | null
+  sandbox_mount_state: string | null
+  mcp_trust_state: string | null
+}
+
+export interface WorkspaceRootResponse extends WorkspaceProjectRoot {
+  workspace_id: string | null
+  is_primary: boolean
+  version: number | null
+  updated_at: string | null
+}
+
+export interface WorkspaceRootsResponse {
+  workspace_id: string
+  workspace_profile: WorkspaceProfile
+  primary_root: WorkspaceRootResponse | null
+  roots: WorkspaceRootResponse[]
+}
+
 export interface WorkspaceCapabilitiesResponse {
   workspace_id: string
+  workspace_profile: WorkspaceProfile
   workspace_kind: string
   access_level: string
+  resolution?: WorkspaceResolution
+  project_root?: WorkspaceProjectRoot
   source_summary: WorkspaceSourceStatusSummary
   workspace_services: Record<string, WorkspaceCapabilityService>
   allowed_actions: Record<string, WorkspaceAllowedAction>
@@ -173,18 +256,16 @@ export interface WorkspaceContextSource extends WorkspaceSourceApiResponse {
   preview: WorkspaceSourcePreviewSummary
 }
 
-export interface WorkspaceContextPartialError {
-  scope: string
-  code: string
-  message: string
-}
-
 export interface WorkspaceContextResponse {
   workspace_id: string
+  workspace_profile: WorkspaceProfile
   workspace_kind: string
   schema_version: number
   generated_at: string
   workspace: WorkspaceApiResponse
+  attention_state: WorkspaceAttentionState
+  resolution: WorkspaceResolution
+  project_root: WorkspaceProjectRoot
   sources: {
     items: WorkspaceContextSource[]
     summary: WorkspaceSourceStatusSummary
@@ -193,6 +274,7 @@ export interface WorkspaceContextResponse {
   services: Record<string, WorkspaceCapabilityService>
   allowed_actions: Record<string, WorkspaceAllowedAction>
   active_jobs: WorkspaceSourceJobStatus[]
+  active_operations: WorkspaceOperationResponse[]
   partial_errors: WorkspaceContextPartialError[]
 }
 
@@ -349,6 +431,156 @@ export interface WorkspaceNoteApiResponse {
 export interface WorkspaceUpsertRequest {
   name: string
   study_materials_policy?: "general" | "workspace"
+  workspace_profile?: WorkspaceProfile
+}
+
+export interface WorkspacePatchRequest {
+  name?: string | null
+  archived?: boolean | null
+  study_materials_policy?: "general" | "workspace" | null
+  workspace_profile?: WorkspaceProfile | null
+  banner_title?: string | null
+  banner_subtitle?: string | null
+  banner_color?: string | null
+  audio_provider?: string | null
+  audio_model?: string | null
+  audio_voice?: string | null
+  audio_speed?: number | null
+  version: number
+}
+
+export interface WorkspacePrimaryRootAttachRequest {
+  backend: WorkspaceProjectRootBackend
+  root_id?: string | null
+  absolute_root?: string | null
+  sandbox_volume_id?: string | null
+  display_name?: string | null
+  replace_existing?: boolean
+  expected_workspace_version?: number | null
+  strict_sandbox_validation?: boolean
+}
+
+export interface WorkspaceSandboxRootProvisionRequest {
+  display_name?: string | null
+  requested_runtime?: string | null
+  root_id?: string | null
+  replace_existing?: boolean
+  expected_workspace_version?: number | null
+}
+
+export interface WorkspaceSandboxRootProvisionResponse {
+  workspace_id: string
+  workspace_profile: WorkspaceProfile
+  operation: WorkspaceOperationResponse
+  primary_root: WorkspaceRootResponse | null
+}
+
+export type WorkspaceFileInventoryState =
+  | "not_started"
+  | "queued"
+  | "scanning"
+  | "current"
+  | "partial"
+  | "stale"
+  | "failed"
+  | "disabled"
+
+export type WorkspaceFileInventoryEntryKind =
+  | "file"
+  | "directory"
+  | "symlink"
+  | "other"
+
+export interface WorkspaceFileInventoryScanRequest {
+  force?: boolean
+  expected_root_version?: number | null
+}
+
+export interface WorkspaceFileInventoryJobStatus {
+  id: number | null
+  uuid: string | null
+  status: string | null
+  job_type: string | null
+  progress_percent: number | null
+  progress_message: string | null
+  error_message: string | null
+}
+
+export interface WorkspaceFileInventoryCounts {
+  files: number
+  directories: number
+  symlinks: number
+  ignored: number
+  indexing_candidates: number
+  diagnostics: number
+  total_entries: number
+}
+
+export interface WorkspaceFileInventoryDiagnostic {
+  code: string
+  message: string
+  path_hint: string | null
+}
+
+export interface WorkspaceFileInventoryStatusResponse {
+  workspace_id: string
+  root_id: string | null
+  state: WorkspaceFileInventoryState
+  durable_state: string | null
+  stale: boolean
+  last_scan_id: string | null
+  last_scan_started_at: string | null
+  last_scan_completed_at: string | null
+  root_version: number | null
+  scan_root_version: number | null
+  ignore_policy_fingerprint: string | null
+  root_snapshot_token: string | null
+  counts: WorkspaceFileInventoryCounts
+  diagnostics: WorkspaceFileInventoryDiagnostic[]
+  job: WorkspaceFileInventoryJobStatus | null
+  updated_at: string | null
+}
+
+export interface WorkspaceFileInventoryItemResponse {
+  relative_path: string
+  entry_kind: WorkspaceFileInventoryEntryKind
+  size_bytes: number | null
+  mtime_ns: number | null
+  mode_bits: number | null
+  extension: string | null
+  mime_hint: string | null
+  language_hint: string | null
+  ignored: boolean
+  ignore_reason: string | null
+  indexing_candidate: boolean
+}
+
+export interface WorkspaceFileInventoryItemsResponse {
+  workspace_id: string
+  root_id: string | null
+  items: WorkspaceFileInventoryItemResponse[]
+  next_cursor: string | null
+  limit: number
+}
+
+export interface WorkspaceFileInventoryItemsRequest {
+  prefix?: string | null
+  limit?: number | null
+  cursor?: string | null
+  include_ignored?: boolean | null
+  entry_kind?: WorkspaceFileInventoryEntryKind | null
+}
+
+export interface WorkspaceOperationResponse {
+  operation_id: string
+  workspace_id: string
+  command: string
+  status: WorkspaceOperationStatus
+  started_at: string
+  updated_at: string
+  retryable: boolean
+  diagnostics: Record<string, unknown>
+  poll_href: string
 }
 
 export interface WorkspaceSourceCreateRequest {
@@ -370,18 +602,68 @@ export interface WorkspaceSourceUpdateRequest {
   version: number
 }
 
+export type WorkspaceArtifactReviewState =
+  | "draft"
+  | "reviewing"
+  | "accepted"
+  | "needs_revision"
+  | "rejected"
+  | "exported"
+  | "assigned"
+  | "archived"
+
+export interface WorkspaceArtifactRedaction {
+  support_safe?: boolean
+  redacted?: boolean
+  retention_class?: string | null
+  redacted_fields?: string[]
+  [key: string]: unknown
+}
+
 export interface WorkspaceArtifactCreateRequest {
   id: string
   artifact_type: string
   title: string
   status?: string
   content?: string | null
+  content_type?: string
+  preview_text?: string | null
+  summary?: string | null
+  review_state?: WorkspaceArtifactReviewState
+  owner_scope?: string
+  owner_id?: string | null
+  project_id?: string | null
+  task_id?: string | null
+  source_collection_id?: string | null
+  producer_metadata?: WorkspaceArtifactJsonRecord
+  source_lineage?: WorkspaceArtifactJsonRecord
+  review_metadata?: WorkspaceArtifactJsonRecord
+  version_metadata?: WorkspaceArtifactJsonRecord
+  export_refs?: WorkspaceArtifactJsonRecord[]
+  redaction?: WorkspaceArtifactRedaction
+  schema_version?: number
 }
 
 export interface WorkspaceArtifactUpdateRequest {
   title?: string
   status?: string
   content?: string | null
+  content_type?: string | null
+  preview_text?: string | null
+  summary?: string | null
+  review_state?: WorkspaceArtifactReviewState | null
+  owner_scope?: string | null
+  owner_id?: string | null
+  project_id?: string | null
+  task_id?: string | null
+  source_collection_id?: string | null
+  producer_metadata?: WorkspaceArtifactJsonRecord | null
+  source_lineage?: WorkspaceArtifactJsonRecord | null
+  review_metadata?: WorkspaceArtifactJsonRecord | null
+  version_metadata?: WorkspaceArtifactJsonRecord | null
+  export_refs?: WorkspaceArtifactJsonRecord[] | null
+  redaction?: WorkspaceArtifactRedaction | null
+  schema_version?: number | null
   total_tokens?: number | null
   total_cost_usd?: number | null
   completed_at?: string | null
@@ -400,6 +682,23 @@ export interface WorkspaceNoteUpdateRequest {
   keywords_json?: string
   version: number
 }
+
+const encodeWorkspacePathSegment = (value: string, label: string): string => {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    throw new Error(`${label} cannot be empty in Workspace API path segments`)
+  }
+  if (trimmed.includes("/")) {
+    throw new Error(`${label} cannot contain "/" in Workspace API path segments`)
+  }
+  return encodeURIComponent(trimmed)
+}
+
+const workspacePath = (workspaceId: string, suffix = ""): AllowedPath =>
+  `/api/v1/workspaces/${encodeWorkspacePathSegment(
+    workspaceId,
+    "workspaceId"
+  )}${suffix}` as AllowedPath
 
 export const workspaceApiMethods = {
   // ── Skills API ──
@@ -597,7 +896,7 @@ export const workspaceApiMethods = {
     data: WorkspaceUpsertRequest
   ): Promise<WorkspaceApiResponse> {
     return await bgRequest<WorkspaceApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}`,
+      path: workspacePath(workspaceId),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -606,7 +905,114 @@ export const workspaceApiMethods = {
 
   async getWorkspace(workspaceId: string): Promise<WorkspaceApiResponse> {
     return await bgRequest<WorkspaceApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}`,
+      path: workspacePath(workspaceId),
+      method: "GET"
+    })
+  },
+
+  async patchWorkspace(
+    workspaceId: string,
+    data: WorkspacePatchRequest
+  ): Promise<WorkspaceApiResponse> {
+    return await bgRequest<WorkspaceApiResponse>({
+      path: workspacePath(workspaceId),
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async deleteWorkspace(workspaceId: string): Promise<void> {
+    await bgRequest<unknown>({
+      path: workspacePath(workspaceId),
+      method: "DELETE"
+    })
+  },
+
+  async getWorkspaceRoots(workspaceId: string): Promise<WorkspaceRootsResponse> {
+    return await bgRequest<WorkspaceRootsResponse>({
+      path: workspacePath(workspaceId, "/roots"),
+      method: "GET"
+    })
+  },
+
+  async attachWorkspacePrimaryRoot(
+    workspaceId: string,
+    data: WorkspacePrimaryRootAttachRequest
+  ): Promise<WorkspaceRootsResponse> {
+    return await bgRequest<WorkspaceRootsResponse>({
+      path: workspacePath(workspaceId, "/roots/primary"),
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async provisionWorkspaceSandboxRoot(
+    workspaceId: string,
+    data: WorkspaceSandboxRootProvisionRequest,
+    idempotencyKey: string
+  ): Promise<WorkspaceSandboxRootProvisionResponse> {
+    const key = idempotencyKey.trim()
+    if (!key) {
+      throw new Error("idempotencyKey is required for sandbox root provisioning")
+    }
+    return await bgRequest<WorkspaceSandboxRootProvisionResponse>({
+      path: workspacePath(workspaceId, "/roots/primary/sandbox-volume"),
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": key
+      },
+      body: data
+    })
+  },
+
+  async getWorkspaceOperation(
+    workspaceId: string,
+    operationId: string
+  ): Promise<WorkspaceOperationResponse> {
+    const encodedOperationId = encodeWorkspacePathSegment(
+      operationId,
+      "operationId"
+    )
+    return await bgRequest<WorkspaceOperationResponse>({
+      path: workspacePath(workspaceId, `/operations/${encodedOperationId}`),
+      method: "GET"
+    })
+  },
+
+  async queueWorkspaceFileInventoryScan(
+    workspaceId: string,
+    data: WorkspaceFileInventoryScanRequest = {}
+  ): Promise<WorkspaceFileInventoryStatusResponse> {
+    return await bgRequest<WorkspaceFileInventoryStatusResponse>({
+      path: workspacePath(workspaceId, "/file-inventory/scan"),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async getWorkspaceFileInventoryStatus(
+    workspaceId: string
+  ): Promise<WorkspaceFileInventoryStatusResponse> {
+    return await bgRequest<WorkspaceFileInventoryStatusResponse>({
+      path: workspacePath(workspaceId, "/file-inventory/status"),
+      method: "GET"
+    })
+  },
+
+  async getWorkspaceFileInventoryItems(
+    workspaceId: string,
+    params?: WorkspaceFileInventoryItemsRequest
+  ): Promise<WorkspaceFileInventoryItemsResponse> {
+    const query = buildQuery(params as Record<string, any> | undefined)
+    return await bgRequest<WorkspaceFileInventoryItemsResponse>({
+      path: appendPathQuery(
+        workspacePath(workspaceId, "/file-inventory/items"),
+        query
+      ),
       method: "GET"
     })
   },
@@ -625,7 +1031,10 @@ export const workspaceApiMethods = {
   async getWorkspaceMigration(
     migrationId: string
   ): Promise<WorkspaceMigrationResponse> {
-    const encodedMigrationId = encodeURIComponent(migrationId)
+    const encodedMigrationId = encodeWorkspacePathSegment(
+      migrationId,
+      "migrationId"
+    )
     return await bgRequest<WorkspaceMigrationResponse>({
       path: `/api/v1/workspaces/migrations/${encodedMigrationId}`,
       method: "GET"
@@ -637,8 +1046,11 @@ export const workspaceApiMethods = {
     chunkId: string,
     data: WorkspaceMigrationChunkUploadRequest
   ): Promise<WorkspaceMigrationChunkReceiptResponse> {
-    const encodedMigrationId = encodeURIComponent(migrationId)
-    const encodedChunkId = encodeURIComponent(chunkId)
+    const encodedMigrationId = encodeWorkspacePathSegment(
+      migrationId,
+      "migrationId"
+    )
+    const encodedChunkId = encodeWorkspacePathSegment(chunkId, "chunkId")
     return await bgRequest<WorkspaceMigrationChunkReceiptResponse>({
       path: `/api/v1/workspaces/migrations/${encodedMigrationId}/chunks/${encodedChunkId}`,
       method: "PUT",
@@ -651,7 +1063,10 @@ export const workspaceApiMethods = {
     migrationId: string,
     data: WorkspaceMigrationFinalizeRequest
   ): Promise<WorkspaceMigrationResponse> {
-    const encodedMigrationId = encodeURIComponent(migrationId)
+    const encodedMigrationId = encodeWorkspacePathSegment(
+      migrationId,
+      "migrationId"
+    )
     return await bgRequest<WorkspaceMigrationResponse>({
       path: `/api/v1/workspaces/migrations/${encodedMigrationId}/finalize`,
       method: "POST",
@@ -664,7 +1079,10 @@ export const workspaceApiMethods = {
     migrationId: string,
     data: WorkspaceMigrationClientDeleteAckRequest
   ): Promise<{ ok: boolean }> {
-    const encodedMigrationId = encodeURIComponent(migrationId)
+    const encodedMigrationId = encodeWorkspacePathSegment(
+      migrationId,
+      "migrationId"
+    )
     return await bgRequest<{ ok: boolean }>({
       path: `/api/v1/workspaces/migrations/${encodedMigrationId}/client-delete-ack`,
       method: "POST",
@@ -677,7 +1095,7 @@ export const workspaceApiMethods = {
     workspaceId: string
   ): Promise<WorkspaceSourceApiResponse[]> {
     return await bgRequest<WorkspaceSourceApiResponse[]>({
-      path: `/api/v1/workspaces/${workspaceId}/sources`,
+      path: workspacePath(workspaceId, "/sources"),
       method: "GET"
     })
   },
@@ -686,7 +1104,7 @@ export const workspaceApiMethods = {
     workspaceId: string
   ): Promise<WorkspaceSourceStatusListResponse> {
     return await bgRequest<WorkspaceSourceStatusListResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/sources/status`,
+      path: workspacePath(workspaceId, "/sources/status"),
       method: "GET"
     })
   },
@@ -695,7 +1113,7 @@ export const workspaceApiMethods = {
     workspaceId: string
   ): Promise<WorkspaceCapabilitiesResponse> {
     return await bgRequest<WorkspaceCapabilitiesResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/capabilities`,
+      path: workspacePath(workspaceId, "/capabilities"),
       method: "GET"
     })
   },
@@ -704,7 +1122,7 @@ export const workspaceApiMethods = {
     workspaceId: string
   ): Promise<WorkspaceContextResponse> {
     return await bgRequest<WorkspaceContextResponse>({
-      path: `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/context`,
+      path: workspacePath(workspaceId, "/context"),
       method: "GET"
     })
   },
@@ -718,11 +1136,10 @@ export const workspaceApiMethods = {
     }
   ): Promise<WorkspaceSourcePreviewResponse> {
     const query = buildQuery(params)
-    const encodedWorkspaceId = encodeURIComponent(workspaceId)
-    const encodedSourceId = encodeURIComponent(sourceId)
+    const encodedSourceId = encodeWorkspacePathSegment(sourceId, "sourceId")
     return await bgRequest<WorkspaceSourcePreviewResponse>({
       path: appendPathQuery(
-        `/api/v1/workspaces/${encodedWorkspaceId}/sources/${encodedSourceId}/preview` as AllowedPath,
+        workspacePath(workspaceId, `/sources/${encodedSourceId}/preview`),
         query
       ),
       method: "GET"
@@ -734,7 +1151,7 @@ export const workspaceApiMethods = {
     data: WorkspaceSourceCreateRequest
   ): Promise<WorkspaceSourceApiResponse> {
     return await bgRequest<WorkspaceSourceApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/sources`,
+      path: workspacePath(workspaceId, "/sources"),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -746,8 +1163,9 @@ export const workspaceApiMethods = {
     sourceId: string,
     data: WorkspaceSourceUpdateRequest
   ): Promise<WorkspaceSourceApiResponse> {
+    const encodedSourceId = encodeWorkspacePathSegment(sourceId, "sourceId")
     return await bgRequest<WorkspaceSourceApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/sources/${sourceId}`,
+      path: workspacePath(workspaceId, `/sources/${encodedSourceId}`),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -759,7 +1177,7 @@ export const workspaceApiMethods = {
     selectedSourceIds: string[]
   ): Promise<void> {
     await bgRequest<unknown>({
-      path: `/api/v1/workspaces/${workspaceId}/sources/selection` as AllowedPath,
+      path: workspacePath(workspaceId, "/sources/selection"),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: { selected_ids: selectedSourceIds }
@@ -767,8 +1185,9 @@ export const workspaceApiMethods = {
   },
 
   async deleteWorkspaceSource(workspaceId: string, sourceId: string): Promise<void> {
+    const encodedSourceId = encodeWorkspacePathSegment(sourceId, "sourceId")
     await bgRequest<unknown>({
-      path: `/api/v1/workspaces/${workspaceId}/sources/${sourceId}`,
+      path: workspacePath(workspaceId, `/sources/${encodedSourceId}`),
       method: "DELETE"
     })
   },
@@ -777,7 +1196,7 @@ export const workspaceApiMethods = {
     workspaceId: string
   ): Promise<WorkspaceArtifactApiResponse[]> {
     return await bgRequest<WorkspaceArtifactApiResponse[]>({
-      path: `/api/v1/workspaces/${workspaceId}/artifacts`,
+      path: workspacePath(workspaceId, "/artifacts"),
       method: "GET"
     })
   },
@@ -787,7 +1206,7 @@ export const workspaceApiMethods = {
     data: WorkspaceArtifactCreateRequest
   ): Promise<WorkspaceArtifactApiResponse> {
     return await bgRequest<WorkspaceArtifactApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/artifacts`,
+      path: workspacePath(workspaceId, "/artifacts"),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -799,8 +1218,12 @@ export const workspaceApiMethods = {
     artifactId: string,
     data: WorkspaceArtifactUpdateRequest
   ): Promise<WorkspaceArtifactApiResponse> {
+    const encodedArtifactId = encodeWorkspacePathSegment(
+      artifactId,
+      "artifactId"
+    )
     return await bgRequest<WorkspaceArtifactApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/artifacts/${artifactId}`,
+      path: workspacePath(workspaceId, `/artifacts/${encodedArtifactId}`),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -808,8 +1231,12 @@ export const workspaceApiMethods = {
   },
 
   async deleteWorkspaceArtifact(workspaceId: string, artifactId: string): Promise<void> {
+    const encodedArtifactId = encodeWorkspacePathSegment(
+      artifactId,
+      "artifactId"
+    )
     await bgRequest<unknown>({
-      path: `/api/v1/workspaces/${workspaceId}/artifacts/${artifactId}`,
+      path: workspacePath(workspaceId, `/artifacts/${encodedArtifactId}`),
       method: "DELETE"
     })
   },
@@ -818,7 +1245,7 @@ export const workspaceApiMethods = {
     workspaceId: string
   ): Promise<WorkspaceNoteApiResponse[]> {
     return await bgRequest<WorkspaceNoteApiResponse[]>({
-      path: `/api/v1/workspaces/${workspaceId}/notes`,
+      path: workspacePath(workspaceId, "/notes"),
       method: "GET"
     })
   },
@@ -828,7 +1255,7 @@ export const workspaceApiMethods = {
     data: WorkspaceNoteCreateRequest
   ): Promise<WorkspaceNoteApiResponse> {
     return await bgRequest<WorkspaceNoteApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/notes`,
+      path: workspacePath(workspaceId, "/notes"),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -841,7 +1268,7 @@ export const workspaceApiMethods = {
     data: WorkspaceNoteUpdateRequest
   ): Promise<WorkspaceNoteApiResponse> {
     return await bgRequest<WorkspaceNoteApiResponse>({
-      path: `/api/v1/workspaces/${workspaceId}/notes/${noteId}`,
+      path: workspacePath(workspaceId, `/notes/${noteId}`),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
@@ -850,7 +1277,7 @@ export const workspaceApiMethods = {
 
   async deleteWorkspaceNote(workspaceId: string, noteId: number): Promise<void> {
     await bgRequest<unknown>({
-      path: `/api/v1/workspaces/${workspaceId}/notes/${noteId}`,
+      path: workspacePath(workspaceId, `/notes/${noteId}`),
       method: "DELETE"
     })
   },

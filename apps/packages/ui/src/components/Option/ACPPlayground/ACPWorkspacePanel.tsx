@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthHeaders, resolveACPServerUrl } from "@/services/acp/connection"
 import { useACPSessionsStore } from "@/store/acp-sessions"
+import { WORKSPACES_PATH } from "@/routes/route-paths"
 
 type WebSocketWithHeaders = new (
   url: string,
@@ -56,6 +57,8 @@ const resolveTokenColor = (tokenName: string, fallbackRgb: string): string => {
   const tokenValue = getComputedStyle(document.documentElement).getPropertyValue(tokenName).trim()
   return tokenValue ? `rgb(${tokenValue})` : fallbackRgb
 }
+
+const WORKSPACES_MANAGER_HREF = `#${WORKSPACES_PATH}`
 
 export const ACPWorkspacePanel: React.FC = () => {
   const { t } = useTranslation("playground")
@@ -211,12 +214,33 @@ export const ACPWorkspacePanel: React.FC = () => {
 
   if (!activeSessionId) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full items-center justify-center p-4">
         <Empty
-          description={t(
-            "playground:acp.workspace.selectSession",
-            "Select a session to open the workspace terminal."
-          )}
+          description={
+            <div className="space-y-2 text-center">
+              <p>
+                {t(
+                  "playground:acp.workspace.selectSession",
+                  "Select a session to open the workspace terminal."
+                )}
+              </p>
+              <p className="text-xs text-text-muted">
+                {t(
+                  "playground:acp.workspace.managerHint",
+                  "Use Workspaces to create or attach the project root before starting agent sessions."
+                )}
+              </p>
+              <a
+                href={WORKSPACES_MANAGER_HREF}
+                className="text-sm font-medium text-primary hover:text-primary/80"
+              >
+                {t(
+                  "playground:acp.workspace.manageCanonicalWorkspaces",
+                  "Manage canonical Workspaces"
+                )}
+              </a>
+            </div>
+          }
         />
       </div>
     )
@@ -241,6 +265,15 @@ export const ACPWorkspacePanel: React.FC = () => {
                   "The workspace terminal requires sandbox mode, which runs the agent inside a Docker container with SSH access. To enable it, set [ACP-SANDBOX] enabled = true in config.txt."
                 )}
               </p>
+              <a
+                href={WORKSPACES_MANAGER_HREF}
+                className="text-sm font-medium text-primary hover:text-primary/80"
+              >
+                {t(
+                  "playground:acp.workspace.manageCanonicalWorkspaces",
+                  "Manage canonical Workspaces"
+                )}
+              </a>
             </div>
           }
         />
@@ -268,15 +301,23 @@ export const ACPWorkspacePanel: React.FC = () => {
             role="status"
           />
         </div>
-        {wsStatus === "disconnected" && (
-          <button
-            type="button"
-            onClick={handleReconnect}
+        <div className="flex items-center gap-2">
+          <a
+            href={WORKSPACES_MANAGER_HREF}
             className="rounded px-2 py-1 text-xs text-primary hover:bg-surface2"
           >
-            {t("playground:acp.workspace.reconnect", "Reconnect")}
-          </button>
-        )}
+            {t("playground:acp.workspace.workspaces", "Workspaces")}
+          </a>
+          {wsStatus === "disconnected" && (
+            <button
+              type="button"
+              onClick={handleReconnect}
+              className="rounded px-2 py-1 text-xs text-primary hover:bg-surface2"
+            >
+              {t("playground:acp.workspace.reconnect", "Reconnect")}
+            </button>
+          )}
+        </div>
       </div>
       <div ref={containerRef} className="flex-1 bg-black" />
     </div>

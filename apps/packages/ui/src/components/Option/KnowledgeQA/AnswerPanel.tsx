@@ -553,7 +553,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       return "Balanced preset typically completes within about 10 seconds."
     }
     if (preset === "thorough") {
-      return "Thorough preset may take up to 30 seconds."
+      return "Deep preset may take up to 30 seconds."
     }
     return "Custom preset timing varies with your settings."
   }, [preset])

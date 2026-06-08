@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .decisions import PolicyDecision, evaluate_profile_tool_decision
 from .models import MCPProfile
 
 _WORKSPACE_BINDING_KEYS = (
@@ -64,6 +65,7 @@ class EffectivePolicyResult(BaseModel):
     status: EffectivePolicyStatus
     reason_code: str
     policy: EffectivePolicy | None = None
+    decision: PolicyDecision | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -110,33 +112,53 @@ def build_effective_policy_result(
     capabilities = list(policy_document.capabilities or [])
     denied_capabilities = list(policy_document.denied_capabilities or [])
 
+    decision: PolicyDecision | None = None
+    approval_required = False
     if tool_name is not None:
-        if tool_name in denied_tools:
+        decision = evaluate_profile_tool_decision(
+            profile,
+            tool_name,
+            capability=capability,
+        )
+        if decision.outcome == "deny" and not _should_continue_capability_checks(
+            decision,
+            allowed_tools=allowed_tools,
+            capability=capability,
+        ):
             return EffectivePolicyResult(
                 status="denied",
-                reason_code="tool_denied",
+                reason_code=decision.reason_code,
+                decision=decision,
                 provenance={**provenance, "tool_name": tool_name},
             )
-        if not _tool_allowed(tool_name, allowed_tools, capability):
-            return EffectivePolicyResult(
-                status="denied",
-                reason_code="tool_not_allowed",
-                provenance={**provenance, "tool_name": tool_name},
-            )
+        if decision.outcome == "ask":
+            approval_required = True
 
     if capability is not None:
         if capability in denied_capabilities:
             return EffectivePolicyResult(
                 status="denied",
                 reason_code="capability_denied",
+                decision=decision,
                 provenance={**provenance, "capability": capability},
             )
         if not _capability_allowed(capability, capabilities):
             return EffectivePolicyResult(
                 status="denied",
                 reason_code="capability_not_allowed",
+                decision=decision,
                 provenance={**provenance, "capability": capability},
             )
+
+    if approval_required:
+        if decision is None:
+            raise RuntimeError("approval_required set without a policy decision")
+        return EffectivePolicyResult(
+            status="approval_required",
+            reason_code=decision.reason_code,
+            decision=decision,
+            provenance={**provenance, "tool_name": tool_name},
+        )
 
     return EffectivePolicyResult(
         status="resolved",
@@ -150,13 +172,10 @@ def build_effective_policy_result(
             resource_constraints=(policy_document.resource_constraints or {}).copy(),
             approval_policy=(profile.approval_policy or {}).copy(),
             path_scopes=[scope.copy() for scope in (profile.path_scopes or [])],
-            external_server_grants=[
-                grant.copy() for grant in (profile.external_server_grants or [])
-            ],
-            credential_grants=[
-                grant.copy() for grant in (profile.credential_grants or [])
-            ],
+            external_server_grants=[grant.copy() for grant in (profile.external_server_grants or [])],
+            credential_grants=[grant.copy() for grant in (profile.credential_grants or [])],
         ),
+        decision=decision,
         provenance=provenance,
     )
 
@@ -170,8 +189,7 @@ def _requires_workspace_binding(profile: MCPProfile) -> bool:
 
     capabilities = policy_document.capabilities or []
     if any(
-        any(token in str(capability).lower() for token in ("write", "mutate", "delete"))
-        for capability in capabilities
+        any(token in str(capability).lower() for token in ("write", "mutate", "delete")) for capability in capabilities
     ):
         return True
 
@@ -197,10 +215,7 @@ def _mapping_has_workspace_binding(mapping: dict[str, Any] | None) -> bool:
     """Return whether a mapping carries a recognized non-empty workspace binding."""
     if not mapping:
         return False
-    return any(
-        _has_workspace_binding_value(mapping.get(key))
-        for key in _WORKSPACE_BINDING_KEYS
-    )
+    return any(_has_workspace_binding_value(mapping.get(key)) for key in _WORKSPACE_BINDING_KEYS)
 
 
 def _has_workspace_binding_value(value: Any) -> bool:
@@ -214,15 +229,19 @@ def _has_workspace_binding_value(value: Any) -> bool:
     return bool(value)
 
 
-def _tool_allowed(
-    tool_name: str,
+def _should_continue_capability_checks(
+    decision: PolicyDecision,
+    *,
     allowed_tools: list[str],
     capability: str | None,
 ) -> bool:
-    """Return whether a requested tool is allowed by explicit profile policy."""
-    if allowed_tools:
-        return tool_name in allowed_tools
-    return capability is not None
+    """Return whether an unmatched capability-only tool decision needs capability checks."""
+    return (
+        decision.reason_code == "tool_not_allowed"
+        and not decision.matched_rules
+        and not allowed_tools
+        and capability is not None
+    )
 
 
 def _capability_allowed(capability: str, capabilities: list[str]) -> bool:

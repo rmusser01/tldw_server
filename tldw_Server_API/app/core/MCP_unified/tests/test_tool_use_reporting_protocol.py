@@ -133,6 +133,56 @@ class _ToolModule:
         return await func(*args, **kwargs)
 
 
+class _FilesystemPayloadModule(_ToolModule):
+    name = "filesystem"
+
+    def __init__(self) -> None:
+        super().__init__(write=True)
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [self._tool_def("fs.patch")]
+
+    def _tool_def(self, tool_name: str) -> dict[str, Any]:
+        return {
+            "name": tool_name,
+            "description": "",
+            "inputSchema": {"type": "object", "properties": {"diff": {"type": "string"}}},
+            "metadata": {
+                "category": "management",
+                "eval": {
+                    "tool_prompt_id": "mcp.fs.patch.v1",
+                    "tool_prompt_version": "2026.06.04",
+                    "task_families": ["filesystem_edit"],
+                    "expected_result_kind": "structured_filesystem_edit",
+                    "prompt_variant": "builtin",
+                },
+            },
+        }
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> dict[str, Any]:
+        del tool_name, arguments, context
+        return {
+            "path": "/Users/me/private/story.txt",
+            "content": "SECRET FILE CONTENT",
+            "read_receipt": "receipt-token-secret",
+            "diff": "--- a/private/story.txt\n+++ b/private/story.txt\n",
+            "eval": {
+                "tool_name": "fs.patch",
+                "tool_prompt_id": "mcp.fs.patch.v1",
+                "tool_prompt_version": "2026.06.04",
+                "action_family": "filesystem_edit",
+                "result_kind": "structured_filesystem_edit",
+                "path_filter_used": True,
+                "truncated": False,
+            },
+        }
+
+
 class _Registry:
     def __init__(self, module: _ToolModule) -> None:
         self.module = module
@@ -193,6 +243,36 @@ async def test_protocol_records_successful_tool_use_event() -> None:
     assert event.model_id == "gpt-4.1"
     assert event.tool_prompt_id == "mcp.test.read.v1"
     assert event.status == "success"
+
+
+@pytest.mark.asyncio
+async def test_protocol_records_filesystem_eval_metadata_without_sensitive_payload() -> None:
+    protocol, recorder = _protocol(module=_FilesystemPayloadModule())
+
+    response = await protocol._handle_tools_call(
+        {
+            "name": "fs.patch",
+            "arguments": {
+                "diff": "--- a/private/story.txt\n+++ b/private/story.txt\n",
+                "read_receipt_by_path": {"private/story.txt": "receipt-token-secret"},
+            },
+        },
+        _request_context(metadata={"profile_id": "backend-engineer"}),
+    )
+
+    assert response["content"][0]["json"]["content"] == "SECRET FILE CONTENT"
+    event = recorder.events[-1]
+    dumped = event.model_dump_json()
+    assert event.requested_tool_name == "fs.patch"
+    assert event.action_family == "filesystem_edit"
+    assert event.result_kind == "structured_filesystem_edit"
+    assert event.path_filter_used is True
+    assert event.truncated is False
+    assert event.profile_id == "backend-engineer"
+    assert "SECRET FILE CONTENT" not in dumped
+    assert "receipt-token-secret" not in dumped
+    assert "/Users/me" not in dumped
+    assert "--- a/private" not in dumped
 
 
 @pytest.mark.asyncio

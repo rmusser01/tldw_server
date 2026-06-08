@@ -66,6 +66,19 @@ class ChatProviderRegistry:
             for number in iter_custom_openai_provider_numbers(start=3)
         }
     )
+    DEFAULT_LOCAL_PROVIDERS: frozenset[str] = frozenset(
+        {
+            "llama.cpp",
+            "kobold",
+            "ooba",
+            "tabbyapi",
+            "vllm",
+            "local-llm",
+            "ollama",
+            "aphrodite",
+            "mlx",
+        }
+    )
 
     DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
         "openai": ("oai",),
@@ -189,6 +202,14 @@ class ChatProviderRegistry:
                 logger.debug(f"Adapter for provider '{name}' is currently unavailable")
             return None
         return adapter
+
+    def resolve_provider_name(self, name: str | None) -> str:
+        """Return the canonical provider name after registry alias resolution."""
+        return self._base.resolve_provider_name(name)
+
+    def is_local_provider_name(self, name: str | None) -> bool:
+        """Return whether a provider name or alias resolves to a local adapter."""
+        return self.resolve_provider_name(name) in self.DEFAULT_LOCAL_PROVIDERS
 
     def get_all_capabilities(self) -> dict[str, dict[str, Any]]:
         """Return capabilities for all registered providers, initializing as needed."""

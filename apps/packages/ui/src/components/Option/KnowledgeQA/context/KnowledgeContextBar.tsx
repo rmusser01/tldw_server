@@ -140,6 +140,7 @@ type KnowledgeContextBarProps = {
   includeNoteIds: string[]
   onIncludeNoteIdsChange: (ids: string[]) => void
   webEnabled: boolean
+  webFallbackAvailable?: boolean
   onToggleWeb: () => void
   generationProvider: string | null
   generationModel: string | null
@@ -456,6 +457,7 @@ export function KnowledgeContextBar({
   includeNoteIds,
   onIncludeNoteIdsChange,
   webEnabled,
+  webFallbackAvailable = true,
   onToggleWeb,
   generationProvider,
   generationModel,
@@ -541,6 +543,7 @@ export function KnowledgeContextBar({
   const selectedMediaSet = useMemo(() => new Set(normalizedMediaIds), [normalizedMediaIds])
   const selectedNoteSet = useMemo(() => new Set(normalizedNoteIds), [normalizedNoteIds])
   const exportedProfilesJson = useMemo(() => JSON.stringify(savedProfiles, null, 2), [savedProfiles])
+  const effectiveWebEnabled = webEnabled && webFallbackAvailable
 
   const presetDetail = preset === "custom" ? null : PRESET_DETAILS[preset]
   const presetDescription =
@@ -813,7 +816,7 @@ export function KnowledgeContextBar({
       includeMediaIds: [...normalizedMediaIds],
       includeNoteIds: [...normalizedNoteIds],
       preset,
-      enableWebFallback: webEnabled,
+      enableWebFallback: effectiveWebEnabled,
     }
     const updated = [newProfile, ...savedProfiles.filter((p) => p.name !== trimmed)].slice(
       0,
@@ -829,7 +832,7 @@ export function KnowledgeContextBar({
     normalizedMediaIds,
     normalizedNoteIds,
     preset,
-    webEnabled,
+    effectiveWebEnabled,
     savedProfiles,
   ])
 
@@ -841,12 +844,23 @@ export function KnowledgeContextBar({
       onPresetChange(profile.preset)
       // Only toggle web fallback if the profile value differs from current state.
       // Note: only a toggle callback is available (no direct setter).
-      if (profile.enableWebFallback !== webEnabled) {
+      if (
+        webFallbackAvailable &&
+        (profile.enableWebFallback ?? false) !== effectiveWebEnabled
+      ) {
         onToggleWeb()
       }
       setProfileMenuOpen(false)
     },
-    [onIncludeMediaIdsChange, onIncludeNoteIdsChange, onSourcesChange, onPresetChange, onToggleWeb, webEnabled]
+    [
+      effectiveWebEnabled,
+      onIncludeMediaIdsChange,
+      onIncludeNoteIdsChange,
+      onSourcesChange,
+      onPresetChange,
+      onToggleWeb,
+      webFallbackAvailable,
+    ]
   )
 
   const deleteProfile = useCallback(
@@ -1339,20 +1353,38 @@ export function KnowledgeContextBar({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Tooltip title="When enabled, includes web search results alongside your documents. Useful when your documents don't cover the topic.">
+        <Tooltip
+          title={
+            webFallbackAvailable
+              ? "When enabled, includes web search results alongside your documents. Useful when your documents don't cover the topic."
+              : "Web fallback is not available on this server."
+          }
+        >
           <button
             type="button"
             onClick={onToggleWeb}
+            disabled={!webFallbackAvailable}
             className={cn(
               "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
-              webEnabled
+              effectiveWebEnabled
                 ? "border-primary/40 bg-primary/10 text-primaryStrong"
-                : "border-border text-text-muted hover:bg-surface2 hover:text-text"
+                : "border-border text-text-muted hover:bg-surface2 hover:text-text",
+              !webFallbackAvailable &&
+                "cursor-not-allowed opacity-60 hover:bg-surface hover:text-text-muted"
             )}
-            aria-pressed={webEnabled}
-            aria-label={`Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`}
+            aria-pressed={effectiveWebEnabled}
+            aria-label={
+              webFallbackAvailable
+                ? `Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`
+                : "Web fallback is not available on this server."
+            }
+            title={
+              webFallbackAvailable
+                ? undefined
+                : "Web fallback is not available on this server."
+            }
           >
-            <Globe className={cn("h-3.5 w-3.5", webEnabled ? "fill-current" : "")} />
+            <Globe className={cn("h-3.5 w-3.5", effectiveWebEnabled ? "fill-current" : "")} />
             Web
           </button>
         </Tooltip>

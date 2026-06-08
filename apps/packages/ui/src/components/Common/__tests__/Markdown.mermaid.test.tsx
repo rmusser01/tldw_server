@@ -206,6 +206,32 @@ describe("Markdown Mermaid fences", () => {
     )
   })
 
+  it("does not count standalone whitespace-only lines as indented code blocks", () => {
+    render(
+      <Markdown
+        message={[
+          "    ",
+          "",
+          "```mermaid",
+          "graph TD",
+          "A --> B",
+          "```"
+        ].join("\n")}
+        enableMermaidDiagrams
+      />
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "graph TD\nA --> B",
+        blockIndex: 0
+      })
+    )
+  })
+
   it("does not render unclosed Mermaid fences as diagrams", () => {
     const { container } = render(
       <Markdown
@@ -345,6 +371,29 @@ describe("Markdown Mermaid fences", () => {
     expect(
       container.querySelector('[aria-label="Message content"]')
     ).not.toBeInTheDocument()
+  })
+
+  it("keeps Mermaid fences on the diagram path when React replays render", () => {
+    render(
+      <React.StrictMode>
+        <Markdown
+          message={
+            "Assistant diagram:\n\n```mermaid\ngraph TD\nA --> B\n```"
+          }
+          enableMermaidDiagrams
+        />
+      </React.StrictMode>
+    )
+
+    expect(screen.getByTestId("mermaid-diagram-block").textContent).toBe(
+      "graph TD\nA --> B"
+    )
+    expect(mermaidDiagramBlockMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: "graph TD\nA --> B",
+        blockIndex: 0
+      })
+    )
   })
 
   it("keeps non-Mermaid ST-compatible markdown on the HTML path when enabled", () => {
