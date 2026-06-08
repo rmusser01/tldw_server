@@ -159,13 +159,19 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     } else if (abs && typeof abs === 'object') {
       if (Array.isArray((abs as any).items)) {
         items = (abs as any).items
+      } else if (Array.isArray((abs as any).notes)) {
+        items = (abs as any).notes
+      } else if (Array.isArray((abs as any).results)) {
+        items = (abs as any).results
       }
       const pagination = (abs as any).pagination
-      if (pagination && typeof pagination.total_items === 'number') {
-        totalVal = Number(pagination.total_items)
-      } else if (Array.isArray((abs as any).items)) {
-        totalVal = (abs as any).items.length
-      }
+      const totalCandidate =
+        (abs as any).total ??
+        pagination?.total ??
+        pagination?.total_items ??
+        (abs as any).count ??
+        items.length
+      totalVal = Number(totalCandidate) || 0
     }
 
     return { items: sortNoteRows(items, sortOption), total: totalVal }

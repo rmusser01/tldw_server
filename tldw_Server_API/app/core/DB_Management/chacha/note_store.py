@@ -1100,6 +1100,85 @@ class NoteStore:
         cursor = self._db.execute_query(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
+    def count_notes_matching_keywords(
+        self,
+        search_term: str | None,
+        keyword_tokens: list[str],
+    ) -> int:
+        """Return the total active notes matching an optional FTS query and keyword-token filter."""
+        tokens = [t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()]
+        if not tokens:
+            if not search_term or not str(search_term).strip():
+                return 0
+            return self._db.count_notes_matching(str(search_term))
+
+        keyword_table = self._db._map_table_for_backend("keywords")
+        like_clause = " OR ".join(["LOWER(k.keyword) LIKE ?"] * len(tokens))
+        like_params = [f"%{t}%" for t in tokens]
+
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            if search_term and str(search_term).strip():
+                tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
+                if not tsquery:
+                    logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
+                    return 0
+                query = """
+                    SELECT COUNT(DISTINCT n.id) AS cnt
+                    FROM notes n
+                    JOIN note_keywords nk ON n.id = nk.note_id
+                    JOIN {keyword_table} k ON k.id = nk.keyword_id
+                    WHERE n.deleted = FALSE
+                      AND k.deleted = FALSE
+                      AND n.notes_fts_tsv @@ to_tsquery('english', ?)
+                      AND ({like_clause})
+                """.format_map(locals())  # nosec B608
+                params = (tsquery, *like_params)
+            else:
+                query = """
+                    SELECT COUNT(DISTINCT n.id) AS cnt
+                    FROM notes n
+                    JOIN note_keywords nk ON n.id = nk.note_id
+                    JOIN {keyword_table} k ON k.id = nk.keyword_id
+                    WHERE n.deleted = FALSE
+                      AND k.deleted = FALSE
+                      AND ({like_clause})
+                """.format_map(locals())  # nosec B608
+                params = tuple(like_params)
+            cursor = self._db.execute_query(query, params)
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row else 0
+
+        if search_term and str(search_term).strip():
+            safe_literal = str(search_term).replace('"', '""')
+            safe_search_term = f'"{safe_literal}"'
+            query = """
+                    SELECT COUNT(DISTINCT n.id) AS cnt
+                    FROM notes_fts
+                    JOIN notes AS n ON notes_fts.rowid = n.rowid
+                    JOIN note_keywords nk ON n.id = nk.note_id
+                    JOIN {keyword_table} k ON k.id = nk.keyword_id
+                    WHERE notes_fts MATCH ?
+                      AND n.deleted = 0
+                      AND k.deleted = 0
+                      AND ({like_clause})
+                    """.format_map(locals())  # nosec B608
+            params = (safe_search_term, *like_params)
+        else:
+            query = """
+                    SELECT COUNT(DISTINCT n.id) AS cnt
+                    FROM notes n
+                    JOIN note_keywords nk ON n.id = nk.note_id
+                    JOIN {keyword_table} k ON k.id = nk.keyword_id
+                    WHERE n.deleted = 0
+                      AND k.deleted = 0
+                      AND ({like_clause})
+                    """.format_map(locals())  # nosec B608
+            params = tuple(like_params)
+
+        cursor = self._db.execute_query(query, params)
+        row = cursor.fetchone()
+        return int(row["cnt"]) if row else 0
+
     # ------------------------------------------------------------------
     # Note <-> Keyword links
     # ------------------------------------------------------------------
