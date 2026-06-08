@@ -26,6 +26,8 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
 
 
 _SUMMARY_UNAVAILABLE_MESSAGE = "Workspace resource summary is unavailable."
+_BACKFILL_ERROR_LIMIT = 25
+_BACKFILL_SAFE_ERROR_MESSAGE = "Workspace membership backfill could not link this resource."
 
 
 class WorkspaceMembershipServiceError(Exception):
@@ -289,11 +291,68 @@ class WorkspaceMembershipService:
             )
         return self._summary_from_rows(rows)
 
-    def backfill_workspace_memberships(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Task 5 owns broad backfill; this slice only exposes an explicit stub."""
+    def backfill_workspace_memberships(
+        self,
+        workspace_id: str,
+        *,
+        user_id: str | None = None,
+        media_db: Any | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly link existing Workspace-scoped rows into generic memberships."""
+        self._require_workspace(workspace_id)
+        created = 0
+        existing = 0
+        skipped = 0
+        errors: list[dict[str, str]] = []
+
+        for candidate in self._workspace_backfill_candidates(workspace_id, errors):
+            before = self.chacha_db.get_workspace_resource_membership(
+                workspace_id,
+                candidate["resource_type"],
+                candidate["resource_id"],
+                include_deleted=False,
+            )
+            try:
+                self.link_membership(
+                    workspace_id,
+                    {
+                        "resource_type": candidate["resource_type"],
+                        "resource_id": candidate["resource_id"],
+                        "role": candidate["role"],
+                        "label": candidate.get("label"),
+                        "transfer_policy": "link",
+                        "provenance": {
+                            "source_surface": "workspace_backfill",
+                            "source_table": candidate["source_table"],
+                        },
+                        "metadata": {},
+                    },
+                    user_id=user_id,
+                    media_db=media_db,
+                    resolve=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - explicit backfill records bounded diagnostics and continues.
+                self._append_backfill_error(
+                    errors,
+                    resource_type=candidate["resource_type"],
+                    resource_id=candidate["resource_id"],
+                    exc=exc,
+                )
+                continue
+            if before is None:
+                created += 1
+            else:
+                existing += 1
+
+        summary = self.workspace_membership_summary(workspace_id)
+        status = "partial" if errors or skipped else "complete"
         return {
-            "status": "not_implemented",
-            "message": "Workspace membership backfill is owned by Task 5.",
+            "status": status,
+            "created": created,
+            "existing": existing,
+            "skipped": skipped,
+            "errors": errors,
+            "summary": summary,
         }
 
     def _require_workspace(self, workspace_id: str) -> Mapping[str, Any]:
@@ -329,6 +388,211 @@ class WorkspaceMembershipService:
             media_db=media_db,
             request_metadata=dict(request_metadata or {}),
         )
+
+    def _workspace_backfill_candidates(
+        self,
+        workspace_id: str,
+        errors: list[dict[str, str]],
+    ) -> list[dict[str, str | None]]:
+        candidates: list[dict[str, str | None]] = []
+        for source in self._safe_backfill_rows(
+            "workspace_source",
+            "",
+            errors,
+            self.chacha_db.list_workspace_sources,
+            workspace_id,
+        ):
+            source_id = self._backfill_row_id(source)
+            if source_id is not None:
+                candidates.append(
+                    {
+                        "resource_type": "workspace_source",
+                        "resource_id": source_id,
+                        "role": "source",
+                        "label": self._backfill_label(source),
+                        "source_table": "workspace_sources",
+                    }
+                )
+            media_id = self._positive_backfill_int(source.get("media_id"))
+            if media_id is not None:
+                candidates.append(
+                    {
+                        "resource_type": "media",
+                        "resource_id": str(media_id),
+                        "role": "source",
+                        "label": self._backfill_label(source),
+                        "source_table": "workspace_sources",
+                    }
+                )
+
+        for artifact in self._safe_backfill_rows(
+            "workspace_artifact",
+            "",
+            errors,
+            self.chacha_db.list_workspace_artifacts,
+            workspace_id,
+        ):
+            artifact_id = self._backfill_row_id(artifact)
+            if artifact_id is not None:
+                candidates.append(
+                    {
+                        "resource_type": "workspace_artifact",
+                        "resource_id": artifact_id,
+                        "role": "artifact",
+                        "label": self._backfill_label(artifact),
+                        "source_table": "workspace_artifacts",
+                    }
+                )
+
+        for note in self._safe_backfill_rows(
+            "workspace_note",
+            "",
+            errors,
+            self.chacha_db.list_workspace_notes,
+            workspace_id,
+        ):
+            note_id = self._backfill_row_id(note)
+            if note_id is not None:
+                candidates.append(
+                    {
+                        "resource_type": "workspace_note",
+                        "resource_id": note_id,
+                        "role": "reference",
+                        "label": self._backfill_label(note),
+                        "source_table": "workspace_notes",
+                    }
+                )
+
+        for conversation in self._workspace_backfill_conversations(workspace_id, errors):
+            conversation_id = self._backfill_row_id(conversation)
+            if conversation_id is not None:
+                candidates.append(
+                    {
+                        "resource_type": "chat",
+                        "resource_id": conversation_id,
+                        "role": "conversation",
+                        "label": self._backfill_label(conversation),
+                        "source_table": "conversations",
+                    }
+                )
+        return candidates
+
+    def _workspace_backfill_conversations(
+        self,
+        workspace_id: str,
+        errors: list[dict[str, str]],
+    ) -> list[Mapping[str, Any]]:
+        list_workspace_conversations = getattr(self.chacha_db, "list_workspace_conversations", None)
+        if callable(list_workspace_conversations):
+            return self._safe_backfill_rows("chat", "", errors, list_workspace_conversations, workspace_id)
+        search_conversations = getattr(self.chacha_db, "search_conversations", None)
+        if callable(search_conversations):
+            return self._safe_backfill_rows(
+                "chat",
+                "",
+                errors,
+                search_conversations,
+                None,
+                scope_type="workspace",
+                workspace_id=workspace_id,
+            )
+        self._append_backfill_error(
+            errors,
+            resource_type="chat",
+            resource_id="",
+            code="chat_listing_unavailable",
+            message="Workspace-scoped chat listing is unavailable.",
+        )
+        return []
+
+    def _safe_backfill_rows(
+        self,
+        resource_type: str,
+        resource_id: str,
+        errors: list[dict[str, str]],
+        func: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[Mapping[str, Any]]:
+        try:
+            rows = func(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - bounded diagnostics are the backfill contract.
+            self._append_backfill_error(
+                errors,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                exc=exc,
+            )
+            return []
+        if not isinstance(rows, list):
+            self._append_backfill_error(
+                errors,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                code="invalid_backfill_rows",
+                message="Workspace backfill row listing returned an invalid payload.",
+            )
+            return []
+        return [row for row in rows if isinstance(row, Mapping)]
+
+    @staticmethod
+    def _backfill_row_id(row: Mapping[str, Any]) -> str | None:
+        raw_id = row.get("id")
+        if raw_id is None:
+            return None
+        normalized = str(raw_id).strip()
+        return normalized or None
+
+    @staticmethod
+    def _backfill_label(row: Mapping[str, Any]) -> str | None:
+        for key in ("title", "name"):
+            raw = row.get(key)
+            if raw is not None and str(raw).strip():
+                return str(raw).strip()[:512]
+        return None
+
+    @staticmethod
+    def _positive_backfill_int(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    @classmethod
+    def _append_backfill_error(
+        cls,
+        errors: list[dict[str, str]],
+        *,
+        resource_type: str,
+        resource_id: str,
+        exc: Exception | None = None,
+        code: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        if len(errors) >= _BACKFILL_ERROR_LIMIT:
+            return
+        if isinstance(exc, WorkspaceMembershipServiceError):
+            code = exc.code
+            message = exc.message
+        elif exc is not None:
+            code = code or "backfill_link_failed"
+            message = message or _BACKFILL_SAFE_ERROR_MESSAGE
+        errors.append(
+            {
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "code": code or "backfill_link_failed",
+                "message": cls._safe_backfill_message(message),
+            }
+        )
+
+    @staticmethod
+    def _safe_backfill_message(message: str | None) -> str:
+        raw_message = str(message or _BACKFILL_SAFE_ERROR_MESSAGE).replace("\n", " ").strip()
+        if "/" in raw_message or "\\" in raw_message:
+            return _BACKFILL_SAFE_ERROR_MESSAGE
+        return raw_message[:240]
 
     def _get_adapter(self, resource_type: str) -> WorkspaceMembershipAdapter:
         try:

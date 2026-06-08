@@ -1319,6 +1319,18 @@ async def get_workspace_context(
                 "message": "Jobs service is unavailable; in-flight ingestion progress may be incomplete.",
             }
         )
+    membership_summary = {"total": 0, "by_resource_type": {}, "by_role": {}}
+    try:
+        membership_summary = WorkspaceMembershipService(db).workspace_membership_summary(workspace_id)
+    except Exception:
+        logger.warning("Workspace membership summary unavailable for workspace {}", workspace_id)
+        partial_errors.append(
+            {
+                "scope": "memberships",
+                "code": "membership_summary_unavailable",
+                "message": "Workspace membership summary is unavailable.",
+            }
+        )
 
     context_sources = [
         _context_source_payload(
@@ -1351,6 +1363,7 @@ async def get_workspace_context(
         allowed_actions=capability_payload.get("allowed_actions") or {},
         active_jobs=active_jobs,
         active_operations=core_context_payload.get("active_operations") or [],
+        memberships=membership_summary,
         partial_errors=partial_errors,
     )
 

@@ -28,6 +28,7 @@ modified_files:
 - tldw_Server_API/app/api/v1/router_groups/content.py
 - tldw_Server_API/app/api/v1/router_groups/minimal.py
 - tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py
+- tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py
 ---
 
 ## Description
@@ -40,9 +41,9 @@ Implement the approved first server-backed Workspace cross-resource membership s
 <!-- AC:BEGIN -->
 - [x] #1 ChaChaNotes persists `workspace_resource_memberships` with SQLite/PostgreSQL schema support, idempotent create, conflict handling, soft-delete, restore, deterministic workspace listing, and reverse resource lookup.
 - [x] #2 Workspace membership models, schemas, adapters, service, and API endpoints implement the approved first slice for `workspace_note`, `media`, `workspace_source`, `workspace_artifact`, and `chat`.
-- [ ] #3 Backfill helper is explicit and idempotent; Workspace context exposes compact membership totals without making membership a global Library/Notes/search filter.
-- [ ] #4 MCP permission preview/path admission remains driven by MCP policy/root bindings, not generic membership.
-- [ ] #5 Focused tests and Bandit verification are recorded; known skips or unrelated failures are documented.
+- [x] #3 Backfill helper is explicit and idempotent; Workspace context exposes compact membership totals without making membership a global Library/Notes/search filter.
+- [x] #4 MCP permission preview/path admission remains driven by MCP policy/root bindings, not generic membership.
+- [x] #5 Focused tests and Bandit verification are recorded; known skips or unrelated failures are documented.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -134,6 +135,18 @@ Task 4 spec-review fix:
 Task 4 reviews after follow-up:
 - Spec compliance re-review approved the API routes after the unsupported POST resource-type fix; required prefixes, filters, `resolve=false`, soft-delete/relink, reverse lookup, archived write, and missing media DB behavior remain compliant.
 - Code quality review approved the endpoint implementation and focused tests; no route registration, dependency usage, response model, or error mapping issues were found.
+
+Task 5 completed by Codex:
+- Added explicit `WorkspaceMembershipService.backfill_workspace_memberships(...)` that reads workspace sources, artifacts, notes, and workspace-scoped conversations through existing helpers, then links candidates via `link_membership(resolve=False)` with stable `workspace_backfill` provenance.
+- Backfill creates `workspace_source`, optional `media`, `workspace_artifact`, `workspace_note`, and `chat` memberships; repeated runs count active duplicates as existing and do not create duplicate rows.
+- Backfill records bounded diagnostics capped at 25 entries with only `resource_type`, `resource_id`, `code`, and safe `message`, continuing without deleting or rewriting sub-resources.
+- Added compact `memberships` totals to `WorkspaceContextResponse` and `GET /api/v1/workspaces/{workspace_id}/context`; membership summary failures return an empty summary plus `partial_errors[{scope: "memberships", code: "membership_summary_unavailable"}]`.
+- Added focused tests for backfill creation, idempotency, bounded unresolved diagnostics, compact context totals without item lists, context summary fallback, and MCP capability/trust separation.
+- TDD red run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py -q` failed with 6 expected failures because backfill returned `not_implemented` and context lacked `memberships`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py -q` passed with `6 passed, 6 warnings`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `72 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched runtime scan reported zero findings in `/tmp/bandit_workspace_membership_task5.json`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -691,6 +691,7 @@ class WorkspaceContextResponse(BaseModel):
     allowed_actions: dict[str, WorkspaceAllowedAction]
     active_jobs: list[WorkspaceSourceJobStatus] = Field(default_factory=list)
     active_operations: list[WorkspaceOperationResponse] = Field(default_factory=list)
+    memberships: WorkspaceContextMembershipSummary = Field(default_factory=WorkspaceContextMembershipSummary)
     partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
 
 
