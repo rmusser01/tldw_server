@@ -893,9 +893,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           updatedAt: queuedAt
         })
         setIsDirty(false)
-        setSaveIndicator('saved')
+        setSaveIndicator('idle')
         setSaveRecoveryNotice(null)
-        setSelectedLastSavedAt(queuedAt)
         if (showSuccessMessage) {
           message.info(
             t('option:notesSearch.offlineSavedLocally', {

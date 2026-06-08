@@ -261,14 +261,14 @@ Likely tests:
 - Browser check: edit -> save -> reload -> verify content; force/mock failure where feasible.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 3.
-- [ ] Add failing tests for dirty/saving/failed/conflict states.
-- [ ] Run the focused test command and confirm failures.
-- [ ] Normalize save-state transitions in `useNotesEditorState.tsx`.
-- [ ] Update `NotesEditorPane.tsx` controls and status copy.
-- [ ] Verify keyboard and screen-reader access to save/error status.
-- [ ] Run focused tests and browser check.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 3.
+- [x] Add failing tests for dirty/saving/failed/conflict states.
+- [x] Run the focused test command and confirm failures.
+- [x] Normalize save-state transitions in `useNotesEditorState.tsx`.
+- [x] Update `NotesEditorPane.tsx` controls and status copy.
+- [x] Verify keyboard and screen-reader access to save/error status.
+- [x] Run focused tests and browser check.
+- [x] Update Backlog notes with verification.
 
 ---
 
