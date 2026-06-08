@@ -1,7 +1,7 @@
 ---
 id: TASK-481.19
 title: Rebase notes PR 2318 on dev and address review comments
-status: In Progress
+status: Done
 labels:
 - notes
 - review
@@ -18,11 +18,11 @@ Rebase PR #2318 (`codex/notes-ux-pr1`) onto the latest origin/dev and address al
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Branch is rebased onto latest origin/dev and force-pushed safely.
-- [ ] #2 PR #2318 base is updated to dev if needed.
-- [ ] #3 All substantive inline review comments are addressed or documented with technical rationale.
-- [ ] #4 Focused frontend/backend tests and Bandit for touched backend scope are run or skips documented.
-- [ ] #5 Backlog and PR status are updated with final verification.
+- [x] #1 Branch is rebased onto latest origin/dev and force-pushed safely.
+- [x] #2 PR #2318 base is updated to dev if needed.
+- [x] #3 All substantive inline review comments are addressed or documented with technical rationale.
+- [x] #4 Focused frontend/backend tests and Bandit for touched backend scope are run or skips documented.
+- [x] #5 Backlog and PR status are updated with final verification.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -45,21 +45,22 @@ Rebase PR #2318 (`codex/notes-ux-pr1`) onto the latest origin/dev and address al
   - `../../.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/notes.py -f json -o /tmp/bandit_notes_pr2318.json` passed with zero findings.
   - `git diff --check` passed.
 - Local note: backend test startup created untracked watchlist template files under `tldw_Server_API/Config_Files/templates/watchlists/`; they are outside this PR scope and are not staged.
+- PR update: `gh pr edit 2318 --base dev` succeeded and `git push --force-with-lease origin codex/notes-ux-pr1` published commit `f42290e123`.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Rebased PR #2318 onto `origin/dev`, updated the PR base to `dev`, addressed all current substantive inline review comments, committed focused regressions, ran frontend/backend/Bandit verification, and force-pushed `codex/notes-ux-pr1` with lease.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
