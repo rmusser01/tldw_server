@@ -10,6 +10,12 @@ from uuid import uuid4
 
 from loguru import logger
 
+from mcp_unified.gateway.profile_governance import (
+    AllowPermissionChangeGovernor,
+    PermissionChangeDecision,
+    PermissionChangeGovernor,
+    PermissionChangeRequest,
+)
 from mcp_unified.interfaces.storage import (
     AuditStore,
     ProfileAssignmentStore,
@@ -20,6 +26,10 @@ from mcp_unified.profiles.defaults import (
     load_gateway_default_assignment,
 )
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.path_grants import (
+    PATH_GRANT_AUTHORING_KEYS,
+    compile_policy_path_grants,
+)
 from mcp_unified.profiles.presets import duplicate_builtin_preset, get_builtin_preset
 from mcp_unified.profiles.store import (
     ProfileAlreadyExistsError,
@@ -41,6 +51,8 @@ _POLICY_PATCH_FIELDS = frozenset(
         "module_patterns",
         "risk_classes",
         "resource_constraints",
+        "path_grants",
+        *PATH_GRANT_AUTHORING_KEYS,
     }
 )
 
@@ -98,12 +110,14 @@ class GatewayProfileManager:
         store_metadata: GatewayProfileStoreMetadata,
         audit_store: AuditStore | None = None,
         fallback_default_profile_id: str | None = None,
+        permission_governor: PermissionChangeGovernor | None = None,
     ) -> None:
         self.profile_store = profile_store
         self.assignment_store = assignment_store
         self.store_metadata = store_metadata
         self.audit_store = audit_store
         self.fallback_default_profile_id = fallback_default_profile_id
+        self.permission_governor = permission_governor or AllowPermissionChangeGovernor()
 
     async def list_profiles(self) -> dict[str, Any]:
         """List all profiles with store metadata."""
@@ -195,6 +209,12 @@ class GatewayProfileManager:
             profile_id=target_profile_id,
             name=normalized_name,
         )
+        governance_request = self._permission_request_for_profile(
+            "profile.duplicate_from_preset",
+            profile,
+            changed_fields=("policy_document", "profile"),
+        )
+        governance_decision = await self._enforce_permission_change(governance_request)
         try:
             stored = await self.profile_store.upsert_profile(profile)
         except ProfileStoreUnavailableError as exc:
@@ -212,6 +232,10 @@ class GatewayProfileManager:
                 "profile_id": stored.id,
                 "preset_id": stored.preset_id,
                 "preset_version": stored.preset_version,
+                "governance": self._governance_audit_payload(
+                    governance_request,
+                    governance_decision,
+                ),
             },
         )
         return {
@@ -261,6 +285,12 @@ class GatewayProfileManager:
 
         now = datetime.now(timezone.utc)
         profile = profile.model_copy(update={"updated_at": now}, deep=True)
+        governance_request = self._permission_request_for_profile(
+            "profile.create",
+            profile,
+            changed_fields=self._profile_create_fields(profile),
+        )
+        governance_decision = await self._enforce_permission_change(governance_request)
         try:
             stored = await self.profile_store.create_profile(profile)
         except ProfileAlreadyExistsError as exc:
@@ -288,7 +318,13 @@ class GatewayProfileManager:
             profile_id=stored.id,
             target_type="profile",
             target_id=stored.id,
-            payload={"profile_id": stored.id},
+            payload={
+                "profile_id": stored.id,
+                "governance": self._governance_audit_payload(
+                    governance_request,
+                    governance_decision,
+                ),
+            },
         )
         profile_payload = self._dump_profile(stored)
         profile_payload["created_at"] = stored.created_at.isoformat()
@@ -362,6 +398,13 @@ class GatewayProfileManager:
             )
             raise
 
+        governance_request = self._permission_request_for_profile(
+            "profile.patch",
+            updated,
+            changed_fields=changed_fields,
+            policy_fields=self._patch_policy_fields(patch),
+        )
+        governance_decision = await self._enforce_permission_change(governance_request)
         updated = updated.model_copy(
             update={"updated_at": datetime.now(timezone.utc)},
             deep=True,
@@ -380,7 +423,14 @@ class GatewayProfileManager:
             profile_id=stored.id,
             target_type="profile",
             target_id=stored.id,
-            payload={"profile_id": stored.id, "changed_fields": list(changed_fields)},
+            payload={
+                "profile_id": stored.id,
+                "changed_fields": list(changed_fields),
+                "governance": self._governance_audit_payload(
+                    governance_request,
+                    governance_decision,
+                ),
+            },
         )
         profile_payload = self._dump_profile(stored)
         profile_payload["created_at"] = stored.created_at.isoformat()
@@ -409,6 +459,50 @@ class GatewayProfileManager:
                 profile_id=normalized_profile_id,
             )
 
+        profile = await self._get_profile(normalized_profile_id)
+        if profile is None:
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile not found: {normalized_profile_id}",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+            )
+
+        try:
+            assignments = await self.assignment_store.list_assignments(
+                profile_id=normalized_profile_id,
+            )
+        except ProfileAssignmentStoreUnavailableError as exc:
+            raise self._error(
+                "Profile assignment store unavailable",
+                reason_code="assignment_store_unavailable",
+            ) from exc
+        if assignments:
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_has_assignments",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile has assignments: {normalized_profile_id}",
+                reason_code="profile_has_assignments",
+                profile_id=normalized_profile_id,
+            )
+
+        governance_request = self._permission_request_for_profile(
+            "profile.delete",
+            profile,
+            changed_fields=("profile",),
+        )
+        governance_decision = await self._enforce_permission_change(governance_request)
         guarded_delete = getattr(
             self.profile_store,
             "delete_profile_if_unassigned",
@@ -468,7 +562,13 @@ class GatewayProfileManager:
                 profile_id=normalized_profile_id,
                 target_type="profile",
                 target_id=normalized_profile_id,
-                payload={"profile_id": normalized_profile_id},
+                payload={
+                    "profile_id": normalized_profile_id,
+                    "governance": self._governance_audit_payload(
+                        governance_request,
+                        governance_decision,
+                    ),
+                },
             )
             return {
                 "ok": True,
@@ -625,6 +725,15 @@ class GatewayProfileManager:
         now = datetime.now(timezone.utc)
         if current_default is not None and current_default.updated_at >= now:
             now = current_default.updated_at + timedelta(microseconds=1)
+        governance_request = self._permission_request_for_profile(
+            "profile.default_change",
+            profile,
+            changed_fields=("default_profile",),
+            target_type="profile_assignment",
+            target_id=GATEWAY_DEFAULT_ASSIGNMENT_ID,
+            extra_risk_flags=("default_profile_change",),
+        )
+        governance_decision = await self._enforce_permission_change(governance_request)
         assignment = ProfileAssignment(
             id=GATEWAY_DEFAULT_ASSIGNMENT_ID,
             profile_id=normalized_profile_id,
@@ -654,6 +763,10 @@ class GatewayProfileManager:
                 "profile_id": normalized_profile_id,
                 "assignment_id": stored_assignment.id,
                 "previous_profile_id": existing.profile_id if existing is not None else None,
+                "governance": self._governance_audit_payload(
+                    governance_request,
+                    governance_decision,
+                ),
             },
         )
         return {
@@ -728,6 +841,229 @@ class GatewayProfileManager:
             target_id=target_id,
             payload=payload,
         )
+
+    async def _enforce_permission_change(
+        self,
+        request: PermissionChangeRequest,
+    ) -> PermissionChangeDecision:
+        """Evaluate and enforce a profile permission-change governance request."""
+        try:
+            decision = await self.permission_governor.evaluate_permission_change(request)
+            if not isinstance(decision, PermissionChangeDecision):
+                raise TypeError("permission governor returned an invalid decision")
+        except Exception as exc:  # noqa: BLE001
+            logger.opt(exception=True).warning(
+                "Gateway profile permission governor failed closed for {action}",
+                action=request.action,
+                target_type=request.target_type,
+                target_id=request.target_id,
+            )
+            decision = PermissionChangeDecision(
+                outcome="deny",
+                reason_code="permission_change_governor_error",
+            )
+            await self._audit_blocked_permission_change(
+                request,
+                decision,
+                reason_code="permission_change_denied",
+            )
+            raise self._error(
+                "Permission change denied",
+                reason_code="permission_change_denied",
+                profile_id=request.profile_id,
+            ) from exc
+
+        if decision.outcome == "allow":
+            return decision
+
+        reason_code = (
+            "permission_change_requires_approval"
+            if decision.outcome == "ask"
+            else "permission_change_denied"
+        )
+        await self._audit_blocked_permission_change(
+            request,
+            decision,
+            reason_code=reason_code,
+        )
+        message = (
+            "Permission change requires approval"
+            if decision.outcome == "ask"
+            else "Permission change denied"
+        )
+        raise self._error(
+            message,
+            reason_code=reason_code,
+            profile_id=request.profile_id,
+        )
+
+    async def _audit_blocked_permission_change(
+        self,
+        request: PermissionChangeRequest,
+        decision: PermissionChangeDecision,
+        *,
+        reason_code: str,
+    ) -> None:
+        payload = self._governance_audit_payload(request, decision)
+        payload["reason_code"] = reason_code
+        await self._append_audit_event(
+            "profile.permission_change_blocked",
+            profile_id=request.profile_id,
+            target_type=request.target_type,
+            target_id=request.target_id,
+            payload=payload,
+        )
+
+    def _permission_request_for_profile(
+        self,
+        action: str,
+        profile: MCPProfile,
+        *,
+        changed_fields: tuple[str, ...],
+        policy_fields: tuple[str, ...] | None = None,
+        target_type: str = "profile",
+        target_id: str | None = None,
+        extra_risk_flags: tuple[str, ...] = (),
+    ) -> PermissionChangeRequest:
+        policy_payload = self._policy_payload(profile.policy_document)
+        effective_policy_fields = (
+            tuple(sorted(policy_fields))
+            if policy_fields is not None
+            else self._non_empty_policy_fields(policy_payload)
+        )
+        risk_flags = self._permission_change_risk_flags(
+            action=action,
+            profile=profile,
+            policy_payload=policy_payload,
+            policy_fields=effective_policy_fields,
+            extra_risk_flags=extra_risk_flags,
+        )
+        return PermissionChangeRequest(
+            action=action,
+            profile_id=profile.id,
+            target_type=target_type,
+            target_id=target_id or profile.id,
+            changed_fields=tuple(sorted(set(changed_fields))),
+            policy_fields=effective_policy_fields,
+            risk_flags=risk_flags,
+        )
+
+    def _permission_change_risk_flags(
+        self,
+        *,
+        action: str,
+        profile: MCPProfile,
+        policy_payload: Mapping[str, Any],
+        policy_fields: tuple[str, ...],
+        extra_risk_flags: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        flags = set(extra_risk_flags)
+        if profile.enabled and action in {
+            "profile.create",
+            "profile.duplicate_from_preset",
+        }:
+            flags.add("profile_enabled")
+        if policy_fields:
+            flags.add("policy_changed")
+        if any(field in policy_fields for field in {"allowed_tools", "tool_patterns", "module_patterns"}):
+            flags.add("tool_policy_changed")
+        if any(field in policy_fields for field in {"path_grants", *PATH_GRANT_AUTHORING_KEYS}):
+            flags.add("path_grants_changed")
+            compiled = compile_policy_path_grants(policy_payload)
+            if any(
+                grant.get("effect") == "allow"
+                and any(action in {"edit", "write"} for action in grant.get("actions", ()))
+                for grant in compiled.path_grants
+            ):
+                flags.add("path_grants_write_or_edit")
+        if self._has_wildcard_tool_policy(policy_payload):
+            flags.add("wildcard_tool_policy")
+        return tuple(sorted(flags))
+
+    def _governance_audit_payload(
+        self,
+        request: PermissionChangeRequest,
+        decision: PermissionChangeDecision,
+    ) -> dict[str, Any]:
+        decision_payload: dict[str, Any] = {
+            "outcome": decision.outcome,
+            "reason_code": decision.reason_code,
+        }
+        if decision.metadata:
+            decision_payload["metadata_keys"] = sorted(str(key) for key in decision.metadata)
+        payload: dict[str, Any] = {
+            "action": request.action,
+            "target_type": request.target_type,
+            "target_id": request.target_id,
+            "changed_fields": self._audit_changed_fields(request.changed_fields),
+            "policy_fields": list(request.policy_fields),
+            "risk_flags": list(request.risk_flags),
+            "decision": decision_payload,
+        }
+        if request.profile_id is not None:
+            payload["profile_id"] = request.profile_id
+        return payload
+
+    @staticmethod
+    def _audit_changed_fields(changed_fields: tuple[str, ...]) -> list[str]:
+        return [
+            "policy" if field == "policy_document" else field
+            for field in changed_fields
+        ]
+
+    @classmethod
+    def _profile_create_fields(cls, profile: MCPProfile) -> tuple[str, ...]:
+        fields = {"name"}
+        if profile.description:
+            fields.add("description")
+        if profile.enabled:
+            fields.add("enabled")
+        if profile.metadata:
+            fields.add("metadata")
+        if cls._non_empty_policy_fields(cls._policy_payload(profile.policy_document)):
+            fields.add("policy_document")
+        return tuple(sorted(fields))
+
+    @staticmethod
+    def _patch_policy_fields(patch: Mapping[str, Any]) -> tuple[str, ...]:
+        policy_patch = patch.get("policy_document")
+        if not isinstance(policy_patch, Mapping):
+            return ()
+        return tuple(sorted(str(key) for key in policy_patch))
+
+    @staticmethod
+    def _non_empty_policy_fields(policy_payload: Mapping[str, Any]) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                str(key)
+                for key, value in policy_payload.items()
+                if value not in (None, [], {}, "")
+            )
+        )
+
+    @staticmethod
+    def _policy_payload(policy_document: object | None) -> dict[str, Any]:
+        if policy_document is None:
+            return {}
+        model_dump = getattr(policy_document, "model_dump", None)
+        if callable(model_dump):
+            payload = model_dump(mode="json")
+            return payload if isinstance(payload, dict) else {}
+        if isinstance(policy_document, Mapping):
+            return dict(policy_document)
+        return {}
+
+    @staticmethod
+    def _has_wildcard_tool_policy(policy_payload: Mapping[str, Any]) -> bool:
+        for field in ("allowed_tools", "tool_patterns", "module_patterns"):
+            values = policy_payload.get(field)
+            if isinstance(values, str):
+                values = [values]
+            if not isinstance(values, list):
+                continue
+            if any(isinstance(value, str) and "*" in value for value in values):
+                return True
+        return False
 
     async def _get_profile(self, profile_id: str) -> MCPProfile | None:
         try:
@@ -823,6 +1159,13 @@ class GatewayProfileManager:
                     "Invalid profile patch",
                     reason_code="invalid_profile_patch",
                 )
+            if any(field in policy_patch for field in {"path_grants", *PATH_GRANT_AUTHORING_KEYS}):
+                compiled_path_grants = compile_policy_path_grants(policy_patch)
+                if compiled_path_grants.has_errors:
+                    raise self._error(
+                        "Invalid profile patch",
+                        reason_code="invalid_profile_patch",
+                    )
             if not policy_patch and set(normalized) == {"policy_document"}:
                 raise self._error(
                     "Invalid profile patch",
