@@ -181,9 +181,10 @@ describe("NotesManagerPage stage 48 first-time notes UX", () => {
     expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
 
     const listRegion = screen.getByTestId("notes-list-region")
+    await within(listRegion).findByText("No notes yet", {}, { timeout: 3000 })
     const createButton = await within(listRegion).findByRole("button", {
       name: "Create note"
-    })
+    }, { timeout: 3000 })
     fireEvent.click(createButton)
 
     await waitFor(() => {
