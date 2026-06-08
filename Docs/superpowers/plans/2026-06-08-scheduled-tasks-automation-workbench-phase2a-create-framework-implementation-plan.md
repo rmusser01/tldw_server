@@ -1034,7 +1034,7 @@ Skip this commit if there are no changes.
 
 ## Review Checklist Before PR
 
-- [ ] Reminder remains the only fully createable Phase 2A template.
+- [ ] Reminder remains the only fully creatable Phase 2A template.
 - [ ] Watch and Ingest are intent-based, not GitHub/YouTube-specific.
 - [ ] Watchlists remains the deep setup workspace.
 - [ ] Handoff panels use "No scheduled task has been created yet" where applicable.
