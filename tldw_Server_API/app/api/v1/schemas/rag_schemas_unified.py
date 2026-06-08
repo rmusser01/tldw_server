@@ -1841,7 +1841,16 @@ class UnifiedRAGResponse(BaseModel):
                     "id": "doc1",
                     "content": "Machine learning is a subset of artificial intelligence...",
                     "score": 0.95,
-                    "metadata": {"source": "media_db", "title": "ML Introduction"}
+                    "metadata": {
+                        "source": "media_db",
+                        "source_id": "42",
+                        "source_type": "media_db",
+                        "chunk_id": "chunk-7",
+                        "evidence_origin": "local_library",
+                        "source_status": "searched",
+                        "unavailable_reason": None,
+                        "title": "ML Introduction",
+                    },
                 }
             ],
             "query": "What is machine learning?",
@@ -1849,7 +1858,12 @@ class UnifiedRAGResponse(BaseModel):
             "metadata": {
                 "sources_searched": ["media_db", "notes"],
                 "documents_retrieved": 10,
-                "cache_hit": False
+                "cache_hit": False,
+                "knowledge_trust": {
+                    "state": "cited_answer",
+                    "reason_codes": [],
+                    "evidence_origin": "local_library",
+                },
             },
             "timings": {
                 "query_expansion": 0.05,
@@ -1859,6 +1873,8 @@ class UnifiedRAGResponse(BaseModel):
             },
             "citations": [
                 {
+                    "index": 1,
+                    "document_id": "doc1",
                     "text": "Machine learning is a subset of artificial intelligence",
                     "source": "ML Introduction",
                     "confidence": 0.95,

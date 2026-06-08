@@ -7,7 +7,16 @@ from typing import Any
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
 
 from .result_model import RAGResult
+from .trust_contracts import EVIDENCE_TEXT_KEYS, classify_knowledge_answer_trust
 
+EVIDENCE_METADATA_KEYS = (
+    "source_id",
+    "source_type",
+    "chunk_id",
+    "evidence_origin",
+    "source_status",
+    "unavailable_reason",
+)
 
 def _result_field(result: Any, key: str, default: Any = None) -> Any:
     """Read a top-level field from attr-based or dict-shaped result objects."""
@@ -49,7 +58,14 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for doc in documents or []:
         doc_id = _extract_field(doc, "id")
-        content = _extract_field(doc, "content")
+        content = next(
+            (
+                value
+                for value in (_extract_field(doc, key) for key in EVIDENCE_TEXT_KEYS)
+                if isinstance(value, str) and value.strip()
+            ),
+            _extract_field(doc, "content"),
+        )
         metadata = _extract_field(doc, "metadata", {}) or {}
         score = _extract_field(doc, "score", 0.0)
 
@@ -58,6 +74,13 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
                 metadata = dict(metadata)
             except (TypeError, ValueError):
                 metadata = {"value": str(metadata)}
+        else:
+            metadata = dict(metadata)
+
+        for key in EVIDENCE_METADATA_KEYS:
+            value = _extract_field(doc, key)
+            if value is not None and metadata.get(key) is None:
+                metadata[key] = value
 
         normalized.append(
             {
@@ -68,6 +91,22 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
             }
         )
     return normalized
+
+
+def _web_fallback_used(metadata: dict[str, Any], documents: list[dict[str, Any]]) -> bool:
+    """Return whether metadata or normalized evidence indicates web fallback use."""
+    web_fallback_metadata = metadata.get("web_fallback")
+    if isinstance(web_fallback_metadata, dict) and any(
+        bool(web_fallback_metadata.get(key)) for key in ("triggered", "used")
+    ):
+        return True
+    if bool(metadata.get("web_fallback_used")):
+        return True
+    return any(
+        document.get("metadata", {}).get("evidence_origin") == "web_fallback"
+        or document.get("evidence_origin") == "web_fallback"
+        for document in documents
+    )
 
 
 def rag_result_from_unified_search_result(result: Any) -> RAGResult:
@@ -119,9 +158,21 @@ def rag_result_from_unified_search_result(result: Any) -> RAGResult:
 
 def rag_result_to_response(result: RAGResult) -> UnifiedRAGResponse:
     """Convert the core result contract into the declared API response."""
-    metadata = result.metadata or {}
+    metadata = dict(result.metadata or {})
+    documents = _normalize_documents(result.documents)
+    trust = classify_knowledge_answer_trust(
+        answer=result.generated_answer,
+        documents=documents,
+        citations=result.citations or result.chunk_citations,
+        web_fallback_used=_web_fallback_used(metadata, documents),
+    )
+    metadata["knowledge_trust"] = {
+        "state": trust["state"],
+        "reason_codes": trust["reason_codes"],
+        "evidence_origin": trust["evidence_origin"],
+    }
     return UnifiedRAGResponse(
-        documents=_normalize_documents(result.documents),
+        documents=documents,
         query=result.query,
         expanded_queries=result.expanded_queries,
         metadata=metadata,

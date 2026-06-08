@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { remarkCitationLinks, splitCitationSegments } from "../answerMarkdown"
+import {
+  buildKnowledgeExportTrustLines,
+  remarkCitationLinks,
+  splitCitationSegments,
+} from "../answerMarkdown"
 
 describe("answerMarkdown citation transform", () => {
   it("splits text into citation and non-citation segments", () => {
@@ -55,5 +59,31 @@ describe("answerMarkdown citation transform", () => {
       { type: "text", value: "." },
     ])
     expect(tree.children[1].value).toBe("const x = '[7]'")
+  })
+
+  it("labels unsupported draft exports with trust and evidence origin metadata", () => {
+    expect(
+      buildKnowledgeExportTrustLines({
+        trustState: "uncited_degraded_answer",
+        evidenceOrigin: "local_library",
+      })
+    ).toEqual([
+      "Trust: unsupported draft",
+      "Answer status: Uncited answer",
+      "Evidence origin: local library",
+    ])
+  })
+
+  it("labels cited exports as supported answer content", () => {
+    expect(
+      buildKnowledgeExportTrustLines({
+        trustState: "cited_answer",
+        evidenceOrigin: "mixed",
+      })
+    ).toEqual([
+      "Trust: cited answer",
+      "Answer status: Cited answer",
+      "Evidence origin: mixed sources",
+    ])
   })
 })

@@ -499,7 +499,7 @@ class FallbackGenerator(BaseGenerator):
                 title = doc.metadata.get("title", f"Source {i}")
                 content_preview = doc.content[:500] + "..." if len(doc.content) > 500 else doc.content
 
-                response_parts.append(f"\n{i}. From {title}:")
+                response_parts.append(f"\n[{i}] From {title}:")
                 response_parts.append(content_preview)
 
             response_parts.append(

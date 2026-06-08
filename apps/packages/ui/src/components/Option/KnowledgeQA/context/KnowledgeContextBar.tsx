@@ -51,6 +51,8 @@ type SearchProfile = {
   includeNoteIds?: string[]
   preset: RagPresetName
   enableWebFallback: boolean
+  generationProvider?: string | null
+  generationModel?: string | null
 }
 
 const VALID_PRESET_KEYS: ReadonlySet<RagPresetName> = new Set([
@@ -81,7 +83,13 @@ function isSearchProfile(value: unknown): value is SearchProfile {
       ))) &&
     typeof record.preset === "string" &&
     VALID_PRESET_KEYS.has(record.preset as RagPresetName) &&
-    typeof record.enableWebFallback === "boolean"
+    typeof record.enableWebFallback === "boolean" &&
+    (record.generationProvider === undefined ||
+      record.generationProvider === null ||
+      typeof record.generationProvider === "string") &&
+    (record.generationModel === undefined ||
+      record.generationModel === null ||
+      typeof record.generationModel === "string")
   )
 }
 
@@ -817,6 +825,8 @@ export function KnowledgeContextBar({
       includeNoteIds: [...normalizedNoteIds],
       preset,
       enableWebFallback: effectiveWebEnabled,
+      generationProvider,
+      generationModel,
     }
     const updated = [newProfile, ...savedProfiles.filter((p) => p.name !== trimmed)].slice(
       0,
@@ -833,6 +843,8 @@ export function KnowledgeContextBar({
     normalizedNoteIds,
     preset,
     effectiveWebEnabled,
+    generationProvider,
+    generationModel,
     savedProfiles,
   ])
 
@@ -850,10 +862,18 @@ export function KnowledgeContextBar({
       ) {
         onToggleWeb()
       }
+      if ("generationProvider" in profile) {
+        onGenerationProviderChange(profile.generationProvider ?? null)
+      }
+      if ("generationModel" in profile) {
+        onGenerationModelChange(profile.generationModel ?? null)
+      }
       setProfileMenuOpen(false)
     },
     [
       effectiveWebEnabled,
+      onGenerationModelChange,
+      onGenerationProviderChange,
       onIncludeMediaIdsChange,
       onIncludeNoteIdsChange,
       onSourcesChange,
@@ -1427,7 +1447,7 @@ export function KnowledgeContextBar({
                 Saved Profiles
               </div>
               <p className="mb-2 rounded-md border border-border/70 bg-surface2/60 px-2 py-1.5 text-[11px] leading-snug text-text-muted">
-                Saved locally in this browser. Export includes selected source IDs and web fallback state; copied exports cannot be revoked.
+                Saved locally in this browser. Export includes selected source IDs, answer model, and web fallback state; copied exports cannot be revoked.
               </p>
               {savedProfiles.length === 0 && !profileSaveMode ? (
                 <p className="px-2 py-3 text-center text-[11px] text-text-muted">
@@ -1470,7 +1490,7 @@ export function KnowledgeContextBar({
               {profileTransferMode === "export" ? (
                 <div className="mt-1.5 rounded-md border border-border/80 bg-surface2/40 p-2">
                   <p className="mb-1 text-[11px] leading-snug text-text-muted">
-                    Export includes selected source IDs and web fallback state, not source contents or credentials. Copied exports cannot be revoked.
+                    Export includes selected source IDs, answer model, and web fallback state, not source contents or credentials. Copied exports cannot be revoked.
                   </p>
                   <textarea
                     aria-label="Exported profile JSON"

@@ -29,7 +29,7 @@ test.describe("Knowledge QA extension setup diagnostics", () => {
       await expect(
         page.getByText("Waiting for a server URL before checking credentials.")
       ).toBeVisible()
-      await expect(page.getByRole("button", { name: "Finish Setup" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Finish setup" })).toBeVisible()
     } finally {
       await context.close()
     }
@@ -77,7 +77,7 @@ test.describe("Knowledge QA extension setup diagnostics", () => {
       await expect(
         page.getByText("Add the API key or login token for this tldw server.")
       ).toBeVisible()
-      await expect(page.getByRole("button", { name: "Open Settings" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Update credentials" })).toBeVisible()
     } finally {
       await context.close()
     }

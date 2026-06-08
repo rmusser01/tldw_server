@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
 import type { RagSource } from "@/services/rag/unified-rag"
-import type { KnowledgeSourceHealthState } from "../types"
+import type {
+  EvidenceOrigin,
+  KnowledgeAnswerTrustState,
+  KnowledgeSourceHealthState,
+  KnowledgeTrustReasonCode,
+  RagResult,
+} from "../types"
 
 const submitExplicitFeedbackMock = vi.fn()
 const messageOpenMock = vi.fn()
@@ -103,15 +109,19 @@ const createSettings = (): AnswerPanelTestSettings => ({
 
 const state = {
   answer: null as string | null,
+  answerTrustState: "cited_answer" as KnowledgeAnswerTrustState,
+  answerTrustReasonCodes: [] as KnowledgeTrustReasonCode[],
+  answerEvidenceOrigin: null as EvidenceOrigin | null,
   citations: [] as Array<{ index: number }>,
   isSearching: false,
   error: null as string | null,
-  results: [] as Array<{ id: string; score?: number; metadata?: { title?: string } }>,
+  results: [] as RagResult[],
   setSettingsPanelOpen: vi.fn(),
   updateSetting: vi.fn(),
   settings: createSettings(),
   preset: "balanced" as "fast" | "balanced" | "thorough" | "custom",
   rerunWithTokenLimit: vi.fn(),
+  retrySync: vi.fn(),
   searchDetails: null as
     | {
         tokensUsed?: number | null
@@ -165,6 +175,9 @@ vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
     answer: state.answer,
+    answerTrustState: state.answerTrustState,
+    answerTrustReasonCodes: state.answerTrustReasonCodes,
+    answerEvidenceOrigin: state.answerEvidenceOrigin,
     citations: state.citations,
     isSearching: state.isSearching,
     error: state.error,
@@ -178,6 +191,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
     settings: state.settings,
     preset: state.preset,
     rerunWithTokenLimit: state.rerunWithTokenLimit,
+    retrySync: state.retrySync,
     scrollToSource: state.scrollToSource,
     focusedSourceIndex: state.focusedSourceIndex,
     sourceHealth: state.sourceHealth,
@@ -189,6 +203,9 @@ describe("AnswerPanel state guardrails", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     state.answer = null
+    state.answerTrustState = "cited_answer"
+    state.answerTrustReasonCodes = []
+    state.answerEvidenceOrigin = null
     state.citations = []
     state.isSearching = false
     state.error = null
@@ -198,6 +215,7 @@ describe("AnswerPanel state guardrails", () => {
     state.settings = createSettings()
     state.preset = "balanced"
     state.rerunWithTokenLimit = vi.fn().mockResolvedValue(undefined)
+    state.retrySync = vi.fn().mockResolvedValue(true)
     state.searchDetails = null
     state.query = "What does this source say?"
     state.currentThreadId = "thread-1"
@@ -311,6 +329,7 @@ describe("AnswerPanel state guardrails", () => {
   })
 
   it("renders a compact answer trust summary outside the markdown answer body", () => {
+    state.answerTrustState = "uncited_degraded_answer"
     state.answer = "Claim one [1]. Claim two."
     state.citations = [{ index: 1 }]
     state.results = [
@@ -335,10 +354,125 @@ describe("AnswerPanel state guardrails", () => {
     expect(trustSummary).toHaveTextContent("Web fallback enabled, not used.")
     expect(trustSummary).toHaveTextContent("AI model: openai / gpt-4o-mini.")
     expect(trustSummary).toHaveTextContent("1 selected source needs attention.")
-    expect(trustSummary).toHaveTextContent("Trust: Partial.")
+    expect(trustSummary).toHaveTextContent("Trust: Uncited answer.")
     expect(screen.getByTestId("knowledge-answer-content")).not.toContainElement(
       trustSummary
     )
+  })
+
+  it("shows cited-answer trust state as an explicit status", () => {
+    state.answerTrustState = "cited_answer"
+    state.answer = "Claim one [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Answer status: Cited answer")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "Trust: Cited answer."
+    )
+  })
+
+  it("shows uncited answers as degraded rather than normal grounded answers", () => {
+    state.answerTrustState = "uncited_degraded_answer"
+    state.answer = "This answer has no inline source."
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+    state.citations = []
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Answer status: Uncited answer")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "Trust: Uncited answer."
+    )
+    expect(screen.getByText("Low answer confidence")).toBeInTheDocument()
+  })
+
+  it("shows unknown trust as a degraded answer state", () => {
+    state.answerTrustState = "unknown_trust"
+    state.answer = "Older restored answer [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Answer status: Trust unknown")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "Trust: Trust unknown."
+    )
+    expect(screen.getByText("Low answer confidence")).toBeInTheDocument()
+  })
+
+  it("shows unsynced local answers as degraded persistence state", async () => {
+    state.answerTrustState = "unsynced_local_result"
+    state.answer = "Local answer [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Answer status: Unsynced local result")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "Trust: Unsynced local result."
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry sync" }))
+
+    await waitFor(() => expect(state.retrySync).toHaveBeenCalledTimes(1))
+  })
+
+  it("shows failed searches with a failed trust status", () => {
+    state.answerTrustState = "failed_search"
+    state.error = "Search execution failed"
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Answer status: Failed search")).toBeInTheDocument()
+    expect(screen.getByText("Search failed")).toBeInTheDocument()
+  })
+
+  it("separates insufficient evidence from generation-disabled guidance", () => {
+    state.answerTrustState = "no_answer_insufficient_evidence"
+    state.results = [{ id: "r1", score: 0.1, metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Answer status: Insufficient evidence")).toBeInTheDocument()
+    expect(
+      screen.getByText("No answer could be generated from the retrieved evidence.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Enable answer generation/i)).not.toBeInTheDocument()
+  })
+
+  it("explains missing inspectable evidence from backend trust reasons", () => {
+    state.answerTrustState = "no_answer_insufficient_evidence"
+    state.answerTrustReasonCodes = ["missing_inspectable_evidence"]
+    state.answer = "Claim with a citation [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(
+      screen.getAllByText(/Cited sources do not include inspectable excerpts/i).length
+    ).toBeGreaterThan(0)
+  })
+
+  it("explains low relevance and web fallback trust reasons", () => {
+    state.answerTrustState = "uncited_degraded_answer"
+    state.answerTrustReasonCodes = ["low_relevance", "web_fallback_used"]
+    state.answer = "Claim without a citation."
+    state.results = [{ id: "r1", score: 0.1, metadata: { title: "Doc 1" } }]
+
+    render(<AnswerPanel />)
+
+    expect(
+      screen.getAllByText(/Retrieved matches are below the relevance threshold/i).length
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/Web fallback contributed evidence to this answer/i).length
+    ).toBeGreaterThan(0)
   })
 
   it("treats missing selected source-health entries as caveats", () => {
@@ -392,6 +526,7 @@ describe("AnswerPanel state guardrails", () => {
   })
 
   it("surfaces integrated recovery actions when answer confidence is weak", () => {
+    state.answerTrustState = "uncited_degraded_answer"
     state.answer = "This answer is not grounded."
     state.results = [{ id: "r1", score: 0.1, metadata: { title: "Doc 1" } }]
     state.citations = []

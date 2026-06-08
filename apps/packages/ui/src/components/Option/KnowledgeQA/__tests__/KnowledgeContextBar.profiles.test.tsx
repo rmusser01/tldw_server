@@ -80,6 +80,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
         includeMediaIds: [42],
         includeNoteIds: ["note-1"],
         webEnabled: true,
+        generationProvider: "openai",
+        generationModel: "gpt-4o-mini",
       })
 
       openProfileMenu()
@@ -98,6 +100,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
         includeNoteIds: ["note-1"],
         preset: "fast",
         enableWebFallback: true,
+        generationProvider: "openai",
+        generationModel: "gpt-4o-mini",
       })
     })
 
@@ -209,6 +213,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
             includeNoteIds: ["note-1"],
             preset: "balanced",
             enableWebFallback: true,
+            generationProvider: "anthropic",
+            generationModel: "claude-3-5-sonnet",
           },
         ])
       )
@@ -226,6 +232,10 @@ describe("KnowledgeContextBar saved search profiles", () => {
       expect(props.onSourcesChange).toHaveBeenCalledWith(["media_db", "notes"])
       expect(props.onIncludeMediaIdsChange).toHaveBeenCalledWith([42, 43])
       expect(props.onIncludeNoteIdsChange).toHaveBeenCalledWith(["note-1"])
+      expect(props.onGenerationProviderChange).toHaveBeenCalledWith("anthropic")
+      expect(props.onGenerationModelChange).toHaveBeenCalledWith(
+        "claude-3-5-sonnet"
+      )
     })
   })
 
@@ -426,7 +436,7 @@ describe("KnowledgeContextBar saved search profiles", () => {
       openProfileMenu()
       fireEvent.click(screen.getByRole("button", { name: "Export profiles" }))
 
-      expect(screen.getAllByText(/Export includes selected source IDs and web fallback state/i)).toHaveLength(2)
+      expect(screen.getAllByText(/Export includes selected source IDs, answer model, and web fallback state/i)).toHaveLength(2)
       expect(screen.getAllByText(/copied exports cannot be revoked/i)).toHaveLength(2)
       const exportedJson = (screen.getByLabelText("Exported profile JSON") as HTMLTextAreaElement).value
       expect(exportedJson).toContain('"name": "Pinned Evidence"')

@@ -51,6 +51,8 @@ Use the source scope controls to:
 
 If no source categories are selected and web fallback is off, Knowledge QA should block submission with recovery copy. If the server has no indexed library sources, add or index content first through source-owner surfaces such as Media, Notes, or Quick Ingest.
 
+Web fallback is optional. Leave it off when you only want personal-library evidence. When it is on and the server uses external web results, Knowledge QA should label that evidence origin in the answer, evidence review, history, and export surfaces.
+
 ## Presets And Settings
 
 Use presets when you want a quick tradeoff:
@@ -88,6 +90,8 @@ Expected review flow:
 
 Treat uncited or weakly cited claims as lower confidence. Narrow source scope, try a more specific question, or use a deeper preset if the evidence does not support the answer.
 
+If an answer is labeled as unsupported, degraded, unknown, or missing citations, do not treat it as a normal grounded answer. Re-run with narrower sources, inspect the evidence rail, or change settings before relying on it.
+
 ## No Results And Recovery
 
 When Knowledge QA returns no results:
@@ -113,6 +117,8 @@ Observed export behavior includes:
 - Share-link controls when the current thread supports read-only sharing.
 
 Exported content should preserve the question, answer, citations, source scope, and relevant retrieval details when available.
+
+Exports should also preserve trust and evidence labels. Markdown exports include a `Trust and Evidence` section when trust state or evidence origin is known. Unsupported drafts are labeled in export output; if the export dialog asks for confirmation, confirm only when you intentionally want to keep that lower-confidence answer with the warning attached.
 
 ## Relationship To Other Workflows
 
@@ -158,11 +164,40 @@ cd apps/tldw-frontend
 npx playwright test e2e/ux-audit/knowledge-readiness-recovery.spec.ts e2e/ux-audit/knowledge-qa-states.spec.ts e2e/ux-audit/knowledge-empty-recovery.spec.ts --project=chromium
 ```
 
+Seeded live WebUI release gate:
+
+```bash
+source ../../.venv/bin/activate
+python ../../Helper_Scripts/seed_knowledge_qa_uat.py \
+  --server-url http://127.0.0.1:8000 \
+  --api-key "$TLDW_E2E_API_KEY" \
+  --manifest /tmp/knowledge-qa-uat.json
+
+TLDW_WEB_AUTOSTART=false \
+TLDW_WEB_URL=http://127.0.0.1:3000 \
+TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
+TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" \
+TLDW_KNOWLEDGE_QA_FIXTURE_MANIFEST=/tmp/knowledge-qa-uat.json \
+bunx playwright test e2e/ux-audit/knowledge-qa-live-backend.spec.ts --project=chromium --reporter=line
+```
+
 Extension:
 
 ```bash
 cd apps/extension
 npx playwright test tests/e2e/knowledge-qa-setup-diagnostics.spec.ts tests/e2e/knowledge-qa-states.spec.ts tests/e2e/knowledge-empty-recovery.spec.ts --project=chromium-extension
 ```
+
+Seeded live extension release gate:
+
+```bash
+cd apps/extension
+TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
+TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" \
+TLDW_KNOWLEDGE_QA_FIXTURE_MANIFEST=/tmp/knowledge-qa-uat.json \
+bunx playwright test tests/e2e/knowledge-qa-live-backend.spec.ts --project=chromium-extension --reporter=line
+```
+
+The seeded live gates are strict. Missing backend readiness, missing manifest, null seeded source IDs, API failure, no generated cited answer, or extension launch failure should be recorded as a failing release gate rather than a passing test.
 
 Python backend checks are not required for documentation-only changes. If backend Knowledge QA/RAG code is touched, run the focused pytest paths and Bandit on the touched Python scope.

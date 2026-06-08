@@ -6,5 +6,5 @@ export function resolveExtensionHeadlessMode(): boolean {
     return !["0", "false", "no", "off"].includes(explicitHeadless)
   }
 
-  return !!process.env.CI
+  return true
 }
