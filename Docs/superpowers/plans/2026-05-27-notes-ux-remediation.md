@@ -337,12 +337,12 @@ Likely tests:
 - Locale snapshot or targeted assertions cover changed strings.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 5.
-- [ ] Add or update tests that currently expose "Keywords" to users.
-- [ ] Change user-facing copy to "Tags" only.
-- [ ] Confirm API/client payloads remain `keywords`.
-- [ ] Run focused UI tests.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 5.
+- [x] Add or update tests that currently expose "Keywords" to users.
+- [x] Change user-facing copy to "Tags" only.
+- [x] Confirm API/client payloads remain `keywords`.
+- [x] Run focused UI tests.
+- [x] Update Backlog notes with verification.
 
 ---
 

@@ -1254,7 +1254,7 @@
     "message": "Tags"
   },
   "notesSearch_tagsHelp": {
-    "message": "Tags help you find this note using the tag filter on the left."
+    "message": "Tags help you organize and filter notes. Add tags in the editor, then filter here."
   },
   "notesSearch_taskCheckboxAria": {
     "message": "Task checkbox"
