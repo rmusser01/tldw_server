@@ -353,6 +353,53 @@ def test_search_notes_with_keyword_tokens_returns_pagination_total(client_with_n
     assert payload["pagination"]["next_offset"] == 2
 
 
+def test_search_notes_falls_back_to_integer_total_when_count_fails(
+    client_with_notes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = client_with_notes_db
+
+    note_ids = []
+    for i in range(3):
+        note = client.post(
+            "/api/v1/notes/",
+            json={"title": f"Fallback Search {i}", "content": f"Fallback searchable content {i}"},
+        ).json()
+        note_ids.append(note["id"])
+
+    kw_resp = client.post("/api/v1/notes/keywords/", json={"keyword": "fallback-topic"})
+    assert kw_resp.status_code == 201, kw_resp.text
+    kw_id = kw_resp.json()["id"]
+    for note_id in note_ids:
+        link = client.post(f"/api/v1/notes/{note_id}/keywords/{kw_id}")
+        assert link.status_code == 200
+
+    def fail_count(*args, **kwargs):
+        raise RuntimeError("count unavailable")
+
+    monkeypatch.setattr(CharactersRAGDB, "count_notes_matching", fail_count)
+    response = client.get(
+        "/api/v1/notes/search/",
+        params={"query": "Fallback", "limit": 2, "offset": 1},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["total"] == 3
+    assert payload["pagination"]["total"] == 3
+
+    monkeypatch.setattr(CharactersRAGDB, "count_notes_matching_keywords", fail_count)
+    keyword_response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "fallback-topic"), ("limit", "2"), ("offset", "1")],
+    )
+    assert keyword_response.status_code == 200, keyword_response.text
+    keyword_payload = keyword_response.json()
+    assert keyword_payload["count"] == 2
+    assert keyword_payload["total"] == 3
+    assert keyword_payload["pagination"]["total"] == 3
+
+
 def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     client = client_with_notes_db
 

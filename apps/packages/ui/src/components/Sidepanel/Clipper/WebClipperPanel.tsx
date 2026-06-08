@@ -356,7 +356,16 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         ) {
           return
         }
-        setWorkspaceOptions(normalizeWorkspaceOptions(response))
+        const normalizedWorkspaceOptions = normalizeWorkspaceOptions(response)
+        setWorkspaceOptions(normalizedWorkspaceOptions)
+        setWorkspaceId((currentWorkspaceId) => {
+          const trimmedWorkspaceId = currentWorkspaceId.trim()
+          if (!trimmedWorkspaceId) return currentWorkspaceId
+          const stillValid = normalizedWorkspaceOptions.some(
+            (option) => option.id === trimmedWorkspaceId
+          )
+          return stillValid ? currentWorkspaceId : ""
+        })
       })
       .catch(() => {
         hasRequestedWorkspaceOptionsRef.current = false

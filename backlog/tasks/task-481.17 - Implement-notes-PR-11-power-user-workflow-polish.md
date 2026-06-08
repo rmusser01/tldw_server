@@ -18,6 +18,10 @@ Implement PR 11 from the notes UX remediation plan: improve fast, repeatable not
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 `Alt + Shift + D` duplicates the selected note or unsaved draft through the existing duplicate action.
+- [x] #2 The duplicate shortcut is ignored while focus is in text inputs or editors.
+- [x] #3 Keyboard shortcut help documents the duplicate-note shortcut.
+- [x] #4 Focused tests cover duplicate shortcut behavior, shortcut conflict guards, and help-modal discoverability.
 <!-- AC:END -->
 
 ## Implementation Plan

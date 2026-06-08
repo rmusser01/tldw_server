@@ -164,4 +164,45 @@ describe("NotesListPanel stage 18 selected-state accessibility", () => {
     fireEvent.keyDown(noteTwoButton, { key: "ArrowUp" })
     expect(noteOneButton).toHaveFocus()
   })
+
+  it("keeps literal replacement tokens in note titles inside open-note labels", () => {
+    render(
+      <NotesListPanel
+        listMode="active"
+        searchQuery=""
+        bulkSelectedIds={[]}
+        isOnline
+        isFetching={false}
+        demoEnabled={false}
+        capsLoading={false}
+        capabilities={{ hasNotes: true } as any}
+        notes={[
+          {
+            id: "n-token",
+            title: "Budget $& Review",
+            content: "alpha",
+            updated_at: new Date().toISOString(),
+            deleted: false,
+            keywords: []
+          }
+        ]}
+        total={1}
+        page={1}
+        pageSize={20}
+        selectedId="n-token"
+        onSelectNote={vi.fn()}
+        onToggleBulkSelection={vi.fn()}
+        onChangePage={vi.fn()}
+        onResetEditor={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenHealth={vi.fn()}
+        onRestoreNote={vi.fn()}
+        onExportAllMd={vi.fn()}
+        onExportAllCsv={vi.fn()}
+        onExportAllJson={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Open note Budget $& Review" })).toBeInTheDocument()
+  })
 })

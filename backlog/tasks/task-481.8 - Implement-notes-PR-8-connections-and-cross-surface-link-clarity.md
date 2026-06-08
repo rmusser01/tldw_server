@@ -18,6 +18,10 @@ Implement PR 8 from the notes UX remediation plan: improve labels and unavailabl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Manual links, wikilinks, backlinks, source chips, and graph edges use user-readable relation labels.
+- [x] #2 Missing or deleted linked notes render as unavailable instead of clickable placeholder note targets.
+- [x] #3 Source labels normalize raw IDs while preserving available human-readable graph labels.
+- [x] #4 Focused tests cover graph view, manual links, wikilinks, backlink labels, and source links.
 <!-- AC:END -->
 
 ## Implementation Plan

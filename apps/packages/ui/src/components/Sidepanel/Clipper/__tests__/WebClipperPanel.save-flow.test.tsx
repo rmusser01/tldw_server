@@ -385,6 +385,46 @@ describe("WebClipperPanel save flow", () => {
     )
   })
 
+  it("clears stale manual workspace IDs when picker options load", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "workspace-alpha",
+            name: "Alpha Workspace",
+            archived: false,
+            study_materials_policy: "general",
+            deleted: false,
+            created_at: "2026-05-27T00:00:00Z",
+            last_modified: "2026-05-27T00:00:00Z",
+            version: 1
+          }
+        ],
+        total: 1
+      })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    expect(
+      await screen.findByText("Workspace picker could not load. Enter a workspace ID manually.")
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Workspace ID"), "workspace-stale")
+
+    await user.click(screen.getByRole("radio", { name: "Note" }))
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    expect(await screen.findByRole("combobox", { name: "Workspace" })).toHaveValue("")
+
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    expect(
+      await screen.findByText("Choose a workspace before saving to Workspace or Both.")
+    ).toBeInTheDocument()
+    expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
+  })
+
   it("retries workspace picker loading after a transient failure when returning to workspace mode", async () => {
     const user = userEvent.setup()
     apiMocks.listWorkspaces

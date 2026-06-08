@@ -29,6 +29,10 @@ Implement PR 6 from the notes UX remediation plan: choose and record the Inbox b
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Web Clipper and sidepanel quick-save notes use shared capture helpers that preserve source metadata.
+- [x] #2 Captured notes receive a durable reserved captured-note keyword so they can be rediscovered from /notes.
+- [x] #3 /notes exposes a Captured quick filter that finds captured notes without requiring manual tag entry.
+- [x] #4 Focused tests verify capture helper output, Web Clipper save flow, quick-save guard behavior, and Captured filter rendering.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,10 +55,10 @@ Implemented PR6 frontend slice. Added shared capture helpers, reserved captured-
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

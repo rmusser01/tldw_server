@@ -18,6 +18,10 @@ Implement PR 3 from the notes UX remediation plan: make dirty, saving, saved, fa
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Dirty, saving, saved, failed, conflicted, and offline queued save states are visible and distinguishable.
+- [x] #2 Failed saves preserve the draft content and expose retry without allowing duplicate in-flight submissions.
+- [x] #3 Offline queued saves are stored locally without being labeled as server-saved or updating server-saved revision metadata.
+- [x] #4 Focused tests verify failed-save recovery, in-flight save state, stale version warning, offline drafting, and keyword partial-save warning behavior.
 <!-- AC:END -->
 
 ## Implementation Plan

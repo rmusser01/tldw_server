@@ -18,6 +18,10 @@ Implement PR 9 from the notes UX remediation plan: harden keyboard, screen-reade
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Notes list rows expose accessible names and button semantics inside a named list, with the active note marked current.
+- [x] #2 Keyboard focus navigation remains inside the notes list and does not depend on an external wrapper.
+- [x] #3 Shortcut discovery, modal focus restoration, selected-state accessibility, and responsive layout regressions are covered by focused tests.
+- [x] #4 Known browser-smoke gaps or unrelated full-sweep failures are recorded in the task summary.
 <!-- AC:END -->
 
 ## Implementation Plan

@@ -373,9 +373,9 @@ describe('NotesManagerPage stage 6 manual link management', () => {
     renderPage()
     await saveSeedNote()
 
-    const unavailableLink = await screen.findByTestId('notes-manual-link-unavailable-e_missing-link')
+    const unavailableLink = await screen.findByTestId('notes-manual-link-e_missing-link')
     expect(unavailableLink).toHaveTextContent('Unavailable note')
-    expect(unavailableLink).toHaveTextContent('note-missing')
     expect(screen.queryByRole('button', { name: 'Note note-missing' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('notes-manual-link-target-select')).toHaveClass('ant-select-disabled')
   })
 })

@@ -533,7 +533,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       aria-label={t('option:notesSearch.openNoteAria', {
                         defaultValue: 'Open note {{title}}',
                         title: noteTitle
-                      }).replace('{{title}}', noteTitle)}
+                      }).replace('{{title}}', () => noteTitle)}
                       onClick={() => {
                         onSelectNote(item.id)
                       }}

@@ -1293,11 +1293,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 onExportAllJson={() => {
                   void exportAllJSON()
                 }}
-                onClearFilters={handleClearFilters}
-                onRetry={retryList}
                 onImportNotes={openImportPicker}
                 onSyncFolder={onSyncFolder}
-                hasActiveFilters={hasActiveFilters}
                 importInProgress={importSubmitting}
                 exportProgress={exportProgress}
               />

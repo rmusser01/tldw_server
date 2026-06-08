@@ -18,6 +18,10 @@ Implement PR 2 from the notes UX remediation plan: expose list query error/stale
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 List query failures expose an error state, retry action, and diagnostic text instead of looking like an empty list.
+- [x] #2 Cached stale results are visibly marked stale and stale totals are not presented as authoritative counts.
+- [x] #3 Empty first-run, active-filter no-results, failed-list, and stale-result states use distinct user-facing copy and actions.
+- [x] #4 Focused regression tests cover list error, stale count handling, create/save, search/filtering, delete, and restore behavior.
 <!-- AC:END -->
 
 ## Implementation Plan

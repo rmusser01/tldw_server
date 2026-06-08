@@ -26,6 +26,11 @@ Implement PR 7 from the notes UX remediation plan: verify destination APIs, repl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Frontend workspace API support lists active workspaces for capture destination selection.
+- [x] #2 Web Clipper renders a workspace picker when workspace options are available and keeps a raw ID fallback when options cannot load.
+- [x] #3 Workspace destination validation prevents saving to Workspace or Both without a selected workspace.
+- [x] #4 Folder picker follow-up is explicitly deferred with rationale when no public notes-folder list/create endpoint is available.
+- [x] #5 Focused tests verify workspace API mapping, Web Clipper destination save behavior, and sidepanel route behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,10 +53,10 @@ Completed PR7A destination picker slice. Added frontend workspace list support t
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

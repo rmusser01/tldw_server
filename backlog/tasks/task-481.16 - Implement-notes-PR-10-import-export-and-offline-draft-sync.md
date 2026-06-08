@@ -19,6 +19,10 @@ Implement PR 10 from the notes UX remediation plan: make import, export, and off
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Import files with known client-side parse errors are blocked before submit and keep the import modal open for correction.
+- [x] #2 Partial import results surface a warning without conflating parse-preview failures with valid backend submissions.
+- [x] #3 Export progress, single-note export/copy, export preflight, print export, and offline drafting sync workflows have focused regression coverage.
+- [x] #4 Browser/backend verification gaps are recorded when no live stack is started for this frontend-focused slice.
 <!-- AC:END -->
 
 ## Implementation Plan

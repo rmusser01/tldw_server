@@ -20,6 +20,10 @@ Create an implementation plan for the /notes WebUI and directly connected browse
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Notes UX remediation plan exists and breaks the work into PR-sized, reviewable slices.
+- [x] #2 Each slice records concrete scope, acceptance criteria, and focused verification expectations.
+- [x] #3 Plan maps observed /notes and browser-extension findings to implementation slices without product-code changes.
+- [x] #4 Child Backlog tasks are created for the remediation slices and linked to the plan.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,10 +46,10 @@ Updated and locally reviewed the /notes UX remediation plan, then created Backlo
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

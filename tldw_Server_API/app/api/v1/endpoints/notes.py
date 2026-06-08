@@ -1726,13 +1726,13 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                     keyword_tokens=token_list,
                 )
             except _NOTES_NONCRITICAL_EXCEPTIONS:
-                total = None
+                total = offset + len(notes_data)
         else:
             notes_data = db.search_notes(search_term=query_term, limit=limit, offset=offset)
             try:
                 total = db.count_notes_matching(query_term)
             except _NOTES_NONCRITICAL_EXCEPTIONS:
-                total = None
+                total = offset + len(notes_data)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline (optional)
         if include_keywords:

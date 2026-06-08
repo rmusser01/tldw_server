@@ -606,11 +606,11 @@ const NotesManagerPage: React.FC = () => {
       }
     }
     for (const item of noteRelations.related) {
-      if (item.available === false) continue
+      if (item.unavailableReason != null) continue
       append(item.id, item.title)
     }
     for (const item of noteRelations.backlinks) {
-      if (item.available === false) continue
+      if (item.unavailableReason != null) continue
       append(item.id, item.title)
     }
     return options.sort((a, b) => a.label.localeCompare(b.label))
@@ -2278,9 +2278,6 @@ const NotesManagerPage: React.FC = () => {
           await ed.handleSelectNote(id)
         }}
         handleClearFilters={list.handleClearFilters}
-        retryList={() => {
-          void list.refetch()
-        }}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
         handleToggleBulkSelection={list.handleToggleBulkSelection}
