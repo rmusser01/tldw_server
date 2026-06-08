@@ -62,6 +62,16 @@ Task 2 completed by Worker 2:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `21 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
 - Bandit touched-scope scan reported zero findings for `membership_models.py` and `workspace_schemas.py`.
+Task 2 follow-up review fixes:
+- Rejected non-finite floats in membership provenance/metadata by making schema JSON sizing use strict JSON serialization (`allow_nan=False`).
+- Added a 2048-character encoded cursor cap before base64 decode and exact integer cursor-version validation for both cursor shapes.
+- Added regression coverage for NaN/Infinity metadata/provenance, oversized cursors, and boolean/float cursor versions.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `33 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched-scope scan reported zero findings for `membership_models.py` and `workspace_schemas.py`.
+Task 2 follow-up self-review update:
+- Added an oversized-cursor regression that monkeypatches base64 decode, proving the length guard runs before decode.
+- Final focused verification after that addition: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `34 passed, 6 warnings`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

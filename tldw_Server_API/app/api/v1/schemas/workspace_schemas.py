@@ -71,7 +71,15 @@ WorkspaceMembershipTransferPolicy = Literal["link", "copy", "promote", "import"]
 
 
 def _json_size_bytes(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    )
 
 
 def _validate_sha256(value: str) -> str:

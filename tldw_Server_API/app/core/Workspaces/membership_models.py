@@ -29,6 +29,7 @@ WORKSPACE_MEMBERSHIP_ROLES = frozenset(
     {"member", "source", "artifact", "conversation", "runtime", "reference"}
 )
 WORKSPACE_MEMBERSHIP_TRANSFER_POLICIES = frozenset({"link", "copy", "promote", "import"})
+WORKSPACE_MEMBERSHIP_CURSOR_MAX_BYTES = 2048
 
 _CURSOR_VERSION = 1
 _MEMBERSHIP_CURSOR_KEYS = frozenset({"v", "updated_at", "resource_type", "resource_id"})
@@ -77,7 +78,7 @@ def encode_membership_cursor(cursor: WorkspaceMembershipCursor) -> str:
 
 def decode_membership_cursor(value: str) -> WorkspaceMembershipCursor:
     payload = _decode_cursor_payload(value)
-    if set(payload) != _MEMBERSHIP_CURSOR_KEYS or payload.get("v") != _CURSOR_VERSION:
+    if set(payload) != _MEMBERSHIP_CURSOR_KEYS or not _cursor_version_is_valid(payload.get("v")):
         raise ValueError("Workspace membership cursor is invalid.")
 
     updated_at = _require_non_empty_string(payload.get("updated_at"), "updated_at")
@@ -106,7 +107,7 @@ def encode_resource_membership_cursor(cursor: WorkspaceResourceMembershipCursor)
 
 def decode_resource_membership_cursor(value: str) -> WorkspaceResourceMembershipCursor:
     payload = _decode_cursor_payload(value)
-    if set(payload) != _RESOURCE_MEMBERSHIP_CURSOR_KEYS or payload.get("v") != _CURSOR_VERSION:
+    if set(payload) != _RESOURCE_MEMBERSHIP_CURSOR_KEYS or not _cursor_version_is_valid(payload.get("v")):
         raise ValueError("Workspace resource membership cursor is invalid.")
 
     return WorkspaceResourceMembershipCursor(
@@ -125,6 +126,8 @@ def _encode_cursor_payload(payload: Mapping[str, Any]) -> str:
 
 def _decode_cursor_payload(value: str) -> Mapping[str, Any]:
     raw = _require_non_empty_string(value, "cursor")
+    if len(raw.encode("utf-8")) > WORKSPACE_MEMBERSHIP_CURSOR_MAX_BYTES:
+        raise ValueError("Workspace membership cursor is invalid.")
     padded = raw + ("=" * (-len(raw) % 4))
     try:
         decoded = base64.b64decode(padded, altchars=b"-_", validate=True)
@@ -140,3 +143,7 @@ def _require_non_empty_string(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"Workspace membership cursor requires string {field_name}.")
     return value
+
+
+def _cursor_version_is_valid(value: Any) -> bool:
+    return type(value) is int and value == _CURSOR_VERSION

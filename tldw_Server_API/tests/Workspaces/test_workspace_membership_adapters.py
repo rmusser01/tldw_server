@@ -14,7 +14,9 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceMembershipResponse,
     WorkspaceMembershipSummaryResponse,
 )
+from tldw_Server_API.app.core.Workspaces import membership_models
 from tldw_Server_API.app.core.Workspaces.membership_models import (
+    WORKSPACE_MEMBERSHIP_CURSOR_MAX_BYTES,
     WorkspaceMembershipCursor,
     WorkspaceResourceMembershipCursor,
     decode_membership_cursor,
@@ -74,6 +76,35 @@ def test_workspace_membership_cursor_rejects_invalid_values(payload: str) -> Non
         decode_membership_cursor(payload)
 
 
+@pytest.mark.parametrize("version", [True, 1.0])
+def test_workspace_membership_cursor_rejects_non_integer_versions(version: object) -> None:
+    payload = _encoded_json(
+        {
+            "v": version,
+            "updated_at": "2026-06-07T12:30:00Z",
+            "resource_type": "media",
+            "resource_id": "42",
+        }
+    )
+
+    with pytest.raises(ValueError):
+        decode_membership_cursor(payload)
+
+
+def test_workspace_membership_cursor_rejects_oversized_values() -> None:
+    payload = _encoded_json(
+        {
+            "v": 1,
+            "updated_at": "2026-06-07T12:30:00Z" + ("x" * 5000),
+            "resource_type": "media",
+            "resource_id": "42",
+        }
+    )
+
+    with pytest.raises(ValueError):
+        decode_membership_cursor(payload)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -84,6 +115,46 @@ def test_workspace_membership_cursor_rejects_invalid_values(payload: str) -> Non
     ],
 )
 def test_workspace_resource_membership_cursor_rejects_invalid_values(payload: str) -> None:
+    with pytest.raises(ValueError):
+        decode_resource_membership_cursor(payload)
+
+
+@pytest.mark.parametrize("version", [True, 1.0])
+def test_workspace_resource_membership_cursor_rejects_non_integer_versions(version: object) -> None:
+    payload = _encoded_json(
+        {
+            "v": version,
+            "updated_at": "2026-06-07T12:30:00Z",
+            "workspace_id": "workspace-1",
+        }
+    )
+
+    with pytest.raises(ValueError):
+        decode_resource_membership_cursor(payload)
+
+
+def test_workspace_resource_membership_cursor_rejects_oversized_values() -> None:
+    payload = _encoded_json(
+        {
+            "v": 1,
+            "updated_at": "2026-06-07T12:30:00Z" + ("x" * 5000),
+            "workspace_id": "workspace-1",
+        }
+    )
+
+    with pytest.raises(ValueError):
+        decode_resource_membership_cursor(payload)
+
+
+def test_workspace_membership_cursors_reject_oversized_values_before_decode(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_decode(*_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError("base64 decode should not run for oversized cursors")
+
+    monkeypatch.setattr(membership_models.base64, "b64decode", fail_decode)
+    payload = "A" * (WORKSPACE_MEMBERSHIP_CURSOR_MAX_BYTES + 1)
+
+    with pytest.raises(ValueError):
+        decode_membership_cursor(payload)
     with pytest.raises(ValueError):
         decode_resource_membership_cursor(payload)
 
@@ -150,6 +221,21 @@ def test_workspace_membership_create_request_rejects_non_json_serializable_value
         "role": "source",
         "transfer_policy": "link",
         field_name: {"bad": object()},
+    }
+
+    with pytest.raises(ValidationError, match=f"{field_name} must be JSON serializable"):
+        WorkspaceMembershipCreateRequest(**payload)
+
+
+@pytest.mark.parametrize("field_name", ["provenance", "metadata"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_workspace_membership_create_request_rejects_non_finite_json_values(field_name: str, value: float) -> None:
+    payload = {
+        "resource_type": "media",
+        "resource_id": "42",
+        "role": "source",
+        "transfer_policy": "link",
+        field_name: {"value": value},
     }
 
     with pytest.raises(ValidationError, match=f"{field_name} must be JSON serializable"):
