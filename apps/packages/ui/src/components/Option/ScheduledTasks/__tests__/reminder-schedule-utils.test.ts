@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import {
   buildDailyCron,
@@ -14,6 +14,25 @@ import {
 describe("reminder schedule utilities", () => {
   it("returns a browser IANA timezone or UTC fallback", () => {
     expect(getDefaultReminderTimezone()).toMatch(/^(UTC|[A-Za-z_]+\/[A-Za-z0-9_+\-]+(?:\/[A-Za-z0-9_+\-]+)?)$/)
+  })
+
+  it("logs timezone detection failures before falling back to UTC", () => {
+    const timezoneError = new Error("timezone unavailable")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => undefined)
+    const dateTimeFormatSpy = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(() => {
+      throw timezoneError
+    })
+
+    try {
+      expect(getDefaultReminderTimezone()).toBe("UTC")
+      expect(debugSpy).toHaveBeenCalledWith(
+        "[ScheduledTasks] Failed to resolve browser timezone; using UTC fallback.",
+        timezoneError
+      )
+    } finally {
+      dateTimeFormatSpy.mockRestore()
+      debugSpy.mockRestore()
+    }
   })
 
   it("converts a one-time datetime-local string to an ISO string", () => {
@@ -37,10 +56,10 @@ describe("reminder schedule utilities", () => {
     })
   })
 
-  it("allows APScheduler nth-weekday cron tokens", () => {
+  it("rejects unsupported nth-weekday cron tokens", () => {
     expect(validateCronExpression("0 9 * * mon#2")).toEqual({
-      valid: true,
-      error: null
+      valid: false,
+      error: "Cron day of week nth-weekday syntax is not supported by the scheduler."
     })
   })
 
@@ -113,14 +132,14 @@ describe("reminder schedule utilities", () => {
     })
   })
 
-  it("allows APScheduler-valid nth weekday bounds", () => {
+  it("rejects nth-weekday cron bounds that APScheduler crontab ignores", () => {
     expect(validateCronExpression("0 9 * * mon#0")).toEqual({
-      valid: true,
-      error: null
+      valid: false,
+      error: "Cron day of week nth-weekday syntax is not supported by the scheduler."
     })
     expect(validateCronExpression("0 9 * * mon#6")).toEqual({
-      valid: true,
-      error: null
+      valid: false,
+      error: "Cron day of week nth-weekday syntax is not supported by the scheduler."
     })
   })
 

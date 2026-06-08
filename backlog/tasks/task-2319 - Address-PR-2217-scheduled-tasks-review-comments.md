@@ -4,7 +4,7 @@ title: Address PR 2217 scheduled-tasks review comments
 status: Done
 assignee: []
 created_date: '2026-06-08 06:44'
-updated_date: 2026-06-07 23:57
+updated_date: 2026-06-08 00:04
 labels:
   - scheduled-tasks
   - code-review
@@ -19,7 +19,9 @@ modified_files:
   - apps/packages/ui/src/components/Option/ScheduledTasks/WatchlistJobReadOnlyPanel.tsx
   - apps/packages/ui/src/components/Option/ScheduledTasks/WatchlistTaskActionLinks.tsx
   - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
+  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/reminder-schedule-utils.test.ts
   - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-status.test.ts
+  - apps/packages/ui/src/components/Option/ScheduledTasks/reminder-schedule-utils.ts
   - apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-status.ts
   - backlog/tasks/task-494 - Create-scheduled-tasks-Automation-Workbench-UX-PRD.md
   - backlog/tasks/task-2319 - Address-PR-2217-scheduled-tasks-review-comments.md
@@ -42,13 +44,15 @@ priority: high
 - Replaced native task filters with AntD `Select` controls and assigned stable IDs to avoid colliding with Drawer title IDs in the accessibility tree.
 - Added an abortable `/openapi.json` scheduled-task support probe with an 8-second timeout.
 - Added missing standard Backlog frontmatter fields to TASK-494.
+- Logged browser timezone detection failures before falling back to UTC.
+- Rejected `#` nth-weekday cron syntax because APScheduler `CronTrigger.from_crontab` accepts `mon#2` but normalizes it to plain `mon`, so allowing it would misrepresent the saved schedule.
 - Verified and kept AntD `Alert.title` and `Space.orientation` because the installed AntD 6.2.0 runtime warns that `message` and `direction` are deprecated.
 - Verified and kept `?` rejected in cron expressions because APScheduler rejects `CronTrigger.from_crontab("0 9 ? * mon")`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR 2217 scheduled-task review feedback after rebasing on latest dev. Frontend verification passed for the expanded scheduled-task suite; backend scheduled-task control-plane tests passed. TypeScript package check completed with unrelated baseline errors in `OpenUIRenderer.tsx` only. Bandit is not applicable because no Python source files were changed.
+Addressed PR 2217 scheduled-task review feedback after rebasing on latest dev. Frontend verification passed for the expanded scheduled-task suite: 65 tests. Backend scheduled-task control-plane tests passed: 4 tests. TypeScript package check completed with unrelated baseline errors in `OpenUIRenderer.tsx` only. Bandit is not applicable because no Python source files were changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

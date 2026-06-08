@@ -854,11 +854,11 @@ describe("ScheduledTasksPage", () => {
         {
           id: "reminder_task:custom",
           primitive: "reminder_task",
-          title: "Second Monday report",
+          title: "Monday report",
           description: "Review generated digest",
           status: "scheduled",
           enabled: true,
-          schedule_summary: "Second Monday at 09:00",
+          schedule_summary: "Every Monday at 09:00",
           timezone: "America/Los_Angeles",
           next_run_at: "2026-03-09T16:00:00+00:00",
           last_run_at: null,
@@ -867,7 +867,7 @@ describe("ScheduledTasksPage", () => {
           source_ref: {
             task_id: "custom",
             schedule_kind: "recurring",
-            cron: "0 9 * * mon#2",
+            cron: "*/15 9 * * mon",
             timezone: "America/Los_Angeles"
           }
         }
@@ -879,7 +879,7 @@ describe("ScheduledTasksPage", () => {
     mocks.updateScheduledTaskReminder.mockResolvedValue({
       id: "reminder_task:custom",
       primitive: "reminder_task",
-      title: "Updated second Monday report",
+      title: "Updated Monday report",
       description: "Review generated digest",
       status: "scheduled",
       enabled: true,
@@ -890,11 +890,11 @@ describe("ScheduledTasksPage", () => {
 
     renderWithQueryClient(<ScheduledTasksPage />)
 
-    expect(await screen.findByText("Second Monday report")).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole("button", { name: "Edit Second Monday report" }))
+    expect(await screen.findByText("Monday report")).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Monday report" }))
     expect(await screen.findByText("Edit reminder")).toBeInTheDocument()
     fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
-      target: { value: "Updated second Monday report" }
+      target: { value: "Updated Monday report" }
     })
     fireEvent.click(await screen.findByRole("button", { name: "Save reminder" }))
 
@@ -902,9 +902,9 @@ describe("ScheduledTasksPage", () => {
       expect(mocks.updateScheduledTaskReminder).toHaveBeenCalledWith(
         "reminder_task:custom",
         expect.objectContaining({
-          title: "Updated second Monday report",
+          title: "Updated Monday report",
           schedule_kind: "recurring",
-          cron: "0 9 * * mon#2",
+          cron: "*/15 9 * * mon",
           timezone: "America/Los_Angeles"
         })
       )

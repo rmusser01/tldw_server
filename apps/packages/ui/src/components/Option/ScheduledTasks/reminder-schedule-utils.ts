@@ -73,7 +73,11 @@ const clampInteger = (value: unknown, min: number, max: number): number => {
 export const getDefaultReminderTimezone = (): string => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  } catch {
+  } catch (error) {
+    console.debug(
+      "[ScheduledTasks] Failed to resolve browser timezone; using UTC fallback.",
+      error
+    )
     return "UTC"
   }
 }
@@ -159,25 +163,10 @@ const validateCronFieldBase = (
   }
 
   if (options.allowNthWeekday && base.includes("#")) {
-    const [weekday, nth, extra] = base.split("#")
-    if (extra !== undefined || !weekday || !nth) {
-      return {
-        valid: false,
-        error: "Cron day of week nth-weekday syntax must look like mon#2."
-      }
+    return {
+      valid: false,
+      error: "Cron day of week nth-weekday syntax is not supported by the scheduler."
     }
-
-    const weekdayResult = parseCronFieldValue(weekday, options)
-    if (!weekdayResult.valid) return weekdayResult
-
-    const nthNumber = Number(nth)
-    if (!Number.isInteger(nthNumber) || nthNumber < 0 || nthNumber > 6) {
-      return {
-        valid: false,
-        error: "Cron day of week nth-weekday value must be between 0 and 6."
-      }
-    }
-    return { valid: true, error: null }
   }
 
   if (base.includes("-")) {
