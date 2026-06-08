@@ -1,4 +1,6 @@
 import { getDesignSystemState } from "@/design-system"
+import type { WorkspaceAssistantDefaultDegradedReason } from "@/types/workspace"
+import type { ChatWorkspaceAssistantSource } from "./types"
 
 export type InspectorRailStagedSource = {
   sourceId: string
@@ -11,6 +13,8 @@ export type InspectorRailProps = {
   stagedSources: InspectorRailStagedSource[]
   selectedModelLabel: string
   selectedPersonaLabel: string | null
+  assistantSource: ChatWorkspaceAssistantSource
+  workspaceAssistantDegradedReason?: WorkspaceAssistantDefaultDegradedReason | null
   backendAvailable: boolean
   streaming: boolean
 }
@@ -29,16 +33,42 @@ const getRuntimeLabel = (backendAvailable: boolean, streaming: boolean) => {
   return streaming ? "Streaming" : READY_STATE_LABEL
 }
 
+const degradedReasonLabels: Record<
+  WorkspaceAssistantDefaultDegradedReason,
+  string
+> = {
+  invalid_default: "Invalid default",
+  permission_denied: "Permission denied",
+  persona_deleted: "Persona deleted",
+  persona_feature_disabled: "Persona feature disabled",
+  persona_unavailable: "Persona unavailable",
+  unsupported_assistant_kind: "Unsupported assistant kind"
+}
+
+const getAssistantSourceLabel = (
+  assistantSource: ChatWorkspaceAssistantSource
+) => {
+  if (assistantSource === "workspace") return "Inherited from workspace"
+  if (assistantSource === "explicit") return "Explicit persona"
+  return null
+}
+
 export const InspectorRail = ({
   scopeLabel,
   stagedSourceCount,
   stagedSources,
   selectedModelLabel,
   selectedPersonaLabel,
+  assistantSource,
+  workspaceAssistantDegradedReason,
   backendAvailable,
   streaming
 }: InspectorRailProps) => {
   const runtimeLabel = getRuntimeLabel(backendAvailable, streaming)
+  const assistantSourceLabel = getAssistantSourceLabel(assistantSource)
+  const degradedReasonLabel = workspaceAssistantDegradedReason
+    ? degradedReasonLabels[workspaceAssistantDegradedReason]
+    : null
 
   return (
     <aside
@@ -74,7 +104,23 @@ export const InspectorRail = ({
       <section className={panelClass}>
         <h2 className={headingClass}>Model / Persona</h2>
         <p className={valueClass}>{selectedModelLabel}</p>
-        <p className={mutedClass}>{selectedPersonaLabel ?? "No persona selected"}</p>
+        {assistantSource === "unavailable" ? (
+          <>
+            <p className={mutedClass}>Workspace default unavailable</p>
+            {degradedReasonLabel ? (
+              <p className={mutedClass}>{degradedReasonLabel}</p>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <p className={mutedClass}>
+              {selectedPersonaLabel ?? "No persona selected"}
+            </p>
+            {assistantSourceLabel ? (
+              <p className={mutedClass}>{assistantSourceLabel}</p>
+            ) : null}
+          </>
+        )}
       </section>
 
       <section className={panelClass}>

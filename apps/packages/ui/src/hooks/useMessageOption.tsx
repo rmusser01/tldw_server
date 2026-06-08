@@ -36,8 +36,23 @@ import { useChatLoopState } from "@/services/chat-loop/hooks";
 import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import type { ChatScope } from "@/types/chat-scope";
 
+type PersonaMemoryMode = "read_only" | "read_write";
+
+type UseMessageOptionOptions = {
+  forceCompareEnabled?: boolean;
+  scope?: ChatScope;
+  inheritedAssistant?: AssistantSelection | null;
+  inheritedPersonaMemoryMode?: PersonaMemoryMode | null;
+};
+
+const normalizePersonaMemoryMode = (
+  value: unknown,
+): PersonaMemoryMode | null => {
+  return value === "read_only" || value === "read_write" ? value : null;
+};
+
 export const useMessageOption = (
-  opts: { forceCompareEnabled?: boolean; scope?: ChatScope } = {},
+  opts: UseMessageOptionOptions = {},
 ) => {
   // Controllers come from Context (for aborting streaming requests)
   const { controller: abortController, setController: setAbortController } =
@@ -256,9 +271,52 @@ export const useMessageOption = (
       serverChatCharacterId,
     ],
   );
+  const inheritedPersonaMemoryMode = React.useMemo(
+    () =>
+      normalizePersonaMemoryMode(opts.inheritedPersonaMemoryMode) ??
+      normalizePersonaMemoryMode(
+        opts.inheritedAssistant?.metadata?.personaMemoryMode,
+      ),
+    [
+      opts.inheritedAssistant?.metadata?.personaMemoryMode,
+      opts.inheritedPersonaMemoryMode,
+    ],
+  );
+  const inheritedAssistant = React.useMemo<AssistantSelection | null>(() => {
+    if (
+      effectiveAssistantState.mode !== "plain" ||
+      selectedAssistant ||
+      serverChatId ||
+      serverChatAssistantKind ||
+      serverChatAssistantId ||
+      serverChatCharacterId ||
+      messages.length > 0 ||
+      history.length > 0
+    ) {
+      return null;
+    }
+    if (
+      opts.inheritedAssistant?.kind !== "persona" ||
+      opts.inheritedAssistant.id == null
+    ) {
+      return null;
+    }
+
+    return opts.inheritedAssistant;
+  }, [
+    effectiveAssistantState.mode,
+    history.length,
+    messages.length,
+    opts.inheritedAssistant,
+    selectedAssistant,
+    serverChatAssistantId,
+    serverChatAssistantKind,
+    serverChatCharacterId,
+    serverChatId,
+  ]);
   const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
     if (effectiveAssistantState.mode === "plain") {
-      return selectedAssistant;
+      return inheritedAssistant ?? selectedAssistant;
     }
 
     const matchesDraftSelection =
@@ -280,7 +338,12 @@ export const useMessageOption = (
         draftMetadata?.system_prompt ??
         null,
     };
-  }, [effectiveAssistantState, selectedAssistant]);
+  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant]);
+  const selectedAssistantSource = inheritedAssistant
+    ? "workspace"
+    : effectiveSelectedAssistant
+      ? "explicit"
+      : "none";
 
   React.useEffect(() => {
     if (!serverChatId || temporaryChat) return;
@@ -415,6 +478,8 @@ export const useMessageOption = (
     invalidateServerChatHistory,
     selectedCharacter,
     selectedAssistant: effectiveSelectedAssistant,
+    inheritedAssistant,
+    inheritedPersonaMemoryMode,
     scope: opts.scope,
   });
   const onSubmit = React.useCallback(
@@ -566,6 +631,7 @@ export const useMessageOption = (
     selectedCharacter,
     setSelectedCharacter,
     selectedAssistant: effectiveSelectedAssistant,
+    selectedAssistantSource,
     setSelectedAssistant,
     replyTarget,
     clearReplyTarget,

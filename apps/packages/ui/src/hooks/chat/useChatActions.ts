@@ -168,9 +168,14 @@ type ChatModeOverrides = {
   selectedKnowledge?: Knowledge | null
 } & Record<string, unknown>
 
+type PersonaMemoryMode = "read_only" | "read_write"
+
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const toChatSubmitResult = normalizeChatSubmitResult
+
+const normalizePersonaMemoryMode = (value: unknown): PersonaMemoryMode | null =>
+  value === "read_only" || value === "read_write" ? value : null
 
 const persistTrackedPersonaPlaygroundSession = async ({
   chatId,
@@ -383,6 +388,8 @@ type UseChatActionsOptions = {
   invalidateServerChatHistory: () => void
   selectedCharacter: Character | null
   selectedAssistant: AssistantSelection | null
+  inheritedAssistant?: AssistantSelection | null
+  inheritedPersonaMemoryMode?: PersonaMemoryMode | null
   messageSteeringMode: MessageSteeringMode
   messageSteeringForceNarrate: boolean
   clearMessageSteering: () => void
@@ -431,6 +438,7 @@ export const useChatActions = ({
   serverChatClusterId,
   serverChatSource,
   serverChatExternalRef,
+  scope,
   setServerChatId,
   setServerChatTitle,
   setServerChatCharacterId,
@@ -463,6 +471,8 @@ export const useChatActions = ({
   invalidateServerChatHistory,
   selectedCharacter,
   selectedAssistant,
+  inheritedAssistant,
+  inheritedPersonaMemoryMode,
   messageSteeringMode,
   messageSteeringForceNarrate,
   clearMessageSteering
@@ -529,9 +539,41 @@ export const useChatActions = ({
       serverChatCharacterId
     ]
   )
+  const inheritedTrackedAssistant = React.useMemo<AssistantSelection | null>(() => {
+    if (
+      effectiveAssistantState.mode !== "plain" ||
+      selectedAssistant ||
+      serverChatId ||
+      serverChatAssistantKind ||
+      serverChatAssistantId ||
+      serverChatCharacterId ||
+      messages.length > 0 ||
+      history.length > 0
+    ) {
+      return null
+    }
+    if (
+      !isPersonaAssistantSelection(inheritedAssistant) ||
+      getAssistantSelectionMode(inheritedAssistant) !== "tracked"
+    ) {
+      return null
+    }
+
+    return inheritedAssistant
+  }, [
+    effectiveAssistantState.mode,
+    history.length,
+    inheritedAssistant,
+    messages.length,
+    selectedAssistant,
+    serverChatAssistantId,
+    serverChatAssistantKind,
+    serverChatCharacterId,
+    serverChatId
+  ])
   const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
     if (effectiveAssistantState.mode === "plain") {
-      return selectedAssistant
+      return inheritedTrackedAssistant ?? selectedAssistant
     }
 
     const matchesDraftSelection =
@@ -554,7 +596,28 @@ export const useChatActions = ({
         draftMetadata?.system_prompt ??
         null
     }
-  }, [effectiveAssistantState, selectedAssistant])
+  }, [effectiveAssistantState, inheritedTrackedAssistant, selectedAssistant])
+  const routingSelectedAssistant = inheritedTrackedAssistant ?? selectedAssistant
+  const selectedPersonaMemoryMode = React.useMemo(() => {
+    if (!isPersonaAssistantSelection(routingSelectedAssistant)) return null
+
+    const inheritedMatchesSelectedPersona =
+      isPersonaAssistantSelection(inheritedAssistant) &&
+      String(inheritedAssistant.id) === String(routingSelectedAssistant.id)
+
+    return (
+      (inheritedMatchesSelectedPersona
+        ? normalizePersonaMemoryMode(inheritedPersonaMemoryMode)
+        : null) ??
+      normalizePersonaMemoryMode(
+        routingSelectedAssistant.metadata?.personaMemoryMode
+      )
+    )
+  }, [
+    inheritedAssistant,
+    inheritedPersonaMemoryMode,
+    routingSelectedAssistant
+  ])
   const greetingEnabled = chatSettings?.greetingEnabled ?? true
   const greetingSelectionId =
     typeof chatSettings?.greetingSelectionId === "string"
@@ -1132,10 +1195,12 @@ export const useChatActions = ({
   const ensurePersonaServerChatWithState = React.useCallback(
     async ({
       assistant,
-      serverChatIdOverride
+      serverChatIdOverride,
+      requestedPersonaMemoryMode
     }: {
       assistant: AssistantSelection & { kind: "persona" }
       serverChatIdOverride?: string | null
+      requestedPersonaMemoryMode?: PersonaMemoryMode | null
     }): Promise<{
       chatId: string
       historyId: string | null
@@ -1144,6 +1209,7 @@ export const useChatActions = ({
       ensurePersonaServerChat({
         assistant,
         serverChatIdOverride,
+        requestedPersonaMemoryMode,
         serverChatId,
         serverChatTitle,
         serverChatAssistantKind,
@@ -1157,7 +1223,11 @@ export const useChatActions = ({
         serverChatExternalRef,
         historyId,
         temporaryChat,
-        createChat: (payload) => tldwClient.createChat(payload),
+        scope,
+        createChat: (payload, options) =>
+          options
+            ? tldwClient.createChat(payload, options)
+            : tldwClient.createChat(payload),
         ensureServerChatHistoryId,
         invalidateServerChatHistory,
         setServerChatId,
@@ -1189,6 +1259,7 @@ export const useChatActions = ({
       serverChatState,
       serverChatTitle,
       serverChatTopic,
+      scope,
       setServerChatAssistantId,
       setServerChatAssistantKind,
       setServerChatCharacterId,
@@ -2773,24 +2844,24 @@ export const useChatActions = ({
           hasEffectiveAssistant: Boolean(
             effectiveSelectedAssistant?.kind && effectiveSelectedAssistant?.id
           ),
-          draftAssistantKind: selectedAssistant?.kind ?? null,
+          draftAssistantKind: routingSelectedAssistant?.kind ?? null,
           draftAssistantSelectionMode: getAssistantSelectionMode(
-            selectedAssistant
+            routingSelectedAssistant
           )
         })
         const resolvedSendMode =
-          getAssistantSelectionMode(selectedAssistant) === "tracked" &&
-          selectedAssistant?.kind === "persona"
+          getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+          routingSelectedAssistant?.kind === "persona"
             ? "tracked_persona"
-            : getAssistantSelectionMode(selectedAssistant) === "tracked" &&
-                selectedAssistant?.kind === "character"
+            : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+                routingSelectedAssistant?.kind === "character"
               ? "tracked_character"
               : sendMode
         const trackedPersonaAssistantForSend =
           resolvedSendMode === "tracked_persona"
-            ? isPersonaAssistantSelection(selectedAssistant) &&
-              getAssistantSelectionMode(selectedAssistant) === "tracked"
-              ? selectedAssistant
+            ? isPersonaAssistantSelection(routingSelectedAssistant) &&
+              getAssistantSelectionMode(routingSelectedAssistant) === "tracked"
+              ? routingSelectedAssistant
               : isPersonaAssistantSelection(effectiveSelectedAssistant)
                 ? effectiveSelectedAssistant
                 : null
@@ -2812,7 +2883,8 @@ export const useChatActions = ({
 
             const personaServerChat = await ensurePersonaServerChatWithState({
               assistant: trackedPersonaAssistantForSend,
-              serverChatIdOverride
+              serverChatIdOverride,
+              requestedPersonaMemoryMode: selectedPersonaMemoryMode
             })
             await persistTrackedPersonaPlaygroundSession({
               chatId: personaServerChat.chatId,
@@ -2856,10 +2928,10 @@ export const useChatActions = ({
               : null
           const draftTrackedCharacter =
             resolvedSendMode === "tracked_character" &&
-            selectedAssistant?.kind === "character" &&
-            getAssistantSelectionMode(selectedAssistant) === "tracked"
+            routingSelectedAssistant?.kind === "character" &&
+            getAssistantSelectionMode(routingSelectedAssistant) === "tracked"
               ? assistantSelectionToCharacter<Character & Record<string, unknown>>(
-                  selectedAssistant
+                  routingSelectedAssistant
                 )
               : null
           const resolvedSelectedCharacter =

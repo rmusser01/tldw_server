@@ -5,10 +5,15 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 export const DEFAULT_PERSONA_MEMORY_MODE = "read_only" as const
 
 type PersonaAssistant = AssistantSelection & { kind: "persona" }
+type PersonaMemoryMode = "read_only" | "read_write"
+
+const normalizePersonaMemoryMode = (value: unknown): PersonaMemoryMode | null =>
+  value === "read_only" || value === "read_write" ? value : null
 
 type EnsurePersonaServerChatArgs = {
   assistant: PersonaAssistant
   serverChatIdOverride?: string | null
+  requestedPersonaMemoryMode?: PersonaMemoryMode | null
   serverChatId: string | null
   serverChatTitle: string | null
   serverChatAssistantKind: "character" | "persona" | null
@@ -97,6 +102,7 @@ export const resetAssistantServerChatState = ({
 export const ensurePersonaServerChat = async ({
   assistant,
   serverChatIdOverride,
+  requestedPersonaMemoryMode,
   serverChatId,
   serverChatTitle,
   serverChatAssistantKind,
@@ -139,6 +145,9 @@ export const ensurePersonaServerChat = async ({
       : null
   const resolvedServerChatId = overrideChatId || serverChatId
   const assistantId = String(assistant.id)
+  const newChatPersonaMemoryMode =
+    normalizePersonaMemoryMode(requestedPersonaMemoryMode) ??
+    DEFAULT_PERSONA_MEMORY_MODE
   const isMatchingPersonaChat =
     Boolean(resolvedServerChatId) &&
     serverChatMetaLoaded &&
@@ -146,8 +155,8 @@ export const ensurePersonaServerChat = async ({
     Boolean(serverChatAssistantId) &&
     String(serverChatAssistantId) === assistantId
   const personaMemoryMode = isMatchingPersonaChat
-    ? serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
-    : DEFAULT_PERSONA_MEMORY_MODE
+    ? serverChatPersonaMemoryMode ?? newChatPersonaMemoryMode
+    : newChatPersonaMemoryMode
   const shouldResetServerChat =
     Boolean(resolvedServerChatId) &&
     serverChatMetaLoaded &&
