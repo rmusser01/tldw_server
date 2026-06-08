@@ -25,8 +25,9 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-
+from mcp_unified.interfaces.file_policy_actions import get_file_policy_action_metadata
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
 )
@@ -43,6 +44,16 @@ def _first_nonempty(*values: Any) -> str | None:
         if text:
             return text
     return None
+
+
+def _file_policy_metadata(action: str) -> dict[str, str]:
+    """Return non-sensitive descriptor metadata for a file-policy action."""
+
+    metadata = get_file_policy_action_metadata(action)
+    return {
+        "file_policy_action": metadata.action,
+        "file_policy_action_family": metadata.family,
+    }
 
 
 class FilesystemModule(BaseModule):
@@ -92,6 +103,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
                 **shared_path_metadata,
             },
         )
@@ -113,6 +125,7 @@ class FilesystemModule(BaseModule):
                 "path_scope_action": "read",
                 "legacy_tool": True,
                 "replacement_tool": "fs.read",
+                **_file_policy_metadata("read"),
                 **shared_path_metadata,
             },
         )
@@ -137,6 +150,7 @@ class FilesystemModule(BaseModule):
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
                 "path_scope_action": "read",
+                **_file_policy_metadata("read"),
                 "eval": {
                     "task_families": ["filesystem_read"],
                     "expected_result_kind": "structured_filesystem_read",
@@ -172,6 +186,7 @@ class FilesystemModule(BaseModule):
                 "write_capable": True,
                 "capabilities": ["filesystem.edit", "filesystem.write"],
                 "path_scope_candidate_source": "module",
+                **_file_policy_metadata("edit"),
                 "eval": {
                     "task_families": ["filesystem_edit"],
                     "expected_result_kind": "structured_filesystem_edit",
@@ -202,6 +217,7 @@ class FilesystemModule(BaseModule):
                 "write_capable": True,
                 "capabilities": ["filesystem.write"],
                 "path_scope_action": "write",
+                **_file_policy_metadata("write"),
                 "eval": {
                     "task_families": ["filesystem_write"],
                     "expected_result_kind": "structured_filesystem_write",
@@ -230,6 +246,7 @@ class FilesystemModule(BaseModule):
                 "path_scope_action": "write",
                 "legacy_tool": True,
                 "replacement_tools": ["fs.patch", "fs.write"],
+                **_file_policy_metadata("write"),
                 **shared_path_metadata,
             },
         )
@@ -253,6 +270,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
                 **shared_path_metadata,
             },
         )
@@ -278,6 +296,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
                 **shared_fs_metadata,
                 "path_argument_hints": ["base_path"],
             },
@@ -310,6 +329,7 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
                 **shared_fs_metadata,
                 "path_argument_hints": ["base_path"],
             },
@@ -1429,7 +1449,7 @@ class FilesystemModule(BaseModule):
                             self._atomic_write_text_file(target, str(plan["_text_before"]))
                         else:
                             target.unlink(missing_ok=True)
-                    except Exception:
+                    except OSError:
                         logger.exception("Failed to roll back partial fs.patch write for {}", target.name)
                 raise ValueError("partial_write_rollback_attempted") from exc
 

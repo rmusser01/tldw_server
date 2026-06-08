@@ -16,6 +16,12 @@ from mcp_unified.gateway.profile_governance import (
     PermissionChangeGovernor,
     PermissionChangeRequest,
 )
+from mcp_unified.interfaces.file_policy_actions import (
+    FILE_POLICY_ADMIN_ACTIONS,
+    FILE_POLICY_DESTRUCTIVE_ACTIONS,
+    FILE_POLICY_EXFILTRATION_ACTIONS,
+    FILE_POLICY_LOCK_ACTIONS,
+)
 from mcp_unified.interfaces.storage import (
     AuditStore,
     ProfileAssignmentStore,
@@ -975,12 +981,22 @@ class GatewayProfileManager:
         if any(field in policy_fields for field in {"path_grants", *PATH_GRANT_AUTHORING_KEYS}):
             flags.add("path_grants_changed")
             compiled = compile_policy_path_grants(policy_payload)
-            if any(
-                grant.get("effect") == "allow"
-                and any(action in {"edit", "write"} for action in grant.get("actions", ()))
+            allowed_path_grant_actions = {
+                str(action)
                 for grant in compiled.path_grants
-            ):
+                if grant.get("effect") == "allow"
+                for action in grant.get("actions", ())
+            }
+            if allowed_path_grant_actions.intersection({"edit", "write"}):
                 flags.add("path_grants_write_or_edit")
+            if allowed_path_grant_actions.intersection(FILE_POLICY_DESTRUCTIVE_ACTIONS):
+                flags.add("path_grants_destructive")
+            if allowed_path_grant_actions.intersection(FILE_POLICY_EXFILTRATION_ACTIONS):
+                flags.add("path_grants_exfiltration")
+            if allowed_path_grant_actions.intersection(FILE_POLICY_ADMIN_ACTIONS):
+                flags.add("path_grants_admin")
+            if allowed_path_grant_actions.intersection(FILE_POLICY_LOCK_ACTIONS):
+                flags.add("path_grants_lock")
         if self._has_wildcard_tool_policy(policy_payload):
             flags.add("wildcard_tool_policy")
         return tuple(sorted(flags))

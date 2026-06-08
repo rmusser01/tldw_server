@@ -156,6 +156,22 @@ profile with `write` can use `fs.write` and patch-created files when policy also
 allows creation. Deny grants take precedence over broader allow grants, so a
 private subtree can remain read-only or blocked under a writable parent.
 
+The file-policy action vocabulary is broader than the tools currently shipped.
+The executable filesystem actions today are:
+
+- `read`: inspect file content, directory listings, search results, and path
+  metadata.
+- `edit`: bounded existing-file edits through `fs.patch`.
+- `write`: deliberate whole-file create or replace through `fs.write`.
+
+The reserved action names are `delete`, `rename`, `move`, `share`, `export`,
+`chmod`, `admin`, and `lock`. Profiles may author and preview these grants now
+so policy intent is explicit, but they do not become executable until a
+dedicated safe tool for that operation lands. Do not treat these actions as
+aliases for `write`: `share` and `export` are exfiltration-sensitive, `delete`,
+`rename`, and `move` are destructive, `chmod` and `admin` are administrative,
+and `lock` is a concurrency-control action.
+
 Operators that prefer inherited policy authoring can keep the executable
 runtime contract flat by compiling `path_grant_authoring` into `path_grants`.
 The supported authoring levels are `org`, `workspace`, `folders`, and `files`;

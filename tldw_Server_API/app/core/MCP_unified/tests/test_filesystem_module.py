@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module import (
     FilesystemModule,
@@ -219,12 +219,16 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert read_metadata["path_argument_hints"] == ["path"]  # nosec B101
     assert read_metadata["readOnlyHint"] is True  # nosec B101
     assert read_metadata["path_scope_action"] == "read"  # nosec B101
+    assert read_metadata["file_policy_action"] == "read"  # nosec B101
+    assert read_metadata["file_policy_action_family"] == "read"  # nosec B101
     assert "filesystem.read" in read_metadata["capabilities"]  # nosec B101
     assert read_metadata["eval"]["task_families"] == ["filesystem_read"]  # nosec B101
     assert read_metadata["eval"]["expected_result_kind"] == "structured_filesystem_read"  # nosec B101
     assert by_name["fs.read"]["inputSchema"]["additionalProperties"] is False  # nosec B101
     patch_metadata = by_name["fs.patch"]["metadata"]
     assert patch_metadata["path_scope_candidate_source"] == "module"  # nosec B101
+    assert patch_metadata["file_policy_action"] == "edit"  # nosec B101
+    assert patch_metadata["file_policy_action_family"] == "bounded_edit"  # nosec B101
     assert patch_metadata["write_capable"] is True  # nosec B101
     assert patch_metadata["eval"]["task_families"] == ["filesystem_edit"]  # nosec B101
     assert patch_metadata["eval"]["expected_result_kind"] == "structured_filesystem_edit"  # nosec B101
@@ -232,6 +236,8 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     write_metadata = by_name["fs.write"]["metadata"]
     assert write_metadata["path_argument_hints"] == ["path"]  # nosec B101
     assert write_metadata["path_scope_action"] == "write"  # nosec B101
+    assert write_metadata["file_policy_action"] == "write"  # nosec B101
+    assert write_metadata["file_policy_action_family"] == "whole_write"  # nosec B101
     assert write_metadata["write_capable"] is True  # nosec B101
     assert write_metadata["eval"]["task_families"] == ["filesystem_write"]  # nosec B101
     assert write_metadata["eval"]["expected_result_kind"] == "structured_filesystem_write"  # nosec B101
@@ -558,7 +564,7 @@ async def test_filesystem_read_can_include_line_numbers(tmp_path: Path) -> None:
     assert result["start_line"] == 2  # nosec B101
     assert result["end_line"] == 3  # nosec B101
     assert result["line_count_total"] == 3  # nosec B101
-    assert result["bytes_read"] == len("beta\ngamma\n".encode("utf-8"))  # nosec B101
+    assert result["bytes_read"] == len(b"beta\ngamma\n")  # nosec B101
     assert result["truncated"] is False  # nosec B101
 
 
@@ -794,7 +800,7 @@ async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
     assert result["applied"] is False  # nosec B101
     assert result["dry_run"] is True  # nosec B101
     assert (
-        result["files"][0]["sha256_after"] == hashlib.sha256("alpha\nBETTA\ngamma\n".encode("utf-8")).hexdigest()
+        result["files"][0]["sha256_after"] == hashlib.sha256(b"alpha\nBETTA\ngamma\n").hexdigest()
     )  # nosec B101
 
 
@@ -969,7 +975,7 @@ async def test_filesystem_write_create_creates_new_text_file(tmp_path: Path) -> 
     assert result["path"] == "docs/new.txt"  # nosec B101
     assert result["written"] is True  # nosec B101
     assert result["created"] is True  # nosec B101
-    assert result["bytes_written"] == len("created\n".encode("utf-8"))  # nosec B101
+    assert result["bytes_written"] == len(b"created\n")  # nosec B101
     assert result["eval"]["action_family"] == "filesystem_write"  # nosec B101
 
     with pytest.raises(ValueError, match="write_target_exists"):
@@ -1033,7 +1039,7 @@ async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> No
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-expected", user_id="1", metadata={})
-    expected_sha = hashlib.sha256("old\n".encode("utf-8")).hexdigest()
+    expected_sha = hashlib.sha256(b"old\n").hexdigest()
 
     result = await mod.execute_tool(
         "fs.write",
@@ -1045,7 +1051,7 @@ async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> No
     assert result["written"] is True  # nosec B101
     assert result["created"] is False  # nosec B101
     assert result["sha256_before"] == expected_sha  # nosec B101
-    assert result["sha256_after"] == hashlib.sha256("new\n".encode("utf-8")).hexdigest()  # nosec B101
+    assert result["sha256_after"] == hashlib.sha256(b"new\n").hexdigest()  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1187,7 +1193,7 @@ async def test_filesystem_write_rejects_stale_hash_and_dry_run_does_not_write(tm
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-stale", user_id="1", metadata={})
-    expected_sha = hashlib.sha256("old\n".encode("utf-8")).hexdigest()
+    expected_sha = hashlib.sha256(b"old\n").hexdigest()
 
     with pytest.raises(ValueError, match="write_preimage_mismatch"):
         await mod.execute_tool(
@@ -1211,7 +1217,7 @@ async def test_filesystem_write_rejects_stale_hash_and_dry_run_does_not_write(tm
     assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
     assert result["written"] is False  # nosec B101
     assert result["dry_run"] is True  # nosec B101
-    assert result["sha256_after"] == hashlib.sha256("dry-run\n".encode("utf-8")).hexdigest()  # nosec B101
+    assert result["sha256_after"] == hashlib.sha256(b"dry-run\n").hexdigest()  # nosec B101
 
 
 @pytest.mark.asyncio

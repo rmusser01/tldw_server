@@ -5,6 +5,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from mcp_unified.interfaces.file_policy_actions import FILE_POLICY_ACTIONS
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 from mcp_unified.profiles.path_grants import (
     PathGrantCompilationResult,
@@ -21,7 +22,7 @@ from tldw_Server_API.app.services.mcp_hub_path_scope_service import McpHubPathSc
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import McpHubWorkspaceRootResolver
 
 _FILESYSTEM_CAPABILITIES = frozenset({"filesystem.read", "filesystem.write", "filesystem.delete"})
-_PATH_GRANT_ACTIONS = frozenset({"read", "edit", "write"})
+_PATH_GRANT_ACTIONS = FILE_POLICY_ACTIONS
 _PATH_GRANT_EFFECTS = frozenset({"allow", "deny"})
 _SUPPORTED_PATH_ARGUMENT_HINTS = frozenset(
     {"path", "file_path", "target_path", "cwd", "paths", "file_paths", "files[].path"}
@@ -303,6 +304,9 @@ def _preview_outcome(enforcement_result: dict[str, Any]) -> str:
 
     if not bool(enforcement_result.get("enabled")):
         return "allow"
+    for decision in _safe_path_decisions(enforcement_result):
+        if decision.get("grant_outcome") in {"denied", "not_granted"}:
+            return "deny"
     if bool(enforcement_result.get("within_scope", True)):
         return "allow"
     if bool(enforcement_result.get("force_approval", False)):

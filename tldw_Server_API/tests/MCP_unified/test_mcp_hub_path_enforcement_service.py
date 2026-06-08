@@ -427,6 +427,69 @@ async def test_effective_permission_preview_returns_redacted_path_grant_decision
 
 
 @pytest.mark.asyncio
+async def test_effective_permission_preview_explains_reserved_file_policy_action() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["share"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.share",
+        action="share",
+        path="documents/story.md",
+    )
+
+    assert result["requested_action"] == "share"
+    assert result["outcome"] == "allow"
+    assert result["grant_outcome"] == "allowed"
+    assert result["matched_grant_prefix"] == "documents"
+    assert result["redacted"] is True
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_effective_permission_preview_denies_ungranted_reserved_file_policy_action() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.export",
+        action="export",
+        path="documents/story.md",
+    )
+
+    assert result["requested_action"] == "export"
+    assert result["outcome"] == "deny"
+    assert result["reason_code"] == "path_action_not_granted"
+    assert result["grant_outcome"] == "not_granted"
+    assert result["redacted"] is True
+
+
+@pytest.mark.asyncio
 async def test_effective_permission_preview_does_not_guess_profile_for_ambiguous_sources() -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
