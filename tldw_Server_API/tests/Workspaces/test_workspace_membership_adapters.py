@@ -703,7 +703,7 @@ class FailingSummaryAdapter:
         return WorkspaceResourceRef(resource_type=self.resource_type, resource_id=str(int(resource_id)))
 
     def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
-        raise RuntimeError("summary backend unavailable")
+        raise RuntimeError("summary backend unavailable at /tmp/secret-token api_key=sk-test")
 
     def on_link(self, membership: dict[str, object], context: WorkspaceMembershipContext) -> None:
         return None
@@ -722,6 +722,19 @@ def test_adapter_summarize_failure_during_list_marks_item_unresolved() -> None:
     summary = payload["items"][0]["summary"]
     assert summary["state"] == "unresolved"
     assert summary["metadata"]["code"] == "summary_unavailable"
+
+
+def test_generic_summarize_failure_uses_safe_unresolved_message() -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "42")] = _membership_row()
+    service = WorkspaceMembershipService(db, adapters={"media": FailingSummaryAdapter()})
+
+    payload = service.list_workspace_memberships("workspace-1", media_db=object())
+
+    message = payload["items"][0]["summary"]["metadata"]["message"]
+    assert message == "Workspace resource summary is unavailable."
+    assert "/tmp/secret-token" not in message
+    assert "sk-test" not in message
 
 
 class RecordingAdapter:
@@ -766,6 +779,42 @@ def test_link_membership_restores_deleted_row_after_adapter_validation() -> None
     assert payload["resource_id"] == "42"
     assert payload["deleted"] is False
     assert adapter.linked
+
+
+def test_link_membership_idempotent_retry_does_not_duplicate_on_link_hook() -> None:
+    db = FakeChaChaDB()
+    adapter = RecordingAdapter()
+    service = WorkspaceMembershipService(db, adapters={"media": adapter})
+
+    first_payload = service.link_membership(
+        "workspace-1",
+        {"resource_type": "media", "resource_id": "0042", "role": "source"},
+        user_id="user-1",
+        media_db=object(),
+    )
+    retry_payload = service.link_membership(
+        "workspace-1",
+        {"resource_type": "media", "resource_id": "0042", "role": "source"},
+        user_id="user-1",
+        media_db=object(),
+    )
+
+    assert first_payload["resource_id"] == "42"
+    assert retry_payload["resource_id"] == "42"
+    assert len(adapter.linked) == 1
+
+
+def test_get_membership_returns_unresolved_summary_when_media_db_is_unavailable() -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "42")] = _membership_row()
+    service = WorkspaceMembershipService(db)
+
+    payload = service.get_membership("workspace-1", "media", "0042")
+
+    assert payload is not None
+    assert payload["resource_id"] == "42"
+    assert payload["summary"]["state"] == "unresolved"
+    assert payload["summary"]["metadata"]["code"] == "media_db_unavailable"
 
 
 def test_list_resource_memberships_canonicalizes_resource_id_before_listing() -> None:

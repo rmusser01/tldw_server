@@ -25,6 +25,9 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
 )
 
 
+_SUMMARY_UNAVAILABLE_MESSAGE = "Workspace resource summary is unavailable."
+
+
 class WorkspaceMembershipServiceError(Exception):
     """Service-level Workspace membership error."""
 
@@ -83,6 +86,8 @@ class WorkspaceMembershipService:
             ref.resource_id,
             include_deleted=True,
         )
+        restore_deleted = existing is not None and self._row_is_deleted(existing)
+        should_call_on_link = existing is None or restore_deleted
         row = self.chacha_db.add_workspace_resource_membership(
             workspace_id,
             {
@@ -93,11 +98,12 @@ class WorkspaceMembershipService:
                 "transfer_policy": data["transfer_policy"],
                 "provenance": data["provenance"],
                 "metadata": data["metadata"],
-                "restore_deleted": existing is not None and self._row_is_deleted(existing),
+                "restore_deleted": restore_deleted,
             },
             user_id=user_id,
         )
-        adapter.on_link(row, context)
+        if should_call_on_link:
+            adapter.on_link(row, context)
         return self._serialize_membership(row, context=context, summary_ref=ref if resolve else None, resolve=resolve)
 
     def get_membership(
@@ -122,7 +128,7 @@ class WorkspaceMembershipService:
             user_id=user_id,
             media_db=media_db,
             request_metadata=None,
-            validate=resolve,
+            validate=False,
         )
         row = self.chacha_db.get_workspace_resource_membership(
             workspace_id,
@@ -424,8 +430,13 @@ class WorkspaceMembershipService:
             return adapter.summarize(resource_id, context)
         except WorkspaceMembershipAdapterError as exc:
             return self._unresolved_summary(resource_type, resource_id, exc.code, exc.message)
-        except Exception as exc:  # pragma: no cover - protects list calls from adapter bugs.
-            return self._unresolved_summary(resource_type, resource_id, "summary_unavailable", str(exc))
+        except Exception:  # pragma: no cover - protects list calls from adapter bugs.
+            return self._unresolved_summary(
+                resource_type,
+                resource_id,
+                "summary_unavailable",
+                _SUMMARY_UNAVAILABLE_MESSAGE,
+            )
 
     @staticmethod
     def _service_error_from_adapter_error(exc: WorkspaceMembershipAdapterError) -> WorkspaceMembershipServiceError:

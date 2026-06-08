@@ -93,6 +93,12 @@ Task 3 spec-review coverage follow-up:
 - Added unlink coverage for successful soft-delete hook invocation and missing/already-deleted no-op behavior.
 - Added reverse lookup fail-closed coverage for unsupported resource types.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `52 passed, 6 warnings`.
+Task 3 code-quality follow-up:
+- Prevented duplicate `on_link` adapter hooks on idempotent active-row retries while preserving create/restore hooks.
+- Made generic summary adapter failures return a safe unresolved message instead of raw exception text.
+- Changed direct `get_membership` to read existing memberships before resource resolution so unavailable backing services produce unresolved summaries instead of hard failures.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed with `55 passed, 6 warnings`.
+- Bandit touched-scope scan reported zero findings for `membership_service.py`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
