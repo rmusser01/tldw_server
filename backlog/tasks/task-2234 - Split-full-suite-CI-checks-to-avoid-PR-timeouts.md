@@ -137,6 +137,7 @@ modified_files:
 - tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
 - tldw_Server_API/tests/DB_Management/test_chacha_migration_v48_tasks.py
 - tldw_Server_API/tests/DB_Management/test_db_path_utils.py
+- tldw_Server_API/tests/DB_Management/test_media_db_request_scope_isolation.py
 - tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py
 - tldw_Server_API/tests/DB_Management/test_migration_tools.py
 - tldw_Server_API/tests/RAG_NEW/conftest.py
@@ -250,6 +251,8 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-07 current-head PR #2258 recheck of run `27112725818` confirmed the corrected Windows/Python 3.12 `db-privileges` shard passed `test_sqlite_migration_adds_task_tables`, then failed later in `test_resolve_media_db_for_user_reuses_shared_sqlite_backend_per_user`. The new log showed a platform-only expectation mismatch: the test monkeypatched `_get_db_path_for_user` to return `Path("/tmp/1.db")`, then expected the POSIX string `"/tmp/1.db"` even though Windows stringifies that `Path` as `"\\tmp\\1.db"`. The request-scope isolation test now derives expected strings from the monkeypatched path resolver for both the shared backend assertion and the later string-user ID assertion. Verification: the focused two-test replay passed, the full `test_media_db_request_scope_isolation.py` file passed with 23 tests, compileall passed, `git diff --check` passed, and Bandit on the touched DB privilege tests with B101/B108 test-scope skips reported zero findings/errors.
+
 2026-06-07 current-head PR #2258 recheck of run `27111995933` found Windows/Python 3.12 `db-privileges` failing in `test_sqlite_migration_adds_task_tables`. The job log and local replay showed the test dropped V48-created task tables, set the DB schema version to 48, then expected the unrelated V48-to-V49 workspace-assistant-defaults migration to recreate those task tables. Root cause: the test targeted the wrong migration boundary; V47-to-V48 owns task table creation, while V48-to-V49 only ensures workspace assistant defaults and bumps the version. The test now starts from schema version 47 before migration, verifies the final schema version, and asserts the task table DDL exists before inspecting constraints. Verification: the exact reproduced test passed, the local CI-shaped `db-privileges` shard passed with `1295 passed, 26 skipped`, compileall passed, `git diff --check` passed, and Bandit on the touched test with B101 skipped reported zero findings/errors.
 
 2026-06-07 PR #2258 follow-up on current run `27108592880` found Windows/Python 3.12 `db-privileges` failed in `test_get_user_base_directory_expands_user`: the test set `HOME` but Windows `Path.expanduser()` used `USERPROFILE`, resolving `~/custom_db_root` under `C:/Users/runneradmin` instead of the test temp home. The test now sets `USERPROFILE` alongside `HOME` before asserting `~` expansion, matching Windows path semantics without changing production path resolution. Verification: the exact failed test plus full `test_db_path_utils.py` passed locally with `25 passed`, compileall passed, `git diff --check` passed, and Bandit on the touched test reported zero findings/errors.
