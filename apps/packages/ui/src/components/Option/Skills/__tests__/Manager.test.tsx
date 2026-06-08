@@ -19,6 +19,8 @@ const notificationMock = vi.hoisted(() => ({
   error: vi.fn()
 }))
 
+const skillDrawerMock = vi.hoisted(() => vi.fn())
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
 }))
@@ -43,7 +45,10 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("../SkillDrawer", () => ({
-  SkillDrawer: () => null
+  SkillDrawer: (props: { open: boolean }) => {
+    skillDrawerMock(props)
+    return props.open ? <div data-testid="skill-drawer-open">Skill drawer open</div> : null
+  }
 }))
 
 vi.mock("../SkillPreview", () => ({
@@ -112,6 +117,73 @@ describe("SkillsManager imports", () => {
         <SkillsManager />
       </QueryClientProvider>
     )
+
+  it("orients users with a page summary and library count", async () => {
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [
+        {
+          name: "summarize",
+          description: "Summarize source material",
+          context: "inline",
+          source: "builtin",
+          path: "skills/summarize/SKILL.md"
+        },
+        {
+          name: "code-review",
+          description: "Review code changes",
+          context: "fork",
+          source: "builtin",
+          path: "skills/code-review/SKILL.md"
+        }
+      ],
+      count: 2,
+      total: 2,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Skills"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Discover, test, create, import, and manage reusable instructions.")
+    ).toBeInTheDocument()
+    expect(await screen.findByText("2 skills")).toBeInTheDocument()
+  })
+
+  it("shows a Skills-specific beginner empty state with first actions", async () => {
+    renderManager()
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Start with a reusable skill"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Skills are reusable instructions that can be tested here and used from chat.")
+    ).toBeInTheDocument()
+
+    const emptyState = screen.getByTestId("skills-empty-state")
+    fireEvent.click(within(emptyState).getByRole("button", { name: "Seed built-ins" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: false })
+    })
+
+    fireEvent.click(within(emptyState).getByRole("button", { name: "Create from template" }))
+    expect(await screen.findByTestId("skill-drawer-open")).toBeInTheDocument()
+
+    fireEvent.click(within(emptyState).getByRole("button", { name: "Import" }))
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Import Skill from Text"
+      })
+    ).toBeInTheDocument()
+  })
 
   it("imports a skill from text via importSkill", async () => {
     renderManager()

@@ -74,8 +74,16 @@ export const SkillsManager: React.FC = () => {
       (s) =>
         s.name.toLowerCase().includes(q) ||
         (s.description && s.description.toLowerCase().includes(q))
-    )
+      )
   }, [data?.skills, search])
+
+  const totalSkills = data?.total ?? 0
+  const hasSearch = search.trim().length > 0
+  const isLibraryEmpty = !isLoading && totalSkills === 0 && !hasSearch
+  const skillCountLabel = t("option:skills.countSummary", {
+    defaultValue: `${totalSkills} ${totalSkills === 1 ? "skill" : "skills"}`,
+    count: totalSkills
+  })
 
   const deleteMutation = useMutation({
     mutationFn: (name: string) => tldwClient.deleteSkill(name),
@@ -358,9 +366,75 @@ export const SkillsManager: React.FC = () => {
     }
   ]
 
+  const beginnerEmptyState = (
+    <div
+      className="mx-auto flex max-w-xl flex-col items-center gap-3 py-8 text-center"
+      data-testid="skills-empty-state"
+    >
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-text">
+          {t("option:skills.emptyTitle", {
+            defaultValue: "Start with a reusable skill"
+          })}
+        </h2>
+        <p className="m-0 text-sm text-text-muted">
+          {t("option:skills.emptyDescription", {
+            defaultValue:
+              "Skills are reusable instructions that can be tested here and used from chat."
+          })}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button
+          type="primary"
+          icon={<Database size={14} />}
+          loading={seedBuiltinsMutation.isPending}
+          onClick={() => seedBuiltinsMutation.mutate(false)}
+        >
+          {t("option:skills.emptySeedBuiltins", {
+            defaultValue: "Seed built-ins"
+          })}
+        </Button>
+        <Button icon={<Plus size={14} />} onClick={handleNew}>
+          {t("option:skills.emptyCreateFromTemplate", {
+            defaultValue: "Create from template"
+          })}
+        </Button>
+        <Button icon={<UploadIcon size={14} />} onClick={openImportTextModal}>
+          {t("option:skills.import", { defaultValue: "Import" })}
+        </Button>
+      </div>
+    </div>
+  )
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+      <section
+        aria-labelledby="skills-manager-title"
+        className="flex flex-col gap-1"
+      >
+        <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h1
+              id="skills-manager-title"
+              className="m-0 text-xl font-semibold text-text"
+            >
+              {t("option:skills.title", { defaultValue: "Skills" })}
+            </h1>
+            <p className="m-0 max-w-2xl text-sm text-text-muted">
+              {t("option:skills.description", {
+                defaultValue:
+                  "Discover, test, create, import, and manage reusable instructions."
+              })}
+            </p>
+          </div>
+          <p className="m-0 text-sm font-medium text-text-muted">
+            {skillCountLabel}
+          </p>
+        </div>
+      </section>
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <Input.Search
           placeholder={t("option:skills.searchPlaceholder", {
             defaultValue: "Search skills..."
@@ -368,9 +442,9 @@ export const SkillsManager: React.FC = () => {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           allowClear
-          style={{ maxWidth: 300 }}
+          style={{ maxWidth: 360 }}
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Dropdown menu={{ items: importMenuItems }} trigger={["click"]}>
             <Button icon={<UploadIcon size={14} />}>
               {t("option:skills.import", { defaultValue: "Import" })}
@@ -397,14 +471,23 @@ export const SkillsManager: React.FC = () => {
         loading={isLoading}
         pagination={false}
         size="middle"
+        locale={{
+          emptyText: isLibraryEmpty
+            ? beginnerEmptyState
+            : t("option:skills.noMatches", {
+                defaultValue: hasSearch
+                  ? "No skills match this search."
+                  : "No skills yet."
+              })
+        }}
       />
 
-      {(data?.total ?? 0) > pageSize && (
+      {totalSkills > pageSize && (
         <div className="flex justify-end">
           <Pagination
             current={page}
             pageSize={pageSize}
-            total={data?.total ?? 0}
+            total={totalSkills}
             onChange={(p, ps) => {
               setPage(p)
               setPageSize(ps)
