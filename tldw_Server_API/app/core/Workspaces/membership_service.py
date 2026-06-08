@@ -302,6 +302,7 @@ class WorkspaceMembershipService:
         self._require_workspace(workspace_id)
         created = 0
         existing = 0
+        restored = 0
         skipped = 0
         errors: list[dict[str, str]] = []
 
@@ -310,8 +311,9 @@ class WorkspaceMembershipService:
                 workspace_id,
                 candidate["resource_type"],
                 candidate["resource_id"],
-                include_deleted=False,
+                include_deleted=True,
             )
+            was_deleted = before is not None and self._row_is_deleted(before)
             try:
                 self.link_membership(
                     workspace_id,
@@ -341,6 +343,8 @@ class WorkspaceMembershipService:
                 continue
             if before is None:
                 created += 1
+            elif was_deleted:
+                restored += 1
             else:
                 existing += 1
 
@@ -350,6 +354,7 @@ class WorkspaceMembershipService:
             "status": status,
             "created": created,
             "existing": existing,
+            "restored": restored,
             "skipped": skipped,
             "errors": errors,
             "summary": summary,

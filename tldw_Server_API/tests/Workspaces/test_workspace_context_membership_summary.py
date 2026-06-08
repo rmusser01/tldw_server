@@ -144,6 +144,20 @@ class BackfillFakeDB:
         key = (workspace_id, str(data["resource_type"]), str(data["resource_id"]))
         existing = self.memberships.get(key)
         if existing is not None:
+            if existing.get("deleted") and data.get("restore_deleted") is True:
+                existing.update(
+                    {
+                        "role": data.get("role", "member"),
+                        "label": data.get("label"),
+                        "transfer_policy": data.get("transfer_policy", "link"),
+                        "provenance": data.get("provenance", {}),
+                        "metadata": data.get("metadata", {}),
+                        "updated_at": self._timestamp(),
+                        "updated_by_user_id": user_id,
+                        "version": int(existing.get("version", 1)) + 1,
+                        "deleted": False,
+                    }
+                )
             return dict(existing)
         now = self._timestamp()
         row = {
@@ -296,6 +310,7 @@ def test_backfill_creates_memberships_from_existing_workspace_rows(media_db: obj
     assert result["status"] == "complete"
     assert result["created"] == 5
     assert result["existing"] == 0
+    assert result["restored"] == 0
     assert result["skipped"] == 0
     assert result["errors"] == []
     assert set(db.memberships) == {
@@ -327,9 +342,39 @@ def test_backfill_is_idempotent(media_db: object) -> None:
     second = service.backfill_workspace_memberships("workspace-1", user_id="user-1", media_db=media_db)
 
     assert first["created"] == 5
+    assert first["restored"] == 0
     assert second["created"] == 0
     assert second["existing"] == 5
+    assert second["restored"] == 0
     assert len(db.memberships) == 5
+
+
+def test_backfill_restores_soft_deleted_membership_without_reporting_created(media_db: object) -> None:
+    db = BackfillFakeDB()
+    db.memberships[("workspace-1", "workspace_source", "source-1")] = {
+        "workspace_id": "workspace-1",
+        "resource_type": "workspace_source",
+        "resource_id": "source-1",
+        "role": "source",
+        "label": "Old source label",
+        "transfer_policy": "link",
+        "provenance": {"source_surface": "previous"},
+        "metadata": {},
+        "created_at": "2026-06-07T11:00:00Z",
+        "updated_at": "2026-06-07T11:30:00Z",
+        "version": 2,
+        "deleted": True,
+    }
+    service = WorkspaceMembershipService(db)
+
+    result = service.backfill_workspace_memberships("workspace-1", user_id="user-1", media_db=media_db)
+
+    assert result["created"] == 4
+    assert result["existing"] == 0
+    assert result["restored"] == 1
+    restored = db.memberships[("workspace-1", "workspace_source", "source-1")]
+    assert restored["deleted"] is False
+    assert restored["version"] == 3
 
 
 def test_backfill_reports_bounded_unresolved_rows_without_rewriting_resources(media_db: object) -> None:
@@ -360,6 +405,7 @@ def test_backfill_reports_bounded_unresolved_rows_without_rewriting_resources(me
 
     assert result["status"] == "partial"
     assert result["created"] == 3
+    assert result["restored"] == 0
     assert len(result["errors"]) == 25
     assert result["errors"][0].keys() == {"resource_type", "resource_id", "code", "message"}
     assert all("/" not in error["message"] for error in result["errors"])

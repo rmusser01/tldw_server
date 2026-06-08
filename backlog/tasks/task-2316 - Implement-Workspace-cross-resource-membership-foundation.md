@@ -147,6 +147,14 @@ Task 5 completed by Codex:
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `72 passed, 6 warnings`.
 - Verification: `git diff --check` passed.
 - Bandit touched runtime scan reported zero findings in `/tmp/bandit_workspace_membership_task5.json`.
+Task 5 code-quality follow-up:
+- Fixed backfill accounting for soft-deleted membership restores by reading pre-link rows with `include_deleted=True`, classifying active existing rows separately from deleted rows, and returning a distinct `restored` count.
+- Updated the focused fake DB to model restore behavior and added regression coverage proving restored rows are not reported as newly created.
+- TDD red run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py -q` failed with expected missing `restored` keys and `created == 5` instead of `4` for a restored row.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py -q` passed with `7 passed, 6 warnings`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_context_membership_summary.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py -q` passed with `73 passed, 6 warnings`.
+- Verification: `git diff --check` passed.
+- Bandit touched runtime scan reported zero findings in `/tmp/bandit_workspace_membership_task5_restore_fix.json`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
