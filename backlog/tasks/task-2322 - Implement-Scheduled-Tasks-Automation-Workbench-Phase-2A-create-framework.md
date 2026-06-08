@@ -19,6 +19,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-route-state.test.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-templates.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskCreatePanel.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx
 ---
 
 ## Description
@@ -31,7 +33,7 @@ Implement the frontend-only Phase 2A /scheduled-tasks Create framework from the 
 <!-- AC:BEGIN -->
 - [ ] #1 URL state helpers support Overview, Tasks, Create, selected template, task detail, invalid tab, invalid template, and invalid task states.
 - [ ] #2 Template registry and matcher keep Reminder as the only fully available template and keep Watch/Ingest/Advanced handoff-only while RAG/Agent remain planned.
-- [ ] #3 Create panel renders templates by intent, not source vendor, and uses handoff panels without claiming a task was created.
+- [x] #3 Create panel renders templates by intent, not source vendor, and uses handoff panels without claiming a task was created.
 - [ ] #4 ScheduledTasksPage integrates tabs, create flow, detail deep links, invalid route states, and created reminder detail navigation while preserving Phase 1 overview/table/detail behavior.
 - [ ] #5 Focused ScheduledTasks and route tests pass; extension route smoke is updated or skip rationale is recorded.
 - [ ] #6 No backend files are changed; Bandit is run only if backend Python changes unexpectedly, otherwise skip rationale is recorded.
@@ -63,6 +65,12 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 2 privacy follow-up: Broadened sensitive handoff URL parameter detection to reject compound keys such as `access_token`, `refresh_token`, `id_token`, and `client_secret`.
 - Task 2 privacy red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` failed because `https://example.com/feed?access_token=secret` was accepted.
 - Task 2 privacy verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 14 tests.
+- Task 3: Added the standalone `ScheduledTaskCreatePanel` with template finder/filter controls, intent-oriented template cards, selected-state Reminder editor handoff, Watch/Ingest/Advanced handoff panels, planned capability panels, and unsafe setup-note summary suppression.
+- Task 3 red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` failed because `../ScheduledTaskCreatePanel` did not exist.
+- Task 3 verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 6 tests.
+- Task 3 template regression verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 14 tests.
+- Task 3 additional check: `cd apps/packages/ui && bunx tsc --noEmit --pretty false` was attempted but exited with Node heap out-of-memory before type diagnostics were produced.
+- Bandit skip: Task 3 changed frontend TypeScript/TSX tests/components and Backlog tracking only; no backend Python files were touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
