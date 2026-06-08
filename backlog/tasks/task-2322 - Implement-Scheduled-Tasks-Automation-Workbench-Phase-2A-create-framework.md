@@ -17,6 +17,8 @@ references:
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-route-state.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-route-state.test.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-templates.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts
 ---
 
 ## Description
@@ -49,6 +51,10 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Bandit skip: Task 1 changed frontend TypeScript and Backlog tracking only; no backend Python files were touched.
 - Task 1 quality follow-up: Normalized caller-provided `templateId` and `taskId` before URL serialization so whitespace-only IDs are omitted instead of encoded.
 - Task 1 quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-route-state.test.ts --maxWorkers=1 --no-file-parallelism` passed with 8 tests.
+- Task 2: Added the static Scheduled Tasks template registry and deterministic matcher. Reminder is the only available Phase 2A creation template; Watch, Ingest, and Advanced are handoff-only; Recurring Question and Agent Task remain planned.
+- Task 2 red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` failed because `../scheduled-task-templates` did not exist.
+- Task 2 verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts --maxWorkers=1 --no-file-parallelism` passed with 10 tests.
+- Bandit skip: Task 2 changed frontend TypeScript tests/helpers and Backlog tracking only; no backend Python files were touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
