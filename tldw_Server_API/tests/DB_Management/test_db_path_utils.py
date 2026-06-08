@@ -20,6 +20,7 @@ def _expect_true(condition: bool, message: str) -> None:
 def test_get_user_base_directory_expands_user(monkeypatch, tmp_path):
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", "~/custom_db_root")
 
     user_dir = DatabasePaths.get_user_base_directory(42)
