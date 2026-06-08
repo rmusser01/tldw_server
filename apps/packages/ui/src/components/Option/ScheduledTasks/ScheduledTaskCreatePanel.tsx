@@ -153,20 +153,16 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
   const matches = useMemo(() => findScheduledTaskTemplates(finderText), [finderText])
   const bestMatch = matches[0] ?? null
   const templates = useMemo(() => filterScheduledTaskTemplates(filterId), [filterId])
-  const templateStateLabels = useMemo(() => {
-    const seenStateLabels = new Set<string>()
-
-    return new Map(
-      templates.map((template) => {
-        const stateLabel = getScheduledTaskTemplateStateLabel(template.state)
-        const displayLabel = seenStateLabels.has(stateLabel)
-          ? `${stateLabel} (${template.title})`
-          : stateLabel
-        seenStateLabels.add(stateLabel)
-        return [template.id, displayLabel]
-      })
-    )
-  }, [templates])
+  const templateStateLabels = useMemo(
+    () =>
+      new Map(
+        templates.map((template) => [
+          template.id,
+          getScheduledTaskTemplateStateLabel(template.state)
+        ])
+      ),
+    [templates]
+  )
 
   const renderSelectedTemplate = () => {
     if (!selectedTemplate) return null
