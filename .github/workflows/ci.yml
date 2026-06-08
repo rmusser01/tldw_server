@@ -255,9 +255,39 @@ jobs:
           - name: authnz-unit
             paths: >-
               tldw_Server_API/tests/AuthNZ_Unit
-          - name: config
+          - name: config-core-loaders
             paths: >-
-              tldw_Server_API/tests/Config
+              tldw_Server_API/tests/Config/test_claims_env_int_parsing.py
+              tldw_Server_API/tests/Config/test_config_adapter.py
+              tldw_Server_API/tests/Config/test_config_admin_endpoint_sanitizers.py
+              tldw_Server_API/tests/Config/test_config_precedence_contract.py
+              tldw_Server_API/tests/Config/test_config_providers_endpoints.py
+              tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py
+              tldw_Server_API/tests/Config/test_config_txt_inline_comment_regression.py
+              tldw_Server_API/tests/Config/test_config_utils_sanitizers.py
+              tldw_Server_API/tests/Config/test_docs_info_capabilities.py
+          - name: config-effective-api
+            paths: >-
+              tldw_Server_API/tests/Config/test_effective_config_api.py
+          - name: config-module-yaml
+            paths: >-
+              tldw_Server_API/tests/Config/test_module_yaml_integration.py
+          - name: config-runtime-env
+            paths: >-
+              tldw_Server_API/tests/Config/test_env_file_selection.py
+              tldw_Server_API/tests/Config/test_feature_flags.py
+              tldw_Server_API/tests/Config/test_local_api_and_custom_openai2_config_keys.py
+              tldw_Server_API/tests/Config/test_migrate_api_keys.py
+              tldw_Server_API/tests/Config/test_pyproject_tooling_extra.py
+              tldw_Server_API/tests/Config/test_redis_config.py
+              tldw_Server_API/tests/Config/test_web_scraper_config_keys.py
+          - name: config-routes-startup
+            paths: >-
+              tldw_Server_API/tests/Config/test_openapi_config_jobs.py
+              tldw_Server_API/tests/Config/test_route_and_cors_guards.py
+              tldw_Server_API/tests/Config/test_route_toggle_evaluations_regressions.py
+              tldw_Server_API/tests/Config/test_startup_api_key_logging.py
+              tldw_Server_API/tests/Config/test_startup_validation.py
           - name: utils-http
             paths: >-
               tldw_Server_API/tests/Utils
@@ -618,6 +648,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -1689,6 +1720,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -2705,6 +2737,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -3647,6 +3680,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -4591,6 +4625,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges

@@ -282,12 +282,35 @@ def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
 
     shards = job["strategy"]["matrix"]["shard"]
     shard_paths = {shard["name"]: set(str(shard["paths"]).split()) for shard in shards}
-    assert set(shard_paths) == {"authnz-unit", "config", "core", "utils-http"}
+    assert set(shard_paths) == {
+        "authnz-unit",
+        "config-core-loaders",
+        "config-effective-api",
+        "config-module-yaml",
+        "config-routes-startup",
+        "config-runtime-env",
+        "core",
+        "utils-http",
+    }
     assert shard_paths["authnz-unit"] == {"tldw_Server_API/tests/AuthNZ_Unit"}
-    assert shard_paths["config"] == {"tldw_Server_API/tests/Config"}
     assert shard_paths["utils-http"] == {
         "tldw_Server_API/tests/Utils",
         "tldw_Server_API/tests/http_client",
+    }
+    config_shards = {name for name in shard_paths if name.startswith("config-")}
+    config_paths = [path for name in config_shards for path in shard_paths[name]]
+    expected_config_paths = {
+        str(path)
+        for path in Path("tldw_Server_API/tests/Config").glob("test_*.py")
+    }
+    assert len(config_paths) == len(set(config_paths))
+    assert set(config_paths) == expected_config_paths
+    assert "tldw_Server_API/tests/Config" not in config_paths
+    assert shard_paths["config-effective-api"] == {
+        "tldw_Server_API/tests/Config/test_effective_config_api.py"
+    }
+    assert shard_paths["config-module-yaml"] == {
+        "tldw_Server_API/tests/Config/test_module_yaml_integration.py"
     }
     assert {
         "tldw_Server_API/tests/test_*.py",
