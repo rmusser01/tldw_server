@@ -419,6 +419,8 @@ Likely tests:
 **Pre-implementation gate:**
 - Verify whether a public notes-folder list/create endpoint exists. If not, split this into PR 7A workspace picker and PR 7B notes-folder API plus picker.
 
+**Decision:** Split PR 7. PR 7A implements the workspace destination picker because `GET /api/v1/workspaces` exists and the frontend workspace client only needed a list method. Notes folders are still exposed to the Web Clipper service through `note_folders`/`note_folder_memberships`, but no public `/api/v1/notes/folders` list/create endpoint was found; keep the folder raw-ID fallback for now and handle folder API plus picker in PR 7B.
+
 **Test plan:**
 - Component test: workspace picker loads, selects, and submits a workspace ID.
 - Component test: invalid/missing required destination blocks save with accessible error text.
@@ -427,14 +429,16 @@ Likely tests:
 - Browser check: capture panel destination selection.
 
 **Implementation steps:**
-- [ ] Create or update the Backlog subtask for PR 7.
-- [ ] Verify destination APIs and record the split/no-split decision.
-- [ ] Add failing picker tests for available destination type.
-- [ ] Implement picker UI and payload mapping.
-- [ ] Preserve or remove raw ID tests according to the approved UI.
-- [ ] Run focused tests and browser check.
-- [ ] Run Bandit if backend folder API is added.
-- [ ] Update Backlog notes with verification.
+- [x] Create or update the Backlog subtask for PR 7.
+- [x] Verify destination APIs and record the split/no-split decision.
+- [x] Add failing picker tests for available destination type.
+- [x] Implement picker UI and payload mapping.
+- [x] Preserve or remove raw ID tests according to the approved UI.
+- [x] Run focused tests and assess browser check feasibility.
+- [x] Run Bandit if backend folder API is added.
+- [x] Update Backlog notes with verification.
+
+**Verification notes:** Focused frontend tests passed for `tldw-api-client.workspace-api.test.ts`, `WebClipperPanel.save-flow.test.tsx`, and `sidepanel-clipper.test.tsx` with 31 tests total. Browser verification is marked needs-verification for PR 7A because the changed surface is the browser-extension sidepanel/Web Clipper component rather than a routable `/notes` WebUI page in this worktree. No Python files were touched, so Bandit was not applicable.
 
 ---
 

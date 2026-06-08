@@ -77,6 +77,42 @@ describe("workspace API domain contract", () => {
     vi.clearAllMocks()
   })
 
+  it("lists workspaces for destination pickers", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      items: [
+        {
+          id: "workspace-alpha",
+          name: "Research Workspace",
+          archived: false,
+          study_materials_policy: "workspace",
+          deleted: false,
+          banner_title: "Research Workspace",
+          banner_subtitle: null,
+          banner_color: null,
+          audio_provider: null,
+          audio_model: null,
+          audio_voice: null,
+          audio_speed: null,
+          created_at: "2026-05-06T12:00:00Z",
+          last_modified: "2026-05-06T12:00:00Z",
+          version: 1
+        }
+      ],
+      total: 1
+    })
+
+    const response = await workspaceApiMethods.listWorkspaces()
+
+    expect(response.items).toHaveLength(1)
+    expect(response.items[0]?.id).toBe("workspace-alpha")
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/workspaces",
+        method: "GET"
+      })
+    )
+  })
+
   it("uses the existing workspace endpoint for workspace upserts", async () => {
     mocks.bgRequest.mockResolvedValue({
       id: "ws-1",

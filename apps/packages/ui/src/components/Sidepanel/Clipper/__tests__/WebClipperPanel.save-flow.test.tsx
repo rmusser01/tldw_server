@@ -451,6 +451,42 @@ describe("WebClipperPanel save flow", () => {
     expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
   })
 
+  it("loads workspace choices and submits the selected workspace id", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces.mockResolvedValueOnce({
+      items: [
+        {
+          id: "workspace-alpha",
+          name: "Research Workspace",
+          archived: false,
+          deleted: false
+        }
+      ],
+      total: 1
+    })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    await waitFor(() => {
+      expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(1)
+    })
+    const workspaceSelect = await screen.findByRole("combobox", { name: "Workspace" })
+    await user.selectOptions(workspaceSelect, "workspace-alpha")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination_mode: "workspace",
+        workspace: { workspace_id: "workspace-alpha" }
+      })
+    )
+  })
+
   it.each([
     ["saved", "Clip saved"],
     ["saved_with_warnings", "Clip saved with warnings"],
