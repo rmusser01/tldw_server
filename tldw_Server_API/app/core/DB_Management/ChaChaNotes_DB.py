@@ -15802,15 +15802,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 return None
             try:
                 parsed = json.loads(stripped)
-            except (json.JSONDecodeError, ValueError):
-                return None
-            return stripped if isinstance(parsed, Mapping) else None
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise InputError("assistant_defaults_json must be valid JSON when provided as a string.") from exc
+            if not isinstance(parsed, Mapping):
+                raise InputError("assistant_defaults_json must be a JSON object or null.")  # noqa: TRY003
+            return stripped
         if not isinstance(value, Mapping):
-            return None
+            raise InputError("assistant_defaults_json must be a mapping, JSON object string, or null.")  # noqa: TRY003
         try:
             return json.dumps(dict(value), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-        except (TypeError, ValueError):
-            return None
+        except (TypeError, ValueError) as exc:
+            raise InputError("assistant_defaults_json must be JSON serializable.") from exc
 
     @classmethod
     def _load_workspace_assistant_defaults_json(cls, value: Any) -> dict[str, Any] | None:
@@ -15824,8 +15826,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             parsed = json.loads(value)
         except (json.JSONDecodeError, ValueError):
+            logger.warning("Ignoring malformed workspace assistant_defaults_json stored in the database.")
             return None
-        return dict(parsed) if isinstance(parsed, Mapping) else None
+        if not isinstance(parsed, Mapping):
+            logger.warning("Ignoring non-object workspace assistant_defaults_json stored in the database.")
+            return None
+        return dict(parsed)
 
     @classmethod
     def _workspace_row_to_dict(cls, row: Any) -> dict[str, Any]:
@@ -15960,15 +15966,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
         now = self._get_current_utc_timestamp_iso()
-        set_clauses = ["last_modified = ?", "version = ?"]
-        params: list[Any] = [now, expected_version + 1]
-
-        for col in (
+        workspace_update_columns = (
             "name", "description", "metadata_json", "study_materials_policy", "workspace_profile", "archived", "tag",
             "banner_title", "banner_subtitle", "banner_color",
             "audio_provider", "audio_model", "audio_voice", "audio_speed",
             "assistant_defaults_json",
-        ):
+        )
+        if not any(col in update_data for col in workspace_update_columns):
+            raise InputError("No recognized workspace fields to update.")  # noqa: TRY003
+
+        set_clauses = ["last_modified = ?", "version = ?"]
+        params: list[Any] = [now, expected_version + 1]
+
+        for col in workspace_update_columns:
             if col in update_data:
                 set_clauses.append(f"{col} = ?")
                 if col == "workspace_profile":
