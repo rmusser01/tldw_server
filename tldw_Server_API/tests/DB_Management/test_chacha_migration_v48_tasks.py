@@ -25,7 +25,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
             conn.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - test-only fixed table list
         conn.execute(
             "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (CharactersRAGDB._CURRENT_SCHEMA_VERSION - 1, CharactersRAGDB._SCHEMA_NAME),
+            (47, CharactersRAGDB._SCHEMA_NAME),
         )
         conn.commit()
 
@@ -34,12 +34,16 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
 
     with sqlite3.connect(db_path) as conn:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        note_tasks_sql = conn.execute(
+        final_version = conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0]
+        note_tasks_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'note_tasks'"
-        ).fetchone()[0]
-        projection_sql = conn.execute(
+        ).fetchone()
+        projection_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_note_projections'"
-        ).fetchone()[0]
+        ).fetchone()
     assert {  # nosec B101
         "note_tasks",
         "task_events",
@@ -48,5 +52,10 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
         "note_task_reconciliation_state",
     } <= tables
     assert "tasks" not in tables  # nosec B101
+    assert final_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101
+    assert note_tasks_row is not None  # nosec B101
+    assert projection_row is not None  # nosec B101
+    note_tasks_sql = note_tasks_row[0]
+    projection_sql = projection_row[0]
     assert "projection_status IN ('live','unlinked','ambiguous','deleted')" in note_tasks_sql  # nosec B101
     assert "projection_status IN ('live','unlinked','ambiguous','deleted')" in projection_sql  # nosec B101
