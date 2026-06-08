@@ -54,7 +54,7 @@ async def list_resource_workspace_memberships(
     resource_type: str,
     resource_id: str,
     include_deleted: bool = Query(default=False),
-    resolve: bool = Query(default=True),
+    resolve: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=1000),
     cursor: str | None = Query(default=None),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),

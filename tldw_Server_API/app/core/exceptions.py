@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -236,6 +237,42 @@ class StorageUnavailableError(StoragePathValidationError):
 
 class WorkspaceArtifactExportStateError(ValueError):
     """Raised when a workspace artifact version is not eligible for export."""
+
+
+class WorkspaceMembershipAdapterError(Exception):
+    """Fail-closed adapter error for Workspace cross-resource memberships."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 404,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = dict(details or {})
+
+
+class WorkspaceMembershipServiceError(Exception):
+    """API-facing service error for Workspace cross-resource memberships."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 409,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = dict(details or {})
 
 
 class InvalidStorageUserIdError(StoragePathValidationError):

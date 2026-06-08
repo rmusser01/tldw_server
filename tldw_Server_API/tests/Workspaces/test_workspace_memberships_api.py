@@ -300,6 +300,17 @@ def test_workspace_list_filters_and_resolve_false(client: TestClient, db: FakeMe
     assert body["summary"]["by_role"] == {"conversation": 1}
 
 
+def test_workspace_list_default_omits_resolved_summaries(client: TestClient) -> None:
+    client.post("/api/v1/workspaces/workspace-1/memberships", json=_membership_payload())
+
+    response = client.get("/api/v1/workspaces/workspace-1/memberships")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["summary"] is None
+
+
 def test_get_one_membership_and_missing_returns_stable_404(client: TestClient) -> None:
     client.post("/api/v1/workspaces/workspace-1/memberships", json=_membership_payload())
 
@@ -353,6 +364,17 @@ def test_reverse_resource_route_returns_resource_memberships(client: TestClient)
     assert body["total"] == 2
     assert {item["workspace_id"] for item in body["items"]} == {"workspace-1", "workspace-2"}
     assert all(item["summary"] is None for item in body["items"])
+
+
+def test_reverse_resource_route_default_omits_resolved_summaries(client: TestClient) -> None:
+    client.post("/api/v1/workspaces/workspace-1/memberships", json=_membership_payload())
+
+    response = client.get("/api/v1/workspace-memberships/resources/chat/chat-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["summary"] is None
 
 
 def test_unsupported_resource_type_returns_stable_400_code(client: TestClient) -> None:

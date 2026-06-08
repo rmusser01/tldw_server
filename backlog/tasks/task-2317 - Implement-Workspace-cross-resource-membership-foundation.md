@@ -17,11 +17,14 @@ documentation:
 - Docs/superpowers/plans/2026-06-07-workspace-cross-resource-membership-implementation-plan.md
 modified_files:
 - tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py
 - tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+- tldw_Server_API/tests/DB_Management/test_pg_rls_policies_contract.py
 - tldw_Server_API/app/core/Workspaces/membership_models.py
 - tldw_Server_API/app/api/v1/schemas/workspace_schemas.py
 - tldw_Server_API/app/core/Workspaces/membership_adapters.py
 - tldw_Server_API/app/core/Workspaces/membership_service.py
+- tldw_Server_API/app/core/exceptions.py
 - tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py
 - tldw_Server_API/app/api/v1/endpoints/workspaces.py
 - tldw_Server_API/app/api/v1/endpoints/workspace_memberships.py
@@ -166,17 +169,7 @@ Task 5 reviews after follow-up:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first server-backed Workspace cross-resource membership foundation under the design in TASK-2315 and remediated the pre-merge review feedback on PR #2312. The PR branch was rebased onto current origin/dev, removing the stale Knowledge QA/RAG trust files from the comparison. The implementation task was renumbered from the colliding TASK-2316 to TASK-2317 so dev's existing PR #2309 task remains canonical.
-
-Review remediation added shared strict membership JSON normalization in `membership_models.py` and routed membership provenance/metadata validation through it from API schemas, WorkspaceMembershipService, and ChaChaNotes DB writes. Direct service and DB callers now reject non-finite JSON values and 16 KiB-plus provenance/metadata before adapter validation or durable writes. Existing linked resources that later become deleted/trash/archived now summarize truthfully through deleted-inclusive adapter summary reads while `validate_access` remains active-record-only and fail-closed for new links.
-
-Final verification on 2026-06-07:
-- Focused regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py -q` passed with `96 passed, 6 warnings`.
-- Broader Workspace regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py -q` passed with `412 passed, 8 warnings`.
-- Bandit touched Python paths: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Workspaces/membership_models.py tldw_Server_API/app/core/Workspaces/membership_adapters.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/endpoints/workspace_memberships.py -f json -o /tmp/bandit_workspace_membership_pr_review.json` exited 0 with `results: 0`.
-- `git diff --check` passed.
-
-Known skips/blockers: none in the exercised Workspace membership scope.
+Implemented PR #2312 review remediation after confirming the branch was already rebased onto current origin/dev (a9c0f9d228b481e7ed2e871aa466bd6aa18d378f). Changes moved Workspace membership service/adapter errors into core.exceptions, added docstrings for membership cursor/model helpers, changed list endpoints to default resolve=false while leaving create/get resolved, made workspace context membership summaries use a DB aggregate instead of paged row scans, made backfill fail fast for archived workspaces before candidate collection, made cursor tuple handling fail closed for unsupported cursor objects and malformed cursor parts, redacted malformed membership JSON logs, made chat membership deleted predicates backend-aware, added best-effort unlink hook handling after soft-delete, and added ChaCha Postgres RLS coverage/policy for workspace_resource_memberships. Verification on 2026-06-07: focused suite passed with 137 passed, 6 warnings; broader Workspace/DB/RLS suite passed with 434 passed, 8 warnings; git diff --check passed; Bandit touched Python scope exited 0 with results length 0 in /tmp/bandit_workspace_membership_pr2312_review2.json. Known blockers: none in the exercised Workspace membership scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,3 +1,4 @@
+"""Shared models and validation helpers for Workspace resource memberships."""
 from __future__ import annotations
 
 import base64
@@ -40,6 +41,8 @@ _RESOURCE_MEMBERSHIP_CURSOR_KEYS = frozenset({"v", "updated_at", "workspace_id"}
 
 @dataclass(frozen=True)
 class WorkspaceMembershipCursor:
+    """Opaque pagination cursor for memberships listed within one Workspace."""
+
     updated_at: str
     resource_type: str
     resource_id: str
@@ -47,12 +50,16 @@ class WorkspaceMembershipCursor:
 
 @dataclass(frozen=True)
 class WorkspaceResourceMembershipCursor:
+    """Opaque pagination cursor for reverse resource-to-Workspace membership lists."""
+
     updated_at: str
     workspace_id: str
 
 
 @dataclass(frozen=True)
 class WorkspaceResourceRef:
+    """Canonical resource reference and compact display summary returned by adapters."""
+
     resource_type: str
     resource_id: str
     title: str | None = None
@@ -64,6 +71,7 @@ class WorkspaceResourceRef:
 
 
 def encode_membership_cursor(cursor: WorkspaceMembershipCursor) -> str:
+    """Encode a Workspace membership page cursor as URL-safe opaque text."""
     if cursor.resource_type not in WORKSPACE_MEMBERSHIP_RESOURCE_TYPES:
         raise ValueError("Workspace membership cursor resource_type is invalid.")
     _require_non_empty_string(cursor.updated_at, "updated_at")
@@ -79,6 +87,7 @@ def encode_membership_cursor(cursor: WorkspaceMembershipCursor) -> str:
 
 
 def decode_membership_cursor(value: str) -> WorkspaceMembershipCursor:
+    """Decode and validate an opaque Workspace membership page cursor."""
     payload = _decode_cursor_payload(value)
     if set(payload) != _MEMBERSHIP_CURSOR_KEYS or not _cursor_version_is_valid(payload.get("v")):
         raise ValueError("Workspace membership cursor is invalid.")
@@ -96,6 +105,7 @@ def decode_membership_cursor(value: str) -> WorkspaceMembershipCursor:
 
 
 def encode_resource_membership_cursor(cursor: WorkspaceResourceMembershipCursor) -> str:
+    """Encode a reverse resource membership page cursor as URL-safe opaque text."""
     _require_non_empty_string(cursor.updated_at, "updated_at")
     _require_non_empty_string(cursor.workspace_id, "workspace_id")
     return _encode_cursor_payload(
@@ -108,6 +118,7 @@ def encode_resource_membership_cursor(cursor: WorkspaceResourceMembershipCursor)
 
 
 def decode_resource_membership_cursor(value: str) -> WorkspaceResourceMembershipCursor:
+    """Decode and validate an opaque reverse resource membership page cursor."""
     payload = _decode_cursor_payload(value)
     if set(payload) != _RESOURCE_MEMBERSHIP_CURSOR_KEYS or not _cursor_version_is_valid(payload.get("v")):
         raise ValueError("Workspace resource membership cursor is invalid.")

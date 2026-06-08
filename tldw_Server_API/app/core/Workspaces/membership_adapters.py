@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.Workspaces.membership_models import WorkspaceResourceRef
+from tldw_Server_API.app.core.exceptions import WorkspaceMembershipAdapterError
 
 
 @dataclass(frozen=True)
@@ -19,24 +20,6 @@ class WorkspaceMembershipContext:
     chacha_db: Any
     media_db: Any | None = None
     request_metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-class WorkspaceMembershipAdapterError(Exception):
-    """Fail-closed adapter error that the service maps onto API-facing errors."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        status_code: int = 404,
-        details: Mapping[str, Any] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-        self.details = dict(details or {})
 
 
 class WorkspaceMembershipAdapter(Protocol):

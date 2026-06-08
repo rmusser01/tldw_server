@@ -375,6 +375,34 @@ def test_list_resource_workspace_memberships_returns_limit_plus_one_for_paginati
     assert [row["workspace_id"] for row in rows] == ["ws-1", "ws-2", "ws-3"]
 
 
+def test_workspace_resource_membership_summary_counts_active_rows(db):
+    db.add_workspace_resource_membership(
+        "ws-1",
+        {"resource_type": "media", "resource_id": "42", "role": "source"},
+    )
+    db.add_workspace_resource_membership(
+        "ws-1",
+        {"resource_type": "chat", "resource_id": "chat-1", "role": "conversation"},
+    )
+    db.add_workspace_resource_membership(
+        "ws-1",
+        {"resource_type": "media", "resource_id": "99", "role": "source"},
+    )
+    db.add_workspace_resource_membership(
+        "ws-2",
+        {"resource_type": "media", "resource_id": "42", "role": "source"},
+    )
+    db.delete_workspace_resource_membership("ws-1", "media", "99")
+
+    summary = db.workspace_resource_membership_summary("ws-1")
+
+    assert summary == {
+        "total": 2,
+        "by_resource_type": {"chat": 1, "media": 1},
+        "by_role": {"conversation": 1, "source": 1},
+    }
+
+
 def test_delete_workspace_preserves_membership_history(db):
     created = db.add_workspace_resource_membership(
         "ws-1",
@@ -610,3 +638,52 @@ def test_get_conversation_for_workspace_membership_returns_workspace_conversatio
     assert row["workspace_id"] == "ws-1"
     assert row["last_modified"] is not None
     assert row["version"] == 1
+
+
+class _SingleRowCursor:
+    def __init__(self, row: dict[str, object] | None = None) -> None:
+        self.row = row
+
+    def fetchone(self) -> dict[str, object] | None:
+        return self.row
+
+
+def test_get_conversation_for_workspace_membership_uses_backend_active_deleted_value(db, monkeypatch):
+    captured: list[tuple[str, tuple[object, ...]]] = []
+
+    def fake_execute(query: str, params: tuple[object, ...], *, commit: bool = False):
+        assert commit is False
+        captured.append((query, params))
+        return _SingleRowCursor()
+
+    monkeypatch.setattr(db, "_workspace_active_deleted_value", lambda: "ACTIVE")
+    monkeypatch.setattr(db, "execute_query", fake_execute)
+
+    assert db.get_conversation_for_workspace_membership("chat-1") is None
+
+    assert captured
+    query, params = captured[0]
+    assert "deleted = ?" in query
+    assert params == ("chat-1", "ACTIVE")
+
+
+def test_malformed_workspace_membership_json_warning_redacts_payload(db, monkeypatch):
+    captured: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def fake_warning(message: str, *args: object, **kwargs: object) -> None:
+        captured.append((message, args, kwargs))
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.logger.warning",
+        fake_warning,
+    )
+    secret_payload = '{"api_key": "sk-secret", "path": "/tmp/private"'
+
+    loaded = db._load_workspace_membership_json_object(secret_payload, field_name="metadata_json")
+
+    assert loaded == {}
+    assert captured
+    rendered = repr(captured)
+    assert "sk-secret" not in rendered
+    assert "/tmp/private" not in rendered
+    assert captured[0][1] == ("metadata_json", len(secret_payload))

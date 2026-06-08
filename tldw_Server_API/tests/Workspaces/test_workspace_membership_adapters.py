@@ -368,6 +368,8 @@ class FakeChaChaDB:
         self.memberships: dict[tuple[str, str, str], dict[str, object]] = {}
         self.last_add_data: dict[str, object] | None = None
         self.last_list_resource_key: tuple[str, str] | None = None
+        self.list_workspace_calls = 0
+        self.summary_calls = 0
         self._clock = 0
 
     def _timestamp(self) -> str:
@@ -482,6 +484,7 @@ class FakeChaChaDB:
         limit: int = 100,
         cursor: tuple[str, str, str] | None = None,
     ) -> list[dict[str, object]]:
+        self.list_workspace_calls += 1
         rows = [
             row
             for (row_workspace_id, _, _), row in self.memberships.items()
@@ -495,6 +498,24 @@ class FakeChaChaDB:
             reverse=True,
         )
         return [dict(row) for row in rows[:limit]]
+
+    def workspace_resource_membership_summary(self, workspace_id: str) -> dict[str, object]:
+        self.summary_calls += 1
+        rows = [
+            row
+            for (row_workspace_id, _, _), row in self.memberships.items()
+            if row_workspace_id == workspace_id and not row.get("deleted")
+        ]
+        by_resource_type: dict[str, int] = {}
+        by_role: dict[str, int] = {}
+        for row in rows:
+            by_resource_type[str(row["resource_type"])] = by_resource_type.get(str(row["resource_type"]), 0) + 1
+            by_role[str(row["role"])] = by_role.get(str(row["role"]), 0) + 1
+        return {
+            "total": len(rows),
+            "by_resource_type": dict(sorted(by_resource_type.items())),
+            "by_role": dict(sorted(by_role.items())),
+        }
 
     def list_resource_workspace_memberships(
         self,
@@ -762,6 +783,34 @@ def test_list_workspace_memberships_resolve_false_omits_adapter_summary() -> Non
     assert payload["workspace_id"] == "workspace-1"
     assert payload["items"][0]["summary"] is None
     assert payload["summary"]["by_resource_type"] == {"media": 1}
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [123, object(), ("only-updated-at", "media"), ("", "media", "42"), ("2026-06-07T12:00:00Z", "media", 42)],
+)
+def test_list_workspace_memberships_rejects_invalid_cursor_types(cursor: object) -> None:
+    service = WorkspaceMembershipService(FakeChaChaDB())
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.list_workspace_memberships("workspace-1", cursor=cursor)
+
+    assert exc_info.value.code == "invalid_cursor"
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [123, object(), ("only-updated-at",), ("", "workspace-1"), ("2026-06-07T12:00:00Z", 7)],
+)
+def test_list_resource_memberships_rejects_invalid_cursor_types(cursor: object) -> None:
+    service = WorkspaceMembershipService(FakeChaChaDB(), adapters={"media": RecordingAdapter()})
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.list_resource_memberships("media", "42", cursor=cursor, media_db=object())
+
+    assert exc_info.value.code == "invalid_cursor"
+    assert exc_info.value.status_code == 400
 
 
 class FailingSummaryAdapter:
@@ -1050,7 +1099,24 @@ def test_unlink_membership_noops_without_adapter_hook_for_missing_or_deleted_mem
     assert adapter.unlinked == []
 
 
-def test_workspace_membership_summary_returns_active_compact_totals() -> None:
+class FailingUnlinkAdapter(RecordingAdapter):
+    def on_unlink(self, membership: dict[str, object], context: WorkspaceMembershipContext) -> None:
+        raise RuntimeError("external cleanup failed")
+
+
+def test_unlink_membership_returns_deleted_row_when_adapter_hook_fails() -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "42")] = _membership_row()
+    service = WorkspaceMembershipService(db, adapters={"media": FailingUnlinkAdapter()})
+
+    payload = service.unlink_membership("workspace-1", "media", "0042", user_id="user-1", media_db=object())
+
+    assert payload is not None
+    assert payload["deleted"] is True
+    assert db.memberships[("workspace-1", "media", "42")]["deleted"] is True
+
+
+def test_workspace_membership_summary_uses_db_aggregate_for_active_compact_totals() -> None:
     db = FakeChaChaDB()
     db.memberships[("workspace-1", "media", "42")] = _membership_row(role="source")
     db.memberships[("workspace-1", "chat", "chat-1")] = _membership_row(
@@ -1068,3 +1134,5 @@ def test_workspace_membership_summary_returns_active_compact_totals() -> None:
         "by_resource_type": {"chat": 1, "media": 1},
         "by_role": {"conversation": 1, "source": 1},
     }
+    assert db.summary_calls == 1
+    assert db.list_workspace_calls == 0

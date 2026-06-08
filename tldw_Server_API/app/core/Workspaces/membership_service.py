@@ -5,9 +5,10 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.Workspaces.membership_adapters import (
     WorkspaceMembershipAdapter,
-    WorkspaceMembershipAdapterError,
     WorkspaceMembershipContext,
     default_workspace_membership_adapters,
     get_workspace_membership_adapter,
@@ -26,29 +27,15 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
     encode_resource_membership_cursor,
     normalize_membership_json_object,
 )
+from tldw_Server_API.app.core.exceptions import (
+    WorkspaceMembershipAdapterError,
+    WorkspaceMembershipServiceError,
+)
 
 
 _SUMMARY_UNAVAILABLE_MESSAGE = "Workspace resource summary is unavailable."
 _BACKFILL_ERROR_LIMIT = 25
 _BACKFILL_SAFE_ERROR_MESSAGE = "Workspace membership backfill could not link this resource."
-
-
-class WorkspaceMembershipServiceError(Exception):
-    """Service-level Workspace membership error."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        status_code: int = 409,
-        details: Mapping[str, Any] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-        self.details = dict(details or {})
 
 
 class WorkspaceMembershipService:
@@ -266,33 +253,26 @@ class WorkspaceMembershipService:
         )
         if row is None:
             return None
-        adapter.on_unlink(row, context)
+        try:
+            adapter.on_unlink(row, context)
+        except Exception:  # noqa: BLE001 - unlink hooks are post-delete best-effort cleanup.
+            logger.opt(exception=True).warning(
+                "Workspace membership unlink hook failed for workspace={} resource_type={} resource_id={}",
+                workspace_id,
+                adapter.resource_type,
+                canonical_resource_id,
+            )
         return self._serialize_membership(row, context=context, resolve=False)
 
     def workspace_membership_summary(self, workspace_id: str) -> dict[str, Any]:
         """Return compact active membership totals for Workspace context."""
         self._require_workspace(workspace_id)
-        rows: list[Mapping[str, Any]] = []
-        cursor: tuple[str, str, str] | None = None
-        page_size = 1000
-        while True:
-            page = self.chacha_db.list_workspace_resource_memberships(
-                workspace_id,
-                include_deleted=False,
-                limit=page_size,
-                cursor=cursor,
-            )
-            active_page = page[:page_size]
-            rows.extend(active_page)
-            if len(page) <= page_size or not active_page:
-                break
-            last = active_page[-1]
-            cursor = (
-                str(last.get("updated_at") or ""),
-                str(last.get("resource_type") or ""),
-                str(last.get("resource_id") or ""),
-            )
-        return self._summary_from_rows(rows)
+        summary = self.chacha_db.workspace_resource_membership_summary(workspace_id)
+        return {
+            "total": int(summary.get("total") or 0),
+            "by_resource_type": dict(summary.get("by_resource_type") or {}),
+            "by_role": dict(summary.get("by_role") or {}),
+        }
 
     def backfill_workspace_memberships(
         self,
@@ -302,7 +282,8 @@ class WorkspaceMembershipService:
         media_db: Any | None = None,
     ) -> dict[str, Any]:
         """Explicitly link existing Workspace-scoped rows into generic memberships."""
-        self._require_workspace(workspace_id)
+        workspace = self._require_workspace(workspace_id)
+        self._require_writable_workspace(workspace)
         created = 0
         existing = 0
         restored = 0
@@ -848,9 +829,13 @@ class WorkspaceMembershipService:
                     status_code=400,
                 ) from exc
             return (decoded.updated_at, decoded.resource_type, decoded.resource_id)
-        if len(cursor) != 3:
+        if (
+            not isinstance(cursor, (tuple, list))
+            or len(cursor) != 3
+            or not all(isinstance(part, str) and part for part in cursor)
+        ):
             raise WorkspaceMembershipServiceError("invalid_cursor", "Workspace membership cursor is invalid.", status_code=400)
-        return cursor
+        return (cursor[0], cursor[1], cursor[2])
 
     @staticmethod
     def _resource_cursor_tuple(
@@ -870,9 +855,13 @@ class WorkspaceMembershipService:
                     status_code=400,
                 ) from exc
             return (decoded.updated_at, decoded.workspace_id)
-        if len(cursor) != 2:
+        if (
+            not isinstance(cursor, (tuple, list))
+            or len(cursor) != 2
+            or not all(isinstance(part, str) and part for part in cursor)
+        ):
             raise WorkspaceMembershipServiceError("invalid_cursor", "Workspace resource membership cursor is invalid.", status_code=400)
-        return cursor
+        return (cursor[0], cursor[1])
 
     @staticmethod
     def _trim_workspace_page(rows: list[Mapping[str, Any]], limit: int) -> tuple[list[Mapping[str, Any]], str | None]:

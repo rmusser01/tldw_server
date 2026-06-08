@@ -13,7 +13,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.core.Workspaces import membership_adapters
-from tldw_Server_API.app.core.Workspaces.membership_service import WorkspaceMembershipService
+from tldw_Server_API.app.core.Workspaces.membership_service import (
+    WorkspaceMembershipService,
+    WorkspaceMembershipServiceError,
+)
 
 
 class BackfillFakeDB:
@@ -60,6 +63,7 @@ class BackfillFakeDB:
             }
         ]
         self.memberships: dict[tuple[str, str, str], dict[str, object]] = {}
+        self.backfill_list_calls = 0
         self._clock = 0
 
     def _timestamp(self) -> str:
@@ -70,6 +74,7 @@ class BackfillFakeDB:
         return self.workspaces.get(workspace_id)
 
     def list_workspace_sources(self, workspace_id: str) -> list[dict[str, object]]:
+        self.backfill_list_calls += 1
         return [dict(row) for row in self.sources if row["workspace_id"] == workspace_id]
 
     def get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, object] | None:
@@ -83,6 +88,7 @@ class BackfillFakeDB:
         )
 
     def list_workspace_artifacts(self, workspace_id: str) -> list[dict[str, object]]:
+        self.backfill_list_calls += 1
         return [dict(row) for row in self.artifacts if row["workspace_id"] == workspace_id]
 
     def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, object] | None:
@@ -96,6 +102,7 @@ class BackfillFakeDB:
         )
 
     def list_workspace_notes(self, workspace_id: str) -> list[dict[str, object]]:
+        self.backfill_list_calls += 1
         return [dict(row) for row in self.notes if row["workspace_id"] == workspace_id and not row.get("deleted")]
 
     def get_workspace_note(self, workspace_id: str, note_id: int) -> dict[str, object] | None:
@@ -116,6 +123,7 @@ class BackfillFakeDB:
         workspace_id: str | None = None,
     ) -> list[dict[str, object]]:
         assert query is None
+        self.backfill_list_calls += 1
         return [
             dict(row)
             for row in self.conversations
@@ -220,6 +228,23 @@ class BackfillFakeDB:
             reverse=True,
         )
         return [dict(row) for row in rows[:limit]]
+
+    def workspace_resource_membership_summary(self, workspace_id: str) -> dict[str, object]:
+        rows = [
+            row
+            for (row_workspace_id, _, _), row in self.memberships.items()
+            if row_workspace_id == workspace_id and not row.get("deleted")
+        ]
+        by_resource_type: dict[str, int] = {}
+        by_role: dict[str, int] = {}
+        for row in rows:
+            by_resource_type[str(row["resource_type"])] = by_resource_type.get(str(row["resource_type"]), 0) + 1
+            by_role[str(row["role"])] = by_role.get(str(row["role"]), 0) + 1
+        return {
+            "total": len(rows),
+            "by_resource_type": dict(sorted(by_resource_type.items())),
+            "by_role": dict(sorted(by_role.items())),
+        }
 
 
 class ContextFakeDB(BackfillFakeDB):
@@ -375,6 +400,19 @@ def test_backfill_restores_soft_deleted_membership_without_reporting_created(med
     restored = db.memberships[("workspace-1", "workspace_source", "source-1")]
     assert restored["deleted"] is False
     assert restored["version"] == 3
+
+
+def test_backfill_rejects_archived_workspace_before_listing_rows(media_db: object) -> None:
+    db = BackfillFakeDB()
+    db.workspaces["workspace-1"] = {**db.workspaces["workspace-1"], "archived": True}
+    service = WorkspaceMembershipService(db)
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.backfill_workspace_memberships("workspace-1", user_id="user-1", media_db=media_db)
+
+    assert exc_info.value.code == "workspace_archived"
+    assert db.backfill_list_calls == 0
+    assert db.memberships == {}
 
 
 def test_backfill_reports_bounded_unresolved_rows_without_rewriting_resources(media_db: object) -> None:

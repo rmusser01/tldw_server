@@ -18266,12 +18266,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             try:
                 parsed = json.loads(value)
             except json.JSONDecodeError:
-                preview = value[:120].replace("\n", "\\n")
                 logger.warning(
-                    "Failed to decode workspace resource membership JSON field {} ({} chars): {}",
+                    "Failed to decode workspace resource membership JSON field {} ({} chars)",
                     field_name,
                     len(value),
-                    preview,
                 )
                 return {}
             return parsed if isinstance(parsed, dict) else {}
@@ -18723,6 +18721,75 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if (normalized := self._normalize_workspace_membership_row(row)) is not None
         ]
 
+    def workspace_resource_membership_summary(self, workspace_id: str) -> dict[str, Any]:
+        """Return compact active membership counts for one Workspace."""
+        normalized_workspace_id = self._normalize_workspace_membership_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        active_deleted_value = self._workspace_active_deleted_value()
+
+        def _row_value(row: Any, key: str, index: int, default: Any = 0) -> Any:
+            if row is None:
+                return default
+            try:
+                return row[key]
+            except (KeyError, IndexError, TypeError):
+                try:
+                    return row[index]
+                except (IndexError, TypeError):
+                    return default
+
+        try:
+            total_cursor = self.execute_query(
+                """
+                SELECT COUNT(*) AS total
+                  FROM workspace_resource_memberships
+                 WHERE workspace_id = ? AND deleted = ?
+                """,
+                (normalized_workspace_id, active_deleted_value),
+            )
+            total_row = total_cursor.fetchone()
+            resource_cursor = self.execute_query(
+                """
+                SELECT resource_type, COUNT(*) AS count
+                  FROM workspace_resource_memberships
+                 WHERE workspace_id = ? AND deleted = ?
+                 GROUP BY resource_type
+                 ORDER BY resource_type ASC
+                """,
+                (normalized_workspace_id, active_deleted_value),
+            )
+            role_cursor = self.execute_query(
+                """
+                SELECT role, COUNT(*) AS count
+                  FROM workspace_resource_memberships
+                 WHERE workspace_id = ? AND deleted = ?
+                 GROUP BY role
+                 ORDER BY role ASC
+                """,
+                (normalized_workspace_id, active_deleted_value),
+            )
+            by_resource_type = {
+                str(_row_value(row, "resource_type", 0)): int(_row_value(row, "count", 1))
+                for row in resource_cursor.fetchall()
+                if _row_value(row, "resource_type", 0, None) is not None
+            }
+            by_role = {
+                str(_row_value(row, "role", 0)): int(_row_value(row, "count", 1))
+                for row in role_cursor.fetchall()
+                if _row_value(row, "role", 0, None) is not None
+            }
+            return {
+                "total": int(_row_value(total_row, "total", 0)),
+                "by_resource_type": by_resource_type,
+                "by_role": by_role,
+            }
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(
+                f"Failed summarizing workspace resource memberships: {exc}"
+            ) from exc  # noqa: TRY003
+
     def delete_workspace_resource_membership(
         self,
         workspace_id: str,
@@ -18819,11 +18886,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_id,
             "conversation_id",
         )
-        deleted_clause = "" if include_deleted else " AND deleted = 0"
+        deleted_clause = ""
+        params: list[Any] = [normalized_conversation_id]
+        if not include_deleted:
+            deleted_clause = " AND deleted = ?"
+            params.append(self._workspace_active_deleted_value())
         cursor = self.execute_query(
             "SELECT id, title, workspace_id, scope_type, last_modified, deleted, version "
             f"FROM conversations WHERE id = ?{deleted_clause}",  # nosec B608
-            (normalized_conversation_id,),
+            tuple(params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
