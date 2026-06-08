@@ -54,9 +54,11 @@ export const buildScheduledTaskSearch = ({
   taskId?: string | null
 }): string => {
   const params = new URLSearchParams()
+  const normalizedTemplateId = normalizeNullableParam(templateId ?? null)
+  const normalizedTaskId = normalizeNullableParam(taskId ?? null)
   if (tab !== "overview") params.set("tab", tab)
-  if (templateId && tab === "create") params.set("template", templateId)
-  if (taskId && tab === "tasks") params.set("task_id", taskId)
+  if (normalizedTemplateId && tab === "create") params.set("template", normalizedTemplateId)
+  if (normalizedTaskId && tab === "tasks") params.set("task_id", normalizedTaskId)
   const serialized = params.toString()
   return serialized ? `?${serialized}` : ""
 }

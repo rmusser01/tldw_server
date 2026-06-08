@@ -35,10 +35,28 @@ describe("scheduled task route state", () => {
     ).toMatchObject({ tab: "tasks", taskId: "reminder_task:2" })
   })
 
+  it("normalizes whitespace-only parsed params to null", () => {
+    expect(
+      parseScheduledTaskRouteState(
+        new URLSearchParams("tab=%20%20&template=%20%20&task_id=%20%20")
+      )
+    ).toMatchObject({
+      tab: "overview",
+      invalidTab: null,
+      templateId: null,
+      taskId: null
+    })
+  })
+
   it("builds search strings without dropping existing valid state", () => {
     expect(buildScheduledTaskSearch({ tab: "tasks", taskId: "reminder_task:2" })).toBe(
       "?tab=tasks&task_id=reminder_task%3A2"
     )
+  })
+
+  it("omits whitespace-only template and task ids when building search strings", () => {
+    expect(buildScheduledTaskSearch({ tab: "create", templateId: "   " })).toBe("?tab=create")
+    expect(buildScheduledTaskSearch({ tab: "tasks", taskId: "   " })).toBe("?tab=tasks")
   })
 
   it("exposes exactly the Phase 2A tabs", () => {

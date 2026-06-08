@@ -47,6 +47,8 @@ Docs/superpowers/plans/2026-06-08-scheduled-tasks-automation-workbench-phase2a-c
 - Task 1: Added pure scheduled task route-state helpers for Phase 2A tabs, template IDs, task IDs, invalid tabs, and URL search serialization.
 - Task 1 verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-route-state.test.ts --maxWorkers=1 --no-file-parallelism` passed with 6 tests.
 - Bandit skip: Task 1 changed frontend TypeScript and Backlog tracking only; no backend Python files were touched.
+- Task 1 quality follow-up: Normalized caller-provided `templateId` and `taskId` before URL serialization so whitespace-only IDs are omitted instead of encoded.
+- Task 1 quality verification: `cd apps/packages/ui && bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-route-state.test.ts --maxWorkers=1 --no-file-parallelism` passed with 8 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
