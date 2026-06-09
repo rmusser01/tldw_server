@@ -775,6 +775,65 @@ async def test_filesystem_patch_rolls_back_previous_writes_on_partial_failure(
 
 
 @pytest.mark.asyncio
+async def test_filesystem_patch_preserves_original_error_when_rollback_raises_unexpected_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    first = docs_dir / "one.txt"
+    second = docs_dir / "two.txt"
+    first_original = "alpha\n"
+    second_original = "beta\n"
+    first.write_text(first_original, encoding="utf-8")
+    second.write_text(second_original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-patch-rollback-unexpected", user_id="1", metadata={})
+    original_atomic_write = FilesystemModule._atomic_write_text_file
+
+    def _fail_second_write_and_first_restore(target: Path, text: str) -> None:
+        if target.name == "two.txt":
+            raise OSError("simulated write failure")
+        if target.name == "one.txt" and text == first_original:
+            raise RuntimeError("simulated rollback failure")
+        original_atomic_write(target, text)
+
+    monkeypatch.setattr(
+        FilesystemModule,
+        "_atomic_write_text_file",
+        staticmethod(_fail_second_write_and_first_restore),
+    )
+
+    with pytest.raises(ValueError, match="partial_write_rollback_attempted"):
+        await mod.execute_tool(
+            "fs.patch",
+            {
+                "diff": """--- a/docs/one.txt
++++ b/docs/one.txt
+@@ -1 +1 @@
+-alpha
++ALPHA
+--- a/docs/two.txt
++++ b/docs/two.txt
+@@ -1 +1 @@
+-beta
++BETA
+""",
+                "expected_sha256_by_path": {
+                    "docs/one.txt": hashlib.sha256(first_original.encode("utf-8")).hexdigest(),
+                    "docs/two.txt": hashlib.sha256(second_original.encode("utf-8")).hexdigest(),
+                },
+            },
+            context=context,
+        )
+
+    assert first.read_text(encoding="utf-8") == "ALPHA\n"  # nosec B101
+    assert second.read_text(encoding="utf-8") == second_original  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"

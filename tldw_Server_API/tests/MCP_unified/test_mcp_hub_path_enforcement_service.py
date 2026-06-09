@@ -490,6 +490,33 @@ async def test_effective_permission_preview_denies_ungranted_reserved_file_polic
 
 
 @pytest.mark.asyncio
+async def test_effective_permission_preview_returns_ask_for_force_approval_scope_block() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    scope = _workspace_scope()
+    scope["workspace_id"] = "ws-1"
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(scope))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "selected_assignment_workspace_ids": ["ws-2"],
+            "policy_document": {"path_scope_mode": "workspace_root"},
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        action="read",
+        path="documents/story.md",
+    )
+
+    assert result["outcome"] == "ask"
+    assert result["reason_code"] == "workspace_not_allowed_but_trusted"
+    assert result.get("path_decisions", []) == []
+
+
+@pytest.mark.asyncio
 async def test_effective_permission_preview_does_not_guess_profile_for_ambiguous_sources() -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
@@ -581,7 +608,7 @@ async def test_path_grants_deny_overrides_broader_allow_grant() -> None:
 
     assert result["within_scope"] is False
     assert result["reason"] == "path_action_denied"
-    assert result["force_approval"] is True
+    assert result["force_approval"] is False
     assert result["path_decisions"] == [
         {
             "requested_action": "edit",

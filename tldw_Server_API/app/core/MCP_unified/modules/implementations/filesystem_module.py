@@ -1449,7 +1449,8 @@ class FilesystemModule(BaseModule):
                             self._atomic_write_text_file(target, str(plan["_text_before"]))
                         else:
                             target.unlink(missing_ok=True)
-                    except OSError:
+                    # Rollback is best effort; preserve the original write failure even if restore fails.
+                    except Exception:  # noqa: BLE001
                         logger.exception("Failed to roll back partial fs.patch write for {}", target.name)
                 raise ValueError("partial_write_rollback_attempted") from exc
 

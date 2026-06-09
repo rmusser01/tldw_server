@@ -159,7 +159,10 @@ def get_file_policy_action_metadata(action: object) -> FilePolicyActionMetadata:
     normalized = normalize_file_policy_action(action)
     if normalized is None:
         raise ValueError("unknown file policy action")
-    return _ACTION_METADATA[normalized]
+    metadata = _ACTION_METADATA.get(normalized)
+    if metadata is None:
+        raise ValueError(f"file policy action metadata is missing for {normalized!r}")
+    return metadata
 
 
 def format_file_policy_action_list(actions: frozenset[str] = FILE_POLICY_ACTIONS) -> str:

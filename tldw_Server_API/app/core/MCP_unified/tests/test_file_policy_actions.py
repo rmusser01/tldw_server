@@ -50,3 +50,14 @@ def test_file_policy_action_metadata_rejects_unknown_actions() -> None:
 
     with pytest.raises(ValueError, match="unknown file policy action"):
         get_file_policy_action_metadata("destroy")
+
+
+def test_file_policy_action_metadata_rejects_missing_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.interfaces import file_policy_actions
+
+    monkeypatch.delitem(file_policy_actions._ACTION_METADATA, "lock")
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        file_policy_actions.get_file_policy_action_metadata("lock")
