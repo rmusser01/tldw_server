@@ -57,6 +57,12 @@ const buildResults = () =>
         source_ref: { job_id: 43, latest_run_id: 103 }
       }),
       buildTask({
+        id: "watchlist_job:paused",
+        title: "Paused monitor",
+        status: "paused",
+        source_ref: { job_id: 45, latest_run_id: 105 }
+      }),
+      buildTask({
         id: "watchlist_job:completed",
         title: "Quiet monitor",
         status: "completed",
@@ -67,11 +73,11 @@ const buildResults = () =>
   )
 
 describe("ScheduledTaskResultsPanel", () => {
-  it("renders projected success, failure, running, and completed-no-results signals", () => {
+  it("renders projected success, failure, running, paused, and completed-no-results signals", () => {
     render(
       <ScheduledTaskResultsPanel
         results={buildResults()}
-        taskCount={4}
+        taskCount={5}
         capabilityMode="projected_signals"
         onCreateTask={vi.fn()}
         onOpenResult={vi.fn()}
@@ -86,6 +92,9 @@ describe("ScheduledTaskResultsPanel", () => {
     expect(screen.getByText("Needs attention")).toBeInTheDocument()
     expect(screen.getByText("Running monitor")).toBeInTheDocument()
     expect(screen.getByText("Running now")).toBeInTheDocument()
+    expect(screen.getByText("Paused monitor")).toBeInTheDocument()
+    expect(screen.getByText("Paused monitor is paused.")).toBeInTheDocument()
+    expect(screen.getByText("Paused")).toBeInTheDocument()
     expect(screen.getByText("Quiet monitor")).toBeInTheDocument()
     expect(screen.getByText("Completed/no results")).toBeInTheDocument()
     expect(screen.getAllByText("Watchlists").length).toBeGreaterThan(0)

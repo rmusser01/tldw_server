@@ -120,6 +120,25 @@ describe("scheduled task result helpers", () => {
     expect(result?.primaryHref).toBe("/scheduled-tasks?tab=results&run_id=77")
   })
 
+  it("projects paused tasks without running copy", () => {
+    const [result] = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:paused",
+        title: "Paused monitor",
+        status: "paused",
+        source_ref: { job_id: 9 }
+      })
+    ])
+
+    expect(result).toMatchObject({
+      signalKind: "running",
+      state: "paused",
+      severity: "warning",
+      summary: "Paused monitor is paused."
+    })
+    expect(buildScheduledTaskAutomationHomeItems([result])).toEqual([])
+  })
+
   it("keeps result and failure signals separate for failed tasks that produced output", () => {
     const results = projectScheduledTaskResults([
       buildTask({

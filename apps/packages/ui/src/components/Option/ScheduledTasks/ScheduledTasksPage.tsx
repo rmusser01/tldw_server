@@ -89,13 +89,20 @@ export const ScheduledTasksPage: React.FC = () => {
       runId?: string | null
       resultId?: string | null
     }) => {
+      const normalizedPath = location.pathname.replace(/\/+$/, "")
+      const onResultsAlias = normalizedPath.endsWith("/scheduled-tasks/results")
+      if (tab === "overview" && onResultsAlias) {
+        navigate("/scheduled-tasks")
+        return
+      }
+
       setSearchParams(
         new URLSearchParams(
           buildScheduledTaskSearch({ tab, templateId, taskId, runId, resultId })
         )
       )
     },
-    [setSearchParams]
+    [location.pathname, navigate, setSearchParams]
   )
 
   React.useEffect(() => {

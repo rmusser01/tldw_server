@@ -358,6 +358,10 @@ const buildResultSummary = (
     return sourceLabel ? `Found ${countText} from ${sourceLabel}.` : `Found ${countText}.`
   }
 
+  if (state === "paused") {
+    return `${task.title} is paused.`
+  }
+
   if (signalKind === "running") {
     return `${task.title} is running now.`
   }
@@ -383,6 +387,10 @@ const buildStatusLabel = (
 
   if (state === "blocked") {
     return "Blocked"
+  }
+
+  if (state === "paused") {
+    return "Paused"
   }
 
   if (signalKind === "failure") {

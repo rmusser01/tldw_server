@@ -57,8 +57,6 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 Implemented Scheduled Tasks Phase 3 Home surfacing. Home now includes a fixed Automation Inbox module that can show scheduled-task result and failure signals without Companion personalization, merge projected task signals with notification-derived signals, handle partial failures without blocking existing Home cards, and deep-link to exact Scheduled Tasks result/run/task targets.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -206,7 +206,7 @@ export const useScheduledTaskHomeSignals = ({
       const projectedItems =
         tasksResult.status === "fulfilled"
           ? buildScheduledTaskAutomationHomeItems(
-              projectScheduledTaskResults(tasksResult.value.items)
+              projectScheduledTaskResults(tasksResult.value?.items ?? [])
             )
           : []
       const notificationItems =
@@ -218,7 +218,7 @@ export const useScheduledTaskHomeSignals = ({
       const nextPartial =
         tasksResult.status === "rejected" ||
         notificationsResult.status === "rejected" ||
-        (tasksResult.status === "fulfilled" && tasksResult.value.partial)
+        (tasksResult.status === "fulfilled" && Boolean(tasksResult.value?.partial))
 
       let nextError: string | null = null
       if (tasksResult.status === "rejected") {
@@ -228,7 +228,7 @@ export const useScheduledTaskHomeSignals = ({
             : "Automation signals unavailable"
       } else if (notificationsResult.status === "rejected") {
         nextError = "Recent automation notifications could not be loaded."
-      } else if (tasksResult.value.partial) {
+      } else if (tasksResult.value?.partial) {
         nextError = "Some scheduled-task sources are temporarily unavailable."
       }
 

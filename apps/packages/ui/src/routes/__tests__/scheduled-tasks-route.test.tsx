@@ -58,6 +58,8 @@ describe("scheduled tasks route wiring", () => {
     expect(webRouteRegistrySource).toContain('path: "/scheduled-tasks/results"')
     expect(extensionRouteRegistrySource).toContain('path: "/scheduled-tasks/results"')
     expect(existsSync(hostedResultsAliasPath)).toBe(true)
+    const hostedResultsAliasSource = readFileSync(hostedResultsAliasPath, "utf8")
+    expect(hostedResultsAliasSource).toContain("option-scheduled-tasks")
   })
 
   it("uses a dedicated extension scheduled tasks route shell", () => {

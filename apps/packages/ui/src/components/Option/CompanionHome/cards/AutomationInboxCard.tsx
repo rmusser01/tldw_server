@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 
 import type {
   ScheduledTaskAutomationHomeItem,
@@ -43,31 +44,61 @@ export function AutomationInboxCard({
   error,
   maxItems = 4
 }: AutomationInboxCardProps) {
+  const { t } = useTranslation()
   const visibleItems = items.slice(0, maxItems)
   const hasItems = visibleItems.length > 0
+  const signalCountLabel = `${items.length} signal${items.length === 1 ? "" : "s"}`
   const subtitle = loading && !hasItems
-    ? "Checking now"
+    ? t("companionHome.automationInbox.checking", { defaultValue: "Checking now" })
     : items.length > 0
-      ? `${items.length} signal${items.length === 1 ? "" : "s"}`
+      ? t("companionHome.automationInbox.signalCount", {
+          count: items.length,
+          defaultValue: signalCountLabel
+        })
       : error
-        ? "0 signals"
-        : "Nothing new from automations."
+        ? t("companionHome.automationInbox.zeroSignals", { defaultValue: "0 signals" })
+        : t(
+            "companionHome.automationInbox.nothingNew",
+            { defaultValue: "Nothing new from automations." }
+          )
   const emptyLabel = loading
-    ? "Loading automation signals"
+    ? t(
+        "companionHome.automationInbox.loadingLabel",
+        { defaultValue: "Loading automation signals" }
+      )
     : error && !hasItems
       ? error
-      : "No automation results yet"
+      : t(
+          "companionHome.automationInbox.emptyLabel",
+          { defaultValue: "No automation results yet" }
+        )
   const emptyDescription = loading
-    ? "Checking recent scheduled-task results and notifications."
+    ? t(
+        "companionHome.automationInbox.loadingDescription",
+        { defaultValue: "Checking recent scheduled-task results and notifications." }
+      )
     : error && !hasItems
-      ? "Scheduled-task results are temporarily unavailable. Other Home cards remain available."
-      : "Results and failures from scheduled tasks appear here after a run."
+      ? t(
+          "companionHome.automationInbox.errorDescription",
+          {
+            defaultValue:
+              "Scheduled-task results are temporarily unavailable. Other Home cards remain available."
+          }
+        )
+      : t(
+          "companionHome.automationInbox.emptyDescription",
+          { defaultValue: "Results and failures from scheduled tasks appear here after a run." }
+        )
 
   return (
     <section className="rounded-3xl border border-border/80 bg-surface/90 p-5 shadow-sm backdrop-blur-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-text">Automation Inbox</h2>
+          <h2 className="text-lg font-semibold text-text">
+            {t("companionHome.automationInbox.title", {
+              defaultValue: "Automation Inbox"
+            })}
+          </h2>
           <p className="mt-1 text-sm text-text-muted">{subtitle}</p>
         </div>
         <span className="rounded-full border border-border/70 bg-bg/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
@@ -77,7 +108,12 @@ export function AutomationInboxCard({
 
       {error && partial && hasItems ? (
         <div className="mt-4 rounded-2xl border border-warn/30 bg-warn/10 px-4 py-3">
-          <div className="text-sm font-semibold text-text">Partial automation data</div>
+          <div className="text-sm font-semibold text-text">
+            {t(
+              "companionHome.automationInbox.partialTitle",
+              { defaultValue: "Partial automation data" }
+            )}
+          </div>
           <p className="mt-1 text-sm leading-6 text-text-muted">{error}</p>
         </div>
       ) : null}

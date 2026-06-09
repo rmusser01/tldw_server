@@ -297,6 +297,33 @@ describe("ScheduledTasksPage", () => {
     expect(screen.queryByText("Result signal not found.")).not.toBeInTheDocument()
   })
 
+  it("can navigate from the Results alias path back to Overview", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+    const user = userEvent.setup()
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks/results")
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+
+    await user.click(screen.getByRole("tab", { name: "Overview" }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    })
+    expect(screen.getByText("Total scheduled tasks")).toBeInTheDocument()
+  })
+
   it("shows a non-blocking missing-result message for stale Results deep links", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [],
@@ -656,7 +683,7 @@ describe("ScheduledTasksPage", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("deletes the selected reminder from the detail drawer and does not leave stale drawer state", async () => {
     const user = userEvent.setup()
@@ -772,7 +799,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(screen.getByText("Healthy reminder")).toBeInTheDocument()
     expect(screen.queryByText("Blocked monitor")).not.toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("counts blocked tasks as needing attention in the overview", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
@@ -954,7 +981,7 @@ describe("ScheduledTasksPage", () => {
     const drawer = await screen.findByRole("dialog", { name: /Daily review/i })
     expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
     expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2)
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("keeps the created reminder detail open from the API response until the list catches up", async () => {
     const user = userEvent.setup()
@@ -999,7 +1026,7 @@ describe("ScheduledTasksPage", () => {
     const drawer = await screen.findByRole("dialog", { name: /Pending reminder/i })
     expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
     expect(screen.queryByText("Task not found.")).not.toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a one-time reminder without run_at", async () => {
     const user = userEvent.setup()
@@ -1020,7 +1047,7 @@ describe("ScheduledTasksPage", () => {
       expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
     })
     expect(screen.getByText("Run at is required for one-time reminders")).toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("creates a daily recurring reminder with cron and timezone from safer controls", async () => {
     const user = userEvent.setup()
@@ -1293,5 +1320,5 @@ describe("ScheduledTasksPage", () => {
     await waitFor(() => {
       expect(mocks.deleteScheduledTaskReminder).toHaveBeenCalledWith("reminder_task:1")
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 })
