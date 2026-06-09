@@ -62,6 +62,10 @@ import { restoreQueuedRequests } from "@/utils/chat-request-queue"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 import {
+  buildCapturedNoteContent,
+  CAPTURED_NOTE_KEYWORD
+} from "@/services/notes-capture"
+import {
   clearPendingWebClipAnalyzeRequest,
   readPendingWebClipAnalyzeRequest
 } from "@/services/web-clipper/enrichment"
@@ -86,7 +90,6 @@ import {
   type LegacySidepanelChatSnapshot,
   readSidepanelRuntimeTabId
 } from "./sidepanel-chat-resume"
-import { buildSidepanelCapturedNotePayload } from "./sidepanel-note-capture"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
@@ -714,12 +717,10 @@ const SidepanelChat = () => {
     setNoteError(null)
     setNoteSaving(true)
     try {
-      const payload = buildSidepanelCapturedNotePayload({
-        content,
+      await tldwClient.createNote(buildCapturedNoteContent(content, noteSourceUrl), {
         title,
-        sourceUrl: noteSourceUrl
+        keywords: [CAPTURED_NOTE_KEYWORD]
       })
-      await tldwClient.createNote(payload.content, payload.noteFields)
       notification.success({
         message: t("sidepanel:notification.savedToNotes", "Saved to Notes")
       })

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
-PathScopeAction = Literal["read", "edit", "write"]
+from .file_policy_actions import FilePolicyAction, normalize_file_policy_action
 
-_VALID_ACTIONS = {"read", "edit", "write"}
+PathScopeAction = FilePolicyAction
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,14 +61,14 @@ def normalize_path_scope_candidate(raw: PathScopeCandidate | Mapping[str, Any]) 
     if path is None:
         raise ValueError("path scope candidate path is required")
 
-    action = _clean_optional_string(raw.get("action"))
-    if action not in _VALID_ACTIONS:
+    action = normalize_file_policy_action(raw.get("action"))
+    if action is None:
         raise ValueError("path scope candidate action is invalid")
 
     source = _clean_optional_string(raw.get("source")) or "module"
     return PathScopeCandidate(
         path=path,
-        action=action,  # type: ignore[arg-type]
+        action=action,
         source=source,
         display_path=_clean_optional_string(raw.get("display_path")),
         requires_existing_file=_coerce_bool_flag(

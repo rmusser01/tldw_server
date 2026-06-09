@@ -6,6 +6,11 @@ import type { SearchHistoryItem } from "../types"
 
 const fetchWithAuthMock = vi.fn()
 const ragSearchMock = vi.fn()
+const addChatMessageMock = vi.fn()
+const searchCharactersMock = vi.fn()
+const listCharactersMock = vi.fn()
+const createChatMock = vi.fn()
+const getChatMock = vi.fn()
 const messageOpenMock = vi.fn()
 const trackMetricMock = vi.fn()
 
@@ -28,11 +33,11 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     initialize: vi.fn().mockResolvedValue(undefined),
     fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args),
     ragSearch: (...args: unknown[]) => ragSearchMock(...args),
-    addChatMessage: vi.fn(),
-    searchCharacters: vi.fn().mockResolvedValue([]),
-    listCharacters: vi.fn().mockResolvedValue([]),
-    createChat: vi.fn().mockResolvedValue({ id: "thread-1", version: 1 }),
-    getChat: vi.fn().mockResolvedValue({ version: 1 }),
+    addChatMessage: (...args: unknown[]) => addChatMessageMock(...args),
+    searchCharacters: (...args: unknown[]) => searchCharactersMock(...args),
+    listCharacters: (...args: unknown[]) => listCharactersMock(...args),
+    createChat: (...args: unknown[]) => createChatMock(...args),
+    getChat: (...args: unknown[]) => getChatMock(...args),
   },
 }))
 
@@ -59,6 +64,11 @@ describe("KnowledgeQAProvider history hydration", () => {
     vi.clearAllMocks()
     latestContext = null
     trackMetricMock.mockResolvedValue(undefined)
+    addChatMessageMock.mockResolvedValue(null)
+    searchCharactersMock.mockResolvedValue([])
+    listCharactersMock.mockResolvedValue([])
+    createChatMock.mockResolvedValue({ id: "thread-1", version: 1 })
+    getChatMock.mockResolvedValue({ version: 1 })
     ragSearchMock.mockResolvedValue({
       results: [],
       generated_answer: null,
@@ -730,6 +740,161 @@ describe("KnowledgeQAProvider history hydration", () => {
       expect(latestContext!.settings.sources).toEqual(["notes"])
       expect(latestContext!.settings.include_note_ids).toEqual(["note-local-1"])
       expect(latestContext!.settings.enable_web_fallback).toBe(false)
+    })
+  })
+
+  it("stores degraded trust state for answer payloads without citations", async () => {
+    searchCharactersMock.mockResolvedValue([
+      { id: 7, name: "Helpful AI Assistant" },
+    ])
+    addChatMessageMock.mockImplementation(async (_threadId: string, payload: any) => ({
+      id: payload?.role === "assistant" ? "assistant-remote" : "user-remote",
+      created_at: "2026-02-18T10:05:00.000Z",
+    }))
+    fetchWithAuthMock.mockImplementation(async (path: string) => {
+      if (path.includes("/rag-context")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+          text: async () => "",
+        }
+      }
+      if (path.includes("/api/v1/chat/conversations/thread-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ keywords: [], version: 1 }),
+          text: async () => "",
+        }
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => [],
+        text: async () => "",
+      }
+    })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "doc-uncited",
+          content: "Evidence snippet",
+          metadata: { title: "Evidence" },
+          score: 0.83,
+        },
+      ],
+      generated_answer: "Answer without inline citation.",
+      metadata: {},
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.setQuery("Explain the uncited result")
+    })
+    await waitFor(() => expect(latestContext!.query).toBe("Explain the uncited result"))
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    await waitFor(() => {
+      expect(latestContext!.answer).toBe("Answer without inline citation.")
+      expect(latestContext!.answerTrustState).toBe("uncited_degraded_answer")
+      expect(latestContext!.searchHistory[0]).toEqual(
+        expect.objectContaining({
+          query: "Explain the uncited result",
+          trustState: "uncited_degraded_answer",
+        })
+      )
+    })
+  })
+
+  it("marks failed searches as failed trust state in current state and history", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    ragSearchMock.mockRejectedValue(new Error("network offline"))
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.setQuery("Search while offline")
+    })
+    await waitFor(() => expect(latestContext!.query).toBe("Search while offline"))
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    await waitFor(() => {
+      expect(latestContext!.error).toBeTruthy()
+      expect(latestContext!.answerTrustState).toBe("failed_search")
+      expect(latestContext!.searchHistory[0]).toEqual(
+        expect.objectContaining({
+          query: "Search while offline",
+          hasAnswer: false,
+          sourcesCount: 0,
+          trustState: "failed_search",
+        })
+      )
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it("preserves unsynced local trust over a cited answer when thread persistence falls back locally", async () => {
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "doc-local-unsynced",
+          content: "Local fallback evidence",
+          metadata: { title: "Local fallback" },
+          score: 0.88,
+        },
+      ],
+      generated_answer: "Cited answer [1]",
+      metadata: {},
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.setQuery("Search in a local-only thread")
+    })
+    await waitFor(() => expect(latestContext!.query).toBe("Search in a local-only thread"))
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    await waitFor(() => {
+      expect(latestContext!.isLocalOnlyThread).toBe(true)
+      expect(latestContext!.answer).toBe("Cited answer [1]")
+      expect(latestContext!.citations).toEqual(
+        expect.arrayContaining([expect.objectContaining({ index: 1 })])
+      )
+      expect(latestContext!.answerTrustState).toBe("unsynced_local_result")
+      expect(latestContext!.searchHistory[0]).toEqual(
+        expect.objectContaining({
+          query: "Search in a local-only thread",
+          trustState: "unsynced_local_result",
+        })
+      )
     })
   })
 })

@@ -31,6 +31,7 @@ from . import (
     audio_tokenizer,
     audio_transcriptions,
     audio_tts,
+    audio_voice_conversion,
     audio_voices,
 )
 
@@ -51,6 +52,7 @@ router.include_router(audio_tokenizer.router)
 router.include_router(audio_transcriptions.router)
 router.include_router(audio_health.router)
 router.include_router(audio_voices.router)
+router.include_router(audio_voice_conversion.router)
 
 _AUDIO_STREAMING_MODULE = f"{__package__}.audio_streaming"
 
@@ -82,6 +84,8 @@ create_speech_metadata = audio_tts.create_speech_metadata
 list_tts_providers = audio_tts.list_tts_providers
 list_tts_voices = audio_tts.list_tts_voices
 reset_tts_metrics = audio_tts.reset_tts_metrics
+get_tts_provider_model_info = audio_tts.get_tts_provider_model_info
+unload_tts_provider = audio_tts.unload_tts_provider
 encode_audio_tokenizer = audio_tokenizer.encode_audio_tokenizer
 decode_audio_tokenizer = audio_tokenizer.decode_audio_tokenizer
 create_transcription = audio_transcriptions.create_transcription
@@ -95,6 +99,7 @@ list_voices = audio_voices.list_voices
 get_voice_details = audio_voices.get_voice_details
 delete_voice = audio_voices.delete_voice
 preview_voice = audio_voices.preview_voice
+create_voice_conversion = audio_voice_conversion.create_voice_conversion
 
 # Dependency helpers (for FastAPI overrides in tests)
 get_tts_service = audio_tts.get_tts_service

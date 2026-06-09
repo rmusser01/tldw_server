@@ -1,5 +1,18 @@
 """Host-neutral MCP Unified interface contracts."""
 
+from .file_policy_actions import (
+    FILE_POLICY_ACTIONS,
+    FILE_POLICY_ADMIN_ACTIONS,
+    FILE_POLICY_DESTRUCTIVE_ACTIONS,
+    FILE_POLICY_EXFILTRATION_ACTIONS,
+    FILE_POLICY_EXISTING_TOOL_ACTIONS,
+    FILE_POLICY_LOCK_ACTIONS,
+    FilePolicyAction,
+    FilePolicyActionMetadata,
+    format_file_policy_action_list,
+    get_file_policy_action_metadata,
+    normalize_file_policy_action,
+)
 from .policy import (
     ApprovalEvaluator,
     EffectivePolicyResolver,
@@ -53,6 +66,14 @@ __all__ = [
     "EnvironmentFlagsProvider",
     "ExternalAccessEvaluator",
     "ExternalRegistryStore",
+    "FILE_POLICY_ACTIONS",
+    "FILE_POLICY_ADMIN_ACTIONS",
+    "FILE_POLICY_DESTRUCTIVE_ACTIONS",
+    "FILE_POLICY_EXISTING_TOOL_ACTIONS",
+    "FILE_POLICY_EXFILTRATION_ACTIONS",
+    "FILE_POLICY_LOCK_ACTIONS",
+    "FilePolicyAction",
+    "FilePolicyActionMetadata",
     "LifecycleGuard",
     "MCPRuntimeDependencies",
     "MetricsCollector",
@@ -74,4 +95,7 @@ __all__ = [
     "WebSocketCloseTarget",
     "WebSocketStream",
     "WebSocketStreamFactory",
+    "format_file_policy_action_list",
+    "get_file_policy_action_metadata",
+    "normalize_file_policy_action",
 ]

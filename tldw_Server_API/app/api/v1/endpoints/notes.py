@@ -1667,13 +1667,13 @@ async def create_note_folder(
 
 @router.get(
     "/search",
-    response_model=list[NoteResponse],
+    response_model=NotesListResponse,
     summary="Search notes for the current user",
     tags=["notes"]
 )
 @router.get(
     "/search/",
-    response_model=list[NoteResponse],
+    response_model=NotesListResponse,
     summary="Search notes for the current user",
     tags=["notes"]
 )
@@ -1684,6 +1684,14 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
         offset: int = Query(0, ge=0, description="Result offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        sort_by: Optional[str] = Query(
+            None,
+            description="Accepted for client compatibility; search results are ordered by relevance and recency.",
+        ),
+        sort_order: Optional[str] = Query(
+            None,
+            description="Accepted for client compatibility; search results are ordered by relevance and recency.",
+        ),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.search")),
@@ -1704,6 +1712,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                                 detail="query or tokens is required")
         logger.debug(
             f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, tokens={token_list}")
+        total = None
         if token_list:
             notes_data = db.search_notes_with_keywords(
                 search_term=query_term or None,
@@ -1711,8 +1720,19 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 limit=limit,
                 offset=offset
             )
+            try:
+                total = db.count_notes_matching_keywords(
+                    search_term=query_term or None,
+                    keyword_tokens=token_list,
+                )
+            except _NOTES_NONCRITICAL_EXCEPTIONS:
+                total = offset + len(notes_data)
         else:
             notes_data = db.search_notes(search_term=query_term, limit=limit, offset=offset)
+            try:
+                total = db.count_notes_matching(query_term)
+            except _NOTES_NONCRITICAL_EXCEPTIONS:
+                total = offset + len(notes_data)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline (optional)
         if include_keywords:
@@ -1720,7 +1740,21 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 _attach_keywords_bulk(db, notes_data)
             except _NOTES_NONCRITICAL_EXCEPTIONS as outer_err:
                 logger.warning(f"Attaching keywords for notes search failed: {outer_err}")
-        return notes_data
+        return {
+            "notes": notes_data,
+            "items": notes_data,
+            "results": notes_data,
+            "count": len(notes_data),
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
+        }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "notes search")
 
@@ -3693,6 +3727,29 @@ async def _list_keywords_impl(
         handle_db_errors(e, "keywords list")
 
 
+async def _search_keywords_impl(
+        *,
+        query: str,
+        db: CharactersRAGDB,
+        limit: int,
+        rate_limiter: RateLimiter,
+        current_user: User,
+):
+    try:
+        try:
+            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "keywords.search")
+        except _NOTES_NONCRITICAL_EXCEPTIONS:
+            allowed, meta = True, {}
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                detail="Rate limit exceeded for keywords.search",
+                                headers={"Retry-After": str(meta.get("retry_after", 60))})
+        logger.debug(f"User (DB client_id: {db.client_id}) searching keywords: query='{query}', limit={limit}")
+        return db.search_keywords(search_term=query, limit=limit)
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "keywords search")
+
+
 @router.put(
     "/{note_id}",
     response_model=NoteResponse,
@@ -4471,6 +4528,30 @@ async def create_keyword(
 
 
 @router.get(
+    "/keywords/search",
+    response_model=list[KeywordResponse],
+    summary="Search keywords for the current user",
+    tags=["Keywords (for Notes)"],
+    include_in_schema=False,
+)
+async def search_keywords_no_slash_endpoint(
+        query: str = Query(..., min_length=1, description="Search term for keywords"),
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        limit: int = Query(10, ge=1, le=100),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("keywords.search")),
+):
+    return await _search_keywords_impl(
+        query=query,
+        db=db,
+        limit=limit,
+        rate_limiter=rate_limiter,
+        current_user=current_user,
+    )
+
+
+@router.get(
     "/keywords/{keyword_id}",
     response_model=KeywordResponse,
     summary="Get a keyword by its ID",
@@ -4713,20 +4794,13 @@ async def search_keywords_endpoint(  # Renamed
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("keywords.search")),
 ):
-    try:
-        try:
-            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "keywords.search")
-        except _NOTES_NONCRITICAL_EXCEPTIONS:
-            allowed, meta = True, {}
-        if not allowed:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                                detail="Rate limit exceeded for keywords.search",
-                                headers={"Retry-After": str(meta.get("retry_after", 60))})
-        logger.debug(f"User (DB client_id: {db.client_id}) searching keywords: query='{query}', limit={limit}")
-        keywords_data = db.search_keywords(search_term=query, limit=limit)
-        return keywords_data
-    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
-        handle_db_errors(e, "keywords search")
+    return await _search_keywords_impl(
+        query=query,
+        db=db,
+        limit=limit,
+        rate_limiter=rate_limiter,
+        current_user=current_user,
+    )
 
 
 # --- Note-Keyword Linking Endpoints ---

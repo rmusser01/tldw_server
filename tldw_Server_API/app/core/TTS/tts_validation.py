@@ -14,6 +14,11 @@ from typing import Any, Optional, Union
 from loguru import logger
 
 from .adapters.base import AudioFormat, TTSRequest
+from .chatterbox_catalog import (
+    CHATTERBOX_LANGUAGE_CODES,
+    ChatterboxModelFamily,
+    resolve_chatterbox_model_family,
+)
 
 #
 # Local Imports
@@ -111,7 +116,7 @@ class ProviderLimits:
         },
         "chatterbox": {
             "max_text_length": 10000,
-            "valid_formats": {"wav", "mp3"},
+            "valid_formats": {"wav", "mp3", "opus", "flac", "pcm"},
             "min_speed": 0.5,
             "max_speed": 2.0
         },
@@ -338,7 +343,7 @@ class TTSInputValidator:
         "kokoro": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS},
         "higgs": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC},
         "dia": {AudioFormat.MP3, AudioFormat.WAV},
-        "chatterbox": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS},
+        "chatterbox": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS, AudioFormat.FLAC, AudioFormat.PCM},
         "vibevoice": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS},
         "vibevoice_realtime": {AudioFormat.PCM, AudioFormat.WAV, AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.FLAC},
         "neutts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS, AudioFormat.FLAC, AudioFormat.PCM},
@@ -605,7 +610,10 @@ class TTSInputValidator:
                 if isinstance(extra_language, str) and extra_language.strip():
                     language = extra_language.strip()
             if language:
-                self._validate_language(language, provider)
+                if provider == "chatterbox":
+                    self._validate_chatterbox_language(language, request)
+                else:
+                    self._validate_language(language, provider)
 
             # Validate voice
             if request.voice:
@@ -814,6 +822,40 @@ class TTSInputValidator:
                     provider=provider,
                     details={"requested_language": language, "supported_languages": supported}
                 )
+
+    def _validate_chatterbox_language(self, language: str, request: TTSRequest) -> None:
+        """Validate Chatterbox language support by selected model family."""
+        extras = request.extra_params if isinstance(request.extra_params, dict) else {}
+        model_hint = getattr(request, "model", None) or extras.get("model")
+        config_variant = (
+            extras.get("chatterbox_variant")
+            or extras.get("model_family")
+            or extras.get("variant")
+            or self._get_provider_setting("chatterbox", "variant")
+        )
+        use_multilingual = parse_bool(
+            extras.get("use_multilingual", self._get_provider_setting("chatterbox", "use_multilingual")),
+            default=False,
+        )
+        family = resolve_chatterbox_model_family(
+            model_hint,
+            language=language,
+            config_variant=config_variant,
+            use_multilingual=use_multilingual,
+        )
+        supported = CHATTERBOX_LANGUAGE_CODES if family is ChatterboxModelFamily.MULTILINGUAL else {"en"}
+        normalized_language = (language or "").strip().casefold()
+        if normalized_language not in supported:
+            supported_list = sorted(supported)
+            raise TTSUnsupportedLanguageError(
+                f"Language '{language}' not supported by chatterbox {family.value}. Supported: {supported_list}",
+                provider="chatterbox",
+                details={
+                    "requested_language": language,
+                    "supported_languages": supported_list,
+                    "model_family": family.value,
+                }
+            )
 
     def _validate_voice(self, voice: str, provider: Optional[str] = None):
         """Validate voice selection"""

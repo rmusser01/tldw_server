@@ -1,10 +1,18 @@
 import React, { useEffect } from "react"
-import { Button, Card, Form, Input, Select, Space, Switch } from "antd"
+import { Button, Card, Form, Input, Space, Switch } from "antd"
 import type {
   CreateScheduledTaskReminderPayload,
   ScheduledTask,
   UpdateScheduledTaskReminderPayload
 } from "@/services/scheduled-tasks-control-plane"
+import { ReminderScheduleControls } from "./ReminderScheduleControls"
+import {
+  datetimeLocalToIsoString,
+  getDefaultReminderTimezone,
+  isoStringToDatetimeLocal,
+  validateCronExpression,
+  validateReminderTimezone
+} from "./reminder-schedule-utils"
 
 type ReminderTaskEditorValues = {
   title: string
@@ -30,21 +38,17 @@ const taskToValues = (task: ScheduledTask | null): ReminderTaskEditorValues => {
     title: task?.title ?? "",
     body: typeof task?.description === "string" ? task.description : "",
     schedule_kind: sourceRef.schedule_kind === "recurring" ? "recurring" : "one_time",
-    run_at: typeof sourceRef.run_at === "string" ? sourceRef.run_at : "",
+    run_at: typeof sourceRef.run_at === "string" ? isoStringToDatetimeLocal(sourceRef.run_at) : "",
     cron: typeof sourceRef.cron === "string" ? sourceRef.cron : "",
-    timezone: typeof sourceRef.timezone === "string" ? sourceRef.timezone : "",
+    timezone:
+      typeof sourceRef.timezone === "string"
+        ? sourceRef.timezone
+        : sourceRef.schedule_kind === "recurring"
+          ? getDefaultReminderTimezone()
+          : "",
     enabled: task ? Boolean(task.enabled) : true
   }
 }
-
-const requiredTrimmedRule = (message: string) => ({
-  validator: (_: unknown, value: unknown) => {
-    if (typeof value === "string" && value.trim().length > 0) {
-      return Promise.resolve()
-    }
-    return Promise.reject(new Error(message))
-  }
-})
 
 export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
   open,
@@ -54,7 +58,6 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
   onSubmit
 }) => {
   const [form] = Form.useForm<ReminderTaskEditorValues>()
-  const scheduleKind = Form.useWatch("schedule_kind", form)
 
   useEffect(() => {
     if (open) {
@@ -74,7 +77,8 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
       return
     }
 
-    const runAt = values.run_at?.trim() || ""
+    const rawRunAt = values.run_at?.trim() || ""
+    const runAt = datetimeLocalToIsoString(rawRunAt) || ""
     const cron = values.cron?.trim() || ""
     const timezone = values.timezone?.trim() || ""
     if (values.schedule_kind === "one_time" && !runAt) {
@@ -86,15 +90,28 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
       ])
       return
     }
-    if (values.schedule_kind === "recurring" && (!cron || !timezone)) {
+    const cronValidation = validateCronExpression(cron)
+    const timezoneValidation = validateReminderTimezone(timezone)
+    if (
+      values.schedule_kind === "recurring" &&
+      (!cron || !timezone || !cronValidation.valid || !timezoneValidation.valid)
+    ) {
       form.setFields([
         {
           name: "cron",
-          errors: !cron ? ["Cron is required for recurring reminders"] : []
+          errors: !cron
+            ? ["Cron is required for recurring reminders"]
+            : !cronValidation.valid
+              ? [cronValidation.error]
+              : []
         },
         {
           name: "timezone",
-          errors: !timezone ? ["Timezone is required for recurring reminders"] : []
+          errors: !timezone
+            ? ["Timezone is required for recurring reminders"]
+            : !timezoneValidation.valid
+              ? [timezoneValidation.error]
+              : []
         }
       ])
       return
@@ -123,7 +140,7 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
   }
 
   return (
-    <Card title={task ? "Edit reminder task" : "Create reminder task"} style={{ marginTop: 16 }}>
+    <Card title={task ? "Edit reminder" : "Create reminder"} style={{ marginTop: 16 }}>
       <Form form={form} layout="vertical">
         <Form.Item label="Title" name="title" rules={[{ required: true, message: "Title is required" }]}>
           <Input />
@@ -131,57 +148,13 @@ export const ReminderTaskEditor: React.FC<ReminderTaskEditorProps> = ({
         <Form.Item label="Body" name="body">
           <Input.TextArea rows={4} />
         </Form.Item>
-        <Form.Item
-          label="Schedule kind"
-          name="schedule_kind"
-          rules={[{ required: true, message: "Schedule kind is required" }]}
-        >
-          <Select
-            options={[
-              { value: "one_time", label: "One time" },
-              { value: "recurring", label: "Recurring" }
-            ]}
-          />
-        </Form.Item>
-        <Form.Item
-          label="Run at"
-          name="run_at"
-          rules={
-            scheduleKind === "one_time"
-              ? [requiredTrimmedRule("Run at is required for one-time reminders")]
-              : []
-          }
-        >
-          <Input placeholder="2026-03-21T10:00:00+00:00" />
-        </Form.Item>
-        <Form.Item
-          label="Cron"
-          name="cron"
-          rules={
-            scheduleKind === "recurring"
-              ? [requiredTrimmedRule("Cron is required for recurring reminders")]
-              : []
-          }
-        >
-          <Input placeholder="0 9 * * *" />
-        </Form.Item>
-        <Form.Item
-          label="Timezone"
-          name="timezone"
-          rules={
-            scheduleKind === "recurring"
-              ? [requiredTrimmedRule("Timezone is required for recurring reminders")]
-              : []
-          }
-        >
-          <Input placeholder="UTC" />
-        </Form.Item>
-        <Form.Item label="Enabled" name="enabled" valuePropName="checked">
+        <ReminderScheduleControls />
+        <Form.Item label="Task is active" name="enabled" valuePropName="checked">
           <Switch />
         </Form.Item>
         <Space>
           <Button type="primary" onClick={() => void handleFinish()} loading={saving}>
-            Save Reminder Task
+            Save reminder
           </Button>
           <Button onClick={onClose}>Cancel</Button>
         </Space>

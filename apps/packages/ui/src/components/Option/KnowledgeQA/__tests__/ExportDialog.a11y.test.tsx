@@ -23,6 +23,20 @@ const state = {
   results: [] as Array<{ id: string }>,
   citations: [] as Array<{ index: number }>,
   answer: "Test answer" as string | null,
+  answerTrustState: "cited_answer" as
+    | "cited_answer"
+    | "uncited_degraded_answer"
+    | "no_answer_insufficient_evidence"
+    | "no_results"
+    | "failed_search"
+    | "unsynced_local_result"
+    | "unknown_trust",
+  answerEvidenceOrigin: "local_library" as
+    | "local_library"
+    | "web_fallback"
+    | "mixed"
+    | "unknown_origin"
+    | null,
   query: "What does this source say?",
   settings: {
     sources: ["media_db", "notes"],
@@ -51,6 +65,8 @@ vi.mock("../KnowledgeQAProvider", () => ({
     results: state.results,
     citations: state.citations,
     answer: state.answer,
+    answerTrustState: state.answerTrustState,
+    answerEvidenceOrigin: state.answerEvidenceOrigin,
     query: state.query,
     settings: state.settings,
     preset: state.preset,
@@ -101,6 +117,8 @@ describe("ExportDialog accessibility", () => {
     state.results = []
     state.citations = []
     state.answer = "Test answer"
+    state.answerTrustState = "cited_answer"
+    state.answerEvidenceOrigin = "local_library"
     state.query = "What does this source say?"
     state.settings = {
       sources: ["media_db", "notes"],
@@ -510,6 +528,61 @@ describe("ExportDialog accessibility", () => {
     })
 
     expect(preview).toBeInTheDocument()
+  })
+
+  it("requires acknowledgement before exporting unsupported draft answers", async () => {
+    state.answer = "Answer without citations."
+    state.answerTrustState = "uncited_degraded_answer"
+    state.answerEvidenceOrigin = "local_library"
+
+    render(<ExportDialog open onClose={vi.fn()} />)
+
+    expect(
+      screen.getByText(/This answer is an unsupported draft/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /I understand this unsupported draft/i,
+      })
+    )
+    expect(screen.getByRole("button", { name: "Export" })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+
+    await waitFor(() => expect(screen.getByText("Preview")).toBeInTheDocument())
+    const preview = screen.getByText((_, element) => {
+      if (!element || element.tagName.toLowerCase() !== "pre") return false
+      const text = element.textContent || ""
+      return (
+        text.includes("Trust: unsupported draft") &&
+        text.includes("Answer status: Uncited answer") &&
+        text.includes("Evidence origin: local library")
+      )
+    })
+    expect(preview).toBeInTheDocument()
+  })
+
+  it("blocks answer-content export for failed and no-result searches", () => {
+    state.answer = null
+    state.answerTrustState = "failed_search"
+    state.answerEvidenceOrigin = null
+
+    const { rerender } = render(<ExportDialog open onClose={vi.fn()} />)
+
+    expect(
+      screen.getByText(/This search state cannot be exported as answer content/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+
+    state.answerTrustState = "no_results"
+    rerender(<ExportDialog open onClose={vi.fn()} />)
+
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+    expect(
+      screen.getByText(/This search state cannot be exported as answer content/i)
+    ).toBeInTheDocument()
   })
 
   it("shows a user-visible error when Save to Notes fails", async () => {

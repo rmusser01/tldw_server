@@ -100,6 +100,8 @@ type NotesListPanelProps = {
   total: number
   page: number
   pageSize: number
+  hasActiveFilters?: boolean
+  isStaleResults?: boolean
   selectedId: string | number | null
   onSelectNote: (id: string | number) => void
   onToggleBulkSelection?: (id: string | number, checked: boolean, shiftKey: boolean) => void
@@ -117,7 +119,6 @@ type NotesListPanelProps = {
   onExportAllJson: () => void
   onImportNotes?: () => void
   onSyncFolder?: () => void
-  hasActiveFilters?: boolean
   importInProgress?: boolean
   syncFolderInProgress?: boolean
   exportProgress?: {
@@ -145,6 +146,8 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   total,
   page,
   pageSize,
+  hasActiveFilters = false,
+  isStaleResults = false,
   selectedId,
   onSelectNote,
   onToggleBulkSelection,
@@ -162,7 +165,6 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onExportAllJson,
   onImportNotes,
   onSyncFolder,
-  hasActiveFilters = false,
   importInProgress = false,
   syncFolderInProgress = false,
   exportProgress = null
@@ -170,6 +172,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const { t } = useTranslation(['option', 'settings'])
   const isTrashView = listMode === 'trash'
   const hasNotes = Array.isArray(notes) && notes.length > 0
+  const hasListError = hasError
   const bulkSelectedIdSet = React.useMemo(
     () => new Set((bulkSelectedIds || []).map((id) => String(id))),
     [bulkSelectedIds]
@@ -239,8 +242,8 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         onOpenHealth={onOpenHealth}
         onCreateNote={onCreateNote}
         onResetEditor={onResetEditor}
-        onRetry={onRetry}
         onClearFilters={onClearFilters}
+        onRetry={onRetry}
       />
     </React.Suspense>
   )
@@ -390,6 +393,39 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             )}
           </div>
         )}
+        {hasListError && hasNotes && (
+          <div
+            className="mt-2 rounded border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-text"
+            role="status"
+            aria-live="polite"
+            data-testid="notes-stale-results-banner"
+          >
+            <div className="font-medium">
+              {isStaleResults
+                ? t('option:notesSearch.staleResultsTitle', {
+                    defaultValue: 'Showing saved results'
+                  })
+                : t('option:notesSearch.refreshWarningTitle', {
+                    defaultValue: 'Refresh failed'
+                  })}
+            </div>
+            <div className="mt-0.5 text-text-muted">
+              {t('option:notesSearch.staleResultsDescription', {
+                defaultValue: 'Refresh failed. Retry to load the latest notes.'
+              })}
+            </div>
+            {onRetry && (
+              <Button
+                size="small"
+                type="link"
+                className="mt-1 h-auto p-0 text-xs"
+                onClick={onRetry}
+              >
+                {t('option:buttonRetry', 'Retry')}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content area */}
@@ -416,14 +452,22 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         )
       ) : !capsLoading && capabilities && !capabilities.hasNotes ? (
         renderEmptyStateSurface('unsupported')
-      ) : hasError ? (
+      ) : hasListError && !hasNotes ? (
         renderEmptyStateSurface('error')
       ) : Array.isArray(notes) && notes.length > 0 ? (
         <>
-          <div className="divide-y divide-border" role="listbox">
+          <div
+            className="divide-y divide-border"
+            role="list"
+            data-notes-list
+            aria-label={t('option:notesSearch.notesListAriaLabel', {
+              defaultValue: 'Notes'
+            })}
+          >
             {notes.map((item) => (
               (() => {
                 const itemIdText = String(item.id)
+                const noteTitle = item.title || `Note ${item.id}`
                 const isBulkSelected = bulkSelectedIdSet.has(itemIdText)
                 const isSelectedNote =
                   selectedId != null && String(selectedId) === itemIdText
@@ -441,6 +485,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             : 'px-4 hover:bg-surface2'
                     }`}
                     data-testid={isTrashView ? `notes-trash-row-${itemIdText}` : undefined}
+                    role="listitem"
                   >
                 {!isTrashView && (
                   <div className="flex items-start gap-2">
@@ -485,12 +530,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                     </button>
                     <button
                       type="button"
+                      aria-label={t('option:notesSearch.openNoteAria', {
+                        defaultValue: 'Open note {{title}}',
+                        title: noteTitle
+                      }).replace('{{title}}', () => noteTitle)}
                       onClick={() => {
                         onSelectNote(item.id)
                       }}
                       className="w-full text-left"
-                      role="option"
-                      aria-selected={isSelectedNote}
                       aria-current={isSelectedNote ? "true" : undefined}
                       data-testid={`notes-open-button-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
                       data-notes-list-item
@@ -498,7 +545,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                           e.preventDefault()
                           const buttons = Array.from(
-                            e.currentTarget.closest('[data-testid="notes-list-region"]')
+                            e.currentTarget.closest('[data-notes-list]')
                               ?.querySelectorAll<HTMLButtonElement>('[data-notes-list-item]') ?? []
                           )
                           const idx = buttons.indexOf(e.currentTarget as HTMLButtonElement)
@@ -679,8 +726,10 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             ))}
           </div>
         </>
+      ) : hasActiveFilters && !isTrashView ? (
+        renderEmptyStateSurface('no-results')
       ) : (
-        renderEmptyStateSurface(hasActiveFilters && !isTrashView ? 'no-results' : 'empty')
+        renderEmptyStateSurface('empty')
       )}
       </div>
 

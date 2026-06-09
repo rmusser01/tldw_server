@@ -334,9 +334,14 @@ describe("NotesManagerPage stage 10 AI title generation", () => {
 
     renderPage()
     const strategySelect = await screen.findByTestId("notes-title-strategy-select")
-    const selectTrigger = strategySelect.closest(".ant-select") || strategySelect
+    const selectTrigger = strategySelect.querySelector(".ant-select-content") || strategySelect
     fireEvent.mouseDown(selectTrigger)
-    fireEvent.click(await screen.findByText("AI-powered"))
+    await waitFor(() => {
+      const options = document.querySelectorAll(".ant-select-item-option")
+      const llmOption = Array.from(options).find((option) => option.textContent === "AI-powered")
+      if (!llmOption) throw new Error('Option "AI-powered" not found')
+      fireEvent.click(llmOption)
+    })
 
     await waitFor(() => {
       expect(mockSetSetting).toHaveBeenCalled()

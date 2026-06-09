@@ -400,6 +400,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             route_key="workspaces",
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_memberships",
+            log_name="workspace_memberships",
+            prefix=f"{API_V1_PREFIX}/workspace-memberships",
+            tags=("workspaces",),
+            route_key="workspaces",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
             log_name="character_chat_sessions",
             prefix=f"{API_V1_PREFIX}/chats",

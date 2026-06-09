@@ -46,6 +46,7 @@ const makeCapabilities = (
 ): WorkspaceCapabilitiesResponse => ({
   workspace_id: "workspace-1",
   workspace_kind: "research_workspace",
+  workspace_profile: "research",
   access_level: "owner",
   source_summary: {
     total: 3,

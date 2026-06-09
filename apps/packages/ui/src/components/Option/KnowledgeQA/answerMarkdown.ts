@@ -1,3 +1,6 @@
+import type { EvidenceOrigin, KnowledgeAnswerTrustState } from "./types"
+import { getKnowledgeAnswerTrustLabel } from "./trustState"
+
 export type CitationSegment =
   | { type: "text"; value: string }
   | { type: "citation"; index: number }
@@ -85,4 +88,55 @@ const transformCitationTextNodes = (node: MarkdownNode) => {
 
 export const remarkCitationLinks = () => (tree: MarkdownNode) => {
   transformCitationTextNodes(tree)
+}
+
+const EVIDENCE_ORIGIN_EXPORT_LABELS: Record<EvidenceOrigin, string> = {
+  local_library: "local library",
+  web_fallback: "web fallback",
+  mixed: "mixed sources",
+  unknown_origin: "unknown origin",
+}
+
+export function isUnsupportedDraftTrustState(
+  trustState: KnowledgeAnswerTrustState | null | undefined
+): boolean {
+  return (
+    trustState === "uncited_degraded_answer" ||
+    trustState === "no_answer_insufficient_evidence" ||
+    trustState === "unsynced_local_result" ||
+    trustState === "unknown_trust"
+  )
+}
+
+export function isBlockedAnswerExportTrustState(
+  trustState: KnowledgeAnswerTrustState | null | undefined
+): boolean {
+  return trustState === "failed_search" || trustState === "no_results"
+}
+
+export function getKnowledgeExportTrustLabel(
+  trustState: KnowledgeAnswerTrustState | null | undefined
+): string {
+  if (trustState === "cited_answer") return "cited answer"
+  if (isUnsupportedDraftTrustState(trustState)) return "unsupported draft"
+  if (trustState === "failed_search") return "failed search"
+  if (trustState === "no_results") return "no answer"
+  return "unknown"
+}
+
+export function buildKnowledgeExportTrustLines({
+  trustState,
+  evidenceOrigin,
+}: {
+  trustState?: KnowledgeAnswerTrustState | null
+  evidenceOrigin?: EvidenceOrigin | null
+}): string[] {
+  const lines = [`Trust: ${getKnowledgeExportTrustLabel(trustState)}`]
+  if (trustState) {
+    lines.push(`Answer status: ${getKnowledgeAnswerTrustLabel(trustState)}`)
+  }
+  if (evidenceOrigin) {
+    lines.push(`Evidence origin: ${EVIDENCE_ORIGIN_EXPORT_LABELS[evidenceOrigin]}`)
+  }
+  return lines
 }

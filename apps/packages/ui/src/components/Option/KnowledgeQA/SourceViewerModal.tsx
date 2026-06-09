@@ -6,7 +6,15 @@ import React, { useEffect } from "react"
 import { ExternalLink, X } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { RagResult } from "./types"
-import { getSourceTypeLabel } from "./sourceListUtils"
+import {
+  getEvidenceOrigin,
+  getEvidenceOriginLabel,
+  getResultChunkId,
+  getResultEvidenceText,
+  getResultSourceId,
+  getUnavailableEvidenceMessage,
+  getSourceTypeLabel,
+} from "./sourceListUtils"
 
 type SourceViewerModalProps = {
   open: boolean
@@ -38,12 +46,25 @@ export function SourceViewerModal({
   if (!open || !result) return null
 
   const title = result.metadata?.title || result.metadata?.source || "Source"
-  const content = result.content || result.text || result.chunk || ""
+  const content = getResultEvidenceText(result)
+  const unavailableMessage = getUnavailableEvidenceMessage(result)
   const url = result.metadata?.url
-  const sourceType = result.metadata?.source_type
+  const sourceType = result.sourceType || result.metadata?.source_type
   const sourceLabel = getSourceTypeLabel(sourceType)
+  const evidenceOrigin = getEvidenceOrigin(result)
+  const evidenceOriginLabel =
+    evidenceOrigin !== "unknown_origin" ? getEvidenceOriginLabel(evidenceOrigin) : null
+  const sourceId = getResultSourceId(result)
+  const chunkId = getResultChunkId(result)
   const pageNumber = result.metadata?.page_number
   const dialogTitleId = "source-viewer-title"
+  const metaParts = [
+    sourceLabel,
+    pageNumber ? `Page ${pageNumber}` : null,
+    evidenceOriginLabel,
+    sourceId ? `Source ID ${sourceId}` : null,
+    chunkId ? `Chunk ${chunkId}` : null,
+  ].filter((value): value is string => Boolean(value))
 
   return (
     <>
@@ -68,8 +89,7 @@ export function SourceViewerModal({
               {title}
             </h3>
             <p className="mt-1 text-xs text-text-muted">
-              {sourceLabel}
-              {pageNumber ? ` • Page ${pageNumber}` : ""}
+              {metaParts.join(" • ")}
             </p>
           </div>
           <div className="ml-3 flex items-center gap-2">
@@ -99,6 +119,10 @@ export function SourceViewerModal({
             <pre className="whitespace-pre-wrap text-sm leading-relaxed text-text">
               {content}
             </pre>
+          ) : unavailableMessage ? (
+            <p className="text-sm text-warn">
+              {unavailableMessage}
+            </p>
           ) : (
             <p className="text-sm text-text-muted">
               Full source content is unavailable for this result.

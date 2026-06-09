@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SourceList } from "../SourceList"
+import type { RagResult } from "../types"
 
 const state = {
   results: [] as Array<Record<string, any>>,
@@ -512,6 +513,31 @@ describe("SourceList researcher workflows", () => {
       .getAllByRole("heading", { level: 4 })
       .map((heading) => heading.textContent)
     expect(titlesAfterUnpin[0]).toBe("Source 1")
+  })
+
+  it("keeps pinned fallback-key sources after results refresh", async () => {
+    const fallbackKeyResult: RagResult = {
+      content: "Body for source without stable backend identifiers",
+      metadata: {
+        title: "Source 10",
+        source_type: "unknown",
+        original_result_index: 9,
+      },
+      score: 0.8,
+    }
+    state.results = [fallbackKeyResult]
+    const { rerender } = render(<SourceList />)
+
+    fireEvent.click(screen.getByLabelText("More actions for source 10"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }))
+    expect(screen.getByText("1 pinned")).toBeInTheDocument()
+
+    state.results = [{ ...fallbackKeyResult }]
+    rerender(<SourceList />)
+
+    await waitFor(() => {
+      expect(screen.getByText("1 pinned")).toBeInTheDocument()
+    })
   })
 
   it("syncs focused source on hover for citation back-link highlighting", () => {

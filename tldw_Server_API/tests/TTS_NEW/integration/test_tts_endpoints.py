@@ -19,11 +19,12 @@ from fastapi import status
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
-from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs, audio_voice_conversion
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.TTS.adapters.base import TTSResponse
+from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSResponse
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, TTSProviderBusyError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.TTS.tts_jobs_worker import _handle_tts_job
 
@@ -57,7 +58,7 @@ class TestTTSGenerateEndpoint:
             headers=auth_headers
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, response.text
         assert response.headers.get("content-type") == "audio/mpeg"
         assert len(response.content) > 0
 
@@ -88,7 +89,7 @@ class TestTTSGenerateEndpoint:
             headers=auth_headers,
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, response.text
         assert response.headers.get("content-type") == "audio/mpeg"
         chunks = list(response.iter_bytes())
         assert len(chunks) > 0
@@ -130,6 +131,98 @@ class TestTTSGenerateEndpoint:
         )
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    async def test_unload_tts_provider_endpoint(self, test_client, auth_headers):
+        """Provider unload endpoint should delegate to the TTS service."""
+        seen: dict[str, Any] = {}
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+        class FakeTTSService:
+            async def unload_provider(self, provider: str):
+                seen["provider"] = provider
+                return {"provider": provider, "unloaded": True}
+
+        async def _override_tts_service():
+            return FakeTTSService()
+
+        async def _override_admin_principal():
+            return AuthPrincipal(kind="user", user_id=1, roles=["admin"], is_admin=True)
+
+        test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _override_tts_service
+        test_client.app.dependency_overrides[get_auth_principal] = _override_admin_principal
+        try:
+            response = test_client.post(
+                "/api/v1/audio/tts/providers/chatterbox/unload",
+                headers=auth_headers,
+            )
+        finally:
+            test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+            test_client.app.dependency_overrides.pop(get_auth_principal, None)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == {"provider": "chatterbox", "unloaded": True}
+        assert seen == {"provider": "chatterbox"}
+
+    async def test_unload_tts_provider_endpoint_requires_admin(self, test_client, auth_headers):
+        """Provider unload should reject normal speech callers because it evicts global runtime state."""
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+        class FakeTTSService:
+            async def unload_provider(self, provider: str):
+                raise AssertionError("unload_provider should not be called for non-admin callers")
+
+        async def _override_tts_service():
+            return FakeTTSService()
+
+        async def _override_user_principal():
+            return AuthPrincipal(kind="user", user_id=1, roles=["user"], is_admin=False)
+
+        test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _override_tts_service
+        test_client.app.dependency_overrides[get_auth_principal] = _override_user_principal
+        try:
+            response = test_client.post(
+                "/api/v1/audio/tts/providers/chatterbox/unload",
+                headers=auth_headers,
+            )
+        finally:
+            test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+            test_client.app.dependency_overrides.pop(get_auth_principal, None)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    async def test_unload_tts_provider_endpoint_returns_conflict_when_active(self, test_client, auth_headers):
+        """Provider unload should return a controlled conflict while requests are in flight."""
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+        class FakeTTSService:
+            async def unload_provider(self, provider: str):
+                raise TTSProviderBusyError(
+                    "Cannot unload TTS provider while requests are in flight",
+                    provider=provider,
+                    details={"active_requests": 1},
+                )
+
+        async def _override_tts_service():
+            return FakeTTSService()
+
+        async def _override_admin_principal():
+            return AuthPrincipal(kind="user", user_id=1, roles=["admin"], is_admin=True)
+
+        test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _override_tts_service
+        test_client.app.dependency_overrides[get_auth_principal] = _override_admin_principal
+        try:
+            response = test_client.post(
+                "/api/v1/audio/tts/providers/chatterbox/unload",
+                headers=auth_headers,
+            )
+        finally:
+            test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+            test_client.app.dependency_overrides.pop(get_auth_principal, None)
+
+        assert response.status_code == status.HTTP_409_CONFLICT
 
     async def test_generate_with_voice_settings(self, test_client, auth_headers):
         """Test generation with voice settings."""
@@ -358,6 +451,307 @@ class TestTTSGenerateEndpoint:
         assert response.status_code == status.HTTP_200_OK
         assert seen["model"] == "omnivoice"
         assert seen["voice"] == "auto"
+
+    async def test_chatterbox_voice_conversion_endpoint_returns_audio(self, test_client, auth_headers):
+        """Chatterbox VC endpoint should materialize uploads and return converted audio bytes."""
+        seen: dict[str, Any] = {}
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            seen["source_exists"] = Path(source_audio_path).exists()
+            seen["target_exists"] = Path(target_voice_path).exists()
+            seen["response_format"] = response_format
+            seen["stream"] = stream
+            return TTSResponse(
+                audio_data=b"converted-vc",
+                format=AudioFormat.WAV,
+                sample_rate=24000,
+                metadata={"mode": "voice_conversion"},
+            )
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "false"},
+                files=[
+                    ("source_audio", ("source.wav", b"RIFF-source", "audio/wav")),
+                    ("target_voice", ("target.wav", b"RIFF-target", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.content == b"converted-vc"
+        assert response.headers.get("content-type") == "audio/wav"
+        assert seen == {
+            "source_exists": True,
+            "target_exists": True,
+            "response_format": "wav",
+            "stream": False,
+        }
+
+    async def test_chatterbox_voice_conversion_stream_keeps_uploads_until_consumed(self, test_client, auth_headers):
+        """Streaming Chatterbox VC should retain temp uploads until the response iterator runs."""
+        seen: dict[str, Any] = {}
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            async def audio_stream():
+                seen["source_exists_during_stream"] = Path(source_audio_path).exists()
+                seen["target_exists_during_stream"] = Path(target_voice_path).exists()
+                yield b"stream-vc"
+
+            return TTSResponse(
+                audio_stream=audio_stream(),
+                format=AudioFormat.WAV,
+                sample_rate=24000,
+                metadata={"mode": "voice_conversion"},
+            )
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "true"},
+                files=[
+                    ("source_audio", ("source.wav", b"RIFF-source", "audio/wav")),
+                    ("target_voice", ("target.wav", b"RIFF-target", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.content == b"stream-vc"
+        assert seen == {
+            "source_exists_during_stream": True,
+            "target_exists_during_stream": True,
+        }
+
+    async def test_chatterbox_voice_conversion_endpoint_uses_stored_target_voice(
+        self,
+        test_client,
+        auth_headers,
+        monkeypatch,
+    ):
+        """Chatterbox VC should resolve target_voice_id through stored custom voices."""
+        seen: dict[str, Any] = {}
+        stored_reference = b"RIFF-stored-target"
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        class FakeVoiceManager:
+            async def load_voice_reference_audio(self, user_id, voice_id):
+                seen["voice_lookup"] = (str(user_id), voice_id)
+                return stored_reference
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+            lambda: FakeVoiceManager(),
+            raising=True,
+        )
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            seen["source_exists"] = Path(source_audio_path).exists()
+            seen["target_exists"] = Path(target_voice_path).exists()
+            seen["target_bytes"] = Path(target_voice_path).read_bytes()
+            seen["response_format"] = response_format
+            seen["stream"] = stream
+            return TTSResponse(
+                audio_data=b"converted-stored-vc",
+                format=AudioFormat.WAV,
+                sample_rate=24000,
+                metadata={"mode": "voice_conversion"},
+            )
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={
+                    "target_voice_id": "voice-1",
+                    "response_format": "wav",
+                    "stream": "false",
+                },
+                files=[
+                    ("source_audio", ("source.wav", b"RIFF-source", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.content == b"converted-stored-vc"
+        assert seen == {
+            "voice_lookup": ("1", "voice-1"),
+            "source_exists": True,
+            "target_exists": True,
+            "target_bytes": stored_reference,
+            "response_format": "wav",
+            "stream": False,
+        }
+
+    async def test_chatterbox_voice_conversion_rejects_oversized_source_upload(
+        self,
+        test_client,
+        auth_headers,
+        monkeypatch,
+    ):
+        """Chatterbox VC should reject oversized uploads before conversion runs."""
+        seen: dict[str, bool] = {}
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+        monkeypatch.setattr(
+            audio_voice_conversion,
+            "_MAX_VOICE_CONVERSION_UPLOAD_BYTES",
+            8,
+            raising=False,
+        )
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            seen["called"] = True
+            return TTSResponse(audio_data=b"unexpected", format=AudioFormat.WAV, sample_rate=24000)
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "false"},
+                files=[
+                    ("source_audio", ("source.wav", b"123456789", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+        assert "exceeds" in response.json()["detail"]
+        assert "called" not in seen
+
+    async def test_chatterbox_voice_conversion_rejects_unsupported_upload_suffix(
+        self,
+        test_client,
+        auth_headers,
+    ):
+        """Chatterbox VC should reject unsupported upload extensions before conversion runs."""
+        seen: dict[str, bool] = {}
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            seen["called"] = True
+            return TTSResponse(audio_data=b"unexpected", format=AudioFormat.WAV, sample_rate=24000)
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "false"},
+                files=[
+                    ("source_audio", ("source.txt", b"RIFF-source", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Unsupported audio upload extension" in response.json()["detail"]
+        assert "called" not in seen
+
+    async def test_chatterbox_voice_conversion_sanitizes_tts_errors(
+        self,
+        test_client,
+        auth_headers,
+    ):
+        """Chatterbox VC should not expose provider exception text by default."""
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            raise TTSError("internal provider failure at /private/chatterbox/model")
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "false"},
+                files=[
+                    ("source_audio", ("source.wav", b"RIFF-source", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        detail = response.json()["detail"]
+        assert detail["message"] == "Voice conversion failed"
+        assert "request_id" in detail
+        assert "internal provider failure" not in json.dumps(detail)
+        assert "/private/chatterbox/model" not in json.dumps(detail)
+
+    async def test_chatterbox_voice_conversion_rejects_upload_and_stored_target_voice(
+        self,
+        test_client,
+        auth_headers,
+    ):
+        """A VC request should not accept two competing target voice references."""
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            return TTSResponse(audio_data=b"unexpected", format=AudioFormat.WAV, sample_rate=24000)
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={
+                    "target_voice_id": "voice-1",
+                    "response_format": "wav",
+                    "stream": "false",
+                },
+                files=[
+                    ("source_audio", ("source.wav", b"RIFF-source", "audio/wav")),
+                    ("target_voice", ("target.wav", b"RIFF-target", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "either target_voice or target_voice_id" in response.json()["detail"]
 
 # ========================================================================
 # TTS Streaming Endpoint Tests
@@ -940,6 +1334,80 @@ class TestProviderManagementEndpoints:
             assert "openai" in data["providers"]
             assert "tts-1" in data["providers"]["openai"].get("models", [])
 
+    async def test_get_provider_model_info(self, test_client, auth_headers):
+        """Provider model-info should expose focused status and Chatterbox metadata."""
+        with patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.get_status') as mock_status, \
+            patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.get_capabilities') as mock_caps:
+            mock_status.return_value = {
+                "providers": {
+                    "chatterbox": {
+                        "status": "available",
+                        "initialized": True,
+                        "failed": False,
+                    }
+                }
+            }
+            mock_caps.return_value = {
+                "chatterbox": {
+                    "formats": ["wav", "mp3"],
+                    "sample_rate": 24000,
+                    "supports_streaming": True,
+                    "metadata": {
+                        "supported_model_ids": [
+                            "chatterbox",
+                            "chatterbox-multilingual",
+                            "chatterbox-turbo",
+                        ],
+                        "model_families": {
+                            "turbo": {
+                                "model_ids": ["chatterbox-turbo"],
+                                "supports_paralinguistic_tags": True,
+                            }
+                        },
+                        "voice_conversion": {
+                            "endpoint": "/api/v1/audio/voice-conversion",
+                            "model_id": "chatterbox-vc",
+                        },
+                    },
+                }
+            }
+
+            response = test_client.get(
+                "/api/v1/audio/tts/providers/chatterbox/model-info",
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert data["provider"] == "chatterbox"
+            assert data["status"] == "available"
+            assert data["initialized"] is True
+            assert data["loaded"] is True
+            assert data["model_ids"] == [
+                "chatterbox",
+                "chatterbox-multilingual",
+                "chatterbox-turbo",
+            ]
+            assert data["model_families"]["turbo"]["supports_paralinguistic_tags"] is True
+            assert data["voice_conversion"]["model_id"] == "chatterbox-vc"
+            assert data["unload_endpoint"] == "/api/v1/audio/tts/providers/chatterbox/unload"
+            assert data["capabilities"]["formats"] == ["wav", "mp3"]
+
+    async def test_get_provider_model_info_unknown_provider(self, test_client, auth_headers):
+        """Unknown model-info providers should return 404."""
+        with patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.get_status') as mock_status, \
+            patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.get_capabilities') as mock_caps:
+            mock_status.return_value = {"providers": {}}
+            mock_caps.return_value = {}
+
+            response = test_client.get(
+                "/api/v1/audio/tts/providers/missing/model-info",
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_404_NOT_FOUND
+            assert "Unknown TTS provider" in response.json()["detail"]["message"]
+
     async def test_switch_default_provider(self, test_client, auth_headers):
         """Test switching the default TTS provider."""
         response = test_client.post(
@@ -1002,6 +1470,95 @@ class TestVoiceManagementEndpoints:
             data = response.json()
             assert "elevenlabs" in data
             assert data["elevenlabs"][0]["id"] == "rachel"
+
+    async def test_list_voices_openai_catalog_format(self, test_client, auth_headers):
+        """Provider voice catalog can be flattened into an OpenAI-style list."""
+        with patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.list_voices') as mock_voices:
+            mock_voices.return_value = {
+                "openai": [
+                    {"id": "alloy", "name": "Alloy", "language": "en", "gender": "neutral"},
+                ],
+                "chatterbox": [
+                    {
+                        "id": "default",
+                        "name": "Default",
+                        "language": "en",
+                        "styles": ["voice_cloning"],
+                    },
+                ],
+            }
+
+            response = test_client.get(
+                "/api/v1/audio/voices/catalog?format=openai",
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert data["object"] == "list"
+            assert [voice["id"] for voice in data["data"]] == ["alloy", "default"]
+            assert data["data"][0] == {
+                "id": "alloy",
+                "object": "voice",
+                "provider": "openai",
+                "name": "Alloy",
+                "language": "en",
+                "metadata": {"gender": "neutral"},
+            }
+            assert data["data"][1]["provider"] == "chatterbox"
+            assert data["data"][1]["metadata"] == {"styles": ["voice_cloning"]}
+
+    async def test_list_voices_openai_catalog_format_filters_provider(self, test_client, auth_headers):
+        """OpenAI-style catalog format still honors provider filtering."""
+        with patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.list_voices') as mock_voices:
+            mock_voices.return_value = {
+                "openai": [{"id": "alloy", "name": "Alloy", "language": "en"}],
+                "chatterbox": [{"id": "default", "name": "Default", "language": "en"}],
+            }
+
+            response = test_client.get(
+                "/api/v1/audio/voices/catalog?provider=chatterbox&format=openai",
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert data["object"] == "list"
+            assert data["data"] == [
+                {
+                    "id": "default",
+                    "object": "voice",
+                    "provider": "chatterbox",
+                    "name": "Default",
+                    "language": "en",
+                }
+            ]
+
+    async def test_custom_voice_list_route_ignores_catalog_format(self, test_client, auth_headers):
+        """The custom voice route remains distinct from provider catalog discovery."""
+
+        class _Voice:
+            def model_dump(self):
+                return {"id": "custom-1", "name": "Custom Voice"}
+
+        class _VoiceManager:
+            async def list_user_voices(self, user_id, refresh=True):
+                return [_Voice()]
+
+        with patch(
+            'tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager',
+            return_value=_VoiceManager(),
+        ):
+            response = test_client.get(
+                "/api/v1/audio/voices?format=openai",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == {
+            "voices": [{"id": "custom-1", "name": "Custom Voice"}],
+            "count": 1,
+        }
 
 # ========================================================================
 # File Download Endpoint Tests

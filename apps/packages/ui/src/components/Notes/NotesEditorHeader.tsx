@@ -419,7 +419,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         break
     }
   }
-
   return (
     <div className="flex flex-col gap-3 border-b border-border bg-surface px-4 py-3 md:flex-row md:items-center md:justify-between">
       <div className="flex flex-col gap-0.5 min-w-0">

@@ -143,4 +143,25 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
     expect(baseMethodNames).not.toContain("getPresentation")
     expect(baseMethodNames).not.toContain("exportPresentation")
   })
+
+  it("unloads TTS providers through the mixed models-audio domain path", async () => {
+    mocks.bgRequest.mockResolvedValue({ provider: "chatterbox", unloaded: true })
+
+    const client = new TldwApiClient()
+    const result = await client.unloadTtsProvider(" chatterbox ")
+
+    expect(result).toEqual({ provider: "chatterbox", unloaded: true })
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/audio/tts/providers/chatterbox/unload",
+      method: "POST"
+    })
+  })
+
+  it("rejects empty TTS provider ids before dispatching client unload requests", async () => {
+    const client = new TldwApiClient()
+
+    await expect(client.unloadTtsProvider("   ")).rejects.toThrow("provider is required")
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
 })

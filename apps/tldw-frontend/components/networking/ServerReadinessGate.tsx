@@ -1,6 +1,7 @@
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
+import { useConnectionStore } from "@tldw/ui/store/connection"
 import {
   StatePanel,
   type StatePanelDiagnostic,
@@ -12,12 +13,6 @@ const _env: DeploymentEnv = {
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL
 }
 
-const _origin =
-  typeof window !== "undefined"
-    ? resolvePublicApiOrigin(_env, window.location.origin)
-    : resolvePublicApiOrigin(_env)
-
-const HEALTH_URL = `${_origin}/api/v1/health`
 const MAX_WAIT_MS = 15_000
 const RETRY_INTERVAL_MS = 2_000
 const OFFLINE_BYPASS_KEYS = ["__tldw_allow_offline", "__tldw_test_bypass"] as const
@@ -47,6 +42,66 @@ const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
 const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
 const HEALTHY_CHECK_STATUSES = new Set(["healthy", "ok"])
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
+const HEALTH_PATH = "/api/v1/health"
+
+const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
+const buildHealthUrl = (origin: string): string =>
+  origin ? `${trimTrailingSlash(origin)}${HEALTH_PATH}` : HEALTH_PATH
+
+const warnReadinessUrlIssue = (
+  message: string,
+  metadata?: Record<string, string>
+): void => {
+  if (metadata) {
+    console.warn(message, metadata)
+    return
+  }
+  console.warn(message)
+}
+
+export function resolveReadinessHealthUrl({
+  configuredServerUrl,
+  env,
+  pageOrigin
+}: {
+  configuredServerUrl?: string | null
+  env: DeploymentEnv
+  pageOrigin?: string
+}): string {
+  const configured = String(configuredServerUrl || "").trim()
+  if (configured) {
+    try {
+      const configuredUrl = new URL(configured)
+      if (
+        configuredUrl.protocol === "http:" ||
+        configuredUrl.protocol === "https:"
+      ) {
+        return buildHealthUrl(configuredUrl.origin)
+      }
+      warnReadinessUrlIssue(
+        "Ignoring unsupported tldw server URL protocol for readiness health check.",
+        { protocol: configuredUrl.protocol }
+      )
+    } catch {
+      warnReadinessUrlIssue(
+        "Ignoring invalid tldw server URL for readiness health check."
+      )
+    }
+  }
+
+  try {
+    const fallbackOrigin =
+      typeof pageOrigin === "string"
+        ? resolvePublicApiOrigin(env, pageOrigin)
+        : resolvePublicApiOrigin(env)
+    return buildHealthUrl(fallbackOrigin)
+  } catch {
+    warnReadinessUrlIssue(
+      "Falling back to relative readiness health check after API origin resolution failed."
+    )
+    return HEALTH_PATH
+  }
+}
 
 function readStorageFlag(key: string): boolean {
   try {
@@ -84,12 +139,14 @@ function extractHealthStatus(body: unknown): string | undefined {
 
 function buildReadinessDiagnostics({
   state,
+  healthUrl,
   degradedChecks = [],
   httpStatus,
   healthStatus,
   errorMessage
 }: {
   state: "ready" | "degraded" | "blocked"
+  healthUrl: string
   degradedChecks?: string[]
   httpStatus?: number
   healthStatus?: string
@@ -98,7 +155,7 @@ function buildReadinessDiagnostics({
   return {
     state,
     degradedChecks,
-    healthUrl: HEALTH_URL,
+    healthUrl,
     httpStatus,
     healthStatus,
     errorMessage,
@@ -106,9 +163,9 @@ function buildReadinessDiagnostics({
   }
 }
 
-async function checkHealth(): Promise<ReadinessResult> {
+async function checkHealth(healthUrl: string): Promise<ReadinessResult> {
   try {
-    const res = await fetch(HEALTH_URL, {
+    const res = await fetch(healthUrl, {
       method: "GET",
       signal: AbortSignal.timeout(3000)
     })
@@ -124,6 +181,7 @@ async function checkHealth(): Promise<ReadinessResult> {
           state: "blocked",
           diagnostics: buildReadinessDiagnostics({
             state: "blocked",
+            healthUrl,
             httpStatus: res.status,
             errorMessage: err instanceof Error ? err.message : "Could not parse health response."
           })
@@ -135,6 +193,7 @@ async function checkHealth(): Promise<ReadinessResult> {
         state: "blocked",
         diagnostics: buildReadinessDiagnostics({
           state: "blocked",
+          healthUrl,
           httpStatus: res.status,
           healthStatus
         })
@@ -146,6 +205,7 @@ async function checkHealth(): Promise<ReadinessResult> {
         state: "ready",
         diagnostics: buildReadinessDiagnostics({
           state: "ready",
+          healthUrl,
           httpStatus: res.status,
           healthStatus: status
         })
@@ -158,6 +218,7 @@ async function checkHealth(): Promise<ReadinessResult> {
         degradedChecks,
         diagnostics: buildReadinessDiagnostics({
           state: "degraded",
+          healthUrl,
           degradedChecks,
           httpStatus: res.status,
           healthStatus: status
@@ -168,6 +229,7 @@ async function checkHealth(): Promise<ReadinessResult> {
       state: "blocked",
       diagnostics: buildReadinessDiagnostics({
         state: "blocked",
+        healthUrl,
         httpStatus: res.status,
         // Empty status means the health JSON did not include a usable status field.
         healthStatus: status !== "" ? status : undefined
@@ -178,6 +240,7 @@ async function checkHealth(): Promise<ReadinessResult> {
       state: "blocked",
       diagnostics: buildReadinessDiagnostics({
         state: "blocked",
+        healthUrl,
         errorMessage: err instanceof Error ? err.message : "Health request failed."
       })
     }
@@ -200,18 +263,18 @@ function navigateTo(path: string): void {
 }
 
 function ReadinessRecoveryPanel({
-  children,
   diagnostics,
+  healthUrl,
   onRetry,
 }: {
-  children: React.ReactNode
   diagnostics: ServerReadinessPublishedState | null
+  healthUrl: string
   onRetry: () => void
 }) {
   const panelDiagnostics: StatePanelDiagnostic[] = [
     {
       label: "Health endpoint",
-      value: HEALTH_URL,
+      value: healthUrl,
       code: true,
     },
     {
@@ -240,32 +303,29 @@ function ReadinessRecoveryPanel({
   }
 
   return (
-    <>
-      <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text">
-        <StatePanel
-          state="unavailable"
-          title="Backend readiness check failed"
-          message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
-          diagnostics={panelDiagnostics}
-          primaryAction={{ label: "Retry", onClick: onRetry }}
-          secondaryActions={[
-            {
-              label: "Health & diagnostics",
-              onClick: () => navigateTo("/settings/health"),
-            },
-            {
-              label: "Server settings",
-              onClick: () => navigateTo("/settings/tldw"),
-            },
-          ]}
-          role="alert"
-          aria-live="assertive"
-          className="w-full max-w-3xl"
-          data-testid="server-readiness-recovery"
-        />
-      </main>
-      <div data-testid="server-readiness-route-content">{children}</div>
-    </>
+    <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text">
+      <StatePanel
+        state="unavailable"
+        title="Backend readiness check failed"
+        message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
+        diagnostics={panelDiagnostics}
+        primaryAction={{ label: "Retry", onClick: onRetry }}
+        secondaryActions={[
+          {
+            label: "Health & diagnostics",
+            onClick: () => navigateTo("/settings/health"),
+          },
+          {
+            label: "Server settings",
+            onClick: () => navigateTo("/settings/tldw"),
+          },
+        ]}
+        role="alert"
+        aria-live="assertive"
+        className="w-full max-w-3xl"
+        data-testid="server-readiness-recovery"
+      />
+    </main>
   )
 }
 
@@ -274,13 +334,28 @@ export const ServerReadinessGate: React.FC<{
   allowDegraded?: boolean
   bypass?: boolean
 }> = ({ children, allowDegraded = false, bypass = false }) => {
+  const configuredServerUrl = useConnectionStore((s) => s.state.serverUrl)
+  const offlineBypassEnabled = shouldBypassReadinessForOffline()
   const [gate, setGate] = React.useState<GateState>(() =>
-    shouldBypassReadinessForOffline() ? "ready" : "checking"
+    offlineBypassEnabled ? "ready" : "checking"
   )
   const [degradedChecks, setDegradedChecks] = React.useState<string[]>([])
   const [lastReadinessState, setLastReadinessState] =
     React.useState<ServerReadinessPublishedState | null>(null)
   const [retryVersion, setRetryVersion] = React.useState(0)
+  const pageOrigin =
+    typeof window !== "undefined" ? window.location.origin : undefined
+  const healthUrl = React.useMemo(
+    () => {
+      if (bypass || offlineBypassEnabled) return HEALTH_PATH
+      return resolveReadinessHealthUrl({
+        configuredServerUrl,
+        env: _env,
+        pageOrigin
+      })
+    },
+    [bypass, configuredServerUrl, offlineBypassEnabled, pageOrigin]
+  )
 
   const retryNow = React.useCallback(() => {
     setRetryVersion((version) => version + 1)
@@ -292,7 +367,7 @@ export const ServerReadinessGate: React.FC<{
       setGate((current) => (current === "ready" ? current : "checking"))
       return
     }
-    if (shouldBypassReadinessForOffline()) {
+    if (offlineBypassEnabled) {
       setGate("ready")
       return
     }
@@ -302,20 +377,28 @@ export const ServerReadinessGate: React.FC<{
     setLastReadinessState(null)
 
     let cancelled = false
-    let retryTimer: number | undefined
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
     const deadline = Date.now() + MAX_WAIT_MS
+    deadlineTimer = setTimeout(() => {
+      if (!cancelled) {
+        setGate("timeout")
+      }
+    }, MAX_WAIT_MS)
 
     const attempt = async () => {
-      const result = await checkHealth()
+      const result = await checkHealth(healthUrl)
       if (cancelled) return
       setLastReadinessState(result.diagnostics)
 
       if (result.state === "ready") {
+        if (deadlineTimer) clearTimeout(deadlineTimer)
         setGate("ready")
         return
       }
 
       if (result.state === "degraded" && allowDegraded) {
+        if (deadlineTimer) clearTimeout(deadlineTimer)
         setDegradedChecks(result.degradedChecks)
         setGate("degraded")
         return
@@ -327,7 +410,7 @@ export const ServerReadinessGate: React.FC<{
       }
 
       setGate("waiting")
-      retryTimer = window.setTimeout(() => {
+      retryTimer = setTimeout(() => {
         if (!cancelled) void attempt()
       }, RETRY_INTERVAL_MS)
     }
@@ -336,9 +419,10 @@ export const ServerReadinessGate: React.FC<{
 
     return () => {
       cancelled = true
-      if (retryTimer) window.clearTimeout(retryTimer)
+      if (retryTimer) clearTimeout(retryTimer)
+      if (deadlineTimer) clearTimeout(deadlineTimer)
     }
-  }, [allowDegraded, bypass, retryVersion])
+  }, [allowDegraded, bypass, healthUrl, offlineBypassEnabled, retryVersion])
 
   React.useEffect(() => {
     if (typeof window === "undefined" || bypass) return
@@ -363,6 +447,7 @@ export const ServerReadinessGate: React.FC<{
         ...(lastReadinessState ??
           buildReadinessDiagnostics({
             state,
+            healthUrl,
             degradedChecks: emittedDegradedChecks
           })),
         state,
@@ -373,7 +458,7 @@ export const ServerReadinessGate: React.FC<{
     return () => {
       window.clearTimeout(emitTimer)
     }
-  }, [bypass, degradedChecks, gate, lastReadinessState])
+  }, [bypass, degradedChecks, gate, healthUrl, lastReadinessState])
 
   if (bypass || gate === "ready") {
     return <>{children}</>
@@ -397,10 +482,9 @@ export const ServerReadinessGate: React.FC<{
     return (
       <ReadinessRecoveryPanel
         diagnostics={lastReadinessState}
+        healthUrl={healthUrl}
         onRetry={retryNow}
-      >
-        {children}
-      </ReadinessRecoveryPanel>
+      />
     )
   }
 

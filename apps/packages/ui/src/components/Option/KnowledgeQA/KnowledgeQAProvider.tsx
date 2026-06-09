@@ -24,6 +24,10 @@ import type {
   KnowledgeQAMessage,
   KnowledgeQAThread,
   CitationRef,
+  KnowledgeAnswerTrustState,
+  KnowledgeTrustMetadata,
+  KnowledgeTrustReasonCode,
+  EvidenceOrigin,
   SearchRuntimeDetails,
   KnowledgeSourceStatus,
   KnowledgeSourceHealthState,
@@ -31,6 +35,7 @@ import type {
   ScopeSnapshot,
   PinnedSourceFilters,
   ThreadHydrationResult,
+  ExtensionKnowledgeFailureState,
 } from "./types"
 import {
   DEFAULT_RAG_SETTINGS,
@@ -51,6 +56,19 @@ import {
   EMPTY_SOURCE_HEALTH_STATE,
   normalizeKnowledgeSourceHealth,
 } from "./sourceHealth"
+import {
+  isKnowledgeAnswerTrustState,
+  normalizeKnowledgeAnswerTrust,
+} from "./trustState"
+import { validateKnowledgeResultScope } from "./scopeValidation"
+import {
+  getEvidenceOrigin,
+  getResultChunkId,
+  getResultEvidenceText,
+  getResultSourceId,
+  getResultSourceStatus,
+  getResultUnavailableReason,
+} from "./sourceListUtils"
 
 const LOCAL_THREAD_PREFIX = "local-"
 const DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
@@ -91,6 +109,10 @@ const initialState: KnowledgeQAState = {
   results: [],
   answer: null,
   citations: [],
+  answerTrustState: "unknown_trust",
+  answerTrustReasonCodes: [],
+  answerEvidenceOrigin: null,
+  extensionFailureState: null,
   searchDetails: null,
   error: null,
   queryWarning: null,
@@ -123,6 +145,15 @@ const initialState: KnowledgeQAState = {
 const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
+type ResultsPayload = {
+  results: RagResult[]
+  answer: string | null
+  citations: CitationRef[]
+  answerTrustState: KnowledgeAnswerTrustState
+  answerTrustReasonCodes?: KnowledgeTrustReasonCode[]
+  answerEvidenceOrigin?: EvidenceOrigin | null
+}
+
 function sliceMessagesForBranch(
   messages: KnowledgeQAMessage[],
   fromUserMessageId: string
@@ -149,8 +180,18 @@ type Action =
   | { type: "SET_QUERY"; payload: string }
   | { type: "SET_QUERY_WARNING"; payload: string | null }
   | { type: "SET_SEARCHING"; payload: boolean }
-  | { type: "SET_RESULTS"; payload: { results: RagResult[]; answer: string | null; citations: CitationRef[] } }
-  | { type: "SET_PARTIAL_RESULTS"; payload: { results: RagResult[]; answer: string | null; citations: CitationRef[] } }
+  | { type: "SET_RESULTS"; payload: ResultsPayload }
+  | { type: "SET_PARTIAL_RESULTS"; payload: ResultsPayload }
+  | { type: "SET_EXTENSION_FAILURE_STATE"; payload: ExtensionKnowledgeFailureState | null }
+  | { type: "MARK_SYNC_FAILED" }
+  | {
+      type: "MARK_SYNC_SUCCEEDED"
+      payload: {
+        answerTrustState: KnowledgeAnswerTrustState
+        answerTrustReasonCodes: KnowledgeTrustReasonCode[]
+        answerEvidenceOrigin: EvidenceOrigin | null
+      }
+    }
   | { type: "SET_SEARCH_DETAILS"; payload: SearchRuntimeDetails | null }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "CLEAR_RESULTS" }
@@ -211,6 +252,13 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         results: action.payload.results,
         answer: action.payload.answer,
         citations: action.payload.citations,
+        answerTrustState: action.payload.answerTrustState,
+        answerTrustReasonCodes: action.payload.answerTrustReasonCodes ?? [],
+        answerEvidenceOrigin: action.payload.answerEvidenceOrigin ?? null,
+        extensionFailureState:
+          action.payload.answerTrustState === "unsynced_local_result"
+            ? "search_succeeded_sync_failed"
+            : null,
         hasSearched: true,
         isSearching: false,
         queryStage: "complete",
@@ -221,8 +269,35 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         results: action.payload.results,
         answer: action.payload.answer,
         citations: action.payload.citations,
+        answerTrustState: action.payload.answerTrustState,
+        answerTrustReasonCodes: action.payload.answerTrustReasonCodes ?? [],
+        answerEvidenceOrigin: action.payload.answerEvidenceOrigin ?? null,
+        extensionFailureState:
+          action.payload.answerTrustState === "unsynced_local_result"
+            ? "search_succeeded_sync_failed"
+            : state.extensionFailureState,
         hasSearched: true,
         isSearching: true,
+      }
+    case "SET_EXTENSION_FAILURE_STATE":
+      return { ...state, extensionFailureState: action.payload }
+    case "MARK_SYNC_FAILED":
+      return {
+        ...state,
+        isLocalOnlyThread: true,
+        answerTrustState: "unsynced_local_result",
+        answerTrustReasonCodes: [],
+        answerEvidenceOrigin: null,
+        extensionFailureState: "search_succeeded_sync_failed",
+      }
+    case "MARK_SYNC_SUCCEEDED":
+      return {
+        ...state,
+        isLocalOnlyThread: false,
+        answerTrustState: action.payload.answerTrustState,
+        answerTrustReasonCodes: action.payload.answerTrustReasonCodes,
+        answerEvidenceOrigin: action.payload.answerEvidenceOrigin,
+        extensionFailureState: null,
       }
     case "SET_SEARCH_DETAILS":
       return { ...state, searchDetails: action.payload }
@@ -230,6 +305,10 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         error: action.payload,
+        answerTrustState: action.payload ? "failed_search" : state.answerTrustState,
+        answerTrustReasonCodes: action.payload ? [] : state.answerTrustReasonCodes,
+        answerEvidenceOrigin: action.payload ? null : state.answerEvidenceOrigin,
+        extensionFailureState: action.payload ? "search_failed" : null,
         hasSearched: true,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
@@ -240,6 +319,10 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         results: [],
         answer: null,
         citations: [],
+        answerTrustState: "unknown_trust",
+        answerTrustReasonCodes: [],
+        answerEvidenceOrigin: null,
+        extensionFailureState: null,
         searchDetails: null,
         error: null,
         queryWarning: null,
@@ -393,6 +476,14 @@ function parseCitations(answer: string, results: RagResult[]): CitationRef[] {
   }))
 }
 
+function getOriginalResultIndex(result: RagResult, fallbackIndex: number): number {
+  const rawIndex = result.metadata?.original_result_index
+  if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) {
+    return fallbackIndex
+  }
+  return Math.max(0, Math.round(rawIndex))
+}
+
 function normalizeAnswerText(value: unknown): string | null {
   if (typeof value !== "string") return null
   return value.trim().length > 0 ? value : null
@@ -470,11 +561,50 @@ function mapRagContextDocumentsToResults(
 
   return retrievedDocuments.map((document, index) => {
     const doc = document as Record<string, unknown>
+    const metadata =
+      doc?.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)
+        ? (doc.metadata as Record<string, unknown>)
+        : {}
+    const sourceId =
+      typeof doc?.source_id === "string"
+        ? doc.source_id
+        : typeof metadata.source_id === "string"
+          ? metadata.source_id
+          : undefined
+    const chunkId =
+      typeof doc?.chunk_id === "string"
+        ? doc.chunk_id
+        : typeof metadata.chunk_id === "string"
+          ? metadata.chunk_id
+          : undefined
+    const evidenceOrigin =
+      typeof doc?.evidence_origin === "string"
+        ? doc.evidence_origin
+        : typeof metadata.evidence_origin === "string"
+          ? metadata.evidence_origin
+          : undefined
+    const sourceStatus =
+      typeof doc?.source_status === "string"
+        ? doc.source_status
+        : typeof metadata.source_status === "string"
+          ? metadata.source_status
+          : undefined
+    const unavailableReason =
+      typeof doc?.unavailable_reason === "string"
+        ? doc.unavailable_reason
+        : typeof metadata.unavailable_reason === "string"
+          ? metadata.unavailable_reason
+          : undefined
     return {
       id:
         typeof doc?.id === "string" && doc.id.length > 0
           ? doc.id
           : `doc-${index + 1}`,
+      sourceId,
+      chunkId,
+      evidenceOrigin,
+      sourceStatus,
+      unavailableReason,
       score: typeof doc?.score === "number" ? doc.score : undefined,
       content:
         typeof doc?.excerpt === "string"
@@ -489,6 +619,7 @@ function mapRagContextDocumentsToResults(
             ? doc.text
             : undefined,
       metadata: {
+        ...metadata,
         title:
           typeof doc?.title === "string" ? doc.title : `Source ${index + 1}`,
         source:
@@ -497,20 +628,39 @@ function mapRagContextDocumentsToResults(
             : typeof doc?.source_type === "string"
               ? doc.source_type
               : undefined,
+        source_id: sourceId,
         source_type:
           typeof doc?.source_type === "string" ? doc.source_type : undefined,
-        chunk_id: typeof doc?.chunk_id === "string" ? doc.chunk_id : undefined,
+        chunk_id: chunkId,
+        evidence_origin: evidenceOrigin,
+        source_status: sourceStatus,
+        unavailable_reason: unavailableReason,
         url: typeof doc?.url === "string" ? doc.url : undefined,
         page_number:
           typeof doc?.page_number === "number" ? doc.page_number : undefined,
-        ...(doc?.metadata &&
-        typeof doc.metadata === "object" &&
-        !Array.isArray(doc.metadata)
-          ? (doc.metadata as Record<string, unknown>)
-          : {}),
       },
     } as RagResult
   })
+}
+
+function buildHistorySourceStatusFromResults(
+  results: RagResult[]
+): Record<string, KnowledgeSourceStatus> | undefined {
+  const sourceStatus: Record<string, KnowledgeSourceStatus> = {}
+  results.forEach((result) => {
+    const sourceType = result.sourceType || result.metadata?.source_type || "unknown"
+    const status = getResultSourceStatus(result) ?? "searched"
+    const existing = sourceStatus[sourceType]
+    if (existing) {
+      existing.count += 1
+      if (existing.status === "searched" && status !== "searched") {
+        existing.status = status
+      }
+      return
+    }
+    sourceStatus[sourceType] = { status, count: 1 }
+  })
+  return Object.keys(sourceStatus).length > 0 ? sourceStatus : undefined
 }
 
 function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
@@ -518,9 +668,13 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   answer: string | null
   results: RagResult[]
   citations: CitationRef[]
+  answerTrustState: KnowledgeAnswerTrustState
+  answerTrustReasonCodes: KnowledgeTrustReasonCode[]
+  answerEvidenceOrigin: EvidenceOrigin | null
   answerPreview?: string
   sourcesCount: number
   settingsSnapshot?: Partial<RagSettings> | null
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
 } | null {
   if (messages.length === 0) return null
 
@@ -540,6 +694,9 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
       answer: null,
       results: [],
       citations: [],
+      answerTrustState: "unknown_trust",
+      answerTrustReasonCodes: [],
+      answerEvidenceOrigin: null,
       sourcesCount: 0,
       settingsSnapshot: null,
     }
@@ -551,6 +708,34 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     normalizeAnswerText(ragContext?.generated_answer) ??
     normalizeAnswerText(latestAssistantMessage.content)
   const citations = answer ? parseCitations(answer, results) : []
+  const storedTrustState = isKnowledgeAnswerTrustState(ragContext?.trust_state)
+    ? ragContext.trust_state
+    : null
+  const storedReasonCodes = Array.isArray(ragContext?.trust_reason_codes)
+    ? ragContext.trust_reason_codes.filter(
+        (value): value is KnowledgeTrustReasonCode => typeof value === "string"
+      )
+    : []
+  const storedEvidenceOrigin =
+    ragContext?.trust_evidence_origin === "local_library" ||
+    ragContext?.trust_evidence_origin === "web_fallback" ||
+    ragContext?.trust_evidence_origin === "mixed" ||
+    ragContext?.trust_evidence_origin === "unknown_origin"
+      ? ragContext.trust_evidence_origin
+      : null
+  const normalizedTrust =
+    storedTrustState != null
+      ? {
+          state: storedTrustState,
+          reasonCodes: storedReasonCodes,
+          evidenceOrigin: storedEvidenceOrigin ?? "unknown_origin",
+        }
+      : normalizeKnowledgeAnswerTrust({
+          answer,
+          results,
+          citations,
+          hasRequiredMetadata: false,
+        })
   const queryFromContext =
     typeof ragContext?.search_query === "string" &&
     ragContext.search_query.trim().length > 0
@@ -563,9 +748,16 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     answer,
     results,
     citations,
+    answerTrustState: normalizedTrust.state,
+    answerTrustReasonCodes: normalizedTrust.reasonCodes,
+    answerEvidenceOrigin:
+      normalizedTrust.evidenceOrigin === "unknown_origin"
+        ? storedEvidenceOrigin
+        : normalizedTrust.evidenceOrigin,
     answerPreview: truncateAnswerPreview(answer),
     sourcesCount: results.length,
     settingsSnapshot: normalizeRestorableSettingsSnapshot(ragContext?.settings_snapshot),
+    sourceStatus: buildHistorySourceStatusFromResults(results),
   }
 }
 
@@ -614,6 +806,15 @@ function extractRagResponse(response: any): {
   return { results, answer, expandedQueries, metadata }
 }
 
+function extractKnowledgeTrustMetadata(
+  metadata: Record<string, unknown>
+): KnowledgeTrustMetadata | null {
+  const rawTrust = metadata.knowledge_trust
+  return rawTrust && typeof rawTrust === "object" && !Array.isArray(rawTrust)
+    ? (rawTrust as KnowledgeTrustMetadata)
+    : null
+}
+
 function mapStreamingContextsToResults(contexts: any[]): RagResult[] {
   return contexts.map((context, index) => ({
     id:
@@ -640,6 +841,17 @@ function calculateAverageRelevance(results: RagResult[]): number | null {
   if (numericScores.length === 0) return null
   const sum = numericScores.reduce((acc, value) => acc + value, 0)
   return sum / numericScores.length
+}
+
+function hasWeakEvidence(results: RagResult[], threshold: number | undefined): boolean {
+  const normalizedThreshold =
+    typeof threshold === "number" && Number.isFinite(threshold) ? threshold : 0.3
+  const scoredResults = results.filter(
+    (result): result is RagResult & { score: number } =>
+      typeof result.score === "number" && Number.isFinite(result.score)
+  )
+  if (scoredResults.length === 0) return false
+  return scoredResults.every((result) => result.score < normalizedThreshold)
 }
 
 function normalizeMetric(value: unknown): number | null {
@@ -1579,6 +1791,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_QUERY", payload: query })
   }, [])
 
+  const setExtensionFailureState = useCallback(
+    (nextState: ExtensionKnowledgeFailureState | null) => {
+      dispatch({ type: "SET_EXTENSION_FAILURE_STATE", payload: nextState })
+    },
+    []
+  )
+
   const createNewThread = useCallback(
     async (title?: string, options?: CreateThreadOptions): Promise<string> => {
       const shouldActivate = options?.shouldActivate ?? (() => true)
@@ -1781,27 +2000,172 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     []
   )
 
+  const retrySync = useCallback(async (): Promise<boolean> => {
+    try {
+      const messagesToSync = state.messages.filter(
+        (candidate) =>
+          candidate.role === "user" ||
+          candidate.role === "assistant" ||
+          candidate.role === "system"
+      )
+      if (messagesToSync.length === 0) {
+        return false
+      }
+
+      let targetThreadId = state.currentThreadId
+      if (!targetThreadId || isLocalThreadId(targetThreadId)) {
+        const firstQuestion =
+          messagesToSync.find((candidate) => candidate.role === "user")?.content ||
+          state.query ||
+          "Knowledge QA"
+        targetThreadId = await createNewThread(firstQuestion)
+      }
+
+      if (!targetThreadId || isLocalThreadId(targetThreadId)) {
+        dispatch({ type: "MARK_SYNC_FAILED" })
+        return false
+      }
+
+      const postSyncTrust = normalizeKnowledgeAnswerTrust({
+        answer: state.answer,
+        results: state.results,
+        citations: state.citations,
+        hasRequiredMetadata: true,
+        weakEvidence: hasWeakEvidence(
+          state.results,
+          state.settings.strip_min_relevance
+        ),
+      })
+      const postSyncEvidenceOrigin =
+        postSyncTrust.evidenceOrigin === "unknown_origin"
+          ? undefined
+          : postSyncTrust.evidenceOrigin
+      const syncRagContextTrust = (ragContext: RagContextData): RagContextData => ({
+        ...ragContext,
+        trust_state: postSyncTrust.state,
+        trust_reason_codes: postSyncTrust.reasonCodes,
+        trust_evidence_origin: postSyncEvidenceOrigin,
+        knowledge_trust: {
+          ...(ragContext.knowledge_trust || {}),
+          state: postSyncTrust.state,
+          reasonCodes: postSyncTrust.reasonCodes,
+          evidenceOrigin: postSyncTrust.evidenceOrigin,
+        },
+      })
+
+      const syncedMessages: KnowledgeQAMessage[] = []
+      let parentMessageId: string | null = null
+      for (const messageToSync of messagesToSync) {
+        const persisted = await persistChatMessage(
+          targetThreadId,
+          messageToSync.role,
+          messageToSync.content,
+          parentMessageId
+        )
+        if (!persisted?.id) {
+          dispatch({ type: "MARK_SYNC_FAILED" })
+          return false
+        }
+        parentMessageId = persisted.id
+
+        const syncedRagContext =
+          messageToSync.role === "assistant" && messageToSync.ragContext
+            ? syncRagContextTrust(messageToSync.ragContext)
+            : messageToSync.ragContext
+        if (messageToSync.role === "assistant" && messageToSync.ragContext) {
+          const persistedContext = await persistRagContext(
+            persisted.id,
+            syncedRagContext as RagContextData
+          )
+          if (!persistedContext) {
+            dispatch({ type: "MARK_SYNC_FAILED" })
+            return false
+          }
+        }
+
+        syncedMessages.push({
+          ...messageToSync,
+          id: persisted.id,
+          conversationId: targetThreadId,
+          timestamp: persisted.timestamp || messageToSync.timestamp,
+          ragContext: syncedRagContext,
+        })
+      }
+
+      dispatch({ type: "SET_THREAD_ID", payload: targetThreadId })
+      dispatch({ type: "SET_MESSAGES", payload: syncedMessages })
+      dispatch({
+        type: "MARK_SYNC_SUCCEEDED",
+        payload: {
+          answerTrustState: postSyncTrust.state,
+          answerTrustReasonCodes: postSyncTrust.reasonCodes,
+          answerEvidenceOrigin:
+            postSyncTrust.evidenceOrigin === "unknown_origin"
+              ? null
+              : postSyncTrust.evidenceOrigin,
+        },
+      })
+      message.open({
+        type: "success",
+        content: "Conversation synced.",
+        duration: 2,
+      })
+      return true
+    } catch (error) {
+      console.warn("Failed to retry Knowledge QA sync:", error)
+      dispatch({ type: "MARK_SYNC_FAILED" })
+      return false
+    }
+  }, [
+    createNewThread,
+    message,
+    persistChatMessage,
+    persistRagContext,
+    state.answer,
+    state.citations,
+    state.currentThreadId,
+    state.messages,
+    state.query,
+    state.results,
+    state.settings.strip_min_relevance,
+  ])
+
   const buildRagContext = useCallback(
     (
       question: string,
       results: RagResult[],
       answer: string | null,
-      settings: RagSettings
+      settings: RagSettings,
+      answerTrustState: KnowledgeAnswerTrustState,
+      answerTrustReasonCodes: KnowledgeTrustReasonCode[],
+      answerEvidenceOrigin: EvidenceOrigin | null
     ): RagContextData => ({
       search_query: question,
       search_mode: settings.search_mode,
       settings_snapshot: createRestorableSettingsSnapshot(settings),
       retrieved_documents: results.map((r) => ({
         id: r.id,
-        source_type: r.metadata?.source_type,
+        source_id: getResultSourceId(r) ?? undefined,
+        source_type: r.sourceType || r.metadata?.source_type,
         title: r.metadata?.title,
         score: r.score,
-        chunk_id: r.metadata?.chunk_id,
-        excerpt: r.content || r.text || r.chunk,
+        chunk_id: getResultChunkId(r) ?? undefined,
+        excerpt: getResultEvidenceText(r) || undefined,
+        evidence_origin: getEvidenceOrigin(r),
+        source_status: getResultSourceStatus(r) ?? undefined,
+        unavailable_reason: getResultUnavailableReason(r) ?? undefined,
         url: r.metadata?.url,
         page_number: r.metadata?.page_number,
       })),
       generated_answer: answer || undefined,
+      trust_state: answerTrustState,
+      trust_reason_codes: answerTrustReasonCodes,
+      trust_evidence_origin: answerEvidenceOrigin ?? undefined,
+      knowledge_trust: {
+        state: answerTrustState,
+        reasonCodes: answerTrustReasonCodes,
+        evidenceOrigin: answerEvidenceOrigin ?? "unknown_origin",
+      },
       timestamp: new Date().toISOString(),
     }),
     []
@@ -1853,6 +2217,14 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           state.pinnedSourceFilters.noteIds
         ),
       }
+      const validateResultsForScope = (candidateResults: RagResult[]) =>
+        validateKnowledgeResultScope({
+          selectedSources: effectiveSettings.sources,
+          selectedMediaIds: effectiveSettings.include_media_ids,
+          selectedNoteIds: effectiveSettings.include_note_ids,
+          webFallbackEnabled: Boolean(effectiveSettings.enable_web_fallback),
+          results: candidateResults,
+        })
 
       let threadId = state.currentThreadId
       if (!threadId) {
@@ -1864,6 +2236,17 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           return
         }
       }
+      let threadSyncFailed = Boolean(threadId && isLocalThreadId(threadId))
+      const markThreadSyncFailed = () => {
+        threadSyncFailed = true
+        dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: true })
+        dispatch({
+          type: "SET_EXTENSION_FAILURE_STATE",
+          payload: "search_succeeded_sync_failed",
+        })
+      }
+      const isThreadSyncFailed = () =>
+        threadSyncFailed || Boolean(threadId && isLocalThreadId(threadId))
 
       const userTimestamp = new Date().toISOString()
       const persistedUser = threadId
@@ -1871,6 +2254,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         : null
       if (isStaleSearchRequest()) {
         return
+      }
+      if (threadId && !isLocalThreadId(threadId) && !persistedUser) {
+        markThreadSyncFailed()
       }
       const userMessageId = persistedUser?.id || crypto.randomUUID()
 
@@ -1906,6 +2292,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         let answer: string | null = null
         let usedStreaming = false
         let resolvedSearchDetails: SearchRuntimeDetails | null = null
+        let backendTrust: KnowledgeTrustMetadata | null = null
 
         if (
           canAttemptStreaming &&
@@ -1957,12 +2344,29 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 const partialCitations = partialAnswer
                   ? parseCitations(partialAnswer, streamResults)
                   : []
+                const partialTrust = normalizeKnowledgeAnswerTrust({
+                  answer: partialAnswer,
+                  results: streamResults,
+                  citations: partialCitations,
+                  hasRequiredMetadata: true,
+                  syncFailed: isThreadSyncFailed(),
+                  weakEvidence: hasWeakEvidence(
+                    streamResults,
+                    effectiveSettings.strip_min_relevance
+                  ),
+                })
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
                     results: streamResults,
                     answer: partialAnswer,
                     citations: partialCitations,
+                    answerTrustState: partialTrust.state,
+                    answerTrustReasonCodes: partialTrust.reasonCodes,
+                    answerEvidenceOrigin:
+                      partialTrust.evidenceOrigin === "unknown_origin"
+                        ? null
+                        : partialTrust.evidenceOrigin,
                   },
                 })
                 receivedStreamEvent = true
@@ -1976,14 +2380,32 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 if (!deltaText) continue
                 streamAnswer += deltaText
                 const partialAnswer = normalizeAnswerText(streamAnswer)
+                const partialCitations = partialAnswer
+                  ? parseCitations(partialAnswer, streamResults)
+                  : []
+                const partialTrust = normalizeKnowledgeAnswerTrust({
+                  answer: partialAnswer,
+                  results: streamResults,
+                  citations: partialCitations,
+                  hasRequiredMetadata: true,
+                  syncFailed: isThreadSyncFailed(),
+                  weakEvidence: hasWeakEvidence(
+                    streamResults,
+                    effectiveSettings.strip_min_relevance
+                  ),
+                })
                 dispatch({
                   type: "SET_PARTIAL_RESULTS",
                   payload: {
                     results: streamResults,
                     answer: partialAnswer,
-                    citations: partialAnswer
-                      ? parseCitations(partialAnswer, streamResults)
-                      : [],
+                    citations: partialCitations,
+                    answerTrustState: partialTrust.state,
+                    answerTrustReasonCodes: partialTrust.reasonCodes,
+                    answerEvidenceOrigin:
+                      partialTrust.evidenceOrigin === "unknown_origin"
+                        ? null
+                        : partialTrust.evidenceOrigin,
                   },
                 })
                 receivedStreamEvent = true
@@ -1999,15 +2421,25 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               }
             }
 
-            if (receivedStreamEvent) {
+            const normalizedStreamAnswer = normalizeAnswerText(streamAnswer)
+            const streamCompletedWithUsableResult =
+              streamResults.length > 0 &&
+              (!effectiveSettings.enable_generation ||
+                Boolean(normalizedStreamAnswer))
+
+            if (receivedStreamEvent && streamCompletedWithUsableResult) {
               results = streamResults
-              answer = normalizeAnswerText(streamAnswer)
+              answer = normalizedStreamAnswer
               usedStreaming = true
               resolvedSearchDetails = buildSearchDetailsFromStreaming(
                 streamResults,
                 streamWhyPayload,
                 streamSourceStatusPayload,
                 effectiveSettings
+              )
+            } else if (receivedStreamEvent) {
+              console.warn(
+                "Streaming search completed without usable evidence, falling back to standard search."
               )
             }
           } catch (streamError) {
@@ -2042,6 +2474,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           const extracted = extractRagResponse(response)
           results = extracted.results
           answer = extracted.answer
+          backendTrust = extractKnowledgeTrustMetadata(extracted.metadata)
           if (answer) {
             dispatch({ type: "SET_QUERY_STAGE", payload: "generating" })
           }
@@ -2055,13 +2488,56 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         if (isStaleSearchRequest()) {
           return
         }
+        const originalResults = results
+        const scopeValidation = validateResultsForScope(originalResults)
+        if (scopeValidation.violations.length > 0) {
+          console.warn("Knowledge QA returned out-of-scope sources:", {
+            violations: scopeValidation.violations,
+          })
+          results = scopeValidation.acceptedResults
+          dispatch({
+            type: "SET_QUERY_WARNING",
+            payload:
+              "Some returned sources were hidden because they were outside the selected source scope.",
+          })
+        }
+
         // Parse citations from answer
         dispatch({ type: "SET_QUERY_STAGE", payload: "verifying" })
-        const citations = answer ? parseCitations(answer, results) : []
+        const visibleCitationIndexes = new Set(
+          results.map((result, index) => getOriginalResultIndex(result, index) + 1)
+        )
+        const citations = answer
+          ? parseCitations(answer, originalResults).filter((citation) =>
+              visibleCitationIndexes.has(citation.index)
+            )
+          : []
+        const answerTrust = normalizeKnowledgeAnswerTrust({
+          answer,
+          results,
+          citations,
+          backendTrust,
+          hasRequiredMetadata: true,
+          syncFailed: isThreadSyncFailed(),
+          weakEvidence: hasWeakEvidence(results, effectiveSettings.strip_min_relevance),
+        })
+        const answerTrustState = answerTrust.state
+        const answerTrustReasonCodes = answerTrust.reasonCodes
+        const answerEvidenceOrigin =
+          answerTrust.evidenceOrigin === "unknown_origin"
+            ? null
+            : answerTrust.evidenceOrigin
 
         dispatch({
           type: "SET_RESULTS",
-          payload: { results, answer, citations },
+          payload: {
+            results,
+            answer,
+            citations,
+            answerTrustState,
+            answerTrustReasonCodes,
+            answerEvidenceOrigin,
+          },
         })
         dispatch({ type: "SET_SEARCH_DETAILS", payload: resolvedSearchDetails })
         dispatch({
@@ -2081,7 +2557,10 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           trimmedQuery,
           results,
           answer,
-          effectiveSettings
+          effectiveSettings,
+          answerTrustState,
+          answerTrustReasonCodes,
+          answerEvidenceOrigin
         )
 
         if (answer && threadId) {
@@ -2093,6 +2572,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           )
           if (isStaleSearchRequest()) {
             return
+          }
+          if (threadId && !isLocalThreadId(threadId) && !persistedAssistant?.id) {
+            markThreadSyncFailed()
           }
           assistantMessageId = persistedAssistant?.id || crypto.randomUUID()
           const assistantMessage: KnowledgeQAMessage = {
@@ -2106,9 +2588,15 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "ADD_MESSAGE", payload: assistantMessage })
 
           if (persistedAssistant?.id) {
-            await persistRagContext(persistedAssistant.id, ragContext)
+            const persistedContext = await persistRagContext(
+              persistedAssistant.id,
+              ragContext
+            )
             if (isStaleSearchRequest()) {
               return
+            }
+            if (!persistedContext) {
+              markThreadSyncFailed()
             }
           }
         }
@@ -2116,7 +2604,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         if (isStaleSearchRequest()) {
           return
         }
+        if (isThreadSyncFailed() && answerTrustState !== "unsynced_local_result") {
+          dispatch({ type: "MARK_SYNC_FAILED" })
+        }
         if (addToHistory) {
+          const historyTrustState = isThreadSyncFailed()
+            ? "unsynced_local_result"
+            : answerTrustState
           const historyItem: SearchHistoryItem = {
             id: crypto.randomUUID(),
             query: trimmedQuery,
@@ -2129,6 +2623,14 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
             messageId: assistantMessageId || undefined,
             keywords: [KNOWLEDGE_QA_KEYWORD],
+            trustState: historyTrustState,
+            trustReasonCodes: answerTrustReasonCodes,
+            evidenceOrigin: answerEvidenceOrigin ?? undefined,
+            sourceStatus:
+              resolvedSearchDetails?.sourceStatus ??
+              buildHistorySourceStatusFromResults(results),
+            unsynced: historyTrustState === "unsynced_local_result",
+            citationCount: citations.length,
           }
           markHistoryMutation()
           dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
@@ -2164,6 +2666,25 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           type: "SET_ERROR",
           payload: errorMessage,
         })
+        if (addToHistory) {
+          const historyItem: SearchHistoryItem = {
+            id: crypto.randomUUID(),
+            query: trimmedQuery,
+            timestamp: new Date().toISOString(),
+            sourcesCount: 0,
+            hasAnswer: false,
+            preset: state.preset,
+            settingsSnapshot: createRestorableSettingsSnapshot(effectiveSettings),
+            conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
+            keywords: [KNOWLEDGE_QA_KEYWORD],
+            trustState: "failed_search",
+            trustReasonCodes: [],
+            unsynced: Boolean(threadId && isLocalThreadId(threadId)),
+            citationCount: 0,
+          }
+          markHistoryMutation()
+          dispatch({ type: "ADD_HISTORY_ITEM", payload: historyItem })
+        }
       } finally {
         if (activeSearchAbortRef.current === abortController) {
           activeSearchAbortRef.current = null
@@ -2316,6 +2837,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             results: hydration.results,
             answer: hydration.answer,
             citations: hydration.citations,
+            answerTrustState: hydration.answerTrustState,
+            answerTrustReasonCodes: hydration.answerTrustReasonCodes,
+            answerEvidenceOrigin: hydration.answerEvidenceOrigin,
           },
         })
       } else {
@@ -2344,6 +2868,12 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               answerPreview: hydration.answerPreview,
               hasAnswer: Boolean(hydration.answer),
               sourcesCount: hydration.sourcesCount || matchingHistoryItem.sourcesCount,
+              trustState: hydration.answerTrustState,
+              trustReasonCodes: hydration.answerTrustReasonCodes,
+              evidenceOrigin: hydration.answerEvidenceOrigin ?? undefined,
+              sourceStatus: hydration.sourceStatus,
+              unsynced: hydration.answerTrustState === "unsynced_local_result",
+              citationCount: hydration.citations.length,
             },
           },
         })
@@ -2409,6 +2939,9 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               results: hydration.results,
               answer: hydration.answer,
               citations: hydration.citations,
+              answerTrustState: hydration.answerTrustState,
+              answerTrustReasonCodes: hydration.answerTrustReasonCodes,
+              answerEvidenceOrigin: hydration.answerEvidenceOrigin,
             },
           })
         } else {
@@ -2559,6 +3092,13 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             results: hydration.results,
             answer: hydration.answer,
             citations: hydration.citations,
+            answerTrustState: isLocalThreadId(branchThreadId)
+              ? "unsynced_local_result"
+              : hydration.answerTrustState,
+            answerTrustReasonCodes: isLocalThreadId(branchThreadId)
+              ? []
+              : hydration.answerTrustReasonCodes,
+            answerEvidenceOrigin: hydration.answerEvidenceOrigin,
           },
         })
       } else {
@@ -3016,6 +3556,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       cancelSearch,
       clearResults,
       rerunWithTokenLimit,
+      retrySync,
+      setExtensionFailureState,
       createNewThread,
       startNewTopic,
       selectThread,
@@ -3050,6 +3592,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       cancelSearch,
       clearResults,
       rerunWithTokenLimit,
+      retrySync,
+      setExtensionFailureState,
       createNewThread,
       startNewTopic,
       selectThread,

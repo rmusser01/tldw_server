@@ -23,7 +23,7 @@ describe("EvidenceRail motion preferences", () => {
     const source = readFileSync(sourcePath, "utf8")
 
     expect(source).toContain(
-      "Use each source card to copy citations, copy excerpts, or open supported sources."
+      "Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links."
     )
   })
 })

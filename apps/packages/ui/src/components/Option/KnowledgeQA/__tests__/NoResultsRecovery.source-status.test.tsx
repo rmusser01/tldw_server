@@ -148,4 +148,19 @@ describe("NoResultsRecovery source diagnostics", () => {
       screen.queryByRole("button", { name: "Show nearest matches" })
     ).not.toBeInTheDocument()
   })
+
+  it("renders trust reason diagnostics for insufficient evidence recovery", () => {
+    render(
+      <NoResultsRecovery
+        {...defaultProps}
+        trustReasonCodes={["no_evidence", "missing_inspectable_evidence"]}
+      />
+    )
+
+    expect(screen.getByText("Recovery reasons")).toBeInTheDocument()
+    expect(screen.getByText(/No searchable evidence was returned/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Cited sources do not include inspectable excerpts/i)
+    ).toBeInTheDocument()
+  })
 })

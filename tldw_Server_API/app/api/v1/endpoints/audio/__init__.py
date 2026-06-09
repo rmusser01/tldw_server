@@ -72,6 +72,13 @@ create_speech = audio_tts.create_speech
 get_tts_service = audio_tts.get_tts_service
 
 
+def create_voice_conversion(*args, **kwargs):
+    """Lazy wrapper for the Chatterbox voice conversion endpoint."""
+    from .audio_voice_conversion import create_voice_conversion as _impl
+
+    return _impl(*args, **kwargs)
+
+
 async def websocket_audio_chat_stream(*args, **kwargs):
     from .audio_streaming import websocket_audio_chat_stream as _impl
 
@@ -166,6 +173,7 @@ _LEGACY_AUDIO_ATTRS = {
     "create_speech_metadata",
     "list_tts_providers",
     "list_tts_voices",
+    "get_tts_provider_model_info",
     "reset_tts_metrics",
     "encode_audio_tokenizer",
     "decode_audio_tokenizer",
@@ -184,6 +192,7 @@ _LEGACY_AUDIO_ATTRS = {
     "get_voice_details",
     "delete_voice",
     "preview_voice",
+    "create_voice_conversion",
     "CHAT_HISTORY_MAX_MESSAGES",
 }
 

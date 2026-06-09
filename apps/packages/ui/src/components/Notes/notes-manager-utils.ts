@@ -276,6 +276,64 @@ export const parseSourceNodeId = (
   }
 }
 
+export const formatGraphEdgeTypeLabel = (edgeType: string | null | undefined): string => {
+  switch (String(edgeType || '').toLowerCase()) {
+    case 'manual':
+      return 'Manual link'
+    case 'wikilink':
+      return 'Note link'
+    case 'backlink':
+      return 'Backlink'
+    case 'tag_membership':
+      return 'Tag'
+    case 'source_membership':
+      return 'Source'
+    default:
+      return 'Connection'
+  }
+}
+
+const SOURCE_LABEL_BY_TYPE: Record<string, string> = {
+  web: 'Web source',
+  webpage: 'Web source',
+  browser: 'Web source',
+  clipper: 'Captured source',
+  yt: 'YouTube source',
+  youtube: 'YouTube source',
+  media: 'Media source'
+}
+
+export const formatSourceNodeLabel = (
+  sourceId: string | number | null | undefined,
+  fallbackLabel?: string | null
+): string => {
+  const parsed = parseSourceNodeId(sourceId)
+  if (!parsed) {
+    return String(fallbackLabel || sourceId || 'Linked source')
+  }
+  const trimmedFallback = String(fallbackLabel || '').trim()
+  const rawSourceId = String(sourceId || '').trim()
+  const externalRef = parsed.externalRef || ''
+  const rawFallbackValues = new Set(
+    [
+      rawSourceId,
+      externalRef,
+      `${parsed.source}:${externalRef}`,
+      `${parsed.source}: ${externalRef}`
+    ]
+      .filter(Boolean)
+      .map((value) => value.toLowerCase())
+  )
+  if (trimmedFallback && !rawFallbackValues.has(trimmedFallback.toLowerCase())) {
+    return trimmedFallback
+  }
+  const sourceType = parsed.source.toLowerCase()
+  const sourceLabel =
+    SOURCE_LABEL_BY_TYPE[sourceType] ||
+    `${parsed.source.charAt(0).toUpperCase()}${parsed.source.slice(1)} source`
+  return parsed.externalRef ? `${sourceLabel}: ${parsed.externalRef}` : sourceLabel
+}
+
 // 120px offset accounts for page header and padding
 export const MIN_SIDEBAR_HEIGHT = 600
 export const NOTE_AUTOSAVE_DELAY_MS = 5000

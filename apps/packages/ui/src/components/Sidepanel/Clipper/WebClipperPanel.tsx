@@ -17,7 +17,6 @@ import {
   writePendingWebClipAnalyzeRequest,
   type WebClipperEnrichmentRunResult
 } from "@/services/web-clipper/enrichment"
-import { ensureCapturedNoteKeyword } from "@/services/note-capture"
 import { buildWebClipSaveRuntime } from "@/services/web-clipper/save-runtime"
 import type {
   WebClipperDestination,
@@ -25,6 +24,8 @@ import type {
   WebClipperSaveResponse
 } from "@/services/web-clipper/types"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
+import { withCapturedNoteKeyword } from "@/services/notes-capture"
 
 type WebClipperPanelProps = {
   draft: PendingClipDraft
@@ -81,6 +82,23 @@ const buildClipAttachments = (
       source_url: draft.pageUrl
     }
   ]
+}
+
+const normalizeWorkspaceOptions = (
+  response: { items?: WorkspaceApiResponse[] } | WorkspaceApiResponse[] | null | undefined
+): WorkspacePickerOption[] => {
+  const rows = Array.isArray(response) ? response : response?.items
+  if (!Array.isArray(rows)) return []
+
+  return rows
+    .filter((workspace) => {
+      if (!workspace?.id) return false
+      return !workspace.deleted && !workspace.archived
+    })
+    .map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name || workspace.banner_title || workspace.id
+    }))
 }
 
 const createOpenTargetUrl = (
@@ -338,14 +356,16 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         ) {
           return
         }
-        setWorkspaceOptions(
-          response.items
-            .filter((workspace) => !workspace.deleted)
-            .map((workspace) => ({
-              id: workspace.id,
-              name: workspace.name
-            }))
-        )
+        const normalizedWorkspaceOptions = normalizeWorkspaceOptions(response)
+        setWorkspaceOptions(normalizedWorkspaceOptions)
+        setWorkspaceId((currentWorkspaceId) => {
+          const trimmedWorkspaceId = currentWorkspaceId.trim()
+          if (!trimmedWorkspaceId) return currentWorkspaceId
+          const stillValid = normalizedWorkspaceOptions.some(
+            (option) => option.id === trimmedWorkspaceId
+          )
+          return stillValid ? currentWorkspaceId : ""
+        })
       })
       .catch(() => {
         hasRequestedWorkspaceOptionsRef.current = false
@@ -450,7 +470,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         title: title.trim() || draft.pageTitle,
         comment: comment.trim() || null,
         folder_id: parsedFolderId,
-        keywords: ensureCapturedNoteKeyword(splitKeywords(tags))
+        keywords: withCapturedNoteKeyword(splitKeywords(tags))
       },
       workspace: needsWorkspace
         ? { workspace_id: trimmedWorkspaceId }

@@ -115,8 +115,19 @@ Filesystem-capable presets expose portable workspace-bounded helpers for common
 read workflows: `fs.stat` for metadata, `fs.glob` for cross-platform path
 matching, and `fs.grep` for UTF-8 text search. These helpers do not invoke a
 host shell and remain subject to the active profile policy and workspace path
-scope. `fs.grep` uses literal matching by default; regex matching requires the
-filesystem module `grep_allow_regex` setting. Grep scans are also bounded by
+scope. `fs.glob` returns capped matches sorted by newest modification time by
+default; pass `sort_by: "path"` when deterministic path ordering is more useful.
+Glob does not apply `.gitignore` by default, but callers can pass
+`respect_gitignore: true` when they want ignored paths filtered.
+`fs.grep` defaults to `output_mode: "files_with_matches"` and can also return
+matching line records with `output_mode: "content"` or per-file totals with
+`output_mode: "count"`. Use `glob` or `type` to narrow grep scans by file
+pattern or common language/file extension aliases. Directory grep scans respect
+the workspace root `.gitignore` by default; direct-file grep still works for a
+named ignored file when profile and path policy allow that file. `fs.grep` uses
+literal matching by default; regex matching requires the filesystem module
+`grep_allow_regex` setting. `multiline: true` is available only with regex mode
+and `files_with_matches` or `count` output. Grep scans are also bounded by
 per-file, total-byte, total-file, and walk-entry limits.
 
 ### Safe File Read, Patch, And Write Tools
@@ -129,7 +140,11 @@ module has a stable `read_receipt_secret` configured.
 For existing-file edits, prefer `fs.patch` over whole-file replacement. It
 accepts unified diff text, derives affected paths before execution for path
 policy checks, validates context in memory, and only writes after preimage
-checks pass. For whole-file creation or deliberate replacement, use `fs.write`.
+checks pass. For small literal replacements where a unified diff is unnecessary,
+`fs.edit` replaces one exact UTF-8 string in an existing file. It rejects missing
+or non-unique matches unless `replace_all=true`, rejects overlapping matches,
+and it also requires either `expected_sha256` or a valid `read_receipt` from
+`fs.read`. For whole-file creation or deliberate replacement, use `fs.write`.
 `fs.write` `mode="create"` fails if the file already exists. `mode="replace"`
 requires either `expected_sha256` or a valid `read_receipt` from `fs.read`.
 
@@ -156,13 +171,61 @@ profile with `write` can use `fs.write` and patch-created files when policy also
 allows creation. Deny grants take precedence over broader allow grants, so a
 private subtree can remain read-only or blocked under a writable parent.
 
+The file-policy action vocabulary is broader than the tools currently shipped.
+The executable filesystem actions today are:
+
+- `read`: inspect file content, directory listings, search results, and path
+  metadata.
+- `edit`: bounded existing-file edits through `fs.patch` or `fs.edit`.
+- `write`: deliberate whole-file create or replace through `fs.write`.
+
+The reserved action names are `delete`, `rename`, `move`, `share`, `export`,
+`chmod`, `admin`, and `lock`. Profiles may author and preview these grants now
+so policy intent is explicit, but they do not become executable until a
+dedicated safe tool for that operation lands. Do not treat these actions as
+aliases for `write`: `share` and `export` are exfiltration-sensitive, `delete`,
+`rename`, and `move` are destructive, `chmod` and `admin` are administrative,
+and `lock` is a concurrency-control action.
+
+Operators that prefer inherited policy authoring can keep the executable
+runtime contract flat by compiling `path_grant_authoring` into `path_grants`.
+The supported authoring levels are `org`, `workspace`, `folders`, and `files`;
+each rule still uses workspace-relative `prefix` or `path`, explicit `actions`,
+and optional `effect`:
+
+```json
+{
+  "path_grant_authoring": {
+    "org": [
+      {"prefix": ".", "actions": ["read"]}
+    ],
+    "workspace": [
+      {"prefix": "documents", "actions": ["read", "edit", "write"]}
+    ],
+    "folders": [
+      {"prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny"}
+    ],
+    "files": [
+      {"path": "downloads/report.md", "actions": ["read"]}
+    ]
+  }
+}
+```
+
+The compiler emits normalized flat grants and validation diagnostics. Explicit
+`path_grants` remain the authoritative runtime form; when both flat and
+authored grants are present, flat `path_grants` win. Invalid authored grants are
+not treated as legacy allowlists, so malformed authored policy fails closed
+rather than widening access.
+
 Denials and permission-decision metadata should be safe to show to operators:
 reason code, requested action, workspace-relative path, grant outcome, grant
 source, and redaction status. They should not include raw file content, read
 receipts, raw diffs, or absolute host paths.
 
 `fs.read_text` and `fs.write_text` remain compatibility tools for older clients.
-New profiles and front-ends should prefer `fs.read`, `fs.patch`, and `fs.write`.
+New profiles and front-ends should prefer `fs.read`, `fs.patch`, `fs.edit`, and
+`fs.write`.
 
 Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass

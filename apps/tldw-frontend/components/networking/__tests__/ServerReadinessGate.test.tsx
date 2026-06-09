@@ -1,5 +1,19 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+const connectionStoreMock = vi.hoisted(() => ({
+  store: {
+    state: {
+      serverUrl: ""
+    }
+  }
+}))
+
+vi.mock("@tldw/ui/store/connection", () => ({
+  useConnectionStore: (
+    selector: (store: typeof connectionStoreMock.store) => unknown
+  ) => selector(connectionStoreMock.store)
+}))
 
 describe("ServerReadinessGate", () => {
   const expectReadinessStatus = () => {
@@ -7,6 +21,10 @@ describe("ServerReadinessGate", () => {
     expect(status).toHaveTextContent(/Checking server readiness|Retrying server readiness/)
     expect(status).toHaveTextContent(/Loading|Retrying/)
   }
+
+  beforeEach(() => {
+    connectionStoreMock.store.state.serverUrl = ""
+  })
 
   afterEach(() => {
     try {
@@ -20,6 +38,7 @@ describe("ServerReadinessGate", () => {
     vi.restoreAllMocks()
     vi.useRealTimers()
     vi.unstubAllEnvs()
+    vi.resetModules()
   })
 
   it("accepts the backend healthy status envelope", async () => {
@@ -46,6 +65,205 @@ describe("ServerReadinessGate", () => {
       "http://127.0.0.1:8000/api/v1/health",
       expect.objectContaining({ method: "GET" })
     )
+  })
+
+  it("uses the saved server URL over the page and environment origin", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    connectionStoreMock.store.state.serverUrl = " http://10.0.0.5:9000/ "
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "healthy" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("App ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://10.0.0.5:9000/api/v1/health",
+      expect.objectContaining({ method: "GET" })
+    )
+  })
+
+  it("normalizes the saved server URL to its origin before probing health", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    connectionStoreMock.store.state.serverUrl =
+      " https://user:secret@example.test/base/path?api_key=hidden "
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "healthy" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("App ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/api/v1/health",
+      expect.objectContaining({ method: "GET" })
+    )
+  })
+
+  it("falls back to the environment origin for invalid saved server URLs", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    connectionStoreMock.store.state.serverUrl = "not a url"
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "healthy" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("App ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/health",
+      expect.objectContaining({ method: "GET" })
+    )
+    expect(warnMock).toHaveBeenCalledWith(
+      "Ignoring invalid tldw server URL for readiness health check."
+    )
+  })
+
+  it("falls back to the environment origin for unsupported saved server URL protocols", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    connectionStoreMock.store.state.serverUrl =
+      "ftp://user:secret@example.test/base/path"
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "healthy" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("App ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/health",
+      expect.objectContaining({ method: "GET" })
+    )
+    expect(warnMock).toHaveBeenCalledWith(
+      "Ignoring unsupported tldw server URL protocol for readiness health check.",
+      { protocol: "ftp:" }
+    )
+    expect(warnMock.mock.calls.flat().map(String).join(" ")).not.toContain(
+      "secret"
+    )
+  })
+
+  it("restarts readiness checks when the configured server URL changes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    connectionStoreMock.store.state.serverUrl = "http://old.example:8000"
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ status: "unavailable" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    const { rerender } = render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://old.example:8000/api/v1/health",
+        expect.objectContaining({ method: "GET" })
+      )
+    })
+
+    connectionStoreMock.store.state.serverUrl = "http://new.example:9000"
+    rerender(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://new.example:9000/api/v1/health",
+        expect.objectContaining({ method: "GET" })
+      )
+    })
+  })
+
+  it("falls back before config hydration and restarts after config is available", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ status: "unavailable" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    const { rerender } = render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8000/api/v1/health",
+        expect.objectContaining({ method: "GET" })
+      )
+    })
+
+    connectionStoreMock.store.state.serverUrl = "http://configured.local:8123"
+    rerender(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://configured.local:8123/api/v1/health",
+        expect.objectContaining({ method: "GET" })
+      )
+    })
   })
 
   it("accepts degraded health as enterable for partial-content responses when allowed", async () => {
@@ -248,7 +466,7 @@ describe("ServerReadinessGate", () => {
       await vi.advanceTimersByTimeAsync(16_000)
     })
 
-    expect(screen.getByText("App ready")).toBeInTheDocument()
+    expect(screen.queryByText("App ready")).not.toBeInTheDocument()
     await act(async () => {
       await vi.runOnlyPendingTimersAsync()
     })
@@ -295,7 +513,7 @@ describe("ServerReadinessGate", () => {
       await vi.advanceTimersByTimeAsync(16_000)
     })
 
-    expect(screen.getByText("App ready")).toBeInTheDocument()
+    expect(screen.queryByText("App ready")).not.toBeInTheDocument()
     await act(async () => {
       await vi.runOnlyPendingTimersAsync()
     })
@@ -334,7 +552,7 @@ describe("ServerReadinessGate", () => {
       await vi.advanceTimersByTimeAsync(16_000)
     })
 
-    expect(screen.getByText("App ready")).toBeInTheDocument()
+    expect(screen.queryByText("App ready")).not.toBeInTheDocument()
 
     await act(async () => {
       rerender(
@@ -381,7 +599,9 @@ describe("ServerReadinessGate", () => {
       await vi.advanceTimersByTimeAsync(16_000)
     })
 
-    expect(screen.getByTestId("knowledge-main-region")).toBeInTheDocument()
+    expect(screen.queryByTestId("knowledge-main-region")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("server-readiness-route-content")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("main")).toHaveLength(1)
     expect(
       screen.getByRole("heading", { name: /Backend readiness check failed/i })
     ).toBeInTheDocument()
@@ -414,7 +634,9 @@ describe("ServerReadinessGate", () => {
       await vi.advanceTimersByTimeAsync(16_000)
     })
 
-    expect(screen.getByTestId("knowledge-main-region")).toBeInTheDocument()
+    expect(screen.queryByTestId("knowledge-main-region")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("server-readiness-route-content")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("main")).toHaveLength(1)
     expect(
       screen.getByRole("heading", { name: /Backend readiness check failed/i })
     ).toBeInTheDocument()

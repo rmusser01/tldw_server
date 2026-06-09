@@ -61,6 +61,7 @@ import {
   normalizeConversationId,
   toConversationLabel,
   toAttachmentMarkdown,
+  formatSourceNodeLabel,
   normalizeGraphNoteId,
   getNotesGraphEdgeLabel,
   parseSourceNodeId,
@@ -414,7 +415,7 @@ const NotesManagerPage: React.FC = () => {
         if (!sourceId) continue
         sourceNodeMap.set(sourceId, {
           id: sourceId,
-          label: String(node?.label || sourceId)
+          label: formatSourceNodeLabel(sourceId, String(node?.label || sourceId))
         })
       }
     }
@@ -605,11 +606,11 @@ const NotesManagerPage: React.FC = () => {
       }
     }
     for (const item of noteRelations.related) {
-      if (item.available === false) continue
+      if (item.unavailableReason != null) continue
       append(item.id, item.title)
     }
     for (const item of noteRelations.backlinks) {
-      if (item.available === false) continue
+      if (item.unavailableReason != null) continue
       append(item.id, item.title)
     }
     return options.sort((a, b) => a.label.localeCompare(b.label))
@@ -2075,6 +2076,14 @@ const NotesManagerPage: React.FC = () => {
         return
       }
 
+      // Alt+Shift+D - duplicate current note or draft
+      if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && (event.key === 'd' || event.key === 'D')) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        event.preventDefault()
+        void duplicateSelectedNote()
+        return
+      }
+
       // Ctrl/Cmd+K — focus search
       if ((event.ctrlKey || event.metaKey) && event.key === 'k' && !event.shiftKey && !event.altKey) {
         if (shouldIgnoreGlobalShortcut(event.target)) return
@@ -2113,7 +2122,7 @@ const NotesManagerPage: React.FC = () => {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [ed.setEditorMode, focusSearchInput, handleNewNote])
+  }, [duplicateSelectedNote, ed.setEditorMode, focusSearchInput, handleNewNote])
 
   // Auto-trigger notes tutorial on first visit
   React.useEffect(() => {
@@ -2240,6 +2249,7 @@ const NotesManagerPage: React.FC = () => {
         isFetching={list.isFetching}
         hasListError={list.isError}
         listErrorMessage={list.listErrorMessage}
+        isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}
         isOnline={isOnline}
         demoEnabled={demoEnabled}
         capsLoading={capsLoading}

@@ -485,3 +485,141 @@ describe("SourceCard action structure", () => {
     expect(screen.queryByText("Weak relevance (21%)")).not.toBeInTheDocument()
   })
 })
+
+describe("SourceCard evidence materialization", () => {
+  it("renders excerpt-only evidence and exposes stable source identifiers", () => {
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
+
+    render(
+      <SourceCard
+        result={{
+          id: "media:42:chunk:7",
+          content: "",
+          excerpt: "Visible matched excerpt from a materialized result.",
+          sourceId: "42",
+          chunkId: "7",
+          evidenceOrigin: "local_library",
+          metadata: {
+            title: "Evidence source",
+            source_type: "media_db",
+          },
+          score: 0.85,
+        }}
+        index={1}
+        isCited={false}
+        isFocused={false}
+        onSourceHover={vi.fn()}
+        onAskAbout={vi.fn()}
+        onViewFull={vi.fn()}
+        onSourceFeedback={vi.fn()}
+        onRetrySourceFeedback={vi.fn()}
+        onTogglePin={vi.fn()}
+        onJumpToCitation={vi.fn()}
+        feedbackThumb={null}
+        feedbackSubmitting={false}
+        feedbackError={null}
+        isPinned={false}
+        highlightTerms={[]}
+        citationUsages={[]}
+      />
+    )
+
+    expect(
+      screen.getByText("Visible matched excerpt from a materialized result.")
+    ).toBeInTheDocument()
+    const sourceRow = screen.getByRole("listitem")
+    expect(sourceRow).toHaveAttribute("data-source-id", "42")
+    expect(sourceRow).toHaveAttribute("data-chunk-id", "7")
+    expect(sourceRow).toHaveAttribute("data-evidence-origin", "local_library")
+  })
+
+  it("renders specific unavailable reasons instead of a blank excerpt", () => {
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
+
+    render(
+      <SourceCard
+        result={{
+          id: "media:99:chunk:2",
+          content: "",
+          sourceId: "99",
+          chunkId: "2",
+          sourceStatus: "unavailable",
+          unavailableReason: "deleted_or_unavailable",
+          evidenceOrigin: "local_library",
+          metadata: {
+            title: "Deleted source",
+            source_type: "media_db",
+          },
+          score: 0,
+        }}
+        index={1}
+        isCited={false}
+        isFocused={false}
+        onSourceHover={vi.fn()}
+        onAskAbout={vi.fn()}
+        onViewFull={vi.fn()}
+        onSourceFeedback={vi.fn()}
+        onRetrySourceFeedback={vi.fn()}
+        onTogglePin={vi.fn()}
+        onJumpToCitation={vi.fn()}
+        feedbackThumb={null}
+        feedbackSubmitting={false}
+        feedbackError={null}
+        isPinned={false}
+        highlightTerms={[]}
+        citationUsages={[]}
+      />
+    )
+
+    expect(screen.getByText(/Source unavailable: Deleted or unavailable/i)).toBeInTheDocument()
+  })
+
+  it("labels web fallback evidence origin when present", () => {
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
+
+    render(
+      <SourceCard
+        result={{
+          id: "web:https://example.com/result",
+          content: "Web fallback excerpt",
+          sourceId: "https://example.com/result",
+          chunkId: "web-1",
+          evidenceOrigin: "web_fallback",
+          metadata: {
+            title: "Web result",
+            source_type: "web",
+            url: "https://example.com/result",
+          },
+          score: 0.71,
+        }}
+        index={1}
+        isCited={false}
+        isFocused={false}
+        onSourceHover={vi.fn()}
+        onAskAbout={vi.fn()}
+        onViewFull={vi.fn()}
+        onSourceFeedback={vi.fn()}
+        onRetrySourceFeedback={vi.fn()}
+        onTogglePin={vi.fn()}
+        onJumpToCitation={vi.fn()}
+        feedbackThumb={null}
+        feedbackSubmitting={false}
+        feedbackError={null}
+        isPinned={false}
+        highlightTerms={[]}
+        citationUsages={[]}
+      />
+    )
+
+    expect(screen.getByText("Web fallback")).toBeInTheDocument()
+  })
+})

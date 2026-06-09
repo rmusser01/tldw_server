@@ -7,6 +7,11 @@ import { BarChart3 } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
 import type { RagResult } from "./types"
+import {
+  getEvidenceOrigin,
+  getResultSourceStatus,
+  getResultUnavailableReason,
+} from "./sourceListUtils"
 
 type SearchDetailsPanelProps = {
   className?: string
@@ -42,6 +47,37 @@ function getWeakestIncludedScore(results: RagResult[]): number | null {
     .filter((score): score is number => typeof score === "number" && Number.isFinite(score))
   if (scores.length === 0) return null
   return Math.min(...scores)
+}
+
+function buildEvidenceOriginParts(results: RagResult[]): string[] {
+  if (results.length === 0) return []
+
+  let localCount = 0
+  let webCount = 0
+  let mixedCount = 0
+  let unknownCount = 0
+  let unavailableCount = 0
+
+  for (const result of results) {
+    const origin = getEvidenceOrigin(result)
+    if (origin === "local_library") localCount += 1
+    else if (origin === "web_fallback") webCount += 1
+    else if (origin === "mixed") mixedCount += 1
+    else unknownCount += 1
+
+    const status = getResultSourceStatus(result)
+    if (getResultUnavailableReason(result) || (status && status !== "searched")) {
+      unavailableCount += 1
+    }
+  }
+
+  return [
+    localCount > 0 ? `local library ${localCount}` : null,
+    webCount > 0 ? `web fallback ${webCount}` : null,
+    mixedCount > 0 ? `mixed ${mixedCount}` : null,
+    unknownCount > 0 ? `unknown origin ${unknownCount}` : null,
+    unavailableCount > 0 ? `unavailable ${unavailableCount}` : null,
+  ].filter((value): value is string => Boolean(value))
 }
 
 function formatCandidateScoreContext(
@@ -159,9 +195,11 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
     coverageParts.push(`returned ${formatInteger(searchDetails.documentsReturned)} sources`)
   }
   const hasRetrievalCounts = candidateParts.length > 0 || coverageParts.length > 0
+  const evidenceOriginParts = buildEvidenceOriginParts(results)
 
   return (
     <details
+      open
       className={cn("rounded-xl border border-border bg-muted/20", className)}
       aria-label="Search details"
     >
@@ -196,13 +234,19 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
           </div>
         ) : null}
         <div>
-          <span className="font-medium">Web fallback:</span>{" "}
+          <span className="font-medium">Web fallback</span>{" "}
           {searchDetails.webFallbackEnabled
             ? searchDetails.webFallbackTriggered
               ? `Triggered${searchDetails.webFallbackEngine ? ` (${searchDetails.webFallbackEngine})` : ""}`
               : "Enabled (not triggered)"
             : "Disabled"}
         </div>
+        {evidenceOriginParts.length > 0 ? (
+          <div>
+            <span className="font-medium">Evidence origins:</span>{" "}
+            {evidenceOriginParts.join(" • ")}
+          </div>
+        ) : null}
         {searchDetails.whyTheseSources && (
           <div>
             <span className="font-medium">Why these sources:</span>{" "}

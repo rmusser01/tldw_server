@@ -76,6 +76,44 @@ describe("InlineRecentSessions", () => {
     expect(screen.getByText("12")).toBeInTheDocument()
   })
 
+  it("shows compact trust label when an item has trust state", () => {
+    const item = makeItem({
+      hasAnswer: true,
+      trustState: "unsynced_local_result",
+      unsynced: true,
+      sourceStatus: {
+        notes: { status: "error", count: 0 },
+      },
+    })
+
+    render(
+      <InlineRecentSessions items={[item]} onRestore={vi.fn()} />
+    )
+
+    expect(screen.getByText("Unsynced local result")).toBeInTheDocument()
+    expect(screen.getByText("1 source issue")).toBeInTheDocument()
+  })
+
+  it("shows compact evidence and citation state without overflowing row layout", () => {
+    const item = makeItem({
+      hasAnswer: true,
+      trustState: "cited_answer",
+      evidenceOrigin: "web_fallback",
+      citationCount: 3,
+    })
+
+    render(
+      <InlineRecentSessions items={[item]} onRestore={vi.fn()} />
+    )
+
+    expect(screen.getByText("Cited answer")).toBeInTheDocument()
+    expect(screen.getByText("Web fallback")).toBeInTheDocument()
+    expect(screen.getByText("3 citations")).toBeInTheDocument()
+
+    const statusRow = screen.getByText("Web fallback").closest("div")
+    expect(statusRow?.className).toContain("min-w-0")
+  })
+
   it("shows sparkle icon only for items with hasAnswer=true", () => {
     const items = [
       makeItem({ id: "with-answer", query: "answered", hasAnswer: true }),

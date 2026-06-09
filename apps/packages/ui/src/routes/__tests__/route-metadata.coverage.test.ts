@@ -158,7 +158,8 @@ describe("route metadata coverage", () => {
       label: "Notes",
       group: "media_library",
       nav: "primary",
-      commandPalette: "show"
+      commandPalette: "show",
+      requiresBackend: true
     })
   })
 

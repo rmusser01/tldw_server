@@ -14,7 +14,11 @@
 **Goal**: Create one backend source of truth for Chatterbox TTS model aliases and update config/install surfaces for the current upstream family.
 **Success Criteria**: Canonical model ids exist in one place, registry/schema/config reference them consistently, and the Chatterbox install extra covers the runtime imports needed for Turbo/VC.
 **Tests**: Alias resolution unit tests; config/registry smoke tests.
-**Status**: Not Started
+**Status**: In Progress
+
+**TASK-531 slice update (2026-06-07)**: Added a shared Chatterbox catalog, wired standard/emotion/multilingual/turbo aliases through `TTSAdapterFactory`, refreshed the OpenAI speech model description, updated provider config defaults, and added current Turbo runtime dependencies. Setup docs remain to be refreshed.
+
+**TASK-539 slice update (2026-06-08)**: Added local model path handling for the Chatterbox runtime loaders. Existing local `model_path`, `multilingual_model_path`, `turbo_model_path`, and `vc_model_path` values use upstream `from_local()`; repo IDs and unset paths preserve the current `from_pretrained()` behavior.
 
 ### Task 1: Add a canonical Chatterbox model catalog
 
@@ -130,7 +134,11 @@ git commit -m "feat: refresh chatterbox config and install surface"
 **Goal**: Teach the adapter to resolve standard, multilingual, and Turbo families cleanly and clean them up correctly.
 **Success Criteria**: Request model aliases and config variant select the right upstream runtime, watermark stripping still works, and cleanup clears every loaded family.
 **Tests**: Adapter unit tests for family selection, cleanup, and unsupported Turbo controls.
-**Status**: Not Started
+**Status**: In Progress
+
+**TASK-531 slice update (2026-06-07)**: Added request/config family resolution for standard, multilingual, and Turbo; lazy-loaded Turbo via `chatterbox.tts_turbo`; cleared all TTS family model handles during cleanup; added safe generate-kwarg filtering and seed handling. Dedicated VC runtime support remains for later stages.
+
+**TASK-532 slice update (2026-06-07)**: Added explicit Turbo ignored-control metadata and stopped passing no-op CFG/exaggeration/min-p controls to the upstream Turbo runtime.
 
 ### Task 3: Add family resolution and runtime caching to the adapter
 
@@ -262,7 +270,9 @@ git commit -m "feat: make chatterbox turbo control handling explicit"
 **Goal**: Update validation and service plumbing so the Chatterbox family behaves correctly without breaking existing callers.
 **Success Criteria**: TTS validation distinguishes standard/multilingual/turbo, existing aliases remain backward compatible, and schema/discovery surfaces reflect the new TTS ids.
 **Tests**: Validation unit tests and endpoint integration tests.
-**Status**: Not Started
+**Status**: In Progress
+
+**TASK-531 slice update (2026-06-07)**: Validation now distinguishes Chatterbox standard/Turbo English-only behavior from multilingual language support, and OpenAI request conversion maps `extra_params.seed` into `TTSRequest.seed`.
 
 ### Task 5: Add Chatterbox family-aware validation
 
@@ -329,7 +339,13 @@ git commit -m "feat: add chatterbox family-aware validation"
 **Goal**: Add a dedicated Chatterbox VC endpoint and adapter path without polluting the text-to-speech model catalog.
 **Success Criteria**: VC requests accept source audio plus target voice input, reuse stored custom voices when provided, and return converted audio successfully.
 **Tests**: VC adapter unit tests and endpoint integration tests.
-**Status**: Not Started
+**Status**: In Progress
+
+**TASK-533 slice update (2026-06-08)**: Added a dedicated Chatterbox VC runtime path in the adapter. The adapter now lazy-loads `chatterbox.vc.ChatterboxVC`, calls upstream `generate(audio=..., target_voice_path=...)`, encodes the resulting waveform through the shared streamer, and clears `model_vc` during cleanup.
+
+**TASK-534 slice update (2026-06-08)**: Added `POST /api/v1/audio/voice-conversion` as a protected multipart endpoint accepting `source_audio`, optional `target_voice`, `response_format`, and `stream`. The endpoint materializes uploads to temporary files, delegates through `TTSServiceV2.convert_chatterbox_voice`, defers temp-file cleanup until streaming responses are consumed, and registers the `audio.voice_conversion` privilege scope.
+
+**TASK-535 slice update (2026-06-08)**: Added `target_voice_id` form support to the voice-conversion endpoint. Stored target voices now resolve through `VoiceManager.load_voice_reference_audio()` for the authenticated user, materialize as the same temporary target reference path used by uploaded `target_voice`, and requests that provide both target reference forms fail fast with HTTP 400.
 
 ### Task 6: Add VC schema and endpoint with shared response helpers
 
@@ -369,13 +385,14 @@ Expected: FAIL because the endpoint does not exist yet.
 
 **Step 3: Write minimal implementation**
 
-- Add the VC request schema.
-- Add a dedicated endpoint that:
-  - decodes source audio
-  - resolves target voice reference bytes from either raw payload or stored custom voice id
+- Add a dedicated multipart endpoint that:
+  - materializes uploaded source audio
+  - materializes optional uploaded target voice audio
+  - resolves stored custom voice IDs into target voice reference files
   - calls into the Chatterbox adapter VC path
-  - returns a non-streaming audio response
-- Extract response/persistence helpers from `audio_tts.py` where reuse is worthwhile.
+  - returns streaming or non-streaming audio responses
+  - defers temp-file cleanup until streaming responses finish
+- Register the route in audio router exports and privilege maps.
 
 **Step 4: Run test to verify it passes**
 
@@ -442,7 +459,7 @@ Expected: FAIL because VC helpers do not exist yet.
 **Step 3: Write minimal implementation**
 
 - Add VC lazy loader and conversion helper.
-- Add temp-file handling for source/target audio.
+- Accept source/target temp-file paths from the endpoint/service layer.
 - Reuse encoding helpers to return requested output format.
 
 **Step 4: Run test to verify it passes**
@@ -467,7 +484,23 @@ git commit -m "feat: add chatterbox vc runtime support"
 **Goal**: Finish all user-facing surfaces and verify the touched scope.
 **Success Criteria**: Docs/UI show the new TTS model family, VC is documented separately, tests pass, and Bandit is clean on touched paths.
 **Tests**: Targeted pytest runs plus Bandit.
-**Status**: Not Started
+**Status**: In Progress
+
+**TASK-531 slice update (2026-06-07)**: Added Chatterbox family ids to the UI fallback model catalog, corrected the frontend Chatterbox voice-reference sample-rate requirement to 24000 Hz, and recorded targeted pytest/Vitest/Bandit verification. Broader docs and VC user-facing coverage remain outstanding.
+
+**TASK-532 slice update (2026-06-07)**: Refreshed the Chatterbox setup runbook and TTS module README for standard, multilingual, and Turbo model behavior. Dedicated VC user-facing docs remain outstanding until that endpoint/runtime slice exists.
+
+**TASK-533/TASK-534 slice update (2026-06-08)**: Documented the dedicated Chatterbox VC endpoint in the setup runbook and TTS module README. The endpoint is intentionally separate from `/api/v1/audio/speech` and `chatterbox-vc` remains outside the TTS model alias catalog.
+
+**TASK-540 slice update (2026-06-08)**: Added an authenticated `POST /api/v1/audio/tts/providers/{provider}/unload` route for releasing cached heavy TTS runtimes, with Chatterbox as the primary operational use case. The route closes one cached adapter and lets the next request reload it on demand.
+
+**TASK-542 slice update (2026-06-08)**: Exposed the provider unload route through the frontend TTS/voice service layer via `unloadTtsProvider()`, kept the fallback capability spec and strict client path metadata aligned with the new backend route, and added focused Vitest coverage for the helper and route metadata.
+
+**TASK-543 slice update (2026-06-08)**: Added typed `TldwApiClient.unloadTtsProvider()` support in the transitional base client and `models-audio` domain, with ownership-guard coverage so future domain cleanup keeps the provider unload route accounted for.
+
+**TASK-544 slice update (2026-06-08)**: Aligned backend `VoiceManager` Chatterbox voice-reference processing requirements with the upstream 24 kHz sample rate already used by `AudioProcessor`, frontend voice requirements, and setup docs.
+
+**TASK-545 slice update (2026-06-08)**: Hardened `VoiceManager` provider normalization so same-format voice uploads are only copied when ffprobe confirms the sample rate already matches the provider target; otherwise uploads are normalized through ffmpeg, covering Chatterbox WAV references that need 24 kHz resampling.
 
 ### Task 8: Update frontend discovery and voice requirements
 
@@ -570,6 +603,176 @@ git diff -- tldw_Server_API/app/api/v1/endpoints/audio
 ```
 
 Expected: only intended Chatterbox parity changes in touched files.
+
+### 2026-06-08 slice update: Chatterbox validation formats
+
+Backlog task: `TASK-529`
+
+- Aligned central Chatterbox request validation with the adapter's advertised output formats by allowing `opus`, `flac`, and `pcm` alongside `wav` and `mp3`.
+- Added focused validation coverage for Chatterbox FLAC/PCM requests and provider-limits metadata.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/test_tts_validation.py tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`.
+
+### 2026-06-08 slice update: Chatterbox family capability metadata
+
+Backlog task: `TASK-530`
+
+- Added adapter capability metadata for discoverable Chatterbox family support: Original/Emotion, Multilingual language codes, Turbo tags, and the voice-conversion endpoint.
+- Kept top-level `supported_languages` behavior unchanged so existing clients still see the configured runtime default.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`.
+
+### 2026-06-08 slice update: Chatterbox voice conditionals cache
+
+Backlog task: `TASK-531`
+
+- Added an in-process adapter cache for upstream `prepare_conditionals()` output keyed by model family, reference-audio hash, and exaggeration.
+- Reused cached conditionals on repeated reference-audio requests and omitted `audio_prompt_path` once conditionals are prepared, preserving fallback behavior for runtimes without `prepare_conditionals()`.
+- Cleared cached conditionals on adapter close/cleanup.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`.
+
+### 2026-06-08 slice update: Chatterbox conditionals cache bounds
+
+Backlog task: `TASK-533`
+
+- Replaced the plain in-process conditionals cache with a bounded LRU cache.
+- Added `chatterbox_conditionals_cache_size` / `conditionals_cache_size` with a default of 16 entries; setting it to 0 disables retention while preserving per-request `prepare_conditionals()` use.
+- Refreshed the Chatterbox setup runbook and provider YAML so operators can tune the cache explicitly.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`, `python -m pytest tldw_Server_API/tests/TTS/test_tts_default_policy.py -v`, `python -m bandit -r tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py -f json -o /tmp/bandit_chatterbox_adapter_task533.json`, and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox VC upload bounds
+
+Backlog task: `TASK-532`
+
+- Replaced unbounded multipart reads in the Chatterbox voice-conversion endpoint with chunked temp-file materialization capped at 50 MiB per upload/payload.
+- Return `413` and clean partial temp files when a source or target voice-conversion upload exceeds the limit.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py -k "chatterbox_voice_conversion" -v`.
+
+### 2026-06-08 slice update: Chatterbox VC response-format docs
+
+Backlog task: `TASK-534`
+
+- Corrected the setup runbook to list only the response formats accepted by the current voice-conversion endpoint: `wav`, `mp3`, `flac`, `opus`, `aac`, and `pcm`.
+- Added the 50 MiB per-upload cap to the runbook note next to the voice-conversion request examples.
+- Verified with `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox provider config aliases
+
+Backlog task: `TASK-535`
+
+- Expanded provider config normalization for Chatterbox YAML settings so generic keys are duplicated to adapter-prefixed `chatterbox_*` keys.
+- Covered family selection, standard/multilingual/Turbo/VC model paths, auto-download, conditionals cache size, and generation default controls.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/test_tts_adapters.py -v`, `python -m bandit -r tldw_Server_API/app/core/TTS/adapter_registry.py -f json -o /tmp/bandit_tts_adapter_registry_task535.json`, and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox target latency config
+
+Backlog task: `TASK-536`
+
+- Made `ChatterboxAdapter` honor `chatterbox_target_latency_ms` / `target_latency_ms` instead of always using the hardcoded 200 ms progressive streaming hint.
+- Added positive-integer coercion so invalid or non-positive values fall back to 200 ms.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`, `python -m bandit -r tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py -f json -o /tmp/bandit_chatterbox_adapter_task536.json`, and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox generation-default config hardening
+
+Backlog task: `TASK-537`
+
+- Made generation default numeric settings parse defensively with prefixed-key precedence and unprefixed aliases.
+- Invalid numeric values for default exaggeration, CFG weight, temperature, repetition penalty, min-p, or top-p now fall back to conservative defaults instead of raising during adapter construction.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`, `python -m bandit -r tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py -f json -o /tmp/bandit_chatterbox_adapter_task537.json`, and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox streaming voice-reference cleanup
+
+Backlog task: `TASK-538`
+
+- Deferred cleanup of temporary Chatterbox voice-reference files for streaming TTS responses until the returned audio stream is consumed or closed.
+- Preserved immediate temp-file cleanup for non-streaming requests and error paths before a streaming response is returned.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`, `python -m bandit -r tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py -f json -o /tmp/bandit_chatterbox_adapter_task538.json`, and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox stream chunk latency
+
+Backlog task: `TASK-539`
+
+- Applied `target_latency_ms` / `chatterbox_target_latency_ms` to the actual `stream_encoded_waveform()` chunk duration for Chatterbox TTS streams.
+- Reused the same configured chunk duration for Chatterbox voice-conversion streams so response streaming behavior matches capability metadata.
+- Verified with `python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v`, `python -m bandit -r tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py -f json -o /tmp/bandit_chatterbox_adapter_task539.json`, and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox streaming latency docs
+
+Backlog task: `TASK-540`
+
+- Refreshed the Chatterbox setup runbook so streaming chunk guidance describes `target_latency_ms` / `chatterbox_target_latency_ms` as configurable, with 200 ms as the default.
+- Clarified that both TTS and voice-conversion streaming use the configured chunk duration.
+- Verified with `rg -n "200ms|0\\.2s|~200" Docs/STT-TTS/CHATTERBOX_SETUP.md` and `git diff --check`.
+
+### 2026-06-08 slice update: Chatterbox BF16 inference
+
+Backlog task: `TASK-541`
+
+- Added opt-in BF16 mode resolution for Chatterbox TTS via `chatterbox_use_bf16`, `use_bf16`, or `TTS_BF16=off|on|auto`, with the default remaining off.
+- When BF16 is enabled, the adapter prepares the Chatterbox T3 module with `torch.bfloat16` and wraps TTS generation in `torch.autocast` when available.
+- Added provider-config alias coverage for generic `use_bf16` and refreshed the provider YAML/setup runbook.
+
+### 2026-06-08 slice update: Chatterbox split_text/chunk_size aliases
+
+Backlog task: `TASK-542`
+
+- Mapped upstream-style `extra_params.split_text` into the existing service-level chunking enable flag.
+- Mapped upstream-style `extra_params.chunk_size` to the service chunk target/max character settings while preserving existing `chunking_service` / `chunking` precedence.
+- Documented that these aliases apply to non-streaming long-text Chatterbox requests so the service can assemble generated PCM segments into one encoded response.
+
+### 2026-06-08 slice update: Chatterbox speed_factor pass-through
+
+Backlog task: `TASK-543`
+
+- Added safe `speed_factor` candidate kwargs for standard, multilingual, and Turbo Chatterbox generation.
+- Explicit `extra_params.speed_factor` takes precedence; otherwise non-default OpenAI-compatible `speed` is offered as `speed_factor`.
+- The existing runtime signature filter still drops `speed_factor` for installed Chatterbox versions that do not support it.
+
+### 2026-06-08 slice update: Chatterbox generation-control capability metadata
+
+Backlog task: `TASK-544`
+
+- Added discoverable Chatterbox capability metadata for standard/multilingual generation controls, Turbo controls, speed-factor request fields, service chunking aliases, and BF16 modes.
+- Kept the top-level `supports_speech_rate` flag false because Chatterbox speed changes are runtime-conditional metadata, not a guaranteed generic speech-rate capability.
+- Refreshed the Chatterbox setup runbook to point operators at the expanded provider capability metadata.
+
+### 2026-06-08 slice update: Chatterbox predefined voice alias
+
+Backlog task: `TASK-545`
+
+- Added safe upstream-style `extra_params.voice_mode="predefined"` plus `extra_params.predefined_voice_id` support for Chatterbox speech requests.
+- The alias resolves through the authenticated user's stored custom voice manager and leaves arbitrary `reference_audio_filename` values untouched.
+- Refreshed the OpenAI speech schema and Chatterbox setup runbook with the supported mapping and security boundary.
+
+### 2026-06-08 slice update: Chatterbox output_format alias
+
+Backlog task: `TASK-546`
+
+- Added optional OpenAI speech request `output_format` as a Chatterbox-family compatibility alias for upstream clients.
+- The alias applies only when `response_format` was omitted; explicit `response_format` keeps precedence, and non-Chatterbox request conversion remains unchanged.
+- Refreshed schema docs and the Chatterbox setup runbook with the alias behavior.
+
+### 2026-06-08 slice update: Chatterbox language alias
+
+Backlog task: `TASK-547`
+
+- Added optional OpenAI speech request `language` as a Chatterbox-family compatibility alias for upstream multilingual clients.
+- The alias applies only when `lang_code` was omitted; explicit `lang_code` keeps precedence, and non-Chatterbox request conversion remains unchanged.
+- Refreshed schema docs and the Chatterbox setup runbook with the alias behavior.
+
+### 2026-06-08 slice update: OpenAI-style provider voice catalog
+
+Backlog task: `TASK-548`
+
+- Added opt-in `format=openai` support to `GET /api/v1/audio/voices/catalog` so clients can receive flattened provider voice discovery as `{ "object": "list", "data": [...] }`.
+- Kept the default provider-to-voices catalog response unchanged and left `GET /api/v1/audio/voices` as the authenticated custom voice list.
+- Documented the Chatterbox voice-discovery mapping in the setup runbook.
+
+### 2026-06-08 slice update: TTS provider model-info
+
+Backlog task: `TASK-549`
+
+- Added `GET /api/v1/audio/tts/providers/{provider}/model-info` for focused provider status, loaded state, supported model IDs, family metadata, voice-conversion metadata, and unload route discovery.
+- Return HTTP 404 for unknown providers instead of an empty model-info payload.
+- Sanitized model-info values from capabilities/status data so provider config secrets and local filesystem paths are not exposed.
 
 **Step 5: Commit**
 

@@ -1,13 +1,17 @@
 ---
 id: TASK-494
 title: Create scheduled tasks Automation Workbench UX PRD
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-07 23:49
 labels:
 - prd
 - ux
 - scheduled-tasks
 - webui
 - extension
+dependencies: []
 priority: High
 documentation:
 - Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
@@ -24,11 +28,11 @@ Write a product/UX PRD for the target /scheduled-tasks Automation Workbench expe
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 PRD addresses the scheduled-tasks UX audit issues and defines the full target UX.
-- [ ] #2 PRD keeps backend/API/data-model details at dependency level rather than implementation detail.
-- [ ] #3 PRD explicitly preserves Watchlists as a separate first-class workflow/persona.
-- [ ] #4 PRD covers WebUI, Home surfacing, browser extension context-aware creation, states, copy, accessibility, success metrics, and phased delivery.
-- [ ] #5 Design document is saved under Docs/superpowers/specs and committed with related Backlog.md task updates.
+- [x] #1 PRD addresses the scheduled-tasks UX audit issues and defines the full target UX.
+- [x] #2 PRD keeps backend/API/data-model details at dependency level rather than implementation detail.
+- [x] #3 PRD explicitly preserves Watchlists as a separate first-class workflow/persona.
+- [x] #4 PRD covers WebUI, Home surfacing, browser extension context-aware creation, states, copy, accessibility, success metrics, and phased delivery.
+- [x] #5 Design document is saved under Docs/superpowers/specs and committed with related Backlog.md task updates.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,10 +55,10 @@ Created the Scheduled Tasks Automation Workbench PRD and marked it ready for use
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

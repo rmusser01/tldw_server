@@ -7,9 +7,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from loguru import logger
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def _apply_test_env_defaults() -> None:
@@ -21,6 +26,8 @@ def _apply_test_env_defaults() -> None:
     - SINGLE_USER_API_KEY/AUTH_MODE/DATABASE_URL: mirror pytest's deterministic
       AuthNZ defaults before importing the app
     - OTEL_SDK_DISABLED: disable OpenTelemetry instrumentation
+    - AUTH_MODE/SINGLE_USER_*: mirror the deterministic single-user auth
+      defaults from tests/conftest.py
     - ROUTES_DISABLE: ensure "research" is disabled and remove "notes" if
       present (parsed from comma/space-delimited values).  Must match
       ``tests/conftest.py`` which only disables "research", NOT "evaluations".
@@ -35,10 +42,14 @@ def _apply_test_env_defaults() -> None:
     os.environ["AUTH_MODE"] = "single_user"
     os.environ.setdefault("DATABASE_URL", "sqlite:///./Databases/users.db")
     os.environ.pop("PROFILE", None)
-    # The snapshot test imports the app while pytest is collecting the test
-    # module, before PYTEST_CURRENT_TEST is set for a specific test call.
-    # Mirror that collection-time environment so route inclusion matches CI.
-    os.environ.pop("PYTEST_CURRENT_TEST", None)
+    # Route inclusion in app startup now keys off explicit pytest runtime, not
+    # only TEST_MODE. Mirror pytest's runtime signal so this helper produces
+    # the same snapshot shape as tests.
+    os.environ.setdefault("PYTEST_CURRENT_TEST", "snapshot_regen::helper (call)")
+    # The privilege snapshot test imports the app during collection, before
+    # PYTEST_CURRENT_TEST is set, so audio routers are included. Keep the
+    # helper aligned with that live app shape.
+    os.environ.setdefault("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     logger.debug("Set test environment flags: MINIMAL_TEST_APP, TEST_MODE, OTEL_SDK_DISABLED")
     existing_disable = os.getenv("ROUTES_DISABLE", "")
     disable_parts = [p for p in existing_disable.replace(" ", ",").split(",") if p]
@@ -74,7 +85,7 @@ def main() -> None:
     registry = collect_privilege_route_registry(fastapi_app, catalog, strict=False)
     serialized = serialize_route_registry(registry)
 
-    snapshot_path = Path("tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json")
+    snapshot_path = PROJECT_ROOT / "tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json"
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot_path.write_text(json.dumps(serialized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     logger.info("Updated snapshot written to {}", snapshot_path)

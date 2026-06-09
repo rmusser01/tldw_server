@@ -12,6 +12,7 @@ import type {
   SearchRuntimeDetails,
   CitationRef,
 } from "../types"
+import { EMPTY_SOURCE_HEALTH_STATE } from "../sourceHealth"
 
 export type KnowledgeQaStateFixtureName =
   | "backendOffline"
@@ -109,6 +110,7 @@ function createSearchDetails(): SearchRuntimeDetails {
     rerankingEnabled: true,
     rerankingStrategy: "cross_encoder",
     averageRelevance: 0.86,
+    sourceStatus: {},
     webFallbackEnabled: false,
     webFallbackTriggered: false,
     webFallbackEngine: null,
@@ -188,6 +190,10 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
     results: [],
     answer: null,
     citations: [],
+    answerTrustState: "unknown_trust",
+    answerTrustReasonCodes: [],
+    answerEvidenceOrigin: null,
+    extensionFailureState: null,
     searchDetails: null,
     error: null,
     queryWarning: null,
@@ -210,12 +216,15 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
       mediaIds: [],
       noteIds: [],
     },
+    sourceHealth: EMPTY_SOURCE_HEALTH_STATE,
     historyHydrated: true,
     setQuery: vi.fn(),
     search: vi.fn(async () => undefined),
     cancelSearch: vi.fn(),
     clearResults: vi.fn(),
     rerunWithTokenLimit: vi.fn(async () => undefined),
+    retrySync: vi.fn(async () => true),
+    setExtensionFailureState: vi.fn(),
     createNewThread: vi.fn(async () => "thread-knowledge-1"),
     startNewTopic: vi.fn(async () => "thread-knowledge-1"),
     selectThread: vi.fn(async () => true),
@@ -237,6 +246,7 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
     setEvidenceRailTab: vi.fn(),
     setQueryStage: vi.fn(),
     setPinnedSourceFilters: vi.fn(),
+    refreshSourceHealth: vi.fn(async () => undefined),
     persistRagContext: vi.fn(async () => true),
     scrollToSource: vi.fn(),
     scrollToCitation: vi.fn(),

@@ -346,15 +346,150 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("hides the welcome state after starting a new draft", async () => {
+  it("preserves draft content and exposes retry after save failure", async () => {
+    let createAttempts = 0
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        createAttempts += 1
+        if (createAttempts === 1) {
+          throw new Error("Server temporarily unavailable")
+        }
+        return { id: 11, version: 1 }
+      }
+
+      if (path === "/api/v1/notes/11" && method === "GET") {
+        return {
+          id: 11,
+          title: "Recoverable note",
+          content: "Draft survives failure",
+          metadata: { keywords: [] },
+          version: 1
+        }
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "Recoverable note" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Draft survives failure" }
+    })
+
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+
+    await waitFor(() => {
+      expect(mockMessageError).toHaveBeenCalledWith("Server temporarily unavailable")
+    })
+
+    expect(titleInput).toHaveValue("Recoverable note")
+    expect(contentInput).toHaveValue("Draft survives failure")
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "error")
+
+    fireEvent.click(screen.getByTestId("notes-save-retry"))
+
+    await waitFor(() => {
+      expect(createAttempts).toBe(2)
+    })
+    expect(mockMessageSuccess).toHaveBeenCalledWith("Note created")
+  })
+
+  it("shows saving state and blocks duplicate submits while save is in flight", async () => {
+    let resolveCreate: ((value: unknown) => void) | null = null
+    const createPromise = new Promise((resolve) => {
+      resolveCreate = resolve
+    })
+
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        return createPromise
+      }
+
+      if (path === "/api/v1/notes/11" && method === "GET") {
+        return {
+          id: 11,
+          title: "Slow save",
+          content: "Saving should be visible",
+          metadata: { keywords: [] },
+          version: 1
+        }
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText("Title"), {
+      target: { value: "Slow save" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
+      target: { value: "Saving should be visible" }
+    })
+
+    const saveButton = screen.getByTestId("notes-save-button")
+    fireEvent.click(saveButton)
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+    })
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saving")
+
+    fireEvent.click(saveButton)
+    expect(createCalls()).toHaveLength(1)
+
+    resolveCreate?.({ id: 11, version: 1 })
+
+    await waitFor(() => {
+      expect(mockMessageSuccess).toHaveBeenCalledWith("Note created")
+    })
+  })
+
+  it("opens a writable, focused title field after starting a new draft from the empty state", async () => {
     renderPage()
 
     expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
+    fireEvent.click(screen.getByRole("button", { name: "Create note" }))
 
     await waitFor(() => {
       expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
+    })
+
+    const titleInput = screen.getByRole("textbox", { name: "Note title" })
+    expect(titleInput).toBeEnabled()
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+
+    await waitFor(() => {
+      expect(titleInput).toHaveFocus()
     })
   })
 

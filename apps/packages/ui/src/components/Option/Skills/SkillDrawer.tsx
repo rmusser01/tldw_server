@@ -1,6 +1,7 @@
 import React from "react"
 import { useMutation } from "@tanstack/react-query"
-import { Button, Collapse, Drawer, Form, Input, Space } from "antd"
+import { Button, Collapse, Drawer, Form, Input, Modal, Radio, Space } from "antd"
+import type { RadioChangeEvent } from "antd"
 import { useTranslation } from "react-i18next"
 import { Plus, Trash2 } from "lucide-react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -8,13 +9,17 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { SkillCreate, SkillResponse, SkillUpdate } from "@/types/skill"
 import {
   buildInitialSkillContent,
+  buildSkillTemplateContent,
   buildSupportingFilesForCreate,
   buildSupportingFilesForUpdate,
+  SKILL_TEMPLATE_OPTIONS,
+  type SkillTemplateId,
   type SupportingFileFormEntry
 } from "./skill-form-utils"
 
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
 const SUPPORTING_FILE_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/
+const DEFAULT_TEMPLATE_ID: SkillTemplateId = "summarizer"
 
 interface SkillDrawerFormValues {
   name: string
@@ -39,10 +44,36 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
   const notification = useAntdNotification()
   const [form] = Form.useForm<SkillDrawerFormValues>()
   const isEdit = Boolean(skill)
+  const [modal, contextHolder] = Modal.useModal()
+  const [selectedTemplateId, setSelectedTemplateId] =
+    React.useState<SkillTemplateId>(DEFAULT_TEMPLATE_ID)
+  const lastGeneratedContentRef = React.useRef("")
+
+  const getTemplateNameForContent = React.useCallback(() => {
+    const name = form.getFieldValue("name") ?? ""
+    return !name || SKILL_NAME_REGEX.test(name) ? name : ""
+  }, [form])
+
+  const generateTemplateContent = React.useCallback(
+    (templateId: SkillTemplateId) =>
+      buildSkillTemplateContent(templateId, getTemplateNameForContent()),
+    [getTemplateNameForContent]
+  )
+
+  const applyTemplate = React.useCallback(
+    (templateId: SkillTemplateId) => {
+      const content = generateTemplateContent(templateId)
+      lastGeneratedContentRef.current = content
+      setSelectedTemplateId(templateId)
+      form.setFieldsValue({ content })
+    },
+    [form, generateTemplateContent]
+  )
 
   React.useEffect(() => {
     if (open) {
       if (skill) {
+        lastGeneratedContentRef.current = ""
         const supportingFiles = Object.entries(skill.supporting_files ?? {}).map(
           ([filename, content]) => ({
             filename,
@@ -56,11 +87,68 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
           supportingFiles
         })
       } else {
+        const content = buildSkillTemplateContent(DEFAULT_TEMPLATE_ID, "")
+        lastGeneratedContentRef.current = content
+        setSelectedTemplateId(DEFAULT_TEMPLATE_ID)
         form.resetFields()
-        form.setFieldsValue({ supportingFiles: [] })
+        form.setFieldsValue({
+          content,
+          supportingFiles: []
+        })
       }
     }
   }, [open, skill, form])
+
+  const handleTemplateChange = (event: RadioChangeEvent) => {
+    const nextTemplateId = event.target.value as SkillTemplateId
+    if (nextTemplateId === selectedTemplateId) return
+
+    const currentContent = form.getFieldValue("content") ?? ""
+    const canReplaceWithoutPrompt =
+      !currentContent || currentContent === lastGeneratedContentRef.current
+
+    if (canReplaceWithoutPrompt) {
+      applyTemplate(nextTemplateId)
+      return
+    }
+
+    modal.confirm({
+      title: t("option:skills.replaceTemplateTitle", {
+        defaultValue: "Replace draft with template?"
+      }),
+      content: t("option:skills.replaceTemplateDescription", {
+        defaultValue:
+          "This will replace your current SKILL.md draft with the selected template."
+      }),
+      okText: t("option:skills.replaceTemplateConfirm", {
+        defaultValue: "Replace draft"
+      }),
+      cancelText: t("option:skills.replaceTemplateCancel", {
+        defaultValue: "Keep current draft"
+      }),
+      onOk: () => applyTemplate(nextTemplateId)
+    })
+  }
+
+  const handleFormValuesChange = (changedValues: Partial<SkillDrawerFormValues>) => {
+    if (isEdit || !Object.prototype.hasOwnProperty.call(changedValues, "name")) {
+      return
+    }
+
+    const nextName = changedValues.name ?? ""
+    if (nextName && !SKILL_NAME_REGEX.test(nextName)) {
+      return
+    }
+
+    const currentContent = form.getFieldValue("content") ?? ""
+    if (currentContent !== lastGeneratedContentRef.current) {
+      return
+    }
+
+    const content = generateTemplateContent(selectedTemplateId)
+    lastGeneratedContentRef.current = content
+    form.setFieldsValue({ content })
+  }
 
   const createMutation = useMutation({
     mutationFn: (values: SkillCreate) =>
@@ -186,7 +274,13 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
         </Space>
       }
     >
-      <Form form={form} layout="vertical" autoComplete="off">
+      {contextHolder}
+      <Form
+        form={form}
+        layout="vertical"
+        autoComplete="off"
+        onValuesChange={handleFormValuesChange}
+      >
         <Form.Item
           name="name"
           label={t("option:skills.nameLabel", { defaultValue: "Name" })}
@@ -214,6 +308,33 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
           />
         </Form.Item>
 
+        {!isEdit && (
+          <Form.Item
+            label={t("option:skills.templateLabel", {
+              defaultValue: "Start from template"
+            })}
+            extra={t("option:skills.templateHelp", {
+              defaultValue:
+                "Templates generate valid SKILL.md frontmatter and a starter instruction body. You can still edit everything below."
+            })}
+          >
+            <Radio.Group
+              optionType="button"
+              buttonStyle="solid"
+              value={selectedTemplateId}
+              onChange={handleTemplateChange}
+            >
+              {SKILL_TEMPLATE_OPTIONS.map((template) => (
+                <Radio.Button key={template.id} value={template.id}>
+                  {t(`option:skills.templates.${template.id}.label`, {
+                    defaultValue: template.label
+                  })}
+                </Radio.Button>
+              ))}
+            </Radio.Group>
+          </Form.Item>
+        )}
+
         <Form.Item
           name="content"
           label={t("option:skills.contentLabel", {
@@ -229,7 +350,7 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
           ]}
           extra={t("option:skills.contentHelp", {
             defaultValue:
-              "Write YAML frontmatter (---) at the top for metadata (description, context, allowed-tools). Use $ARGUMENTS for argument substitution."
+              "Advanced: edit the generated YAML frontmatter (---) and instructions directly. Use $ARGUMENTS for argument substitution."
           })}
         >
           <Input.TextArea

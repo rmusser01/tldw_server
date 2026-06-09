@@ -5,7 +5,7 @@ import { SearchDetailsPanel } from "../SearchDetailsPanel"
 const state = {
   searchDetails: null as any,
   isSearching: false,
-  results: [] as Array<{ score?: number }>,
+  results: [] as Array<Record<string, any>>,
 }
 
 vi.mock("../KnowledgeQAProvider", () => ({
@@ -122,5 +122,79 @@ describe("SearchDetailsPanel", () => {
     expect(screen.getByText("No retrieval counts were reported for this search.")).toBeInTheDocument()
     expect(screen.getByText("No closest-miss candidates were reported.")).toBeInTheDocument()
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
+  })
+
+  it("keeps core runtime details visible when the evidence rail switches to details", () => {
+    state.searchDetails = {
+      expandedQueries: [],
+      rerankingEnabled: false,
+      rerankingStrategy: null,
+      averageRelevance: null,
+      webFallbackEnabled: false,
+      webFallbackTriggered: false,
+      webFallbackEngine: null,
+      documentsConsidered: null,
+      chunksConsidered: null,
+      documentsReturned: 1,
+      candidatesConsidered: null,
+      candidatesReturned: 1,
+      candidatesRejected: null,
+      retrievalLatencyMs: null,
+      alsoConsidered: [],
+      whyTheseSources: null,
+    }
+
+    render(<SearchDetailsPanel />)
+
+    const webFallbackLine = screen.getByText(/Web fallback:?/i).closest("div")
+    expect(webFallbackLine).toBeVisible()
+    expect(webFallbackLine).toHaveTextContent(/Web fallback disabled/i)
+  })
+
+  it("summarizes materialized evidence origins and unavailable results", () => {
+    state.results = [
+      {
+        score: 0.84,
+        evidenceOrigin: "local_library",
+        sourceStatus: "searched",
+      },
+      {
+        score: 0.67,
+        evidenceOrigin: "web_fallback",
+        sourceStatus: "searched",
+      },
+      {
+        score: 0,
+        evidenceOrigin: "local_library",
+        sourceStatus: "unavailable",
+        unavailableReason: "deleted_or_unavailable",
+      },
+    ]
+    state.searchDetails = {
+      expandedQueries: [],
+      rerankingEnabled: false,
+      rerankingStrategy: null,
+      averageRelevance: null,
+      webFallbackEnabled: true,
+      webFallbackTriggered: true,
+      webFallbackEngine: "duckduckgo",
+      documentsConsidered: null,
+      chunksConsidered: null,
+      documentsReturned: 3,
+      candidatesConsidered: null,
+      candidatesReturned: 3,
+      candidatesRejected: null,
+      retrievalLatencyMs: null,
+      alsoConsidered: [],
+      whyTheseSources: null,
+    }
+
+    render(<SearchDetailsPanel />)
+
+    const evidenceLine = screen.getByText(/Evidence origins:/i).closest("div")
+    expect(evidenceLine).not.toBeNull()
+    expect(evidenceLine?.textContent).toContain("local library 2")
+    expect(evidenceLine?.textContent).toContain("web fallback 1")
+    expect(evidenceLine?.textContent).toContain("unavailable 1")
   })
 })

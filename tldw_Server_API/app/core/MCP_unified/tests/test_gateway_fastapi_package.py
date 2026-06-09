@@ -1287,6 +1287,22 @@ def test_gateway_profile_management_routes_have_pydantic_response_models() -> No
             422,
         ),
         (
+            "PATCH",
+            "/mcp/profiles/reviewer",
+            {"name": "Reviewer"},
+            "patch_profile",
+            "permission_change_denied",
+            403,
+        ),
+        (
+            "PATCH",
+            "/mcp/profiles/reviewer",
+            {"name": "Reviewer"},
+            "patch_profile",
+            "permission_change_requires_approval",
+            409,
+        ),
+        (
             "DELETE",
             "/mcp/profiles/reviewer",
             None,
@@ -3620,7 +3636,6 @@ def test_gateway_config_bootstrap_custom_factory_ignores_config_process_policy(
         GatewayProfileStoreConfig,
         bootstrap_profile_gateway_from_config,
     )
-    from mcp_unified.storage.models import ExternalServerDefinition
 
     def factory(server: ExternalServerDefinition) -> Any:
         return server.id

@@ -30,7 +30,7 @@ test.describe("Integrations and scheduled tasks routes", () => {
         page.getByRole("heading", { name: /scheduled tasks/i })
       ).toBeVisible()
       await expect(
-        page.getByText(/Watchlist jobs remain managed from Watchlists/i)
+        page.getByText(/Track reminders, Watchlist monitors/i)
       ).toBeVisible()
     } finally {
       await context.close()

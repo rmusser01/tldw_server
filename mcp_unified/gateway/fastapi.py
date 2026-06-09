@@ -82,6 +82,8 @@ _PROFILE_MANAGEMENT_STATUS_CODES = {
     "profile_already_exists": 409,
     "invalid_profile_request": 422,
     "invalid_profile_patch": 422,
+    "permission_change_denied": 403,
+    "permission_change_requires_approval": 409,
     "profile_store_unavailable": 503,
     "assignment_store_unavailable": 503,
     "unexpected_delete_result": 500,
@@ -123,6 +125,8 @@ _CREDENTIAL_GRANT_STATUS_CODES = {
 }
 _EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
 _PROFILE_MANAGEMENT_PUBLIC_ERRORS = {
+    "permission_change_denied": "Permission change denied",
+    "permission_change_requires_approval": "Permission change requires approval",
     "profile_store_unavailable": "Profile store unavailable",
     "assignment_store_unavailable": "Profile assignment store unavailable",
 }

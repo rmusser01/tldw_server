@@ -32,7 +32,7 @@ class _FakeMultiRootPathService:
             "normalized_paths": normalized_paths,
             "workspace_bundle_ids": [self.workspace_id],
             "workspace_bundle_roots": [self.workspace_root],
-            "path_workspace_map": {normalized_path: self.workspace_id for normalized_path in normalized_paths},
+            "path_workspace_map": dict.fromkeys(normalized_paths, self.workspace_id),
             "resolved_workspace_roots_by_id": {self.workspace_id: self.workspace_root},
         }
 
@@ -427,6 +427,96 @@ async def test_effective_permission_preview_returns_redacted_path_grant_decision
 
 
 @pytest.mark.asyncio
+async def test_effective_permission_preview_explains_reserved_file_policy_action() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["share"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.share",
+        action="share",
+        path="documents/story.md",
+    )
+
+    assert result["requested_action"] == "share"
+    assert result["outcome"] == "allow"
+    assert result["grant_outcome"] == "allowed"
+    assert result["matched_grant_prefix"] == "documents"
+    assert result["redacted"] is True
+    assert "/tmp/mcp-hub-path-enforcer" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_effective_permission_preview_denies_ungranted_reserved_file_policy_action() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.export",
+        action="export",
+        path="documents/story.md",
+    )
+
+    assert result["requested_action"] == "export"
+    assert result["outcome"] == "deny"
+    assert result["reason_code"] == "path_action_not_granted"
+    assert result["grant_outcome"] == "not_granted"
+    assert result["redacted"] is True
+
+
+@pytest.mark.asyncio
+async def test_effective_permission_preview_returns_ask_for_force_approval_scope_block() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    scope = _workspace_scope()
+    scope["workspace_id"] = "ws-1"
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(scope))
+
+    result = await svc.preview_effective_path_permission(
+        effective_policy={
+            "enabled": True,
+            "selected_assignment_workspace_ids": ["ws-2"],
+            "policy_document": {"path_scope_mode": "workspace_root"},
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        action="read",
+        path="documents/story.md",
+    )
+
+    assert result["outcome"] == "ask"
+    assert result["reason_code"] == "workspace_not_allowed_but_trusted"
+    assert result.get("path_decisions", []) == []
+
+
+@pytest.mark.asyncio
 async def test_effective_permission_preview_does_not_guess_profile_for_ambiguous_sources() -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
@@ -518,7 +608,7 @@ async def test_path_grants_deny_overrides_broader_allow_grant() -> None:
 
     assert result["within_scope"] is False
     assert result["reason"] == "path_action_denied"
-    assert result["force_approval"] is True
+    assert result["force_approval"] is False
     assert result["path_decisions"] == [
         {
             "requested_action": "edit",
@@ -532,6 +622,108 @@ async def test_path_grants_deny_overrides_broader_allow_grant() -> None:
         }
     ]
     assert "/tmp/mcp-hub-path-enforcer" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_authored_path_grants_compile_for_runtime_enforcement() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+    effective_policy = {
+        "enabled": True,
+        "policy_document": {
+            "path_scope_mode": "workspace_root",
+            "path_grant_authoring": {
+                "workspace": [
+                    {"prefix": "documents", "actions": ["read", "edit", "write"]},
+                ],
+                "folders": [
+                    {"prefix": "documents/private", "actions": ["edit", "write"], "effect": "deny"},
+                ],
+            },
+        },
+    }
+
+    allowed = await svc.evaluate_tool_call(
+        effective_policy=effective_policy,
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.patch",
+        tool_args={"path": "documents/public/story.md"},
+        tool_def=_filesystem_tool_def(action="edit"),
+    )
+    denied = await svc.evaluate_tool_call(
+        effective_policy=effective_policy,
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.patch",
+        tool_args={"path": "documents/private/secret.md"},
+        tool_def=_filesystem_tool_def(action="edit"),
+    )
+
+    assert allowed["within_scope"] is True
+    assert allowed["path_decisions"][0]["grant_source"] == "path_grants"
+    assert denied["within_scope"] is False
+    assert denied["reason"] == "path_action_denied"
+    assert denied["path_decisions"][0]["matched_grant_prefix"] == "documents/private"
+
+    root_allowed = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grant_authoring": {
+                    "workspace": [
+                        {"prefix": "./", "actions": ["read"]},
+                    ],
+                },
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        tool_args={"path": "README.md"},
+        tool_def=_filesystem_tool_def(action="read"),
+    )
+
+    assert root_allowed["within_scope"] is True
+    assert root_allowed["path_decisions"][0]["grant_source"] == "path_grants"
+    assert root_allowed["path_decisions"][0]["matched_grant_prefix"] == "."
+
+
+@pytest.mark.asyncio
+async def test_invalid_authored_path_grants_do_not_fall_back_to_legacy_allowlist() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_allowlist_prefixes": ["documents"],
+                "path_grant_authoring": {
+                    "workspace": [
+                        {"prefix": "/documents", "actions": ["read"]},
+                    ],
+                },
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="read"),
+    )
+
+    assert result["within_scope"] is False
+    assert result["reason"] == "path_action_not_granted"
+    assert result["path_decisions"][0]["grant_outcome"] == "not_granted"
+    assert result["scope_payload"]["path_grant_diagnostic_codes"] == ["invalid_prefix"]
+    assert result["scope_payload"]["path_grant_diagnostics"] == [
+        {"code": "invalid_prefix", "source": "workspace[0]", "severity": "error"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -563,6 +755,52 @@ async def test_path_grants_are_authoritative_when_legacy_allowlist_also_present(
     assert result["reason"] == "path_action_not_granted"
     assert result["path_decisions"][0]["normalized_path"] == "documents/story.md"
     assert result["path_decisions"][0]["grant_source"] == "path_grants"
+
+
+@pytest.mark.asyncio
+async def test_path_grants_treat_fs_edit_as_edit_action() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    allowed = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read", "edit"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.edit",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="edit"),
+    )
+    denied = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.edit",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="edit"),
+    )
+
+    assert allowed["within_scope"] is True  # nosec B101
+    assert allowed["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
+    assert denied["within_scope"] is False  # nosec B101
+    assert denied["reason"] == "path_action_not_granted"  # nosec B101
+    assert denied["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
 
 
 @pytest.mark.asyncio

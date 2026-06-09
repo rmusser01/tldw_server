@@ -62,6 +62,7 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "tailLlamacppLogs",
     "transcribeAudio",
     "unloadMlxModel",
+    "unloadTtsProvider",
     "updateAudioPreset",
     "updateLlamacppConfig",
     "updateLlamacppProfile",

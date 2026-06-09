@@ -31,7 +31,7 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 | **PocketTTS** | Local ONNX | EN | ✅ (reference) | Zero-shot cloning, streaming ONNX |
 | **LuxTTS** | Local PyTorch | EN | ✅ (reference) | 48kHz voice cloning (ZipVoice) |
 | **Higgs** | Local PyTorch | 50+ | ✅ (3-10s) | Music generation, multi-lingual |
-| **Chatterbox** | Local PyTorch | EN | ✅ (5-20s) | Emotion exaggeration control |
+| **Chatterbox** | Local PyTorch | EN, 23 via multilingual | ✅ (5-20s) | Original emotion control, multilingual model, Turbo paralinguistic tags |
 | **Dia** | Local PyTorch | EN | ✅ (dialogue prompts) | Multi-speaker dialogue specialist |
 | **VibeVoice** | Local PyTorch | 12 | ✅ (Any) | Long-form (90min), spontaneous music |
 | **VibeVoice Realtime** | WS adapter | EN | ❌ | Low-latency streaming (requires realtime backend) |
@@ -152,6 +152,23 @@ providers:
       chunk_max_bytes: 767
       interval_silence: 200
 ```
+
+### Chatterbox
+
+Chatterbox exposes the current Resemble AI TTS family through one provider key.
+
+- `chatterbox` and `chatterbox-emotion`: Original English model with emotion-to-exaggeration control.
+- `chatterbox-multilingual`: Multilingual runtime for the upstream 23 language codes.
+- `chatterbox-turbo`: English Turbo runtime with paralinguistic tags such as `[laugh]`, `[cough]`, and `[chuckle]`.
+
+Generation notes:
+
+- Original and Multilingual accept `cfg_weight`, `temperature`, `repetition_penalty`, `min_p`, and `top_p`.
+- Turbo accepts `temperature`, `repetition_penalty`, `top_p`, and `top_k`.
+- Turbo intentionally drops CFG, min-p, emotion, and exaggeration controls; response metadata reports them in `ignored_controls` when the caller sends them.
+- `extra_params.seed` is normalized into the typed `TTSRequest.seed` path for reproducibility where the runtime honors PyTorch seeding.
+- `use_multilingual: true` remains as a legacy compatibility route for non-English `model: "chatterbox"` requests, but new clients should send `model: "chatterbox-multilingual"` explicitly.
+- Chatterbox voice conversion is exposed separately through `POST /api/v1/audio/voice-conversion` with multipart `source_audio` and optional `target_voice` uploads. It is not registered as a `/audio/speech` model id.
 
 ## One-Command Installers
 Run these from the project root to install a single TTS backend (deps + models where applicable):
@@ -545,8 +562,12 @@ providers:
 
   chatterbox:
     enabled: true
-    model_path: resemble-ai/chatterbox
-    enable_watermark: true
+    variant: standard          # standard, multilingual, or turbo
+    model_path: ResembleAI/chatterbox
+    multilingual_model_path: ResembleAI/chatterbox-multilingual
+    turbo_model_path: ResembleAI/chatterbox-turbo
+    device: auto
+    disable_watermark: true
 
   vibevoice:
     enabled: true
@@ -605,8 +626,8 @@ The registry automatically aliases common, generic keys from your YAML to the pr
   - Aliased to: `dia_model_path`, `dia_device`, `dia_use_safetensors`, `dia_use_bf16`, `dia_sample_rate`, `dia_auto_detect_speakers`, `dia_max_speakers`
 
 - Chatterbox
-  - Generic: `device`, `use_multilingual`, `disable_watermark`, `sample_rate`, `target_latency_ms`
-  - Aliased to: `chatterbox_device`, `chatterbox_use_multilingual`, `chatterbox_disable_watermark`, `chatterbox_target_latency_ms`
+  - Generic: `device`, `variant`, `model_path`, `multilingual_model_path`, `turbo_model_path`, `use_multilingual`, `disable_watermark`, `sample_rate`, `target_latency_ms`, `auto_download`
+  - Aliased to: `chatterbox_device`, `chatterbox_variant`, `chatterbox_use_multilingual`, `chatterbox_disable_watermark`, `chatterbox_target_latency_ms`
 
 - VibeVoice
   - Generic: `device`, `sample_rate`, `variant`, `model_path`, `model_dir`, `cache_dir`, `voices_dir`, `background_music`, `enable_singing`, `use_quantization`, `auto_cleanup`, `auto_download`, `enable_sage`, `attention_type`, `cfg_scale`, `diffusion_steps`, `temperature`, `top_p`, `top_k`, `stream_chunk_size`, `stream_buffer_size`
