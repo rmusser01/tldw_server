@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -102,6 +104,36 @@ class _FakeWorkspaceRootResolver:
     async def resolve_for_context(self, **kwargs) -> dict:  # noqa: ANN003
         self.calls.append(dict(kwargs))
         return dict(self.result)
+
+
+def _filesystem_tool_def(name: str, action: str) -> dict:
+    return {
+        "name": name,
+        "description": name,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        "metadata": {
+            "uses_filesystem": True,
+            "path_boundable": True,
+            "path_argument_hints": ["path"],
+            "path_scope_action": action,
+        },
+    }
+
+
+def _effective_path_policy(path_grants: list[dict]) -> dict:
+    return {
+        "enabled": True,
+        "allowed_tools": ["fs.read", "fs.edit", "fs.write", "fs.patch"],
+        "policy_document": {
+            "path_scope_mode": "workspace_root",
+            "path_grants": path_grants,
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -777,6 +809,185 @@ def test_path_scope_key_includes_active_workspace_id() -> None:
     )
 
     assert scope_key_a != scope_key_b
+
+
+@pytest.mark.asyncio
+async def test_path_grants_keep_read_edit_and_write_distinct(tmp_path) -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+    from tldw_Server_API.app.services.mcp_hub_path_scope_service import McpHubPathScopeService
+
+    workspace_root = str(tmp_path)
+    path_service = McpHubPathEnforcementService(
+        path_scope_service=McpHubPathScopeService(
+            sandbox_service=object(),
+            workspace_root_resolver=_FakeWorkspaceRootResolver(
+                {
+                    "workspace_root": workspace_root,
+                    "workspace_id": "workspace-actions",
+                    "source": "test_workspace",
+                    "reason": None,
+                }
+            ),
+        )
+    )
+    context = SimpleNamespace(
+        user_id="7",
+        session_id="sess-actions",
+        metadata={"workspace_id": "workspace-actions"},
+    )
+
+    async def _evaluate(path_grants: list[dict], tool_name: str, action: str) -> dict:
+        return await path_service.evaluate_tool_call(
+            effective_policy=_effective_path_policy(path_grants),
+            context=context,
+            tool_name=tool_name,
+            tool_args={"path": "docs/a.txt"},
+            tool_def=_filesystem_tool_def(tool_name, action),
+        )
+
+    def _assert_not_granted(result: dict, requested_action: str) -> None:
+        assert result["within_scope"] is False  # nosec B101
+        assert result["reason"] == "path_action_not_granted"  # nosec B101
+        assert workspace_root not in repr(result)  # nosec B101
+        decision = result["scope_payload"]["path_decisions"][0]
+        assert decision["requested_action"] == requested_action  # nosec B101
+        assert decision["reason_code"] == "path_action_not_granted"  # nosec B101
+        assert decision["redacted"] is True  # nosec B101
+
+    read_policy_grants = [{"prefix": "docs", "actions": ["read"]}]
+    read_allowed = await _evaluate(read_policy_grants, "fs.read", "read")
+    read_edit_denied = await _evaluate(read_policy_grants, "fs.edit", "edit")
+    read_write_denied = await _evaluate(read_policy_grants, "fs.write", "write")
+
+    assert read_allowed["within_scope"] is True  # nosec B101
+    assert read_allowed["path_decisions"][0]["requested_action"] == "read"  # nosec B101
+    _assert_not_granted(read_edit_denied, "edit")
+    _assert_not_granted(read_write_denied, "write")
+
+    edit_policy_grants = [{"prefix": "docs", "actions": ["edit"]}]
+    edit_allowed = await _evaluate(edit_policy_grants, "fs.edit", "edit")
+    edit_read_denied = await _evaluate(edit_policy_grants, "fs.read", "read")
+    edit_write_denied = await _evaluate(edit_policy_grants, "fs.write", "write")
+
+    assert edit_allowed["within_scope"] is True  # nosec B101
+    assert edit_allowed["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
+    _assert_not_granted(edit_read_denied, "read")
+    _assert_not_granted(edit_write_denied, "write")
+
+    write_policy_grants = [{"prefix": "docs", "actions": ["write"]}]
+    write_allowed = await _evaluate(write_policy_grants, "fs.write", "write")
+    write_read_denied = await _evaluate(write_policy_grants, "fs.read", "read")
+    write_edit_denied = await _evaluate(write_policy_grants, "fs.edit", "edit")
+
+    assert write_allowed["within_scope"] is True  # nosec B101
+    assert write_allowed["path_decisions"][0]["requested_action"] == "write"  # nosec B101
+    _assert_not_granted(write_read_denied, "read")
+    _assert_not_granted(write_edit_denied, "edit")
+
+
+@pytest.mark.asyncio
+async def test_path_grants_deny_override_wins_for_nested_prefix(tmp_path) -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+    from tldw_Server_API.app.services.mcp_hub_path_scope_service import McpHubPathScopeService
+
+    path_service = McpHubPathEnforcementService(
+        path_scope_service=McpHubPathScopeService(
+            sandbox_service=object(),
+            workspace_root_resolver=_FakeWorkspaceRootResolver(
+                {
+                    "workspace_root": str(tmp_path),
+                    "workspace_id": "workspace-deny-override",
+                    "source": "test_workspace",
+                    "reason": None,
+                }
+            ),
+        )
+    )
+
+    result = await path_service.evaluate_tool_call(
+        effective_policy=_effective_path_policy(
+            [
+                {"prefix": "docs", "actions": ["read", "edit", "write"]},
+                {"prefix": "docs/private", "actions": ["edit", "write"], "effect": "deny"},
+            ]
+        ),
+        context=SimpleNamespace(
+            user_id="7",
+            session_id="sess-deny-override",
+            metadata={"workspace_id": "workspace-deny-override"},
+        ),
+        tool_name="fs.edit",
+        tool_args={"path": "docs/private/a.txt"},
+        tool_def=_filesystem_tool_def("fs.edit", "edit"),
+    )
+
+    assert result["within_scope"] is False  # nosec B101
+    assert result["reason"] == "path_action_denied"  # nosec B101
+    decision = result["scope_payload"]["path_decisions"][0]
+    assert decision["reason_code"] == "path_action_denied"  # nosec B101
+    assert decision["matched_grant_prefix"] == "docs/private"  # nosec B101
+    assert decision["matched_grant_effect"] == "deny"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_path_grants_patch_bundle_fails_closed_when_create_needs_write(tmp_path) -> None:
+    from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+    from tldw_Server_API.app.services.mcp_hub_path_scope_service import McpHubPathScopeService
+
+    path_service = McpHubPathEnforcementService(
+        path_scope_service=McpHubPathScopeService(
+            sandbox_service=object(),
+            workspace_root_resolver=_FakeWorkspaceRootResolver(
+                {
+                    "workspace_root": str(tmp_path),
+                    "workspace_id": "workspace-patch-bundle",
+                    "source": "test_workspace",
+                    "reason": None,
+                }
+            ),
+        )
+    )
+
+    result = await path_service.evaluate_tool_call(
+        effective_policy=_effective_path_policy(
+            [
+                {"prefix": "docs", "actions": ["edit"]},
+            ]
+        ),
+        context=SimpleNamespace(
+            user_id="7",
+            session_id="sess-patch-bundle",
+            metadata={"workspace_id": "workspace-patch-bundle"},
+        ),
+        tool_name="fs.patch",
+        tool_args={"diff": "not-inspected-here"},
+        tool_def=_filesystem_tool_def("fs.patch", "edit"),
+        path_scope_candidates=[
+            PathScopeCandidate(path="docs/allowed.txt", action="edit", source="filesystem_diff"),
+            PathScopeCandidate(
+                path="docs/new.txt",
+                action="write",
+                source="filesystem_diff",
+                creates_file=True,
+            ),
+        ],
+    )
+
+    assert result["within_scope"] is False  # nosec B101
+    assert result["reason"] == "path_action_not_granted"  # nosec B101
+    decisions = result["scope_payload"]["path_decisions"]
+    write_decision = next(decision for decision in decisions if decision["requested_action"] == "write")
+    assert write_decision["normalized_path"] == "docs/new.txt"  # nosec B101
+    assert write_decision["reason_code"] == "path_action_not_granted"  # nosec B101
+    assert write_decision["redacted"] is True  # nosec B101
 
 
 @pytest.mark.asyncio
