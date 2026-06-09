@@ -304,16 +304,27 @@ def test_filesystem_validates_new_filesystem_helper_arguments() -> None:
     )
 
     mod.validate_tool_arguments("fs.stat", {"path": "docs/readme.md"})
-    mod.validate_tool_arguments("fs.glob", {"pattern": "**/*.py", "limit": 10})
+    mod.validate_tool_arguments(
+        "fs.glob",
+        {"pattern": "**/*.py", "limit": 10, "respect_gitignore": True, "sort_by": "path"},
+    )
     mod.validate_tool_arguments(
         "fs.grep",
         {
             "pattern": "TODO",
             "include": ["*.py", "**/*.md"],
             "exclude": ["**/.venv/**"],
+            "glob": "**/*.py",
+            "type": "py",
+            "output_mode": "content",
+            "respect_gitignore": True,
             "limit": 10,
             "max_file_bytes": 1024,
         },
+    )
+    mod.validate_tool_arguments(
+        "fs.grep",
+        {"pattern": "a.*b", "regex": True, "multiline": True, "output_mode": "count"},
     )
 
     invalid_cases = [
@@ -330,6 +341,8 @@ def test_filesystem_validates_new_filesystem_helper_arguments() -> None:
         ("fs.glob", {"pattern": "**/*.py", "include_directories": "yes"}, "include_directories must be a boolean"),
         ("fs.glob", {"pattern": "**/*.py", "follow_symlinks": "yes"}, "follow_symlinks must be a boolean"),
         ("fs.glob", {"pattern": "**/*.py", "case_sensitive": "yes"}, "case_sensitive must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "respect_gitignore": "yes"}, "respect_gitignore must be a boolean"),
+        ("fs.glob", {"pattern": "**/*.py", "sort_by": "ctime"}, "sort_by must be one of"),
         ("fs.glob", {"pattern": "**/*.py", "limit": 0}, "limit must be a positive integer"),
         ("fs.grep", {"pattern": "TODO", "unknown": True}, "unknown arguments"),
         ("fs.grep", {}, "pattern is required"),
@@ -338,10 +351,22 @@ def test_filesystem_validates_new_filesystem_helper_arguments() -> None:
         ("fs.grep", {"pattern": "TODO", "include": "*.py"}, "include must be a list of strings"),
         ("fs.grep", {"pattern": "TODO", "include": [1]}, "include must be a list of strings"),
         ("fs.grep", {"pattern": "TODO", "exclude": "*.py"}, "exclude must be a list of strings"),
+        ("fs.grep", {"pattern": "TODO", "glob": 7}, "glob must be a string"),
+        ("fs.grep", {"pattern": "TODO", "type": 7}, "type must be a string"),
+        ("fs.grep", {"pattern": "TODO", "type": "unknown"}, "unsupported grep type"),
+        ("fs.grep", {"pattern": "TODO", "output_mode": "json"}, "output_mode must be one of"),
         ("fs.grep", {"pattern": "TODO", "regex": "yes"}, "regex must be a boolean"),
         ("fs.grep", {"pattern": "TODO", "case_sensitive": "yes"}, "case_sensitive must be a boolean"),
         ("fs.grep", {"pattern": "TODO", "include_hidden": "yes"}, "include_hidden must be a boolean"),
         ("fs.grep", {"pattern": "TODO", "follow_symlinks": "yes"}, "follow_symlinks must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "respect_gitignore": "yes"}, "respect_gitignore must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "multiline": "yes"}, "multiline must be a boolean"),
+        ("fs.grep", {"pattern": "TODO", "multiline": True}, "multiline grep requires regex=true"),
+        (
+            "fs.grep",
+            {"pattern": "TODO.*done", "regex": True, "multiline": True, "output_mode": "content"},
+            "multiline grep does not support content output_mode",
+        ),
         ("fs.grep", {"pattern": "TODO", "limit": 0}, "limit must be a positive integer"),
         ("fs.grep", {"pattern": "TODO", "max_file_bytes": 0}, "max_file_bytes must be a positive integer"),
         (
@@ -1810,14 +1835,96 @@ async def test_filesystem_glob_matches_sorted_paths_and_normalizes_patterns(tmp_
         metadata={"workspace_id": "workspace-1"},
     )
 
-    result = await mod.execute_tool("fs.glob", {"pattern": "**/*.py"}, context=context)
-    backslash_result = await mod.execute_tool("fs.glob", {"pattern": r"**\*.py"}, context=context)
+    result = await mod.execute_tool("fs.glob", {"pattern": "**/*.py", "sort_by": "path"}, context=context)
+    backslash_result = await mod.execute_tool(
+        "fs.glob",
+        {"pattern": r"**\*.py", "sort_by": "path"},
+        context=context,
+    )
 
     assert [match["path"] for match in result["matches"]] == ["app.py", "pkg/app.py"]  # nosec B101
     assert [match["path"] for match in backslash_result["matches"]] == ["app.py", "pkg/app.py"]  # nosec B101
     assert result["base_path"] == "."  # nosec B101
     assert result["pattern"] == "**/*.py"  # nosec B101
     assert result["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_defaults_to_mtime_sort_with_path_sort_opt_in(tmp_path: Path) -> None:
+    """Verify fs.glob defaults to mtime sorting and can opt into path sorting."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    old_file = workspace_root / "a-old.py"
+    new_file = workspace_root / "z-new.py"
+    old_file.write_text("old", encoding="utf-8")
+    new_file.write_text("new", encoding="utf-8")
+    os.utime(old_file, (1_700_000_000, 1_700_000_000))
+    os.utime(new_file, (1_700_000_100, 1_700_000_100))
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-mtime-sort",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    default_sorted = await mod.execute_tool("fs.glob", {"pattern": "*.py"}, context=context)
+    path_sorted = await mod.execute_tool("fs.glob", {"pattern": "*.py", "sort_by": "path"}, context=context)
+
+    assert [match["path"] for match in default_sorted["matches"]] == ["z-new.py", "a-old.py"]  # nosec B101
+    assert [match["path"] for match in path_sorted["matches"]] == ["a-old.py", "z-new.py"]  # nosec B101
+    assert default_sorted["eval"]["result_kind"] == "structured_filesystem_glob"  # nosec B101
+    assert default_sorted["eval"]["path_filter_used"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_glob_respects_gitignore_when_requested(tmp_path: Path) -> None:
+    """Verify fs.glob applies root gitignore rules only when requested."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / ".gitignore").write_text("ignored.py\nbuild/\n", encoding="utf-8")
+    (workspace_root / "visible.py").write_text("visible", encoding="utf-8")
+    (workspace_root / "ignored.py").write_text("ignored", encoding="utf-8")
+    build_dir = workspace_root / "build"
+    build_dir.mkdir()
+    (build_dir / "generated.py").write_text("generated", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-glob-gitignore",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    default_result = await mod.execute_tool("fs.glob", {"pattern": "**/*.py", "sort_by": "path"}, context=context)
+    ignored_result = await mod.execute_tool(
+        "fs.glob",
+        {"pattern": "**/*.py", "respect_gitignore": True, "sort_by": "path"},
+        context=context,
+    )
+
+    assert [match["path"] for match in default_result["matches"]] == [  # nosec B101
+        "build/generated.py",
+        "ignored.py",
+        "visible.py",
+    ]
+    assert [match["path"] for match in ignored_result["matches"]] == ["visible.py"]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1916,20 +2023,20 @@ async def test_filesystem_glob_case_hidden_and_limit_behavior(tmp_path: Path) ->
         metadata={"workspace_id": "workspace-1"},
     )
 
-    sensitive = await mod.execute_tool("fs.glob", {"pattern": "**/*.py"}, context=context)
+    sensitive = await mod.execute_tool("fs.glob", {"pattern": "**/*.py", "sort_by": "path"}, context=context)
     insensitive = await mod.execute_tool(
         "fs.glob",
-        {"pattern": "**/*.py", "case_sensitive": False},
+        {"pattern": "**/*.py", "case_sensitive": False, "sort_by": "path"},
         context=context,
     )
     hidden = await mod.execute_tool(
         "fs.glob",
-        {"pattern": "**/*.py", "case_sensitive": False, "include_hidden": True},
+        {"pattern": "**/*.py", "case_sensitive": False, "include_hidden": True, "sort_by": "path"},
         context=context,
     )
     limited = await mod.execute_tool(
         "fs.glob",
-        {"pattern": "**/*.py", "case_sensitive": False, "include_hidden": True, "limit": 2},
+        {"pattern": "**/*.py", "case_sensitive": False, "include_hidden": True, "limit": 2, "sort_by": "path"},
         context=context,
     )
 
@@ -2076,22 +2183,22 @@ async def test_filesystem_grep_literal_regex_case_and_newlines(tmp_path: Path) -
 
     literal = await mod.execute_tool(
         "fs.grep",
-        {"pattern": "TODO", "base_path": "docs", "include": ["**/*.py"]},
+        {"pattern": "TODO", "base_path": "docs", "include": ["**/*.py"], "output_mode": "content"},
         context=context,
     )
     regex = await mod.execute_tool(
         "fs.grep",
-        {"pattern": r"TODO:\s+\w+", "base_path": "docs", "regex": True},
+        {"pattern": r"TODO:\s+\w+", "base_path": "docs", "regex": True, "output_mode": "content"},
         context=context,
     )
     insensitive = await mod.execute_tool(
         "fs.grep",
-        {"pattern": "error", "base_path": "docs", "case_sensitive": False},
+        {"pattern": "error", "base_path": "docs", "case_sensitive": False, "output_mode": "content"},
         context=context,
     )
     newline = await mod.execute_tool(
         "fs.grep",
-        {"pattern": "third", "base_path": "docs"},
+        {"pattern": "third", "base_path": "docs", "output_mode": "content"},
         context=context,
     )
 
@@ -2107,6 +2214,228 @@ async def test_filesystem_grep_literal_regex_case_and_newlines(tmp_path: Path) -
     assert insensitive["matches"][0]["match_text"] == "Error"  # nosec B101
     assert newline["matches"][0]["line_number"] == 3  # nosec B101
     assert newline["matches"][0]["line"] == "third"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_output_modes_glob_type_and_direct_file_base(tmp_path: Path) -> None:
+    """Verify fs.grep output modes, glob/type filters, and direct-file searches."""
+    workspace_root = tmp_path / "workspace"
+    src_dir = workspace_root / "src"
+    docs_dir = workspace_root / "docs"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "app.py").write_text("TODO app\nTODO second\n", encoding="utf-8")
+    (src_dir / "app.ts").write_text("TODO ts\n", encoding="utf-8")
+    (src_dir / "notes.md").write_text("TODO notes\n", encoding="utf-8")
+    (docs_dir / "guide.py").write_text("TODO docs\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-output-modes",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    default_mode = await mod.execute_tool("fs.grep", {"pattern": "TODO", "base_path": "src"}, context=context)
+    content_mode = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "base_path": "src", "output_mode": "content", "glob": "**/*.py"},
+        context=context,
+    )
+    count_mode = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "base_path": "src", "output_mode": "count", "type": "py"},
+        context=context,
+    )
+    direct_file = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "base_path": "src/app.py", "output_mode": "count"},
+        context=context,
+    )
+
+    assert default_mode["output_mode"] == "files_with_matches"  # nosec B101
+    assert default_mode["eval"]["result_kind"] == "structured_filesystem_grep"  # nosec B101
+    assert default_mode["eval"]["path_filter_used"] is True  # nosec B101
+    assert default_mode["matches"] == [  # nosec B101
+        {"path": "src/app.py"},
+        {"path": "src/app.ts"},
+        {"path": "src/notes.md"},
+    ]
+    assert content_mode["output_mode"] == "content"  # nosec B101
+    assert [match["path"] for match in content_mode["matches"]] == ["src/app.py", "src/app.py"]  # nosec B101
+    assert all("line" in match and "line_number" in match for match in content_mode["matches"])  # nosec B101
+    assert count_mode["output_mode"] == "count"  # nosec B101
+    assert count_mode["matches"] == [{"path": "src/app.py", "count": 2}]  # nosec B101
+    assert direct_file["matches"] == [{"path": "src/app.py", "count": 2}]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_respects_gitignore_but_allows_direct_file_base(tmp_path: Path) -> None:
+    """Verify directory grep respects gitignore while direct-file grep bypasses it."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / ".gitignore").write_text("ignored.py\n", encoding="utf-8")
+    (workspace_root / "visible.py").write_text("TODO visible\n", encoding="utf-8")
+    (workspace_root / "ignored.py").write_text("TODO ignored\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-gitignore",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    default_result = await mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+    include_ignored = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "respect_gitignore": False},
+        context=context,
+    )
+    direct_ignored = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "base_path": "ignored.py", "output_mode": "count"},
+        context=context,
+    )
+
+    assert default_result["matches"] == [{"path": "visible.py"}]  # nosec B101
+    assert include_ignored["matches"] == [{"path": "ignored.py"}, {"path": "visible.py"}]  # nosec B101
+    assert direct_ignored["matches"] == [{"path": "ignored.py", "count": 1}]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_handles_malformed_gitignore_and_direct_file_bypass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify malformed gitignore content cannot break grep or direct-file search."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / ".gitignore").write_bytes(b"\xff\n")
+    (workspace_root / "visible.py").write_text("TODO visible\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-malformed-gitignore",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    malformed_result = await mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+
+    def _fail_load_gitignore(_workspace_root: Path) -> None:
+        """Fail if direct-file grep attempts to load workspace gitignore rules."""
+        raise AssertionError("direct-file grep should not load .gitignore")
+
+    monkeypatch.setattr(FilesystemModule, "_load_gitignore_spec", staticmethod(_fail_load_gitignore))
+    direct_file = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "TODO", "base_path": "visible.py", "output_mode": "count"},
+        context=context,
+    )
+
+    assert malformed_result["matches"] == [{"path": "visible.py"}]  # nosec B101
+    assert direct_file["matches"] == [{"path": "visible.py", "count": 1}]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_ignores_symlinked_gitignore(tmp_path: Path) -> None:
+    """Verify symlinked workspace gitignore files are ignored for grep."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    outside_gitignore = tmp_path / "outside.gitignore"
+    outside_gitignore.write_text("visible.py\n", encoding="utf-8")
+    try:
+        (workspace_root / ".gitignore").symlink_to(outside_gitignore)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+    (workspace_root / "visible.py").write_text("TODO visible\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-filesystem-grep-symlink-gitignore",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    result = await mod.execute_tool("fs.grep", {"pattern": "TODO"}, context=context)
+
+    assert result["matches"] == [{"path": "visible.py"}]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_grep_multiline_regex_supports_file_and_count_modes(tmp_path: Path) -> None:
+    """Verify multiline grep regex works for file and count output modes."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "story.txt").write_text("alpha\nmiddle\nomega\n", encoding="utf-8")
+    (workspace_root / "single.txt").write_text("alpha omega\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"grep_allow_regex": True}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(
+        request_id="req-filesystem-grep-multiline",
+        user_id="7",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    single_line = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "alpha.*omega", "regex": True},
+        context=context,
+    )
+    multiline_count = await mod.execute_tool(
+        "fs.grep",
+        {"pattern": "alpha.*omega", "regex": True, "multiline": True, "output_mode": "count"},
+        context=context,
+    )
+
+    assert single_line["matches"] == [{"path": "single.txt"}]  # nosec B101
+    assert multiline_count["matches"] == [  # nosec B101
+        {"path": "single.txt", "count": 1},
+        {"path": "story.txt", "count": 1},
+    ]
 
 
 @pytest.mark.asyncio

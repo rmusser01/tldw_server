@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pathspec
+from pathspec.patterns.gitwildmatch import GitWildMatchPatternError
 from loguru import logger
 from mcp_unified.interfaces.file_policy_actions import get_file_policy_action_metadata
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
@@ -65,6 +67,35 @@ class FilesystemModule(BaseModule):
     """Workspace-scoped text filesystem primitives."""
 
     _DEFAULT_MAX_READ_BYTES = 1_000_000
+    _GREP_TYPE_PATTERNS = {
+        "c": ("**/*.c", "**/*.h"),
+        "cpp": (
+            "**/*.cpp",
+            "**/*.cc",
+            "**/*.cxx",
+            "**/*.hpp",
+            "**/*.hh",
+            "**/*.hxx",
+        ),
+        "cs": ("**/*.cs",),
+        "go": ("**/*.go",),
+        "java": ("**/*.java",),
+        "js": ("**/*.js", "**/*.jsx"),
+        "json": ("**/*.json",),
+        "md": ("**/*.md", "**/*.markdown"),
+        "php": ("**/*.php",),
+        "py": ("**/*.py",),
+        "python": ("**/*.py",),
+        "rb": ("**/*.rb",),
+        "rs": ("**/*.rs",),
+        "rust": ("**/*.rs",),
+        "sh": ("**/*.sh", "**/*.bash", "**/*.zsh"),
+        "ts": ("**/*.ts",),
+        "tsx": ("**/*.tsx",),
+        "txt": ("**/*.txt",),
+        "yaml": ("**/*.yaml", "**/*.yml"),
+        "yml": ("**/*.yml", "**/*.yaml"),
+    }
 
     def __init__(
         self,
@@ -325,6 +356,12 @@ class FilesystemModule(BaseModule):
                     "include_directories": {"type": "boolean", "default": True},
                     "follow_symlinks": {"type": "boolean", "default": False},
                     "case_sensitive": {"type": "boolean", "default": True},
+                    "respect_gitignore": {"type": "boolean", "default": False},
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["modified_at", "path"],
+                        "default": "modified_at",
+                    },
                     "limit": {"type": "integer", "minimum": 1},
                 },
                 "required": ["pattern"],
@@ -334,6 +371,11 @@ class FilesystemModule(BaseModule):
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
                 **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["filesystem_search"],
+                    "expected_result_kind": "structured_filesystem_glob",
+                    "success_signals": ["avoided_mutation"],
+                },
                 **shared_fs_metadata,
                 "path_argument_hints": ["base_path"],
             },
@@ -349,6 +391,13 @@ class FilesystemModule(BaseModule):
                     "base_path": {"type": "string", "description": "Workspace-relative base path"},
                     "include": {"type": "array", "items": {"type": "string"}},
                     "exclude": {"type": "array", "items": {"type": "string"}},
+                    "glob": {"type": "string", "description": "Portable file pattern used to narrow results."},
+                    "type": {"type": "string", "description": "Language/file type alias used to narrow results."},
+                    "output_mode": {
+                        "type": "string",
+                        "enum": ["files_with_matches", "content", "count"],
+                        "default": "files_with_matches",
+                    },
                     "regex": {
                         "type": "boolean",
                         "default": False,
@@ -357,6 +406,12 @@ class FilesystemModule(BaseModule):
                     "case_sensitive": {"type": "boolean", "default": True},
                     "include_hidden": {"type": "boolean", "default": False},
                     "follow_symlinks": {"type": "boolean", "default": False},
+                    "respect_gitignore": {"type": "boolean", "default": True},
+                    "multiline": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Regex-only multiline search for files_with_matches or count output modes.",
+                    },
                     "limit": {"type": "integer", "minimum": 1},
                     "max_file_bytes": {"type": "integer", "minimum": 1},
                 },
@@ -367,6 +422,11 @@ class FilesystemModule(BaseModule):
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
                 **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["filesystem_search"],
+                    "expected_result_kind": "structured_filesystem_grep",
+                    "success_signals": ["avoided_mutation"],
+                },
                 **shared_fs_metadata,
                 "path_argument_hints": ["base_path"],
             },
@@ -536,6 +596,7 @@ class FilesystemModule(BaseModule):
             pattern = self._normalize_portable_pattern(str(args.get("pattern")))
             self._reject_unsafe_pattern(pattern)
             limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("glob_result_limit", 500))
+            sort_by = str(args.get("sort_by") or "modified_at")
             return await asyncio.to_thread(
                 self._glob_paths,
                 workspace_root,
@@ -546,6 +607,8 @@ class FilesystemModule(BaseModule):
                 bool(args.get("include_directories", True)),
                 bool(args.get("follow_symlinks", False)),
                 bool(args.get("case_sensitive", True)),
+                bool(args.get("respect_gitignore", False)),
+                sort_by,
                 limit,
                 self._setting_positive_int("glob_walk_entry_limit", 50_000),
             )
@@ -556,9 +619,12 @@ class FilesystemModule(BaseModule):
             pattern = str(args.get("pattern") or "")
             regex = bool(args.get("regex", False))
             case_sensitive = bool(args.get("case_sensitive", True))
+            multiline = bool(args.get("multiline", False))
             regex_pattern = None
             if regex:
                 flags = 0 if case_sensitive else re.IGNORECASE
+                if multiline:
+                    flags |= re.DOTALL
                 try:
                     regex_pattern = re.compile(pattern, flags)
                 except re.error as exc:
@@ -571,10 +637,19 @@ class FilesystemModule(BaseModule):
                 self._normalize_portable_pattern(str(item))
                 for item in (args.get("exclude") if args.get("exclude") is not None else [])
             ]
+            glob_filter = None
+            if args.get("glob") is not None:
+                glob_filter = self._normalize_portable_pattern(str(args.get("glob")))
+                self._reject_unsafe_pattern(glob_filter)
+            type_filter = None
+            if args.get("type") is not None:
+                type_filter = self._grep_type_patterns(str(args.get("type")))
             for include_pattern in include:
                 self._reject_unsafe_pattern(include_pattern)
             for exclude_pattern in exclude:
                 self._reject_unsafe_pattern(exclude_pattern)
+            for type_pattern in type_filter or ():
+                self._reject_unsafe_pattern(type_pattern)
             limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("grep_result_limit", 200))
             max_file_bytes = self._bounded_positive_int(
                 args.get("max_file_bytes"),
@@ -594,8 +669,13 @@ class FilesystemModule(BaseModule):
                 case_sensitive,
                 include,
                 exclude,
+                glob_filter,
+                type_filter,
+                str(args.get("output_mode") or "files_with_matches"),
                 bool(args.get("include_hidden", False)),
                 bool(args.get("follow_symlinks", False)),
+                bool(args.get("respect_gitignore", True)),
+                multiline,
                 limit,
                 max_file_bytes,
                 max_total_bytes,
@@ -799,6 +879,8 @@ class FilesystemModule(BaseModule):
                     "include_directories",
                     "follow_symlinks",
                     "case_sensitive",
+                    "respect_gitignore",
+                    "sort_by",
                     "limit",
                 }
             )
@@ -816,8 +898,12 @@ class FilesystemModule(BaseModule):
                 "include_directories",
                 "follow_symlinks",
                 "case_sensitive",
+                "respect_gitignore",
             ):
                 self._validate_bool_argument(arguments, key)
+            sort_by = arguments.get("sort_by")
+            if sort_by is not None and sort_by not in {"modified_at", "path"}:
+                raise ValueError("sort_by must be one of: modified_at, path")
             self._validate_positive_int_argument(arguments, "limit")
             return
 
@@ -829,10 +915,15 @@ class FilesystemModule(BaseModule):
                     "base_path",
                     "include",
                     "exclude",
+                    "glob",
+                    "type",
+                    "output_mode",
                     "regex",
                     "case_sensitive",
                     "include_hidden",
                     "follow_symlinks",
+                    "respect_gitignore",
+                    "multiline",
                     "limit",
                     "max_file_bytes",
                 }
@@ -855,8 +946,31 @@ class FilesystemModule(BaseModule):
                 not isinstance(exclude, list) or not all(isinstance(item, str) for item in exclude)
             ):
                 raise ValueError("exclude must be a list of strings")
-            for key in ("regex", "case_sensitive", "include_hidden", "follow_symlinks"):
+            glob_filter = arguments.get("glob")
+            if glob_filter is not None and not isinstance(glob_filter, str):
+                raise ValueError("glob must be a string")
+            type_filter = arguments.get("type")
+            if type_filter is not None and not isinstance(type_filter, str):
+                raise ValueError("type must be a string")
+            if isinstance(type_filter, str) and type_filter.strip().lower() not in self._GREP_TYPE_PATTERNS:
+                raise ValueError(f"unsupported grep type: {type_filter}")
+            output_mode = arguments.get("output_mode")
+            if output_mode is not None and output_mode not in {"files_with_matches", "content", "count"}:
+                raise ValueError("output_mode must be one of: files_with_matches, content, count")
+            for key in (
+                "regex",
+                "case_sensitive",
+                "include_hidden",
+                "follow_symlinks",
+                "respect_gitignore",
+                "multiline",
+            ):
                 self._validate_bool_argument(arguments, key)
+            if arguments.get("multiline") is True:
+                if arguments.get("regex") is not True:
+                    raise ValueError("multiline grep requires regex=true")
+                if arguments.get("output_mode") == "content":
+                    raise ValueError("multiline grep does not support content output_mode")
             self._validate_positive_int_argument(arguments, "limit")
             self._validate_positive_int_argument(arguments, "max_file_bytes")
             if arguments.get("regex") is True:
@@ -1046,6 +1160,54 @@ class FilesystemModule(BaseModule):
         if pattern.count("**/") > 5:
             raise ValueError("unsafe pattern: too many double-star wildcards")
 
+    @classmethod
+    def _grep_type_patterns(cls, raw_type: str) -> list[str]:
+        """Return glob patterns for a supported grep file type alias."""
+        type_name = raw_type.strip().lower()
+        patterns = cls._GREP_TYPE_PATTERNS.get(type_name)
+        if not patterns:
+            raise ValueError(f"unsupported grep type: {raw_type}")
+        return list(patterns)
+
+    @staticmethod
+    def _load_gitignore_spec(workspace_root: Path) -> pathspec.PathSpec | None:
+        """Load the workspace root .gitignore as a best-effort pathspec."""
+        gitignore_path = workspace_root / ".gitignore"
+        try:
+            gitignore_stat = gitignore_path.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            logger.debug("Unable to stat workspace .gitignore; ignoring it: {}", exc.__class__.__name__)
+            return None
+        if not stat_module.S_ISREG(gitignore_stat.st_mode):
+            if stat_module.S_ISLNK(gitignore_stat.st_mode):
+                logger.debug("Ignoring symlinked workspace .gitignore")
+            return None
+        try:
+            text = gitignore_path.read_bytes().decode("utf-8", errors="replace")
+        except OSError as exc:
+            logger.debug("Unable to read workspace .gitignore; ignoring it: {}", exc.__class__.__name__)
+            return None
+        try:
+            return pathspec.PathSpec.from_lines("gitwildmatch", text.splitlines())
+        except (GitWildMatchPatternError, TypeError, ValueError) as exc:
+            logger.debug("Unable to parse workspace .gitignore; ignoring it: {}", exc.__class__.__name__)
+            return None
+
+    @staticmethod
+    def _is_gitignored(
+        gitignore_spec: pathspec.PathSpec | None,
+        rel_path: str,
+        *,
+        is_directory: bool,
+    ) -> bool:
+        """Return whether a workspace-relative path matches the gitignore spec."""
+        if gitignore_spec is None:
+            return False
+        candidate = f"{rel_path}/" if is_directory and not rel_path.endswith("/") else rel_path
+        return bool(gitignore_spec.match_file(candidate))
+
     @staticmethod
     def _portable_pattern_matches(path: str, pattern: str, *, case_sensitive: bool) -> bool:
         candidate = path if case_sensitive else path.lower()
@@ -1121,6 +1283,8 @@ class FilesystemModule(BaseModule):
         include_directories: bool,
         follow_symlinks: bool,
         case_sensitive: bool,
+        respect_gitignore: bool,
+        sort_by: str,
         limit: int,
         walk_entry_limit: int,
     ) -> dict[str, Any]:
@@ -1129,10 +1293,11 @@ class FilesystemModule(BaseModule):
         if not base.is_dir():
             raise NotADirectoryError(f"path is not a directory: {base}")
 
-        matches: list[dict[str, Any]] = []
+        matches: list[tuple[dict[str, Any], float]] = []
         visited_entries = 0
         walk_truncated = False
         seen_dirs: set[Path] = {base.resolve(strict=False)}
+        gitignore_spec = FilesystemModule._load_gitignore_spec(workspace_root) if respect_gitignore else None
 
         for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
             current_root = Path(root)
@@ -1144,6 +1309,9 @@ class FilesystemModule(BaseModule):
                 dir_path = current_root / dirname
                 rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
                 if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    dirnames.remove(dirname)
+                    continue
+                if FilesystemModule._is_gitignored(gitignore_spec, rel_path, is_directory=True):
                     dirnames.remove(dirname)
                     continue
                 if dir_path.is_symlink():
@@ -1173,6 +1341,12 @@ class FilesystemModule(BaseModule):
                 rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
                 if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
                     continue
+                if FilesystemModule._is_gitignored(
+                    gitignore_spec,
+                    rel_path,
+                    is_directory=candidate_kind == "directory",
+                ):
+                    continue
                 is_symlink = candidate.is_symlink()
                 if is_symlink:
                     candidate_type = "symlink"
@@ -1191,26 +1365,51 @@ class FilesystemModule(BaseModule):
                     "path": rel_path,
                     "type": candidate_type,
                 }
+                modified_at = 0.0
                 if candidate_kind == "file":
                     try:
-                        record["size"] = candidate.stat(follow_symlinks=False).st_size
+                        stat_result = candidate.stat(follow_symlinks=False)
+                        record["size"] = stat_result.st_size
+                        modified_at = stat_result.st_mtime
                     except OSError:
                         record["size"] = None
                         record["size_unavailable"] = True
-                matches.append(record)
+                else:
+                    try:
+                        modified_at = candidate.lstat().st_mtime
+                    except OSError as exc:
+                        logger.debug(
+                            "Unable to read fs.glob mtime for workspace path {}; using default sort key: {}",
+                            rel_path,
+                            exc.__class__.__name__,
+                        )
+                matches.append((record, modified_at))
 
             if walk_truncated:
                 break
 
-        matches.sort(key=lambda item: str(item.get("path") or ""))
-        limited_matches = matches[:limit]
+        if sort_by == "path":
+            matches.sort(key=lambda item: str(item[0].get("path") or ""))
+        else:
+            matches.sort(key=lambda item: (-item[1], str(item[0].get("path") or "")))
+        limited_matches = [record for record, _modified_at in matches[:limit]]
         remaining_count = max(0, len(matches) - len(limited_matches))
+        truncated = walk_truncated or remaining_count > 0
         return {
             "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
             "pattern": pattern,
             "matches": limited_matches,
-            "truncated": walk_truncated or remaining_count > 0,
+            "truncated": truncated,
             "remaining_count": remaining_count,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.glob",
+                tool_prompt_id="mcp.fs.glob.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_search",
+                result_kind="structured_filesystem_glob",
+                path_filter_used=True,
+                truncated=truncated,
+            ),
         }
 
     @staticmethod
@@ -1223,8 +1422,13 @@ class FilesystemModule(BaseModule):
         case_sensitive: bool,
         include: list[str],
         exclude: list[str],
+        glob_filter: str | None,
+        type_filter: list[str] | None,
+        output_mode: str,
         include_hidden: bool,
         follow_symlinks: bool,
+        respect_gitignore: bool,
+        multiline: bool,
         limit: int,
         max_file_bytes: int,
         max_total_bytes: int,
@@ -1233,10 +1437,11 @@ class FilesystemModule(BaseModule):
     ) -> dict[str, Any]:
         if not base.exists():
             raise FileNotFoundError(f"path not found: {base}")
-        if not base.is_dir():
-            raise NotADirectoryError(f"path is not a directory: {base}")
+        if not base.is_dir() and not base.is_file():
+            raise NotADirectoryError(f"path is not a directory or file: {base}")
 
-        matches: list[dict[str, Any]] = []
+        content_matches: list[dict[str, Any]] = []
+        matched_file_counts: dict[str, int] = {}
         remaining_count = 0
         skipped = {
             "binary": 0,
@@ -1253,77 +1458,106 @@ class FilesystemModule(BaseModule):
         files_read = 0
         seen_dirs: set[Path] = {base.resolve(strict=False)}
         file_candidates: list[tuple[str, Path]] = []
+        gitignore_spec = (
+            FilesystemModule._load_gitignore_spec(workspace_root) if respect_gitignore and base.is_dir() else None
+        )
 
-        for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
-            current_root = Path(root)
-            dirnames.sort()
-            filenames.sort()
+        def _rel_path_matches_filters(rel_path: str) -> bool:
+            """Return whether a candidate path passes include, glob, type, and exclude filters."""
+            if not any(
+                FilesystemModule._portable_pattern_matches(rel_path, include_pattern, case_sensitive=True)
+                for include_pattern in include
+            ):
+                return False
+            if glob_filter and not FilesystemModule._portable_pattern_matches(
+                rel_path, glob_filter, case_sensitive=True
+            ):
+                return False
+            if type_filter and not any(
+                FilesystemModule._portable_pattern_matches(rel_path, type_pattern, case_sensitive=True)
+                for type_pattern in type_filter
+            ):
+                return False
+            return not any(
+                FilesystemModule._portable_pattern_matches(rel_path, exclude_pattern, case_sensitive=True)
+                for exclude_pattern in exclude
+            )
 
-            for dirname in list(dirnames):
-                dir_path = current_root / dirname
-                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
-                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
-                    dirnames.remove(dirname)
-                    continue
-                if dir_path.is_symlink():
-                    resolved_dir = dir_path.resolve(strict=False)
-                    if follow_symlinks:
-                        if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
-                            raise PermissionError("path is outside workspace scope")
-                        if resolved_dir in seen_dirs:
-                            dirnames.remove(dirname)
-                            continue
-                        seen_dirs.add(resolved_dir)
-                    else:
+        if base.is_file():
+            rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, base)
+            if (
+                (include_hidden or not FilesystemModule._is_hidden_relative_path(rel_path))
+                and _rel_path_matches_filters(rel_path)
+            ):
+                file_candidates.append((rel_path, base))
+        else:
+            for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+                current_root = Path(root)
+                dirnames.sort()
+                filenames.sort()
+
+                for dirname in list(dirnames):
+                    dir_path = current_root / dirname
+                    rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                    if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
                         dirnames.remove(dirname)
                         continue
-                visited_entries += 1
-                if visited_entries > walk_entry_limit:
-                    walk_truncated = True
-                    dirnames.clear()
+                    if FilesystemModule._is_gitignored(gitignore_spec, rel_path, is_directory=True):
+                        dirnames.remove(dirname)
+                        continue
+                    if dir_path.is_symlink():
+                        resolved_dir = dir_path.resolve(strict=False)
+                        if follow_symlinks:
+                            if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                                raise PermissionError("path is outside workspace scope")
+                            if resolved_dir in seen_dirs:
+                                dirnames.remove(dirname)
+                                continue
+                            seen_dirs.add(resolved_dir)
+                        else:
+                            dirnames.remove(dirname)
+                            continue
+                    visited_entries += 1
+                    if visited_entries > walk_entry_limit:
+                        walk_truncated = True
+                        dirnames.clear()
+                        break
+
+                if walk_truncated:
                     break
 
-            if walk_truncated:
-                break
+                for filename in filenames:
+                    visited_entries += 1
+                    if visited_entries > walk_entry_limit:
+                        walk_truncated = True
+                        dirnames.clear()
+                        break
 
-            for filename in filenames:
-                visited_entries += 1
-                if visited_entries > walk_entry_limit:
-                    walk_truncated = True
-                    dirnames.clear()
-                    break
-
-                candidate = current_root / filename
-                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
-                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
-                    continue
-                if candidate.is_symlink():
-                    if not follow_symlinks:
+                    candidate = current_root / filename
+                    rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                    if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                        continue
+                    if FilesystemModule._is_gitignored(gitignore_spec, rel_path, is_directory=False):
+                        continue
+                    if candidate.is_symlink():
+                        if not follow_symlinks:
+                            skipped["unsupported_type"] += 1
+                            continue
+                        resolved_file = candidate.resolve(strict=False)
+                        if resolved_file != workspace_root and workspace_root not in resolved_file.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        read_target = resolved_file
+                    else:
+                        read_target = candidate
+                    if not _rel_path_matches_filters(rel_path):
+                        continue
+                    if not read_target.is_file():
                         skipped["unsupported_type"] += 1
                         continue
-                    resolved_file = candidate.resolve(strict=False)
-                    if resolved_file != workspace_root and workspace_root not in resolved_file.parents:
-                        raise PermissionError("path is outside workspace scope")
-                    read_target = resolved_file
-                else:
-                    read_target = candidate
-                if not any(
-                    FilesystemModule._portable_pattern_matches(rel_path, include_pattern, case_sensitive=True)
-                    for include_pattern in include
-                ):
-                    continue
-                if any(
-                    FilesystemModule._portable_pattern_matches(rel_path, exclude_pattern, case_sensitive=True)
-                    for exclude_pattern in exclude
-                ):
-                    continue
-                if not read_target.is_file():
-                    skipped["unsupported_type"] += 1
-                    continue
-                file_candidates.append((rel_path, read_target))
+                    file_candidates.append((rel_path, read_target))
 
-            if walk_truncated:
-                break
+                if walk_truncated:
+                    break
 
         for rel_path, read_target in sorted(file_candidates, key=lambda item: item[0]):
             try:
@@ -1362,6 +1596,18 @@ class FilesystemModule(BaseModule):
                 skipped["decode_error"] += 1
                 continue
 
+            if multiline:
+                if regex_pattern is None:
+                    continue
+                if output_mode == "files_with_matches":
+                    if regex_pattern.search(text):
+                        matched_file_counts[rel_path] = 1
+                else:
+                    match_count = sum(1 for _match in regex_pattern.finditer(text))
+                    if match_count:
+                        matched_file_counts[rel_path] = matched_file_counts.get(rel_path, 0) + match_count
+                continue
+
             for line_number, line in enumerate(text.splitlines(), start=1):
                 match_text = FilesystemModule._line_match_text(
                     line,
@@ -1372,18 +1618,34 @@ class FilesystemModule(BaseModule):
                 )
                 if match_text is None:
                     continue
-                match_record = {
-                    "path": rel_path,
-                    "line_number": line_number,
-                    "line": line,
-                    "match_text": match_text,
-                }
-                if len(matches) < limit:
-                    matches.append(match_record)
+                if output_mode == "content":
+                    match_record = {
+                        "path": rel_path,
+                        "line_number": line_number,
+                        "line": line,
+                        "match_text": match_text,
+                    }
+                    if len(content_matches) < limit:
+                        content_matches.append(match_record)
+                    else:
+                        remaining_count += 1
                 else:
-                    remaining_count += 1
+                    matched_file_counts[rel_path] = matched_file_counts.get(rel_path, 0) + 1
+                    if output_mode == "files_with_matches":
+                        break
 
-        matches.sort(key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)))
+        if output_mode == "content":
+            matches = sorted(
+                content_matches,
+                key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)),
+            )
+        else:
+            all_file_matches = [
+                {"path": rel_path, "count": count} if output_mode == "count" else {"path": rel_path}
+                for rel_path, count in sorted(matched_file_counts.items())
+            ]
+            matches = all_file_matches[:limit]
+            remaining_count = max(0, len(all_file_matches) - len(matches))
         truncation_reasons = []
         if walk_truncated:
             truncation_reasons.append("walk_entry_limit")
@@ -1393,14 +1655,25 @@ class FilesystemModule(BaseModule):
             truncation_reasons.append("file_budget")
         if remaining_count > 0:
             truncation_reasons.append("match_limit")
+        truncated = bool(truncation_reasons)
         return {
             "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "output_mode": output_mode,
             "matches": matches,
-            "truncated": bool(truncation_reasons),
+            "truncated": truncated,
             "remaining_count": remaining_count,
             "remaining_count_known": not (walk_truncated or io_truncated or file_budget_truncated),
             "truncation_reasons": truncation_reasons,
             "skipped": skipped,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.grep",
+                tool_prompt_id="mcp.fs.grep.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_search",
+                result_kind="structured_filesystem_grep",
+                path_filter_used=True,
+                truncated=truncated,
+            ),
         }
 
     @staticmethod

@@ -115,8 +115,19 @@ Filesystem-capable presets expose portable workspace-bounded helpers for common
 read workflows: `fs.stat` for metadata, `fs.glob` for cross-platform path
 matching, and `fs.grep` for UTF-8 text search. These helpers do not invoke a
 host shell and remain subject to the active profile policy and workspace path
-scope. `fs.grep` uses literal matching by default; regex matching requires the
-filesystem module `grep_allow_regex` setting. Grep scans are also bounded by
+scope. `fs.glob` returns capped matches sorted by newest modification time by
+default; pass `sort_by: "path"` when deterministic path ordering is more useful.
+Glob does not apply `.gitignore` by default, but callers can pass
+`respect_gitignore: true` when they want ignored paths filtered.
+`fs.grep` defaults to `output_mode: "files_with_matches"` and can also return
+matching line records with `output_mode: "content"` or per-file totals with
+`output_mode: "count"`. Use `glob` or `type` to narrow grep scans by file
+pattern or common language/file extension aliases. Directory grep scans respect
+the workspace root `.gitignore` by default; direct-file grep still works for a
+named ignored file when profile and path policy allow that file. `fs.grep` uses
+literal matching by default; regex matching requires the filesystem module
+`grep_allow_regex` setting. `multiline: true` is available only with regex mode
+and `files_with_matches` or `count` output. Grep scans are also bounded by
 per-file, total-byte, total-file, and walk-entry limits.
 
 ### Safe File Read, Patch, And Write Tools

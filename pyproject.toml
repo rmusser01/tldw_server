@@ -62,6 +62,7 @@ dependencies = [
   "openpyxl>=3.1.2",
   "pandas>=2.0.0",
   "passlib>=1.7.0",
+  "pathspec>=0.12.1",
   "prometheus-client",
   "psutil>=5.9.0",
   "pydantic>=2.0.0",
