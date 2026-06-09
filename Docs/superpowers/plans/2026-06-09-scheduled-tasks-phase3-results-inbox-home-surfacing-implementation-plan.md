@@ -579,11 +579,11 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Update `ScheduledTaskOverview.tsx`.
-- [ ] Update `ScheduledTaskTable.tsx`.
-- [ ] Update `ScheduledTaskDetailDrawer.tsx`.
-- [ ] Confirm no Watchlists-owned edit controls are introduced.
-- [ ] Run ScheduledTasks tests.
+- [x] Update `ScheduledTaskOverview.tsx`.
+- [x] Update `ScheduledTaskTable.tsx`.
+- [x] Update `ScheduledTaskDetailDrawer.tsx`.
+- [x] Confirm no Watchlists-owned edit controls are introduced.
+- [x] Run ScheduledTasks tests.
 
 ## Stage 6: Home Surfacing
 

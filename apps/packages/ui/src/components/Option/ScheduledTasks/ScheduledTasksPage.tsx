@@ -178,6 +178,13 @@ export const ScheduledTasksPage: React.FC = () => {
     },
     [createdTaskFallback, selectedTaskId, tasks]
   )
+  const selectedTaskLatestResult = React.useMemo(
+    () =>
+      selectedTask
+        ? projectedResults.find((result) => result.taskId === selectedTask.id) ?? null
+        : null,
+    [projectedResults, selectedTask]
+  )
   const hasLoadedTasks = Boolean(tasksQuery.data)
   const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
   const selectedTemplate = React.useMemo(
@@ -411,6 +418,8 @@ export const ScheduledTasksPage: React.FC = () => {
         <ScheduledTaskOverview
           tasks={tasks}
           partial={Boolean(tasksQuery.data?.partial)}
+          results={projectedResults}
+          onOpenResult={openResultSignal}
         />
       ) : null}
 
@@ -431,6 +440,10 @@ export const ScheduledTasksPage: React.FC = () => {
       runId: result.runId,
       taskId: result.taskId
     })
+  }
+
+  const openTaskResults = (task: ScheduledTask) => {
+    updateRoute({ tab: "results", taskId: task.id })
   }
 
   const renderResultsTab = () => (
@@ -475,8 +488,10 @@ export const ScheduledTasksPage: React.FC = () => {
       {hasLoadedTasks && tasks.length > 0 ? (
         <ScheduledTaskTable
           tasks={tasks}
+          results={projectedResults}
           onCreateReminder={openCreateReminder}
           onInspectTask={openTaskDetail}
+          onOpenTaskResults={openTaskResults}
           onEditReminder={openEditReminder}
           onDeleteReminder={handleDeleteReminder}
         />
@@ -600,6 +615,7 @@ export const ScheduledTasksPage: React.FC = () => {
             <ScheduledTaskDetailDrawer
               open
               task={selectedTask}
+              latestResult={selectedTaskLatestResult}
               onClose={closeTaskDetail}
               onEditReminder={openEditReminder}
               onDeleteReminder={handleDeleteReminder}

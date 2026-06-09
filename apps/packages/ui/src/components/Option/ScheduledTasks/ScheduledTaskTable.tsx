@@ -16,6 +16,7 @@ import {
   type ScheduledTaskStatusKey
 } from "./scheduled-task-status"
 import { WatchlistTaskActionLinks } from "./WatchlistTaskActionLinks"
+import type { ScheduledTaskResultItem } from "./scheduled-task-results"
 
 export interface ScheduledTaskTableRowActionContext {
   task: ScheduledTask
@@ -23,8 +24,10 @@ export interface ScheduledTaskTableRowActionContext {
 
 export interface ScheduledTaskTableProps {
   tasks: ScheduledTask[]
+  results?: ScheduledTaskResultItem[]
   onCreateReminder: () => void
   onInspectTask: (task: ScheduledTask) => void
+  onOpenTaskResults?: (task: ScheduledTask) => void
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
 }
@@ -96,8 +99,10 @@ const typeFilterOptions: Array<{
 
 export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
   tasks,
+  results = [],
   onCreateReminder,
   onInspectTask,
+  onOpenTaskResults,
   onEditReminder,
   onDeleteReminder
 }) => {
@@ -119,6 +124,29 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       }),
     [tasks, searchText, statusFilter, typeFilter]
   )
+  const resultCountByTaskId = useMemo(() => {
+    const counts = new Map<string, number>()
+    results.forEach((result) => {
+      counts.set(result.taskId, (counts.get(result.taskId) ?? 0) + 1)
+    })
+    return counts
+  }, [results])
+
+  const renderResultsButton = (task: ScheduledTask) => {
+    if (!onOpenTaskResults || !resultCountByTaskId.has(task.id)) {
+      return null
+    }
+
+    return (
+      <Button
+        size="small"
+        aria-label={rowActionLabel("View results for", task)}
+        onClick={() => onOpenTaskResults(task)}
+      >
+        Results
+      </Button>
+    )
+  }
 
   const columns: ColumnsType<ScheduledTask> = [
     {
@@ -210,6 +238,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
               >
                 Inspect
               </Button>
+              {renderResultsButton(task)}
               <Button
                 size="small"
                 aria-label={rowActionLabel("Edit", task)}
@@ -238,6 +267,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
             >
               Inspect
             </Button>
+            {renderResultsButton(task)}
             <WatchlistTaskActionLinks
               task={task}
               size="small"

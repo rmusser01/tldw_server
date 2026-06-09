@@ -448,9 +448,11 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("1 needs attention")).toBeInTheDocument()
     expect(screen.getByText("1 running now")).toBeInTheDocument()
     expect(screen.getByText("Next upcoming run")).toBeInTheDocument()
+    expect(screen.getByText("Latest result signal")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open latest result signal" })).toBeInTheDocument()
     expect(screen.getAllByText(/2030/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
-    expect(screen.queryByText("Review notes")).not.toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "Task" })).not.toBeInTheDocument()
   })
 
   it("renders task rows and Watchlists links inside the Tasks tab", async () => {
@@ -509,9 +511,11 @@ describe("ScheduledTasksPage", () => {
     expect(within(reminderRow as HTMLElement).getByText("No completed runs yet")).toBeInTheDocument()
 
     expect(screen.getByRole("button", { name: "Inspect Review notes" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View results for Review notes" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Edit Review notes" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete Review notes" })).toBeInTheDocument()
     expect(await screen.findByText("Morning digest")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View results for Morning digest" })).toBeInTheDocument()
     expect(
       await screen.findByRole("link", { name: "Open monitor settings for Morning digest" })
     ).toHaveAttribute("href", "/watchlists?tab=jobs")
