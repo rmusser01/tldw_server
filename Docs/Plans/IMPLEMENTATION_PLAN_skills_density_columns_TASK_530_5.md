@@ -25,7 +25,8 @@
 **Status**: Complete
 
 ## Verification Notes
-- PASS: `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx` (21 tests).
+- PR #2339 review follow-up addressed hidden context sort state, AntD-class-coupled test selection, and render-phase preference initialization feedback.
+- PASS: `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx` (22 tests).
 - PASS: `bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts` (8 tests).
 - PASS: `git diff --check`.
 - TYPECHECK CAVEAT: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json --pretty false` still fails on inherited baseline errors in Notes tests, `src/entries/background.ts`, and `src/services/tldw/voice-cloning.ts`; no `src/components/Option/Skills/Manager.tsx` errors remain.

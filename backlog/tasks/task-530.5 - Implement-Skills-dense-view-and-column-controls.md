@@ -51,6 +51,9 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_density_columns_TASK_530_5.md
 - Added a column visibility dropdown for optional list-row metadata columns: description, mode/context, argument hint, user visibility, and model invocation. Name and actions remain mandatory.
 - Existing server-backed search, filters, sorting, pagination, import, seed, preview, and create flows remain covered by the expanded Skills manager suite.
 - Bandit is not applicable: touched implementation files are frontend TypeScript/React plus tests/docs; no Python code changed.
+- PR #2339 review follow-up: replaced the column-visibility test's Ant Design class traversal with accessible menu/menuitem queries.
+- PR #2339 review follow-up: hiding the Mode/context column now clears an active `sort=context` state and resets to page 1 so backend query state cannot remain sorted by a hidden column.
+- PR #2339 review follow-up: table preference state now uses React lazy initializers instead of a render-phase `useMemo` read.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -59,7 +62,7 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_density_columns_TASK_530_5.md
 Implemented TASK-530.5 power-user table scanning controls for `/skills`: compact/comfortable density, optional metadata column visibility, and local persistence of both preferences. Regression tests cover density toggling, optional column visibility, preference restoration, and the existing Skills manager behavior.
 
 Verification:
-- PASS: `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx` (21 tests)
+- PASS: `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx` (22 tests after PR review follow-up)
 - PASS: `bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts` (8 tests)
 - PASS: `git diff --check`
 - TYPECHECK CAVEAT: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json --pretty false` still fails on inherited baseline errors in Notes tests, `src/entries/background.ts`, and `src/services/tldw/voice-cloning.ts`; no `src/components/Option/Skills/Manager.tsx` errors remain after the touched-file fixes.

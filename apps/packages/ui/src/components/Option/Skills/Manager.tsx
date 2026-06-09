@@ -190,7 +190,6 @@ export const SkillsManager: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const queryClient = useQueryClient()
   const notification = useAntdNotification()
-  const initialTablePreferences = React.useMemo(loadSkillsTablePreferences, [])
 
   const [page, setPage] = React.useState(1)
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
@@ -204,10 +203,10 @@ export const SkillsManager: React.FC = () => {
   const [modelFilter, setModelFilter] = React.useState("")
   const [debouncedModelFilter, setDebouncedModelFilter] = React.useState("")
   const [tableDensity, setTableDensity] =
-    React.useState<SkillTableDensity>(initialTablePreferences.density)
+    React.useState<SkillTableDensity>(() => loadSkillsTablePreferences().density)
   const [visibleOptionalColumns, setVisibleOptionalColumns] = React.useState<
     SkillOptionalColumnKey[]
-  >(initialTablePreferences.visibleColumns)
+  >(() => loadSkillsTablePreferences().visibleColumns)
   const [sortState, setSortState] = React.useState<SkillSortState>({})
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
@@ -354,6 +353,15 @@ export const SkillsManager: React.FC = () => {
 
   const handleColumnVisibilityToggle = (columnKey: string) => {
     if (!isSkillOptionalColumnKey(columnKey)) return
+
+    if (
+      visibleOptionalColumns.includes(columnKey)
+      && isSkillTableSortField(columnKey)
+      && sortState.field === columnKey
+    ) {
+      setSortState({})
+      setPage(1)
+    }
 
     setVisibleOptionalColumns((current) => {
       return current.includes(columnKey)

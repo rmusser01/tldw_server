@@ -157,6 +157,14 @@ describe("SkillsManager imports", () => {
       </QueryClientProvider>
     )
 
+  const openColumnVisibilityMenu = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Column visibility" }))
+    return screen.findByRole("menu")
+  }
+
+  const getColumnVisibilityOption = async (name: string) =>
+    within(await openColumnVisibilityMenu()).findByRole("menuitem", { name })
+
   it("orients users with a page summary and library count", async () => {
     tldwClientMock.listSkills.mockResolvedValueOnce({
       skills: [
@@ -579,6 +587,53 @@ describe("SkillsManager imports", () => {
     })
   })
 
+  it("clears server-backed mode sorting when the mode column is hidden", async () => {
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [
+        {
+          name: "mode-sorted",
+          description: "Mode sorted skill",
+          argument_hint: null,
+          user_invocable: true,
+          disable_model_invocation: false,
+          context: "inline" as const
+        }
+      ],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("columnheader", { name: /Mode/ }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sort: "context",
+          order: "asc",
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+
+    fireEvent.click(await getColumnVisibilityOption("Mode"))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({
+          sort: "context",
+          order: "asc"
+        })
+      )
+    })
+    expect(screen.queryByRole("columnheader", { name: /Mode/ })).not.toBeInTheDocument()
+  })
+
   it("resets pagination when server-backed filters change", async () => {
     const pageOneSkills = Array.from({ length: 10 }, (_, index) => makeSkill(index + 1))
     const pageTwoSkills = [makeSkill(11), makeSkill(12)]
@@ -747,18 +802,12 @@ describe("SkillsManager imports", () => {
     expect(screen.queryByRole("columnheader", { name: "Argument hint" })).not.toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Mode/ })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Column visibility" }))
-    fireEvent.click(await screen.findByText("Argument hint"))
+    fireEvent.click(await getColumnVisibilityOption("Argument hint"))
 
     expect(await screen.findByRole("columnheader", { name: "Argument hint" })).toBeInTheDocument()
     expect(screen.getByText("topic")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Column visibility" }))
-    const modeMenuItem = screen
-      .getAllByText("Mode")
-      .find((element) => element.closest(".ant-dropdown-menu"))
-    expect(modeMenuItem).toBeTruthy()
-    fireEvent.click(modeMenuItem!)
+    fireEvent.click(await getColumnVisibilityOption("Mode"))
 
     expect(screen.queryByRole("columnheader", { name: /Mode/ })).not.toBeInTheDocument()
     expect(window.localStorage.getItem("tldw:skills-manager:table-preferences:v1")).toContain(
