@@ -126,7 +126,7 @@
 - Test: `tldw_Server_API/tests/Explainer/test_explainer_endpoints.py`
 - Test: `tldw_Server_API/tests/Services/test_router_groups_contract.py`
 
-- [ ] **Step 1: Create an implementation Backlog task**
+- [x] **Step 1: Create an implementation Backlog task**
 
 Create a task before code edits, for example:
 
@@ -136,7 +136,7 @@ References: TASK-546, TASK-547, Docs/superpowers/specs/2026-06-09-explainer-work
 Modified files: all Task 1 files
 ```
 
-- [ ] **Step 2: Write failing repository tests**
+- [x] **Step 2: Write failing repository tests**
 
 Add tests that define the persistence contract before implementation:
 
@@ -182,7 +182,7 @@ def test_repository_rejects_cross_user_session_access(tmp_path):
     assert repo.get_session(session.id, owner_user_id="8") is None
 ```
 
-- [ ] **Step 3: Run repository tests and verify failure**
+- [x] **Step 3: Run repository tests and verify failure**
 
 Run:
 
@@ -192,7 +192,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: FAIL because `ExplainerDatabase` and `ExplainerRepository` do not exist.
 
-- [ ] **Step 4: Implement the database schema and repository**
+- [x] **Step 4: Implement the database schema and repository**
 
 Create tables with explicit ownership columns and soft delete fields:
 
@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS explainer_nodes (
 
 Add companion tables for selected sources and citations rather than storing them only as JSON, so ownership checks and export serialization stay reliable.
 
-- [ ] **Step 5: Make repository tests pass**
+- [x] **Step 5: Make repository tests pass**
 
 Run:
 
@@ -245,7 +245,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: PASS.
 
-- [ ] **Step 6: Write failing endpoint tests**
+- [x] **Step 6: Write failing endpoint tests**
 
 Use the existing FastAPI test-client patterns from nearby endpoint tests. Cover:
 
@@ -255,7 +255,7 @@ Use the existing FastAPI test-client patterns from nearby endpoint tests. Cover:
 - `PATCH /api/v1/explainer/sessions/{session_id}` updates output intent and grounding.
 - `DELETE /api/v1/explainer/sessions/{session_id}` archives rather than hard-deleting.
 
-- [ ] **Step 7: Run endpoint tests and verify failure**
+- [x] **Step 7: Run endpoint tests and verify failure**
 
 Run:
 
@@ -265,7 +265,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: FAIL because the endpoint router is not implemented/registered.
 
-- [ ] **Step 8: Implement schemas, dependency, service, and router**
+- [x] **Step 8: Implement schemas, dependency, service, and router**
 
 Endpoint surface:
 
@@ -289,7 +289,7 @@ db: ExplainerDatabase = Depends(get_explainer_db)
 
 Do not put LLM or retrieval imports in `endpoints/explainer.py`; keep them in the later jobs layer so the router remains lightweight.
 
-- [ ] **Step 9: Register routers and run router contract tests**
+- [x] **Step 9: Register routers and run router contract tests**
 
 Run:
 
@@ -299,7 +299,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/tes
 
 Expected: PASS and route key `explainer` is present where expected.
 
-- [ ] **Step 10: Run Task 1 tests**
+- [x] **Step 10: Run Task 1 tests**
 
 Run:
 
@@ -309,7 +309,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: PASS.
 
-- [ ] **Step 11: Commit Task 1**
+- [x] **Step 11: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/Explainer_DB.py \
@@ -341,11 +341,11 @@ git commit -m "feat: add explainer persistence api"
 - Test: `tldw_Server_API/tests/Explainer/test_explainer_jobs.py`
 - Test: `tldw_Server_API/tests/Explainer/test_explainer_endpoints.py`
 
-- [ ] **Step 1: Create or update Backlog task**
+- [x] **Step 1: Create or update Backlog task**
 
 Either create a new implementation task for Jobs generation or update the Task 1 implementation task if the same PR slice is still small.
 
-- [ ] **Step 2: Write failing service/job tests**
+- [x] **Step 2: Write failing service/job tests**
 
 Cover:
 
@@ -371,7 +371,7 @@ Also cover:
 - `source_only` insufficient retrieval creates a child node with `evidence_state = "insufficient"` and `outside_knowledge_used = False`.
 - Cross-user job status returns 404.
 
-- [ ] **Step 3: Run job tests and verify failure**
+- [x] **Step 3: Run job tests and verify failure**
 
 Run:
 
@@ -381,7 +381,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: FAIL because Jobs integration does not exist.
 
-- [ ] **Step 4: Implement enqueue and status endpoints**
+- [x] **Step 4: Implement enqueue and status endpoints**
 
 Add endpoints:
 
@@ -404,7 +404,7 @@ GET  /api/v1/explainer/jobs/{job_id}
 
 `GET /jobs/{job_id}` must load the Jobs row and verify `owner_user_id == current_user.id` and `domain == "explainer"` before returning status.
 
-- [ ] **Step 5: Implement Explainer Jobs constants and handler**
+- [x] **Step 5: Implement Explainer Jobs constants and handler**
 
 Use the existing Jobs domain pattern:
 
@@ -420,7 +420,7 @@ Use an idempotency key with session, node, intent, and answer version:
 idempotency_key=f"explainer:{session_id}:{node_id}:{intent}:{answer_revision}"
 ```
 
-- [ ] **Step 6: Implement prompt builders with deterministic test seams**
+- [x] **Step 6: Implement prompt builders with deterministic test seams**
 
 `prompting.py` should expose pure functions:
 
@@ -431,7 +431,7 @@ def build_node_expansion_prompt(*, session, node, source_context, intent, ground
 
 Tests should inject a fake generator into the job handler rather than calling a real LLM.
 
-- [ ] **Step 7: Implement retrieval and grounding validation**
+- [x] **Step 7: Implement retrieval and grounding validation**
 
 `retrieval.py` should validate selected source ownership before returning excerpts. `grounding.py` should convert handler output to one of:
 
@@ -444,7 +444,7 @@ insufficient
 
 For `source_only`, reject or rewrite uncited generated claims into an `insufficient` node. Do not silently downgrade to outside knowledge.
 
-- [ ] **Step 8: Run Task 2 backend tests**
+- [x] **Step 8: Run Task 2 backend tests**
 
 Run:
 
@@ -454,7 +454,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Task 2**
+- [x] **Step 9: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/core/Explainer \
@@ -478,7 +478,7 @@ git commit -m "feat: add explainer expansion jobs"
 - Test: `tldw_Server_API/tests/Explainer/test_explainer_chatbook_export.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py`
 
-- [ ] **Step 1: Create or update Backlog task**
+- [x] **Step 1: Create or update Backlog task**
 
 Use a dedicated task if this becomes a standalone PR slice:
 
@@ -487,7 +487,7 @@ Title: Add Explainer Chatbook export and import support
 References: TASK-546, TASK-547
 ```
 
-- [ ] **Step 2: Write failing Chatbook adapter tests**
+- [x] **Step 2: Write failing Chatbook adapter tests**
 
 Test a complete tree export:
 
@@ -514,7 +514,7 @@ Also cover:
 - Import restores an `explainer_session`.
 - Import detects `generated_document` with `metadata.subtype = "explainer_session"` and routes it to Explainer restoration.
 
-- [ ] **Step 3: Run Chatbook tests and verify failure**
+- [x] **Step 3: Run Chatbook tests and verify failure**
 
 Run:
 
@@ -524,7 +524,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: FAIL because Chatbook support is not implemented.
 
-- [ ] **Step 4: Add `explainer_session` to Chatbook models**
+- [x] **Step 4: Add `explainer_session` to Chatbook models**
 
 Add:
 
@@ -536,7 +536,7 @@ class ContentType(str, Enum):
 
 Add `explainer_sessions: dict[str, Any]` to `ChatbookContent` and include it in `get_all_ids`.
 
-- [ ] **Step 5: Implement structured plus rendered export payload**
+- [x] **Step 5: Implement structured plus rendered export payload**
 
 `chatbook_adapter.py` should output:
 
@@ -563,7 +563,7 @@ Add `explainer_sessions: dict[str, Any]` to `ChatbookContent` and include it in 
 
 Keep original linked source documents out of the archive unless a later option explicitly includes them.
 
-- [ ] **Step 6: Add Chatbook service collection**
+- [x] **Step 6: Add Chatbook service collection**
 
 Add `_collect_explainer_sessions` that writes:
 
@@ -583,7 +583,7 @@ ContentItem(
 )
 ```
 
-- [ ] **Step 7: Add Explainer export endpoint**
+- [x] **Step 7: Add Explainer export endpoint**
 
 Add:
 
@@ -603,11 +603,11 @@ async_mode=True
 
 Return the normal Chatbooks export response shape.
 
-- [ ] **Step 8: Implement import restoration**
+- [x] **Step 8: Implement import restoration**
 
 Import should restore Explainer sessions by creating a new session ID for the importing user, preserving original IDs in metadata for traceability. Cross-user source references remain references only; if the source does not exist for the importing user, mark it `unresolved` in selected-source metadata.
 
-- [ ] **Step 9: Run Task 3 tests**
+- [x] **Step 9: Run Task 3 tests**
 
 Run:
 
@@ -617,7 +617,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer/te
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit Task 3**
+- [x] **Step 10: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/core/Explainer/chatbook_adapter.py \
