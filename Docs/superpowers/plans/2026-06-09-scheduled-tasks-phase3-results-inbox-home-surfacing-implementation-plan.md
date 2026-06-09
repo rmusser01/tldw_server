@@ -670,6 +670,7 @@ Avoid:
 - At a 390px viewport, `/scheduled-tasks?tab=results` preserved the active Results tab, projected-mode note, empty state, and primary action without obvious text loss in the DOM evidence.
 - `/companion` rendered `Automation Inbox` even when personalization was unavailable, placed before `Inbox Preview`, and kept the existing Companion cards intact.
 - At a 390px viewport, `/companion` preserved `Automation Inbox` ahead of `Inbox Preview` with non-personalized empty-state copy visible.
+- 390px overflow measurements showed no horizontal overflow on `/scheduled-tasks?tab=results` or `/companion` (`scrollWidth` matched `clientWidth` at 390px).
 
 ## Stage 8: Documentation, Backlog, And Verification
 
@@ -706,6 +707,13 @@ python -m bandit -r <backend_touched_paths> -f json -o /tmp/bandit_scheduled_tas
 
 If implementation touches only frontend and docs, record: `Bandit skipped because no Python/backend files were changed.`
 
+**Stage 8 Verification Results:**
+
+- `./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__ src/components/Option/CompanionHome/__tests__ src/services/__tests__/notifications.test.ts` from `apps/packages/ui`: 19 test files passed, 181 tests passed.
+- `git diff --check`: passed with no whitespace errors.
+- Browser smoke used WebUI on `http://localhost:18001` and a temporary read-only mock API on `http://127.0.0.1:8000`; `/scheduled-tasks`, `/scheduled-tasks?tab=results`, and `/companion` rendered without the readiness gate.
+- Bandit skipped because this Phase 3 closeout touched frontend, docs, and Backlog task files only; no Python/backend files were changed.
+
 ## Implementation Notes For Future Workers
 
 - Start with pure projection tests before rendering. It is easier to stabilize UX states when result semantics are tested outside React.
@@ -720,15 +728,15 @@ If implementation touches only frontend and docs, record: `Bandit skipped becaus
 
 ## PR Review Checklist
 
-- [ ] `/scheduled-tasks?tab=results` is discoverable from Overview, Tasks, Home, and direct URL.
-- [ ] `/scheduled-tasks/results` aliases to the same Results experience.
-- [ ] Result drawer answers: what happened, when, where from, owning workspace, next action.
-- [ ] Home shows an Automation Inbox even when Companion personalization is not enabled.
-- [ ] Watchlists UX remains intact and domain configuration is not moved.
-- [ ] Result and failure states are understandable without color.
-- [ ] Extension-width layout has no horizontal overflow except intentional tables.
-- [ ] No backend-only promise appears in frontend copy before the backend supports it.
-- [ ] Projected mode does not claim durable review state or expose unsupported retry/review buttons.
-- [ ] Mixed failure-plus-output states preserve both signals.
-- [ ] Tests cover missing deep links and partial dependency failures.
-- [ ] Backlog task records verification, known skips, and final summary.
+- [x] `/scheduled-tasks?tab=results` is discoverable from Overview, Tasks, Home, and direct URL.
+- [x] `/scheduled-tasks/results` aliases to the same Results experience.
+- [x] Result drawer answers: what happened, when, where from, owning workspace, next action.
+- [x] Home shows an Automation Inbox even when Companion personalization is not enabled.
+- [x] Watchlists UX remains intact and domain configuration is not moved.
+- [x] Result and failure states are understandable without color.
+- [x] Extension-width layout has no horizontal overflow except intentional tables.
+- [x] No backend-only promise appears in frontend copy before the backend supports it.
+- [x] Projected mode does not claim durable review state or expose unsupported retry/review buttons.
+- [x] Mixed failure-plus-output states preserve both signals.
+- [x] Tests cover missing deep links and partial dependency failures.
+- [x] Backlog task records verification, known skips, and final summary.
