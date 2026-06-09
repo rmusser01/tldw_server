@@ -106,6 +106,57 @@ def test_list_sessions_only_returns_current_user_sessions(explainer_client) -> N
     assert titles == ["Owner session"]
 
 
+def test_list_sessions_returns_summary_page_without_nodes_or_citations(explainer_client) -> None:
+    client, _db, set_user = explainer_client
+    owner_response = client.post(
+        "/api/v1/explainer/sessions",
+        json=_create_goal_payload(title="Owner session", rootPrompt="Owner topic"),
+    )
+    assert owner_response.status_code == 201
+    owner_session = owner_response.json()
+    node_response = client.post(
+        f"/api/v1/explainer/sessions/{owner_session['id']}/nodes",
+        json={
+            "parentId": owner_session["rootNodeIds"][0],
+            "title": "Owner detail",
+            "citations": [
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention notes",
+                    "excerpt": "This excerpt must not appear in list responses.",
+                }
+            ],
+        },
+    )
+    assert node_response.status_code == 201
+    second_response = client.post(
+        "/api/v1/explainer/sessions",
+        json=_create_goal_payload(title="Second owner session", rootPrompt="Second topic"),
+    )
+    assert second_response.status_code == 201
+
+    set_user(8)
+    other_response = client.post(
+        "/api/v1/explainer/sessions",
+        json=_create_goal_payload(title="Other user session", rootPrompt="Other topic"),
+    )
+    assert other_response.status_code == 201
+
+    set_user(7)
+    response = client.get("/api/v1/explainer/sessions?limit=1&offset=0")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert len(body["items"]) == 1
+    assert body["items"][0]["ownerUserId"] == "7"
+    assert "nodes" not in body["items"][0]
+    assert "rootNodeIds" not in body["items"][0]
+    assert "citations" not in str(body)
+    assert "This excerpt must not appear in list responses." not in str(body)
+
+
 def test_patch_session_updates_output_intent_and_grounding(explainer_client) -> None:
     client, _db, _set_user = explainer_client
     created = client.post("/api/v1/explainer/sessions", json=_create_goal_payload())
@@ -251,3 +302,131 @@ def test_patch_node_replaces_citation_snapshots(explainer_client) -> None:
     loaded = ExplainerRepository(db).get_session(session_body["id"], owner_user_id="7")
     assert loaded is not None
     assert loaded.nodes[node_id].citations[0].location_label == "paragraph 2"
+
+
+def test_patch_node_can_clear_nullable_fields_with_json_null(explainer_client) -> None:
+    client, _db, _set_user = explainer_client
+    created = client.post("/api/v1/explainer/sessions", json=_create_goal_payload())
+    assert created.status_code == 201
+    session_body = created.json()
+    node_response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes",
+        json={
+            "parentId": session_body["rootNodeIds"][0],
+            "title": "Scaled dot product attention",
+            "body": "Body to clear",
+        },
+    )
+    assert node_response.status_code == 201
+    node_id = node_response.json()["id"]
+    populated = client.patch(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{node_id}",
+        json={
+            "selectedCustomAnswer": "Answer to clear",
+            "generationMetadata": {"model": "test"},
+        },
+    )
+    assert populated.status_code == 200
+    assert populated.json()["body"] == "Body to clear"
+    assert populated.json()["selectedCustomAnswer"] == "Answer to clear"
+    assert populated.json()["generationMetadata"] == {"model": "test"}
+
+    response = client.patch(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{node_id}",
+        json={
+            "body": None,
+            "selectedCustomAnswer": None,
+            "generationMetadata": None,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["body"] is None
+    assert body["selectedCustomAnswer"] is None
+    assert body["generationMetadata"] is None
+
+
+def test_delete_node_removes_descendant_subtree_and_citations(explainer_client) -> None:
+    client, _db, _set_user = explainer_client
+    created = client.post(
+        "/api/v1/explainer/sessions",
+        json=_create_goal_payload(
+            grounding="source_led",
+            selectedSources=[
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                }
+            ],
+        ),
+    )
+    assert created.status_code == 201
+    session_body = created.json()
+    parent_response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes",
+        json={
+            "parentId": session_body["rootNodeIds"][0],
+            "title": "Parent branch",
+            "citations": [
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                    "excerpt": "Parent citation.",
+                }
+            ],
+        },
+    )
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+    child_response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes",
+        json={
+            "parentId": parent_id,
+            "title": "Child branch",
+            "citations": [
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                    "excerpt": "Child citation.",
+                }
+            ],
+        },
+    )
+    assert child_response.status_code == 201
+    child_id = child_response.json()["id"]
+    grandchild_response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes",
+        json={
+            "parentId": child_id,
+            "title": "Grandchild branch",
+            "citations": [
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                    "excerpt": "Grandchild citation.",
+                }
+            ],
+        },
+    )
+    assert grandchild_response.status_code == 201
+    grandchild_id = grandchild_response.json()["id"]
+
+    delete_response = client.delete(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{parent_id}",
+    )
+    assert delete_response.status_code == 200
+    loaded = client.get(f"/api/v1/explainer/sessions/{session_body['id']}")
+
+    assert loaded.status_code == 200
+    body = loaded.json()
+    assert parent_id not in body["nodes"]
+    assert child_id not in body["nodes"]
+    assert grandchild_id not in body["nodes"]
+    assert "Parent citation." not in str(body)
+    assert "Child citation." not in str(body)
+    assert "Grandchild citation." not in str(body)

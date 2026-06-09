@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerOutputIntent,
     ExplainerSelectedSource,
     ExplainerSession,
+    ExplainerSessionSummary,
 )
 
 
@@ -219,9 +220,45 @@ class ExplainerSessionResponse(_ExplainerSchema):
         )
 
 
+class ExplainerSessionSummaryResponse(_ExplainerSchema):
+    id: str
+    owner_user_id: str = Field(alias="ownerUserId")
+    title: str
+    mode: str
+    status: str
+    output_intent: str = Field(alias="outputIntent")
+    grounding: str
+    depth_preset: str = Field(alias="depthPreset")
+    node_count: int = Field(alias="nodeCount")
+    selected_source_count: int = Field(alias="selectedSourceCount")
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+    archived_at: str | None = Field(default=None, alias="archivedAt")
+
+    @classmethod
+    def from_domain(cls, summary: ExplainerSessionSummary) -> "ExplainerSessionSummaryResponse":
+        return cls(
+            id=summary.id,
+            owner_user_id=summary.owner_user_id,
+            title=summary.title,
+            mode=summary.mode,
+            status=summary.status,
+            output_intent=summary.output_intent,
+            grounding=summary.grounding,
+            depth_preset=summary.depth_preset,
+            node_count=summary.node_count,
+            selected_source_count=summary.selected_source_count,
+            created_at=summary.created_at,
+            updated_at=summary.updated_at,
+            archived_at=summary.archived_at,
+        )
+
+
 class ExplainerSessionListResponse(_ExplainerSchema):
-    items: list[ExplainerSessionResponse]
+    items: list[ExplainerSessionSummaryResponse]
     total: int
+    limit: int
+    offset: int
 
 
 class ExplainerDeleteNodeResponse(_ExplainerSchema):

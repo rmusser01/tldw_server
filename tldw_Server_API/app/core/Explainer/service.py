@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerNode,
     ExplainerSelectedSource,
     ExplainerSession,
+    ExplainerSessionSummary,
 )
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 
@@ -55,6 +56,19 @@ class ExplainerService:
 
     def list_sessions(self, *, owner_user_id: str) -> list[ExplainerSession]:
         return self.repo.list_sessions(owner_user_id=owner_user_id)
+
+    def list_session_summaries(
+        self,
+        *,
+        owner_user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ExplainerSessionSummary], int]:
+        return self.repo.list_session_summaries(
+            owner_user_id=owner_user_id,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_session(self, session_id: str, *, owner_user_id: str) -> ExplainerSession:
         session = self.repo.get_session(session_id, owner_user_id=owner_user_id)

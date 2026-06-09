@@ -124,3 +124,20 @@ class ExplainerSession:
     created_at: str
     updated_at: str
     archived_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ExplainerSessionSummary:
+    id: str
+    owner_user_id: str
+    title: str
+    mode: str
+    status: str
+    output_intent: str
+    grounding: str
+    depth_preset: str
+    node_count: int
+    selected_source_count: int
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
