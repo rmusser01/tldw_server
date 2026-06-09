@@ -69,6 +69,7 @@ class TldwPathScopeEnforcer:
         tool_name: str,
         tool_args: Any,
         tool_def: dict[str, Any] | None,
+        path_scope_candidates: list[Any] | None = None,
     ) -> dict[str, Any]:
         from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
             get_mcp_hub_path_enforcement_service,
@@ -81,6 +82,7 @@ class TldwPathScopeEnforcer:
             tool_name=tool_name,
             tool_args=tool_args,
             tool_def=tool_def,
+            path_scope_candidates=path_scope_candidates,
         )
 
 

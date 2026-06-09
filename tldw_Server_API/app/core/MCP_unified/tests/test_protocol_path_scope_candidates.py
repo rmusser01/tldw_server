@@ -210,6 +210,46 @@ async def test_protocol_passes_module_path_candidates_to_enforcer() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_tldw_path_scope_enforcer_forwards_module_candidates(monkeypatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_policy import TldwPathScopeEnforcer
+    from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
+
+    class _Service:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def evaluate_tool_call(self, **kwargs: Any) -> dict[str, Any]:
+            self.calls.append(kwargs)
+            return {
+                "enabled": True,
+                "within_scope": True,
+                "reason": None,
+                "force_approval": False,
+            }
+
+    service = _Service()
+
+    async def _fake_service() -> _Service:
+        return service
+
+    monkeypatch.setattr(path_service_mod, "get_mcp_hub_path_enforcement_service", _fake_service)
+    candidates = [PathScopeCandidate(path="docs/a.txt", action="edit", source="test")]
+
+    result = await TldwPathScopeEnforcer().evaluate_tool_call(
+        effective_policy={"enabled": True},
+        context=_context(),
+        tool_name="fs.patch",
+        tool_args={"diff": "..."},
+        tool_def={"metadata": {"uses_filesystem": True}},
+        path_scope_candidates=candidates,
+    )
+
+    assert result["within_scope"] is True  # nosec B101
+    assert service.calls[0]["path_scope_candidates"] == candidates  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_protocol_fails_closed_when_module_candidates_unavailable() -> None:
     module = _PatchModule(include_candidate_hook=False)
     protocol = _build_protocol(module, _RecordingPathEnforcer())
