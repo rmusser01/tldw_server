@@ -33,7 +33,7 @@ jobs:
       SINGLE_USER_TEST_API_KEY: test-api-key-for-e2e-testing-12345
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       TLDW_TEST_RUN_ID: e2e-smoke-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}-py${{ matrix.python-version }}
-      USER_DB_BASE_DIR: ${{ runner.temp }}/tldw-e2e-user-dbs-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}-py${{ matrix.python-version }}
+      USER_DB_BASE_DIR: Databases/user_databases_test/e2e-smoke-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}-py${{ matrix.python-version }}
       # Avoid matplotlib cache permission issues during imports
       MPLCONFIGDIR: ${{ github.workspace }}/.mpl-cache
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
