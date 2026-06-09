@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Button,
   Form,
   Input,
@@ -32,6 +31,7 @@ import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { SkillDrawer } from "./SkillDrawer"
 import { SkillPreview } from "./SkillPreview"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type {
   SkillSummary,
   SkillResponse,
@@ -643,33 +643,32 @@ export const SkillsManager: React.FC = () => {
       </div>
 
       {isError && (
-        <Alert
-          type="error"
-          showIcon
+        <DesignSystemAlert
+          variant="error"
           title={t("option:skills.loadListError", {
             defaultValue: "Failed to load skills"
           })}
-          description={listErrorDescription}
-          action={
-            <Button size="small" onClick={() => void refetch()}>
-              {t("common:tryAgain", { defaultValue: "Try again" })}
-            </Button>
-          }
-        />
+          action={{
+            label: t("common:tryAgain", { defaultValue: "Try again" }),
+            onClick: () => void refetch()
+          }}
+        >
+          {listErrorDescription}
+        </DesignSystemAlert>
       )}
 
       {successAction && (
-        <Alert
+        <DesignSystemAlert
           data-testid="skills-success-actions"
-          type="success"
-          showIcon
+          variant="success"
           title={successAction.title}
-          description={successAction.description}
-          closable
-          onClose={() => setSuccessAction(null)}
-          action={(() => {
+          dismissible
+          onDismiss={() => setSuccessAction(null)}
+        >
+          <p className="m-0">{successAction.description}</p>
+          {(() => {
             const skillName = successAction.skillName
-            if (!skillName) return undefined
+            if (!skillName) return null
             const invocation = buildSkillInvocation(skillName)
             return (
               <div className="flex flex-wrap items-center gap-2">
@@ -702,7 +701,7 @@ export const SkillsManager: React.FC = () => {
               </div>
             )
           })()}
-        />
+        </DesignSystemAlert>
       )}
 
       <Table
