@@ -121,6 +121,7 @@ class RawSqlFallbackDisabledError(RuntimeError):
 
 
 _RESIDUAL_ENCODED_PATH_CONTROL_RE = re.compile(r"%(?:2e|2f|5c)", re.IGNORECASE)
+_SQLITE_FTS_UNSAFE_PUNCTUATION_RE = re.compile(r"[^\w\s\"*]", re.UNICODE)
 
 
 def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
@@ -185,6 +186,9 @@ def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
         return text
     if "-" in text and " " not in text:
         return f"\"{text}\""
+    if _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.search(text):
+        text = _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
