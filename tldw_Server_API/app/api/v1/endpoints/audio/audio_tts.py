@@ -1187,7 +1187,11 @@ async def get_tts_provider_model_info(
     except HTTPException:
         raise
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error("Error getting TTS provider model info")
+        logger.bind(
+            request_id=request_id,
+            provider=provider_key or "<missing>",
+            error_type=type(e).__name__,
+        ).opt(exception=e).error("Error getting TTS provider model info")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_http_error_detail("Failed to get provider model info", request_id, exc=e),
@@ -1219,7 +1223,11 @@ async def unload_tts_provider(
             detail=_http_error_detail(f"Unknown TTS provider '{provider}'", request_id, exc=e),
         ) from e
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error("Error unloading TTS provider")
+        logger.bind(
+            request_id=request_id,
+            provider=(provider or "").strip().lower() or "<missing>",
+            error_type=type(e).__name__,
+        ).opt(exception=e).error("Error unloading TTS provider")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_http_error_detail("Failed to unload TTS provider", request_id, exc=e),

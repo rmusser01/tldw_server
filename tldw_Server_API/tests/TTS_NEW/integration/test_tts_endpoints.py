@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSResponse
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.TTS.tts_jobs_worker import _handle_tts_job
 
@@ -579,6 +580,75 @@ class TestTTSGenerateEndpoint:
         assert response.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
         assert "exceeds" in response.json()["detail"]
         assert "called" not in seen
+
+    async def test_chatterbox_voice_conversion_rejects_unsupported_upload_suffix(
+        self,
+        test_client,
+        auth_headers,
+    ):
+        """Chatterbox VC should reject unsupported upload extensions before conversion runs."""
+        seen: dict[str, bool] = {}
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            seen["called"] = True
+            return TTSResponse(audio_data=b"unexpected", format=AudioFormat.WAV, sample_rate=24000)
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "false"},
+                files=[
+                    ("source_audio", ("source.txt", b"RIFF-source", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Unsupported audio upload extension" in response.json()["detail"]
+        assert "called" not in seen
+
+    async def test_chatterbox_voice_conversion_sanitizes_tts_errors(
+        self,
+        test_client,
+        auth_headers,
+    ):
+        """Chatterbox VC should not expose provider exception text by default."""
+        multipart_headers = {
+            name: value
+            for name, value in auth_headers.items()
+            if name.lower() != "content-type"
+        }
+
+        async def fake_convert(self, *, source_audio_path, target_voice_path, response_format, stream):  # noqa: ARG001
+            raise TTSError("internal provider failure at /private/chatterbox/model")
+
+        with patch(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.convert_chatterbox_voice",
+            new=fake_convert,
+        ):
+            response = test_client.post(
+                "/api/v1/audio/voice-conversion",
+                data={"response_format": "wav", "stream": "false"},
+                files=[
+                    ("source_audio", ("source.wav", b"RIFF-source", "audio/wav")),
+                ],
+                headers=multipart_headers,
+            )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        detail = response.json()["detail"]
+        assert detail["message"] == "Voice conversion failed"
+        assert "request_id" in detail
+        assert "internal provider failure" not in json.dumps(detail)
+        assert "/private/chatterbox/model" not in json.dumps(detail)
 
     async def test_chatterbox_voice_conversion_rejects_upload_and_stored_target_voice(
         self,

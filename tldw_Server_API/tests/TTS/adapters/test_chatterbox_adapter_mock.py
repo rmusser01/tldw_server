@@ -869,6 +869,80 @@ class TestChatterboxAdapterMock:
         assert len(fake_model.generate_kwargs) == 2
         assert all("audio_prompt_path" not in kwargs for kwargs in fake_model.generate_kwargs)
 
+    async def test_conditionals_cache_key_hashes_reference_in_worker_thread(self, tmp_path):
+        """Reference hashing should not perform blocking file I/O on the async request path."""
+        adapter = ChatterboxAdapter({})
+        reference_path = tmp_path / "reference.wav"
+        reference_path.write_bytes(b"RIFF-threaded-hash")
+
+        async def fake_to_thread(func, *args, **kwargs):
+            fake_to_thread.called = True
+            return func(*args, **kwargs)
+
+        fake_to_thread.called = False
+
+        with patch.object(chatterbox_mod.asyncio, "to_thread", new=fake_to_thread):
+            cache_key = await adapter._voice_conditionals_cache_key(
+                str(reference_path),
+                family=ChatterboxModelFamily.STANDARD,
+                exaggeration=0.5,
+            )
+
+        assert fake_to_thread.called is True
+        assert cache_key is not None
+        assert cache_key[0] == ChatterboxModelFamily.STANDARD.value
+
+    async def test_conditionals_cache_stores_cpu_conditionals(self, tmp_path):
+        """Cached Chatterbox conditionals should be moved off accelerator memory when possible."""
+        adapter = ChatterboxAdapter({"chatterbox_conditionals_cache_size": 2})
+        adapter.device = "cuda"
+        reference_path = tmp_path / "reference.wav"
+        reference_path.write_bytes(b"RIFF-cpu-cache")
+
+        class FakeConditionals:
+            def __init__(self, device: str):
+                self.device = device
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return FakeConditionals("cpu")
+
+            def to(self, device: str):
+                return FakeConditionals(device)
+
+        class FakeModel:
+            def __init__(self):
+                self.conds = None
+                self.prepare_calls = 0
+
+            def prepare_conditionals(self, wav_fpath: str, exaggeration: float = 0.5) -> None:  # noqa: ARG002
+                self.prepare_calls += 1
+                self.conds = FakeConditionals("cuda")
+
+        fake_model = FakeModel()
+
+        first = await adapter._prepare_cached_conditionals(
+            fake_model,
+            voice_reference_path=str(reference_path),
+            family=ChatterboxModelFamily.STANDARD,
+            exaggeration=0.5,
+        )
+        cached_conditionals = next(iter(adapter._conditionals_cache.values()))
+        second = await adapter._prepare_cached_conditionals(
+            fake_model,
+            voice_reference_path=str(reference_path),
+            family=ChatterboxModelFamily.STANDARD,
+            exaggeration=0.5,
+        )
+
+        assert first is True
+        assert second is True
+        assert fake_model.prepare_calls == 1
+        assert cached_conditionals.device == "cpu"
+        assert fake_model.conds.device == "cuda"
+
     async def test_conditionals_cache_evicts_least_recently_used_reference(self, tmp_path):
         """Conditionals cache should stay bounded and refresh recency on hits."""
         adapter = ChatterboxAdapter({"chatterbox_conditionals_cache_size": 2})
@@ -912,17 +986,17 @@ class TestChatterboxAdapterMock:
         ]
         assert len(adapter._conditionals_cache) == 2
         remaining_keys = set(adapter._conditionals_cache)
-        assert adapter._voice_conditionals_cache_key(
+        assert await adapter._voice_conditionals_cache_key(
             str(references["a"]),
             family=ChatterboxModelFamily.STANDARD,
             exaggeration=0.5,
         ) not in remaining_keys
-        assert adapter._voice_conditionals_cache_key(
+        assert await adapter._voice_conditionals_cache_key(
             str(references["b"]),
             family=ChatterboxModelFamily.STANDARD,
             exaggeration=0.5,
         ) in remaining_keys
-        assert adapter._voice_conditionals_cache_key(
+        assert await adapter._voice_conditionals_cache_key(
             str(references["c"]),
             family=ChatterboxModelFamily.STANDARD,
             exaggeration=0.5,

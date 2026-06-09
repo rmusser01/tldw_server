@@ -1,5 +1,12 @@
-# audio_voice_conversion.py
-# Description: Chatterbox voice conversion endpoint.
+"""Chatterbox voice-conversion upload endpoint.
+
+This module exposes the OpenAI-adjacent voice conversion route for local
+Chatterbox VC runtimes. It is deliberately narrow: uploads are bounded and
+validated before temporary materialization, stored custom voices are resolved
+through the voice manager, and temporary files are kept alive for streaming
+responses until the stream has been consumed.
+"""
+
 import contextlib
 import tempfile
 from pathlib import Path
@@ -12,6 +19,7 @@ from starlette import status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import _AUDIO_CONTENT_TYPE_MAP, get_tts_service
+from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSError,
@@ -42,6 +50,23 @@ _ALLOWED_UPLOAD_SUFFIXES = {
     ".wav",
     ".webm",
 }
+_UPLOAD_CONTENT_TYPE_SUFFIXES = {
+    "audio/aac": ".aac",
+    "audio/flac": ".flac",
+    "audio/l16": ".pcm",
+    "audio/m4a": ".m4a",
+    "audio/mp4": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
+    "audio/pcm": ".pcm",
+    "audio/wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/webm": ".webm",
+    "audio/x-m4a": ".m4a",
+    "audio/x-wav": ".wav",
+}
 _MAX_VOICE_CONVERSION_UPLOAD_BYTES = 50 * 1024 * 1024
 _VOICE_CONVERSION_UPLOAD_CHUNK_BYTES = 1024 * 1024
 _VOICE_CONVERSION_NONCRITICAL_EXCEPTIONS = (
@@ -52,23 +77,57 @@ _VOICE_CONVERSION_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _safe_audio_suffix(filename: Optional[str]) -> str:
-    """Return a conservative suffix for temporary uploaded audio files."""
+def _upload_label(prefix: str) -> str:
+    """Return a stable human-readable label for one upload role."""
+    return prefix.rstrip("_")
+
+
+def _safe_upload_filename(filename: Optional[str]) -> str:
+    """Return a sanitized upload filename for diagnostic logging only."""
+    value = str(filename or "").strip()
+    if not value:
+        return "<missing>"
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        name = Path(value).name
+        if name:
+            return name[:128]
+    return "<invalid>"
+
+
+def _resolve_audio_suffix(filename: Optional[str], content_type: Optional[str] = None) -> str:
+    """Validate and return a temporary suffix for an uploaded audio file."""
     suffix = Path(filename or "").suffix.lower()
     if suffix in _ALLOWED_UPLOAD_SUFFIXES:
         return suffix
-    return ".wav"
+
+    if suffix:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported audio upload extension: {suffix}",
+        )
+
+    normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    inferred_suffix = _UPLOAD_CONTENT_TYPE_SUFFIXES.get(normalized_content_type)
+    if inferred_suffix is not None:
+        return inferred_suffix
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Audio upload must include a supported filename extension or audio content type",
+    )
 
 
-async def _materialize_upload(upload: UploadFile, *, prefix: str) -> str:
+async def _materialize_upload(upload: UploadFile, *, prefix: str, request_id: str) -> str:
     """Persist one upload to a temporary file and return its path."""
-    empty_detail = f"{prefix.rstrip('_')} audio upload is empty"
+    upload_role = _upload_label(prefix)
+    empty_detail = f"{upload_role} audio upload is empty"
     tmp_path: Optional[str] = None
     total_bytes = 0
     wrote_payload = False
     try:
+        suffix = _resolve_audio_suffix(upload.filename, upload.content_type)
         with tempfile.NamedTemporaryFile(
-            suffix=_safe_audio_suffix(upload.filename),
+            suffix=suffix,
             prefix=prefix,
             delete=False,
         ) as tmp_file:
@@ -82,7 +141,7 @@ async def _materialize_upload(upload: UploadFile, *, prefix: str) -> str:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         detail=(
-                            f"{prefix.rstrip('_')} audio upload exceeds "
+                            f"{upload_role} audio upload exceeds "
                             f"{_MAX_VOICE_CONVERSION_UPLOAD_BYTES} bytes"
                         ),
                     )
@@ -97,10 +156,17 @@ async def _materialize_upload(upload: UploadFile, *, prefix: str) -> str:
         if tmp_path:
             with contextlib.suppress(OSError):
                 Path(tmp_path).unlink(missing_ok=True)
-        logger.error("Failed to materialize voice conversion upload")
+        logger.bind(
+            request_id=request_id,
+            upload_role=upload_role,
+            filename=_safe_upload_filename(upload.filename),
+            content_type=upload.content_type or "<missing>",
+            bytes_read=total_bytes,
+            error_type=type(exc).__name__,
+        ).opt(exception=exc).error("Failed to materialize voice conversion upload")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to prepare voice conversion upload",
+            detail=_http_error_detail("Failed to prepare voice conversion upload", request_id, exc=exc),
         ) from exc
 
     if not wrote_payload:
@@ -120,7 +186,8 @@ def _materialize_audio_bytes(
     prefix: str,
     filename: Optional[str],
     empty_detail: str,
-    ) -> str:
+    request_id: str,
+) -> str:
     """Persist audio bytes to a temporary file and return its path."""
     if not payload:
         raise HTTPException(
@@ -135,8 +202,9 @@ def _materialize_audio_bytes(
 
     tmp_path: Optional[str] = None
     try:
+        suffix = _resolve_audio_suffix(filename, "audio/wav")
         with tempfile.NamedTemporaryFile(
-            suffix=_safe_audio_suffix(filename),
+            suffix=suffix,
             prefix=prefix,
             delete=False,
         ) as tmp_file:
@@ -146,15 +214,21 @@ def _materialize_audio_bytes(
         if tmp_path:
             with contextlib.suppress(OSError):
                 Path(tmp_path).unlink(missing_ok=True)
-        logger.error("Failed to materialize voice conversion upload")
+        logger.bind(
+            request_id=request_id,
+            upload_role=_upload_label(prefix),
+            filename=_safe_upload_filename(filename),
+            bytes_read=len(payload),
+            error_type=type(exc).__name__,
+        ).opt(exception=exc).error("Failed to materialize voice conversion audio bytes")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to prepare voice conversion upload",
+            detail=_http_error_detail("Failed to prepare voice conversion upload", request_id, exc=exc),
         ) from exc
     return tmp_path
 
 
-async def _materialize_stored_target_voice(user_id: int, voice_id: str) -> str:
+async def _materialize_stored_target_voice(user_id: int, voice_id: str, *, request_id: str) -> str:
     """Resolve and materialize a stored custom voice reference for Chatterbox VC."""
     resolved_voice_id = voice_id.strip()
     if not resolved_voice_id:
@@ -177,7 +251,7 @@ async def _materialize_stored_target_voice(user_id: int, voice_id: str) -> str:
     except VoiceProcessingError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=_http_error_detail("Stored target voice reference is not available", request_id, exc=exc),
         ) from exc
 
     return _materialize_audio_bytes(
@@ -185,6 +259,7 @@ async def _materialize_stored_target_voice(user_id: int, voice_id: str) -> str:
         prefix="chatterbox_vc_target_",
         filename=f"{resolved_voice_id}.wav",
         empty_detail="Stored target voice reference audio is empty",
+        request_id=request_id,
     )
 
 
@@ -281,11 +356,23 @@ async def create_voice_conversion(
     source_path: Optional[str] = None
     target_path: Optional[str] = None
     try:
-        source_path = await _materialize_upload(source_audio, prefix="chatterbox_vc_source_")
+        source_path = await _materialize_upload(
+            source_audio,
+            prefix="chatterbox_vc_source_",
+            request_id=request_id,
+        )
         if target_voice is not None:
-            target_path = await _materialize_upload(target_voice, prefix="chatterbox_vc_target_")
+            target_path = await _materialize_upload(
+                target_voice,
+                prefix="chatterbox_vc_target_",
+                request_id=request_id,
+            )
         elif resolved_target_voice_id:
-            target_path = await _materialize_stored_target_voice(current_user.id, resolved_target_voice_id)
+            target_path = await _materialize_stored_target_voice(
+                current_user.id,
+                resolved_target_voice_id,
+                request_id=request_id,
+            )
 
         response = await tts_service.convert_chatterbox_voice(
             source_audio_path=source_path,
@@ -314,10 +401,26 @@ async def create_voice_conversion(
             )
         return Response(content=audio_bytes, media_type=content_type, headers=headers)
     except (TTSInvalidVoiceReferenceError, TTSValidationError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_http_error_detail("Invalid voice conversion request", request_id, exc=exc),
+        ) from exc
     except TTSProviderNotConfiguredError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_http_error_detail("Chatterbox voice conversion provider is not configured", request_id, exc=exc),
+        ) from exc
     except TTSError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.bind(
+            request_id=request_id,
+            response_format=resolved_format,
+            stream=stream,
+            target_voice_id_present=bool(resolved_target_voice_id),
+            error_type=type(exc).__name__,
+        ).opt(exception=exc).error("Voice conversion failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_http_error_detail("Voice conversion failed", request_id, exc=exc),
+        ) from exc
     finally:
         _cleanup_upload_paths((source_path, target_path))

@@ -54,6 +54,7 @@ _CHATTERBOX_NUMERIC_EXCEPTIONS = (TypeError, ValueError)
 _BF16_MODE_OFF = "off"
 _BF16_MODE_ON = "on"
 _BF16_MODE_AUTO = "auto"
+_UNSUPPORTED_CONDITIONALS_CACHE = object()
 
 #######################################################################################################################
 # No-op watermarker to ensure no watermark is applied
@@ -786,7 +787,16 @@ class ChatterboxAdapter(TTSAdapter):
             return gen_kwargs
         return {key: value for key, value in gen_kwargs.items() if key in parameters}
 
-    def _voice_conditionals_cache_key(
+    @staticmethod
+    def _hash_voice_reference_file(voice_reference_path: str) -> str:
+        """Return a SHA256 digest for one voice reference file."""
+        digest = hashlib.sha256()
+        with Path(voice_reference_path).open("rb") as audio_file:
+            for chunk in iter(lambda: audio_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    async def _voice_conditionals_cache_key(
         self,
         voice_reference_path: str,
         *,
@@ -795,14 +805,69 @@ class ChatterboxAdapter(TTSAdapter):
     ) -> Optional[tuple[str, str, float]]:
         """Build a stable in-process cache key for one reference audio file."""
         try:
-            digest = hashlib.sha256()
-            with Path(voice_reference_path).open("rb") as audio_file:
-                for chunk in iter(lambda: audio_file.read(1024 * 1024), b""):
-                    digest.update(chunk)
+            digest = await asyncio.to_thread(self._hash_voice_reference_file, voice_reference_path)
             normalized_exaggeration = round(float(exaggeration), 4)
         except _CHATTERBOX_RUNTIME_EXCEPTIONS:
             return None
-        return (family.value, digest.hexdigest(), normalized_exaggeration)
+        return (family.value, digest, normalized_exaggeration)
+
+    @classmethod
+    def _conditionals_to_cpu_for_cache(cls, conditionals: Any) -> Any:
+        """Return a cacheable copy of conditionals moved away from accelerator memory."""
+        if conditionals is None or isinstance(conditionals, (str, bytes, int, float, bool)):
+            return conditionals
+        if isinstance(conditionals, dict):
+            cached: dict[Any, Any] = {}
+            for key, value in conditionals.items():
+                cached_value = cls._conditionals_to_cpu_for_cache(value)
+                if cached_value is _UNSUPPORTED_CONDITIONALS_CACHE:
+                    return _UNSUPPORTED_CONDITIONALS_CACHE
+                cached[key] = cached_value
+            return cached
+        if isinstance(conditionals, list):
+            cached_list = []
+            for value in conditionals:
+                cached_value = cls._conditionals_to_cpu_for_cache(value)
+                if cached_value is _UNSUPPORTED_CONDITIONALS_CACHE:
+                    return _UNSUPPORTED_CONDITIONALS_CACHE
+                cached_list.append(cached_value)
+            return cached_list
+        if isinstance(conditionals, tuple):
+            cached_tuple = []
+            for value in conditionals:
+                cached_value = cls._conditionals_to_cpu_for_cache(value)
+                if cached_value is _UNSUPPORTED_CONDITIONALS_CACHE:
+                    return _UNSUPPORTED_CONDITIONALS_CACHE
+                cached_tuple.append(cached_value)
+            return tuple(cached_tuple)
+
+        detached = conditionals
+        detach = getattr(detached, "detach", None)
+        if callable(detach):
+            detached = detach()
+
+        cpu = getattr(detached, "cpu", None)
+        if callable(cpu):
+            return cpu()
+
+        to_device = getattr(detached, "to", None)
+        if callable(to_device):
+            return to_device("cpu")
+
+        return _UNSUPPORTED_CONDITIONALS_CACHE
+
+    def _conditionals_for_cache(self, conditionals: Any) -> Any:
+        """Normalize conditionals before retaining them in the adapter LRU cache."""
+        try:
+            cacheable_conditionals = self._conditionals_to_cpu_for_cache(conditionals)
+        except _CHATTERBOX_RUNTIME_EXCEPTIONS as exc:
+            logger.debug(
+                f"{self.provider_name}: voice conditionals cache normalization skipped ({type(exc).__name__})"
+            )
+            return None
+        if cacheable_conditionals is _UNSUPPORTED_CONDITIONALS_CACHE:
+            return None
+        return cacheable_conditionals
 
     def _assign_conditionals(self, model: Any, conditionals: Any) -> None:
         """Assign cached Chatterbox conditionals, moving them to the adapter device when possible."""
@@ -828,7 +893,7 @@ class ChatterboxAdapter(TTSAdapter):
         if not callable(prepare_conditionals):
             return False
 
-        cache_key = self._voice_conditionals_cache_key(
+        cache_key = await self._voice_conditionals_cache_key(
             voice_reference_path,
             family=family,
             exaggeration=exaggeration,
@@ -864,10 +929,12 @@ class ChatterboxAdapter(TTSAdapter):
 
         conditionals = getattr(model, "conds", None)
         if cache_key is not None and conditionals is not None and self.conditionals_cache_size > 0:
-            self._conditionals_cache[cache_key] = conditionals
-            self._conditionals_cache.move_to_end(cache_key)
-            while len(self._conditionals_cache) > self.conditionals_cache_size:
-                self._conditionals_cache.popitem(last=False)
+            cacheable_conditionals = self._conditionals_for_cache(conditionals)
+            if cacheable_conditionals is not None:
+                self._conditionals_cache[cache_key] = cacheable_conditionals
+                self._conditionals_cache.move_to_end(cache_key)
+                while len(self._conditionals_cache) > self.conditionals_cache_size:
+                    self._conditionals_cache.popitem(last=False)
         return True
 
     def _apply_generation_seed(self, seed: Optional[int]) -> None:
