@@ -279,7 +279,7 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <Space orientation="vertical" size={4}>
-              <Typography.Text strong>No results to review</Typography.Text>
+              <Typography.Text strong>No automation signals yet</Typography.Text>
               <Typography.Text type="secondary">
                 The latest scheduled runs have not produced new results or failures.
               </Typography.Text>
@@ -382,7 +382,7 @@ const PanelHeader: React.FC<{ capabilityMode: ScheduledTaskResultsCapabilityMode
         Scheduled task results
       </Typography.Title>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        Review outputs, failures, and run state from recurring automations.
+        Inspect outputs, failures, and run state from recurring automations.
         Source-specific setup stays in the owning workspace.
       </Typography.Paragraph>
     </div>
@@ -392,7 +392,7 @@ const PanelHeader: React.FC<{ capabilityMode: ScheduledTaskResultsCapabilityMode
       title={capabilityMode === "projected_signals" ? "Latest automation signals" : "Results"}
       description={
         capabilityMode === "projected_signals"
-          ? "Latest signals inferred from task status. Durable review state appears when the results API is available."
+          ? "Latest signals inferred from task status. Result history and item actions appear when the results API is available."
           : "Review state comes from the scheduled-task results API."
       }
     />

@@ -279,7 +279,7 @@ Use these strings unless implementation discovers stronger local wording:
 - Results tab label: `Results`
 - Results page title: `Scheduled task results`
 - Results page subtitle: `Review outputs, failures, and run state from recurring automations. Source-specific setup stays in the owning workspace.`
-- Projected-mode subtitle: `Latest signals inferred from task status. Durable review state appears when the results API is available.`
+- Projected-mode subtitle: `Latest signals inferred from task status. Result history and item actions appear when the results API is available.`
 - Filter label, normalized result modes only: `Review state`
 - Filter values, normalized result modes only: `Unreviewed`, `Reviewed`, `All`
 - Filter label: `Result state`
@@ -655,12 +655,21 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Review all new visible copy against copy recommendations.
-- [ ] Search for source-specific examples in generic UI.
-- [ ] Search for unsupported review/retry buttons in projected-mode rendering.
-- [ ] Verify drawer focus and accessible labels.
-- [ ] Verify no nested cards or decorative layout drift in Home.
-- [ ] Record screenshots or browser observations in the implementation Backlog task.
+- [x] Review all new visible copy against copy recommendations.
+- [x] Search for source-specific examples in generic UI.
+- [x] Search for unsupported review/retry buttons in projected-mode rendering.
+- [x] Verify drawer focus and accessible labels.
+- [x] Verify no nested cards or decorative layout drift in Home.
+- [x] Record screenshots or browser observations in the implementation Backlog task.
+
+**Stage 7 Browser Observations:**
+
+- Started the WebUI at `http://localhost:18001` and a temporary read-only mock API at `http://127.0.0.1:8000` for health, OpenAPI, scheduled-task, and notification empty responses.
+- `/scheduled-tasks` rendered the Scheduled Tasks shell after the readiness gate passed, with Overview, Results, Tasks, and Create tabs visible.
+- `/scheduled-tasks?tab=results` rendered the Results tab with source-agnostic projected-mode copy, no readiness gate, the `No scheduled tasks yet` empty state, and a visible `Create scheduled task` action.
+- At a 390px viewport, `/scheduled-tasks?tab=results` preserved the active Results tab, projected-mode note, empty state, and primary action without obvious text loss in the DOM evidence.
+- `/companion` rendered `Automation Inbox` even when personalization was unavailable, placed before `Inbox Preview`, and kept the existing Companion cards intact.
+- At a 390px viewport, `/companion` preserved `Automation Inbox` ahead of `Inbox Preview` with non-personalized empty-state copy visible.
 
 ## Stage 8: Documentation, Backlog, And Verification
 

@@ -176,7 +176,7 @@ describe("ScheduledTaskResultsPanel", () => {
       />
     )
 
-    expect(screen.getByText("No results to review")).toBeInTheDocument()
+    expect(screen.getByText("No automation signals yet")).toBeInTheDocument()
   })
 
   it("opens a result with an accessible action name", async () => {
