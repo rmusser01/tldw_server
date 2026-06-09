@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the frontend-only Phase 2B.2 capability-aware shell for Watch and Ingest templates so `/scheduled-tasks` can display runtime capability, Limited availability, generated destination/notification copy, and safety messaging without promoting Watch/Ingest to Available before all gates pass.
+**Goal:** Build the frontend-only Phase 2B.2 capability-aware shell for Watch and Ingest templates so `/scheduled-tasks` can display runtime capability, Limited availability, generated source/destination/notification copy, and safety messaging without promoting Watch/Ingest to Available before all gates and an explicit creation-adapter guard pass.
 
 **Architecture:** Keep the implementation inside the existing ScheduledTasks feature folder. Add a pure capability-contract helper module that overlays capability metadata onto the existing template registry, then update the Create panel to render effective capability states and generated copy. Do not add backend calls, Watchlists creation adapters, source preview APIs, duplicate APIs, notification APIs, or Home result surfacing in this slice.
 
@@ -24,11 +24,11 @@ In scope:
 - Add a frontend capability model for Watch/Ingest template gates.
 - Add the `limited_availability` template state.
 - Keep Reminder as the only default Available template.
-- Keep Watch/Ingest default behavior non-creating. Tests may prove the pure resolver can model future all-gates availability, but the page default must not pass all gates or create Watch/Ingest tasks in this slice.
-- Generate review/destination/notification copy from capability metadata.
-- Render Limited availability, missing gate reasons, and result-only notification copy.
+- Keep Watch/Ingest default behavior non-creating. Tests may prove the pure resolver can model future all-gates availability, but only when an explicit creation adapter flag is true. The page default must not pass that adapter guard or create Watch/Ingest tasks in this slice.
+- Generate source-intent, destination, and notification copy from capability metadata.
+- Render Limited availability, missing gate reasons, source support, and result-only notification copy.
 - Add redaction-safe copy helpers for capability and preview-adjacent text.
-- Update tests so Watch/Ingest cannot appear in Available now unless all gates pass.
+- Update tests so Watch/Ingest cannot appear in Available now unless all gates and the explicit creation-adapter guard pass.
 - Preserve current Watchlists handoff behavior and exact copy that says no scheduled task was created.
 - Preserve extension route parity because the extension reuses the same component.
 
@@ -82,7 +82,7 @@ Current Phase 2A files already exist:
 - `apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-template-capabilities.ts`
   - Pure Phase 2B frontend capability model.
   - Availability gate definitions.
-  - Result/notification copy generation.
+  - Source-intent, result, and notification copy generation.
   - Capability overlay for existing templates.
   - Redaction helpers for capability-sourced text.
 - `apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-template-capabilities.test.ts`
@@ -93,12 +93,12 @@ Current Phase 2A files already exist:
 - `apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-templates.ts`
   - Add `limited_availability` to `ScheduledTaskTemplateState`.
   - Update Watch and Ingest base descriptions to avoid overpromising notifications/search/RAG.
-- Export helpers that allow filtering an effective template list, not only the static registry.
+  - Export helpers that allow filtering an effective template list, not only the static registry.
 - `apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskCreatePanel.tsx`
   - Accept optional `templateCapabilities` prop.
   - Resolve effective template states through the new capability helper.
   - Render Limited availability and missing gate copy.
-  - Render generated result/notification copy in selected Watch/Ingest panels.
+  - Render generated source/destination/notification copy in selected Watch/Ingest panels.
   - Keep non-Available states out of creation paths.
 - `apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx`
   - Pass the default no-contract capability map into `ScheduledTaskCreatePanel`.
@@ -107,7 +107,7 @@ Current Phase 2A files already exist:
   - Add label/filter coverage for `limited_availability`.
   - Add regression coverage that Available now excludes Limited availability.
 - `apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx`
-  - Add coverage for Limited availability UI, generated copy, and no create CTA.
+  - Add coverage for Limited availability UI, generated source/destination/notification copy, no create CTA, and extension-width essentials.
 - `apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx`
   - Update source-vendor empty-state copy assertions if needed.
   - Add route-level smoke that Watch/Ingest still do not create tasks.
@@ -129,11 +129,13 @@ The shell must enforce these rules:
 1. `reminder` remains `available`.
 2. `watch` and `ingest` default to `handoff_only` when no capability contract exists.
 3. `watch` and `ingest` become `limited_availability` when capability metadata exists but at least one required gate is missing.
-4. `watch` and `ingest` become `available` only when every required gate passes.
-5. `available_now` includes only effective state `available`.
-6. Limited availability must never render a create CTA or "scheduled" success copy.
-7. Generated result/notification copy must be based on capability metadata, not hardcoded promises.
-8. Phase 2B.2 product defaults must not provide all-gates capability data for Watch/Ingest because no Watchlists creation adapter exists in this slice.
+4. `watch` and `ingest` remain `limited_availability` when every required gate passes but `creationAdapterSupported !== true`.
+5. `watch` and `ingest` become `available` only when every required gate passes and `creationAdapterSupported === true`.
+6. `available_now` includes only effective state `available`.
+7. Limited availability must never render a create CTA or "scheduled" success copy.
+8. Generated source/destination/notification copy must be based on capability metadata, not hardcoded promises.
+9. Phase 2B.2 product defaults must not provide `creationAdapterSupported: true` for Watch/Ingest because no Watchlists creation adapter exists in this slice.
+10. `sourceIntent.can_create` describes source-level capability only. It must not be treated as a substitute for `creationAdapterSupported`.
 
 Required gates for Watch:
 
@@ -197,16 +199,26 @@ describe("scheduled task template capabilities", () => {
     expect(getMissingAvailabilityGates("watch", capability)).toContain("source_preview")
   })
 
-  it("allows Watch only when every Watch gate passes", () => {
+  it("keeps Watch limited when gates pass but no creation adapter is supported", () => {
     const capability = buildScheduledTaskTemplateCapability("watch", {
+      passedGates: REQUIRED_WATCH_AVAILABILITY_GATES
+    })
+
+    expect(resolveTemplateCapabilityState("watch", capability)).toBe("limited_availability")
+  })
+
+  it("allows Watch only when every Watch gate and the creation adapter guard pass", () => {
+    const capability = buildScheduledTaskTemplateCapability("watch", {
+      creationAdapterSupported: true,
       passedGates: REQUIRED_WATCH_AVAILABILITY_GATES
     })
 
     expect(resolveTemplateCapabilityState("watch", capability)).toBe("available")
   })
 
-  it("does not require notification gate for Ingest availability", () => {
+  it("does not require notification gate for Ingest availability once creation is supported", () => {
     const capability = buildScheduledTaskTemplateCapability("ingest", {
+      creationAdapterSupported: true,
       passedGates: REQUIRED_INGEST_AVAILABILITY_GATES
     })
 
@@ -281,6 +293,7 @@ export interface ScheduledTaskResultDestinationMetadata {
 export interface ScheduledTaskTemplateCapability {
   templateId: ScheduledTaskTemplateId
   passedGates: readonly ScheduledTaskAvailabilityGate[]
+  creationAdapterSupported?: boolean
   sourceIntent?: ScheduledTaskSourceIntentCapability | null
   resultDestinations?: ScheduledTaskResultDestinationMetadata | null
   reason?: string | null
@@ -347,7 +360,13 @@ export const resolveTemplateCapabilityState = (
     return null
   }
 
-  return getMissingAvailabilityGates(templateId, capability).length === 0
+  if (getMissingAvailabilityGates(templateId, capability).length > 0) {
+    return "limited_availability"
+  }
+
+  // Keep this separate from sourceIntent.can_create. That flag describes source-level
+  // support, not whether this /scheduled-tasks shell has a real creation adapter.
+  return capability.creationAdapterSupported === true
     ? "available"
     : "limited_availability"
 }
@@ -370,6 +389,7 @@ export const buildScheduledTaskTemplateCapability = (
 ): ScheduledTaskTemplateCapability => ({
   templateId,
   passedGates: [],
+  creationAdapterSupported: false,
   sourceIntent: null,
   resultDestinations: null,
   reason: null,
@@ -504,7 +524,7 @@ git add apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-tem
 git commit -m "feat: add limited scheduled task template state"
 ```
 
-## Task 3: Generate Result And Notification Copy From Metadata
+## Task 3: Generate Source, Result, And Notification Copy From Metadata
 
 **Files:**
 
@@ -517,10 +537,32 @@ Add tests:
 
 ```ts
 import {
+  buildSourceIntentCopy,
   buildResultDestinationCopy,
   buildNotificationPolicyCopy,
   redactCapabilityPreviewText
 } from "../scheduled-task-template-capabilities"
+
+it("generates source-intent copy from source support metadata", () => {
+  expect(
+    buildSourceIntentCopy({
+      sourceFamily: "feed",
+      can_watch: true,
+      can_ingest: false,
+      can_preview: true,
+      can_notify: false,
+      can_index_search: false,
+      can_index_rag: false,
+      can_create: false,
+      reason: "Ingest setup continues in Watchlists."
+    })
+  ).toEqual([
+    "Detected source: feed.",
+    "Watch: supported.",
+    "Ingest: not supported for this source yet.",
+    "Ingest setup continues in Watchlists."
+  ])
+})
 
 it("generates destination copy from metadata", () => {
   expect(
@@ -551,6 +593,27 @@ it("redacts private-looking preview text", () => {
   expect(redactCapabilityPreviewText("https://example.com/feed?token=secret")).toBe(
     "[redacted private source]"
   )
+  expect(redactCapabilityPreviewText("https://example.com/feed#private")).toBe(
+    "[redacted private source]"
+  )
+  expect(redactCapabilityPreviewText("https://example.com/feed?api_key=secret")).toBe(
+    "[redacted private source]"
+  )
+  expect(redactCapabilityPreviewText("https://example.com/feed?access_token=secret")).toBe(
+    "[redacted private source]"
+  )
+  expect(redactCapabilityPreviewText("https://example.com/feed?client_secret=secret")).toBe(
+    "[redacted private source]"
+  )
+  expect(redactCapabilityPreviewText("Authorization: Bearer abc123")).toBe(
+    "[redacted private source]"
+  )
+  expect(redactCapabilityPreviewText("api key: sk-test-secret")).toBe(
+    "[redacted private source]"
+  )
+  expect(redactCapabilityPreviewText("Provider response: token=private-value")).toBe(
+    "[redacted private source]"
+  )
   expect(redactCapabilityPreviewText("Public release feed")).toBe("Public release feed")
 })
 ```
@@ -569,6 +632,21 @@ Expected: fail because helpers are missing.
 Use deterministic copy and avoid raw implementation details:
 
 ```ts
+export const buildSourceIntentCopy = (
+  intent: ScheduledTaskSourceIntentCapability | null | undefined
+): string[] => {
+  if (!intent) {
+    return ["Source support: configured in Watchlists."]
+  }
+
+  return [
+    `Detected source: ${intent.sourceFamily.replace(/_/g, " ")}.`,
+    intent.can_watch ? "Watch: supported." : "Watch: not supported for this source yet.",
+    intent.can_ingest ? "Ingest: supported." : "Ingest: not supported for this source yet.",
+    ...(intent.reason ? [redactCapabilityPreviewText(intent.reason)] : [])
+  ]
+}
+
 export const buildResultDestinationCopy = (
   metadata: ScheduledTaskResultDestinationMetadata | null | undefined
 ): string[] => {
@@ -598,7 +676,7 @@ export const buildNotificationPolicyCopy = (
     : "Notifications are not available for this source yet."
 ```
 
-For redaction, reuse the same sensitive URL/prose logic if it can be exported cleanly from `scheduled-task-templates.ts`. If exporting creates circular responsibility, duplicate a small private-looking pattern in this module and add tests.
+For redaction, reuse the same sensitive URL/prose logic if it can be exported cleanly from `scheduled-task-templates.ts`. If exporting creates circular responsibility, duplicate a small private-looking pattern in this module and add tests. The redaction check must catch URL fragments, query params such as `token`, `api_key`, `access_token`, `client_secret`, `key`, `secret`, `password`, and `auth`, bearer tokens, prose such as `api key:` or `client secret:`, and provider snippets such as `Provider response: token=...`. Return one generic replacement string instead of partially masking secrets in this UI.
 
 - [ ] **Step 4: Run tests**
 
@@ -639,6 +717,17 @@ it("shows Limited availability without create language when a Watch gate is miss
     passedGates: REQUIRED_WATCH_AVAILABILITY_GATES.filter(
       (gate) => gate !== "source_preview"
     ),
+    sourceIntent: {
+      sourceFamily: "feed",
+      can_watch: true,
+      can_ingest: false,
+      can_preview: false,
+      can_notify: false,
+      can_index_search: false,
+      can_index_rag: false,
+      can_create: false,
+      reason: "Ingest setup continues in Watchlists."
+    },
     resultDestinations: {
       home_supported: false,
       notifications_supported: false,
@@ -658,6 +747,10 @@ it("shows Limited availability without create language when a Watch gate is miss
 
   expect(screen.getByText("Limited availability")).toBeInTheDocument()
   expect(screen.getByText(/source preview/i)).toBeInTheDocument()
+  expect(screen.getByText("Detected source: feed.")).toBeInTheDocument()
+  expect(screen.getByText("Watch: supported.")).toBeInTheDocument()
+  expect(screen.getByText("Ingest: not supported for this source yet.")).toBeInTheDocument()
+  expect(screen.getByText("Ingest setup continues in Watchlists.")).toBeInTheDocument()
   expect(screen.getByText("Home: not yet shown.")).toBeInTheDocument()
   expect(screen.getByText("Notifications: not available for this source yet.")).toBeInTheDocument()
   expect(screen.getByText("No scheduled task has been created yet.")).toBeInTheDocument()
@@ -682,9 +775,46 @@ it("keeps Available now from showing Limited availability templates", () => {
 
   // Click Available now and assert Reminder remains while Watch is absent.
 })
+
+it("keeps capability essentials visible in an extension-width container", () => {
+  const capability = buildScheduledTaskTemplateCapability("watch", {
+    passedGates: REQUIRED_WATCH_AVAILABILITY_GATES.filter(
+      (gate) => gate !== "source_preview"
+    ),
+    sourceIntent: {
+      sourceFamily: "feed",
+      can_watch: true,
+      can_ingest: false,
+      can_preview: false,
+      can_notify: false,
+      can_index_search: false,
+      can_index_rag: false,
+      can_create: false,
+      reason: "Preview is not available for this source yet."
+    }
+  })
+
+  render(
+    <div style={{ width: 360 }}>
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="watch"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        templateCapabilities={{ watch: capability }}
+      />
+    </div>
+  )
+
+  expect(screen.getByText("Limited availability")).toBeInTheDocument()
+  expect(screen.getByText("Detected source: feed.")).toBeInTheDocument()
+  expect(screen.getByText("Preview is not available for this source yet.")).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
+})
 ```
 
 Complete the second test using the existing `Segmented` labels. If Ant Design renders segmented options as labels instead of buttons, use `getByText("Available now")` and click its closest interactive parent, matching current test patterns.
+
+The extension-width test is a jsdom presence test, not a pixel-perfect layout proof. It exists to prevent hiding the essential status, detected source, reason, and action-suppression copy behind desktop-only assumptions. If the implementation later adds browser e2e for the extension route, add a visual/narrow-viewport smoke there too.
 
 - [ ] **Step 2: Run failing component tests**
 
@@ -705,6 +835,7 @@ import {
   applyScheduledTaskTemplateCapabilities,
   buildNotificationPolicyCopy,
   buildResultDestinationCopy,
+  buildSourceIntentCopy,
   getMissingAvailabilityGates
 } from "./scheduled-task-template-capabilities"
 
@@ -739,6 +870,7 @@ Update `HandoffPanel` to accept capability:
 
 ```ts
 const missingGates = getMissingAvailabilityGates(template.id, capability)
+const sourceIntentCopy = buildSourceIntentCopy(capability?.sourceIntent)
 const resultDestinationCopy = buildResultDestinationCopy(capability?.resultDestinations)
 const notificationCopy = buildNotificationPolicyCopy(capability?.resultDestinations)
 ```
@@ -747,11 +879,12 @@ Render:
 
 - `Limited availability` tag via existing state label.
 - Missing gates as human-readable lines such as `Missing: source preview`.
+- Source support copy under a heading such as `Source support`, including detected source family, Watch/Ingest support, and capability reason text after redaction.
 - Destination copy under a heading such as `Result destinations`.
 - Notification copy under a heading such as `Notifications`.
 - Existing Watchlists setup and "No scheduled task has been created yet."
 
-Do not add a Watch/Ingest create API, mutation, or success path. Keep all-gates availability coverage in pure helper tests only unless a later Watchlists creation adapter is implemented. Component/page defaults should exercise Handoff only and Limited availability states, not an artificial all-gates Available product path.
+Do not add a Watch/Ingest create API, mutation, or success path. Keep all-gates plus adapter-guard availability coverage in pure helper tests only unless a later Watchlists creation adapter is implemented. Component/page defaults should exercise Handoff only and Limited availability states, not an artificial all-gates Available product path.
 
 - [ ] **Step 5: Run component tests**
 
@@ -829,7 +962,7 @@ Pass it from `ScheduledTasksPage`:
 />
 ```
 
-Use an empty default map so Watch/Ingest remain `handoff_only` until runtime capability contracts exist.
+Use an empty default map so Watch/Ingest remain `handoff_only` until runtime capability contracts and a real creation adapter exist. Do not set `creationAdapterSupported: true` in page defaults in Phase 2B.2.
 
 - [ ] **Step 4: Update empty-state copy**
 
@@ -919,7 +1052,11 @@ Check:
 - Watch/Ingest are not created from `/scheduled-tasks`.
 - Reminder remains the only default Available template.
 - Limited availability is not included in Available now.
+- Watch/Ingest can resolve to Available only when all required gates and `creationAdapterSupported === true` pass.
+- Source-intent copy is visible in Limited availability UI when metadata is present.
 - Home/search/RAG/notification copy is generated from metadata.
+- Capability text redacts URL fragments, secret query params, bearer/prose secrets, and provider snippets.
+- Extension-width component coverage keeps status, source, reason, and action-suppression copy present.
 - No hardcoded GitHub/YouTube primary IA copy was introduced.
 - Existing Watchlists handoff copy still says no task was created.
 - No backend/service API calls were added.
@@ -960,8 +1097,9 @@ After this plan is implemented:
 
 - `/scheduled-tasks?tab=create&template=watch` can explain Watch capability status without creating a task.
 - `/scheduled-tasks?tab=create&template=ingest` can explain Ingest capability status without promising search/RAG readiness.
-- Tests prove Watch/Ingest cannot appear in Available now unless all gates pass.
+- Tests prove Watch/Ingest cannot appear in Available now unless all gates and the explicit creation-adapter guard pass.
 - Tests prove missing preview produces Limited availability.
-- Result and notification copy is generated from metadata.
+- Source-intent, result, and notification copy is generated from metadata.
+- Redaction tests cover URL fragments, secret query params, bearer/prose secrets, and provider snippets.
 - Existing Reminder creation remains unchanged.
 - Existing Watchlists UX remains unchanged.
