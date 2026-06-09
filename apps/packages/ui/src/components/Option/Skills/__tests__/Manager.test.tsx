@@ -55,6 +55,15 @@ vi.mock("../SkillPreview", () => ({
   SkillPreview: () => null
 }))
 
+const makeSkill = (index: number) => ({
+  name: `skill-${index}`,
+  description: `Skill ${index}`,
+  argument_hint: null,
+  user_invocable: true,
+  disable_model_invocation: false,
+  context: "inline" as const
+})
+
 describe("SkillsManager imports", () => {
   let queryClient: QueryClient
 
@@ -177,12 +186,90 @@ describe("SkillsManager imports", () => {
     fireEvent.click(within(emptyState).getByRole("button", { name: "Create from template" }))
     expect(await screen.findByTestId("skill-drawer-open")).toBeInTheDocument()
 
-    fireEvent.click(within(emptyState).getByRole("button", { name: "Import" }))
+    expect(within(emptyState).queryByRole("button", { name: "Import" })).not.toBeInTheDocument()
+    fireEvent.click(within(emptyState).getByRole("button", { name: "Import from text" }))
     expect(
       await screen.findByRole("dialog", {
         name: "Import Skill from Text"
       })
     ).toBeInTheDocument()
+  })
+
+  it("shows an explicit load error instead of the beginner empty state", async () => {
+    tldwClientMock.listSkills.mockRejectedValueOnce(new Error("backend down"))
+
+    renderManager()
+
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Failed to load skills")
+    expect(alert).toHaveTextContent("backend down")
+    expect(screen.queryByTestId("skills-empty-state")).not.toBeInTheDocument()
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it("clamps stale pagination when totals shrink", async () => {
+    const firstPageBeforeShrink = Array.from({ length: 10 }, (_, index) => makeSkill(index + 1))
+    const firstPageAfterShrink = Array.from({ length: 5 }, (_, index) => makeSkill(index + 1))
+    let firstPageCalls = 0
+
+    tldwClientMock.listSkills.mockImplementation(({ offset }: { offset: number }) => {
+      if (offset === 10) {
+        return Promise.resolve({
+          skills: [],
+          count: 0,
+          total: 5,
+          limit: 10,
+          offset: 10
+        })
+      }
+
+      firstPageCalls += 1
+      return Promise.resolve({
+        skills: firstPageCalls === 1 ? firstPageBeforeShrink : firstPageAfterShrink,
+        count: firstPageCalls === 1 ? 10 : 5,
+        total: firstPageCalls === 1 ? 11 : 5,
+        limit: 10,
+        offset: 0
+      })
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("11 skills")).toBeInTheDocument()
+
+    const secondPageItem = await screen.findByTitle("2")
+    fireEvent.click(within(secondPageItem).getByText("2"))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenCalledWith({ limit: 10, offset: 10 })
+    })
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith({ limit: 10, offset: 0 })
+    })
+    expect(await screen.findByText("5 skills")).toBeInTheDocument()
+    expect(screen.queryByText("No skills yet.")).not.toBeInTheDocument()
+  })
+
+  it("distinguishes a non-empty library with an empty current page", async () => {
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [],
+      count: 0,
+      total: 5,
+      limit: 10,
+      offset: 10
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("5 skills")).toBeInTheDocument()
+    expect(screen.getByText("No skills on this page.")).toBeInTheDocument()
+    expect(screen.queryByText("No skills yet.")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("skills-empty-state")).not.toBeInTheDocument()
   })
 
   it("imports a skill from text via importSkill", async () => {

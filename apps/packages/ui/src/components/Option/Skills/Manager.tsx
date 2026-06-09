@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Alert,
   Button,
   Form,
   Input,
@@ -61,7 +62,13 @@ export const SkillsManager: React.FC = () => {
 
   const offset = (page - 1) * pageSize
 
-  const { data, isLoading } = useQuery<SkillsListResponse>({
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery<SkillsListResponse>({
     queryKey: ["skills", page, pageSize],
     queryFn: () => tldwClient.listSkills({ limit: pageSize, offset })
   })
@@ -77,13 +84,34 @@ export const SkillsManager: React.FC = () => {
       )
   }, [data?.skills, search])
 
+  const hasLoadedSkills = data != null && !isError
   const totalSkills = data?.total ?? 0
   const hasSearch = search.trim().length > 0
-  const isLibraryEmpty = !isLoading && totalSkills === 0 && !hasSearch
-  const skillCountLabel = t("option:skills.countSummary", {
-    defaultValue: `${totalSkills} ${totalSkills === 1 ? "skill" : "skills"}`,
-    count: totalSkills
-  })
+  const isLibraryEmpty =
+    hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch
+  const skillCountLabel = isError
+    ? t("option:skills.countUnavailable", {
+        defaultValue: "Count unavailable"
+      })
+    : t("option:skills.countSummary", {
+        defaultValue: `${totalSkills} ${totalSkills === 1 ? "skill" : "skills"}`,
+        count: totalSkills
+      })
+  const listErrorDescription =
+    error instanceof Error && error.message
+      ? error.message
+      : t("option:skills.loadListErrorDescription", {
+          defaultValue: "Check your server connection and try again."
+        })
+
+  React.useEffect(() => {
+    if (!hasLoadedSkills) return
+
+    const lastPage = Math.max(1, Math.ceil(totalSkills / pageSize))
+    if (page > lastPage) {
+      setPage(lastPage)
+    }
+  }, [hasLoadedSkills, page, pageSize, totalSkills])
 
   const deleteMutation = useMutation({
     mutationFn: (name: string) => tldwClient.deleteSkill(name),
@@ -401,11 +429,35 @@ export const SkillsManager: React.FC = () => {
           })}
         </Button>
         <Button icon={<UploadIcon size={14} />} onClick={openImportTextModal}>
-          {t("option:skills.import", { defaultValue: "Import" })}
+          {t("option:skills.emptyImportText", {
+            defaultValue: "Import from text"
+          })}
         </Button>
       </div>
     </div>
   )
+
+  let tableEmptyText: React.ReactNode = beginnerEmptyState
+  if (!isLibraryEmpty) {
+    let emptyText = t("option:skills.emptyTable", {
+      defaultValue: "No skills yet."
+    })
+    if (isError) {
+      emptyText = t("option:skills.emptyTableError", {
+        defaultValue: "Unable to load skills."
+      })
+    } else if (hasSearch) {
+      emptyText = t("option:skills.noMatches", {
+        defaultValue: "No skills match this search."
+      })
+    } else if (totalSkills > 0) {
+      emptyText = t("option:skills.emptyCurrentPage", {
+        defaultValue: "No skills on this page."
+      })
+    }
+
+    tableEmptyText = emptyText
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -464,6 +516,22 @@ export const SkillsManager: React.FC = () => {
         </div>
       </div>
 
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={t("option:skills.loadListError", {
+            defaultValue: "Failed to load skills"
+          })}
+          description={listErrorDescription}
+          action={
+            <Button size="small" onClick={() => void refetch()}>
+              {t("common:tryAgain", { defaultValue: "Try again" })}
+            </Button>
+          }
+        />
+      )}
+
       <Table
         dataSource={filteredSkills}
         columns={columns}
@@ -472,13 +540,7 @@ export const SkillsManager: React.FC = () => {
         pagination={false}
         size="middle"
         locale={{
-          emptyText: isLibraryEmpty
-            ? beginnerEmptyState
-            : t("option:skills.noMatches", {
-                defaultValue: hasSearch
-                  ? "No skills match this search."
-                  : "No skills yet."
-              })
+          emptyText: tableEmptyText
         }}
       />
 

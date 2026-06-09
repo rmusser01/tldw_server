@@ -32,28 +32,21 @@ Docs/superpowers/plans/2026-06-08-skills-beginner-activation-and-guided-authorin
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+['Rebased codex/skills-beginner-empty-state on latest origin/dev.', 'Addressed PR #2319 review feedback: load failures now render an explicit Alert with retry instead of the beginner empty state; stale pagination clamps to the last valid page after totals shrink; non-empty libraries with empty current pages show a distinct table empty message; beginner empty-state import action now says Import from text to avoid duplicate Import labels.', 'Added regression coverage for load-error handling, stale pagination clamping, empty-current-page messaging, and duplicate Import label avoidance.', 'Verification: bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --maxWorkers=1 passed 9 tests; bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx src/components/Option/Skills/__tests__/SkillsWorkspace.test.tsx --maxWorkers=1 passed 15 tests; git diff --check passed; Bandit via repo .venv against apps/packages/ui/src/components/Option/Skills produced 0 findings / 0 LOC because touched scope is TypeScript.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the next scoped Skills UX slice: the active /skills manager now shows a visible Skills heading, a short workflow summary, and the current total count above the toolbar. The zero-skill table state now explains what Skills are and gives first actions to seed built-ins, open skill creation, or import text, while searched-empty states stay as simple no-match feedback.
-
-Verification:
-- `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --maxWorkers=1` passed 6 tests after red/green.
-- `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx src/components/Option/Skills/__tests__/SkillsWorkspace.test.tsx --maxWorkers=1` passed 12 tests.
-- `git diff --check` exited 0.
-- Browser smoke on `http://127.0.0.1:18002/skills` confirmed the Skills heading, workflow summary, `0 skills` count, and beginner empty-state actions in the accessibility snapshot. The global backend reachability modal appeared because no tldw server was running.
-- Bandit skipped: frontend-only TypeScript/TSX slice.
+Rebased PR #2319 on latest dev and addressed review feedback. The Skills manager now shows an explicit load-error alert with retry instead of the beginner empty state, clamps stale pagination when totals shrink, distinguishes empty current pages from empty libraries, and gives the beginner import action a unique accessible label. Added regression tests for each review item and verified the focused Skills suites, diff check, and Bandit touched-scope report.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
