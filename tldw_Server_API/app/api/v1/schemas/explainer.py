@@ -188,6 +188,12 @@ class ExplainerQuestionAnswerRequest(_ExplainerSchema):
     selected_custom_answer: str | None = Field(default=None, alias="selectedCustomAnswer")
 
 
+class ExplainerChatbookExportRequest(_ExplainerSchema):
+    name: str | None = None
+    description: str | None = None
+    async_mode: bool = Field(default=True, alias="asyncMode")
+
+
 class ExplainerJobAcceptedResponse(_ExplainerSchema):
     job_id: str = Field(alias="jobId")
     session_id: str = Field(alias="sessionId")
