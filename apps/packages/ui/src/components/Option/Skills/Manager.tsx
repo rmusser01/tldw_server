@@ -25,7 +25,8 @@ import {
   Play,
   FileDown,
   FileText,
-  Database
+  Database,
+  Copy
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
@@ -46,6 +47,35 @@ interface ImportTextFormValues {
   overwrite?: boolean
 }
 
+interface SkillsSuccessAction {
+  title: string
+  description: string
+  skillName?: string
+  testLabel?: string
+  viewLabel?: string
+}
+
+interface SeedSkillsResult {
+  count?: number
+  seeded?: unknown
+}
+
+const getResponseSkillName = (result: unknown): string | undefined => {
+  if (!result || typeof result !== "object") return undefined
+  const name = (result as { name?: unknown }).name
+  const trimmedName = typeof name === "string" ? name.trim() : ""
+  return SKILL_NAME_REGEX.test(trimmedName) ? trimmedName : undefined
+}
+
+const getSeededSkillNames = (result: SeedSkillsResult | undefined): string[] => {
+  if (!Array.isArray(result?.seeded)) return []
+  return result.seeded
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter((name): name is string => SKILL_NAME_REGEX.test(name))
+}
+
+const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
+
 export const SkillsManager: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const queryClient = useQueryClient()
@@ -58,6 +88,8 @@ export const SkillsManager: React.FC = () => {
   const [importTextOpen, setImportTextOpen] = React.useState(false)
   const [editingSkill, setEditingSkill] = React.useState<SkillResponse | null>(null)
   const [previewSkill, setPreviewSkill] = React.useState<string | null>(null)
+  const [successAction, setSuccessAction] =
+    React.useState<SkillsSuccessAction | null>(null)
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
 
   const offset = (page - 1) * pageSize
@@ -117,6 +149,7 @@ export const SkillsManager: React.FC = () => {
     mutationFn: (name: string) => tldwClient.deleteSkill(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["skills"] })
+      setSuccessAction(null)
       notification.success({
         message: t("option:skills.deleteSuccess", { defaultValue: "Skill deleted" })
       })
@@ -135,10 +168,22 @@ export const SkillsManager: React.FC = () => {
       content: string
       overwrite?: boolean
     }) => tldwClient.importSkill(payload),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ["skills"] })
       setImportTextOpen(false)
       importTextForm.resetFields()
+      const skillName = getResponseSkillName(result) ?? variables.name
+      if (skillName) {
+        setSuccessAction({
+          title: t("option:skills.importSuccess", { defaultValue: "Skill imported" }),
+          description: t("option:skills.importSuccessActionDesc", {
+            defaultValue:
+              "Next, test it here or open the skill to confirm the imported details."
+          }),
+          skillName,
+          viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
+        })
+      }
       notification.success({
         message: t("option:skills.importSuccess", { defaultValue: "Skill imported" })
       })
@@ -153,9 +198,29 @@ export const SkillsManager: React.FC = () => {
 
   const seedBuiltinsMutation = useMutation({
     mutationFn: (overwrite: boolean = false) => tldwClient.seedSkills({ overwrite }),
-    onSuccess: (result: { count?: number } | undefined) => {
+    onSuccess: (result: SeedSkillsResult | undefined) => {
       queryClient.invalidateQueries({ queryKey: ["skills"] })
       const count = Number(result?.count ?? 0)
+      const seededSkillNames = getSeededSkillNames(result)
+      const suggestedSkillName =
+        seededSkillNames.includes("summarize") ? "summarize" : seededSkillNames[0]
+      if (suggestedSkillName) {
+        setSuccessAction({
+          title: t("option:skills.seedSuccess", {
+            defaultValue: "Built-in skills seeded"
+          }),
+          description: t("option:skills.seedSuccessActionDesc", {
+            defaultValue:
+              "Try a built-in skill now, or copy the chat invocation for later."
+          }),
+          skillName: suggestedSkillName,
+          testLabel: t("option:skills.testSpecificSkill", {
+            defaultValue: `Test ${suggestedSkillName}`,
+            skillName: suggestedSkillName
+          }),
+          viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
+        })
+      }
       notification.success({
         message: t("option:skills.seedSuccess", { defaultValue: "Built-in skills seeded" }),
         description: t("option:skills.seedSuccessDesc", {
@@ -173,6 +238,7 @@ export const SkillsManager: React.FC = () => {
   })
 
   const handleNew = () => {
+    setSuccessAction(null)
     setEditingSkill(null)
     setDrawerOpen(true)
   }
@@ -227,8 +293,20 @@ export const SkillsManager: React.FC = () => {
 
   const handleImportFile = async (file: File) => {
     try {
-      await tldwClient.importSkillFile(file)
+      const result = await tldwClient.importSkillFile(file)
       queryClient.invalidateQueries({ queryKey: ["skills"] })
+      const skillName = getResponseSkillName(result)
+      if (skillName) {
+        setSuccessAction({
+          title: t("option:skills.importSuccess", { defaultValue: "Skill imported" }),
+          description: t("option:skills.importSuccessActionDesc", {
+            defaultValue:
+              "Next, test it here or open the skill to confirm the imported details."
+          }),
+          skillName,
+          viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
+        })
+      }
       notification.success({
         message: t("option:skills.importSuccess", { defaultValue: "Skill imported" })
       })
@@ -242,6 +320,7 @@ export const SkillsManager: React.FC = () => {
   }
 
   const openImportTextModal = () => {
+    setSuccessAction(null)
     importTextForm.resetFields()
     importTextForm.setFieldsValue({ overwrite: false, content: "" })
     setImportTextOpen(true)
@@ -273,9 +352,47 @@ export const SkillsManager: React.FC = () => {
     setEditingSkill(null)
   }
 
-  const handleDrawerSaved = () => {
+  const handleDrawerSaved = (savedSkillName?: string) => {
+    const wasCreating = !editingSkill
     queryClient.invalidateQueries({ queryKey: ["skills"] })
     handleDrawerClose()
+    if (wasCreating && savedSkillName) {
+      setSuccessAction({
+        title: t("option:skills.createSuccess", { defaultValue: "Skill created" }),
+        description: t("option:skills.createSuccessActionDesc", {
+          defaultValue:
+            "Next, test it here or copy the chat invocation for a conversation."
+        }),
+        skillName: savedSkillName,
+        viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
+      })
+    }
+  }
+
+  const handleCopyInvocation = async (skillName: string) => {
+    try {
+      const writeText = navigator.clipboard?.writeText
+      if (!writeText) {
+        throw new Error(
+          t("option:skills.copyInvocationUnavailable", {
+            defaultValue: "Clipboard is not available in this browser context."
+          })
+        )
+      }
+      await writeText.call(navigator.clipboard, buildSkillInvocation(skillName))
+      notification.success({
+        message: t("option:skills.copyInvocationSuccess", {
+          defaultValue: "Skill invocation copied"
+        })
+      })
+    } catch (err: any) {
+      notification.error({
+        message: t("option:skills.copyInvocationError", {
+          defaultValue: "Failed to copy skill invocation"
+        }),
+        description: err?.message
+      })
+    }
   }
 
   const columns: ColumnsType<SkillSummary> = [
@@ -529,6 +646,53 @@ export const SkillsManager: React.FC = () => {
               {t("common:tryAgain", { defaultValue: "Try again" })}
             </Button>
           }
+        />
+      )}
+
+      {successAction && (
+        <Alert
+          data-testid="skills-success-actions"
+          type="success"
+          showIcon
+          title={successAction.title}
+          description={successAction.description}
+          closable
+          onClose={() => setSuccessAction(null)}
+          action={(() => {
+            const skillName = successAction.skillName
+            if (!skillName) return undefined
+            const invocation = buildSkillInvocation(skillName)
+            return (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="small"
+                  icon={<Play size={14} />}
+                  onClick={() => setPreviewSkill(skillName)}
+                >
+                  {successAction.testLabel ??
+                    t("option:skills.testRun", { defaultValue: "Test run" })}
+                </Button>
+                <Button
+                  size="small"
+                  icon={<Pen size={14} />}
+                  onClick={() => void handleEdit(skillName)}
+                >
+                  {successAction.viewLabel ??
+                    t("option:skills.viewSkill", { defaultValue: "View skill" })}
+                </Button>
+                <Button
+                  size="small"
+                  icon={<Copy size={14} />}
+                  onClick={() => void handleCopyInvocation(skillName)}
+                >
+                  {t("option:skills.copyInvocation", {
+                    defaultValue: `Copy ${invocation}`,
+                    invocation
+                  })}
+                </Button>
+              </div>
+            )
+          })()}
         />
       )}
 

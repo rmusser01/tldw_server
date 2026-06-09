@@ -20,6 +20,7 @@ const notificationMock = vi.hoisted(() => ({
 }))
 
 const skillDrawerMock = vi.hoisted(() => vi.fn())
+const skillPreviewMock = vi.hoisted(() => vi.fn())
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
@@ -45,14 +46,26 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("../SkillDrawer", () => ({
-  SkillDrawer: (props: { open: boolean }) => {
+  SkillDrawer: (props: { open: boolean; onSaved: (skillName?: string) => void }) => {
     skillDrawerMock(props)
-    return props.open ? <div data-testid="skill-drawer-open">Skill drawer open</div> : null
+    return props.open ? (
+      <div data-testid="skill-drawer-open">
+        Skill drawer open
+        <button type="button" onClick={() => props.onSaved("created-skill")}>
+          Complete create
+        </button>
+      </div>
+    ) : null
   }
 }))
 
 vi.mock("../SkillPreview", () => ({
-  SkillPreview: () => null
+  SkillPreview: (props: { skillName: string | null }) => {
+    skillPreviewMock(props)
+    return props.skillName ? (
+      <div data-testid="skill-preview-open">Test run: {props.skillName}</div>
+    ) : null
+  }
 }))
 
 const makeSkill = (index: number) => ({
@@ -66,8 +79,10 @@ const makeSkill = (index: number) => ({
 
 describe("SkillsManager imports", () => {
   let queryClient: QueryClient
+  let originalClipboard: Clipboard | undefined
 
   beforeEach(() => {
+    originalClipboard = navigator.clipboard
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -75,6 +90,12 @@ describe("SkillsManager imports", () => {
       }
     })
     vi.clearAllMocks()
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      }
+    })
     tldwClientMock.listSkills.mockResolvedValue({
       skills: [],
       count: 0,
@@ -85,7 +106,7 @@ describe("SkillsManager imports", () => {
     tldwClientMock.importSkill.mockResolvedValue({ name: "imported-skill" })
     tldwClientMock.importSkillFile.mockResolvedValue({ name: "imported-file-skill" })
     tldwClientMock.seedSkills.mockResolvedValue({
-      seeded: ["summarize", "code-review", "feynman-technique"],
+      seeded: [" summarize ", "code-review", "feynman-technique"],
       count: 3
     })
 
@@ -118,6 +139,14 @@ describe("SkillsManager imports", () => {
     cleanup()
     Modal.destroyAll()
     message.destroy()
+    if (originalClipboard) {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard
+      })
+    } else {
+      Reflect.deleteProperty(navigator, "clipboard")
+    }
   })
 
   const renderManager = () =>
@@ -301,6 +330,49 @@ describe("SkillsManager imports", () => {
         overwrite: false
       })
     })
+
+    const successActions = await screen.findByTestId("skills-success-actions")
+    expect(successActions).toHaveTextContent("Skill imported")
+    fireEvent.click(within(successActions).getByRole("button", { name: "View skill" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.getSkill).toHaveBeenCalledWith("imported-skill")
+    })
+  })
+
+  it("falls back to the validated import name when the API returns an invalid name", async () => {
+    tldwClientMock.importSkill.mockResolvedValueOnce({ name: "Imported Skill" })
+
+    renderManager()
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Import" }))
+    fireEvent.click(await screen.findByText("Import Text"))
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Import Skill from Text"
+    })
+
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "fallback-skill" }
+    })
+    fireEvent.change(within(dialog).getByLabelText("SKILL.md Content"), {
+      target: {
+        value: "---\nname: fallback-skill\ndescription: imported\n---\n\nBody"
+      }
+    })
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import" }))
+
+    const successActions = await screen.findByTestId("skills-success-actions")
+    fireEvent.click(within(successActions).getByRole("button", { name: "View skill" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.getSkill).toHaveBeenCalledWith("fallback-skill")
+    })
   })
 
   it("keeps file import flow functional via importSkillFile", async () => {
@@ -336,6 +408,17 @@ describe("SkillsManager imports", () => {
     await waitFor(() => {
       expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: false })
     })
+
+    const successActions = await screen.findByTestId("skills-success-actions")
+    expect(successActions).toHaveTextContent("Built-in skills seeded")
+
+    fireEvent.click(within(successActions).getByRole("button", { name: "Test summarize" }))
+    expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("summarize")
+
+    fireEvent.click(within(successActions).getByRole("button", { name: "Copy /skill summarize" }))
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("/skill summarize")
+    })
   })
 
   it("seeds built-in skills with overwrite via seedSkills action", async () => {
@@ -350,6 +433,33 @@ describe("SkillsManager imports", () => {
 
     await waitFor(() => {
       expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: true })
+    })
+  })
+
+  it("offers test-run and copy-invocation actions after creating a skill", async () => {
+    renderManager()
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "New Skill" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Complete create" }))
+
+    const successActions = await screen.findByTestId("skills-success-actions")
+    expect(successActions).toHaveTextContent("Skill created")
+
+    fireEvent.click(within(successActions).getByRole("button", { name: "Test run" }))
+    expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("created-skill")
+
+    fireEvent.click(
+      within(successActions).getByRole("button", {
+        name: "Copy /skill created-skill"
+      })
+    )
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("/skill created-skill")
     })
   })
 })
