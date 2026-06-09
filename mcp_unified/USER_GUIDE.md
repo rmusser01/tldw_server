@@ -129,9 +129,13 @@ module has a stable `read_receipt_secret` configured.
 For existing-file edits, prefer `fs.patch` over whole-file replacement. It
 accepts unified diff text, derives affected paths before execution for path
 policy checks, validates context in memory, and only writes after preimage
-checks pass. For whole-file creation or deliberate replacement, use `fs.write`.
-`fs.write` `mode="create"` fails if the file already exists. `mode="replace"`
-requires either `expected_sha256` or a valid `read_receipt` from `fs.read`.
+checks pass. For small literal replacements where a unified diff is unnecessary,
+`fs.edit` replaces one exact UTF-8 string in an existing file. It rejects missing
+or non-unique matches unless `replace_all=true`, and it also requires either
+`expected_sha256` or a valid `read_receipt` from `fs.read`. For whole-file
+creation or deliberate replacement, use `fs.write`. `fs.write` `mode="create"`
+fails if the file already exists. `mode="replace"` requires either
+`expected_sha256` or a valid `read_receipt` from `fs.read`.
 
 This read-before-mutate flow protects against stale edits: if a file changes
 after the model read it, the expected hash or receipt no longer matches and the
@@ -161,7 +165,7 @@ The executable filesystem actions today are:
 
 - `read`: inspect file content, directory listings, search results, and path
   metadata.
-- `edit`: bounded existing-file edits through `fs.patch`.
+- `edit`: bounded existing-file edits through `fs.patch` or `fs.edit`.
 - `write`: deliberate whole-file create or replace through `fs.write`.
 
 The reserved action names are `delete`, `rename`, `move`, `share`, `export`,
@@ -209,7 +213,8 @@ source, and redaction status. They should not include raw file content, read
 receipts, raw diffs, or absolute host paths.
 
 `fs.read_text` and `fs.write_text` remain compatibility tools for older clients.
-New profiles and front-ends should prefer `fs.read`, `fs.patch`, and `fs.write`.
+New profiles and front-ends should prefer `fs.read`, `fs.patch`, `fs.edit`, and
+`fs.write`.
 
 Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass

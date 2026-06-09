@@ -758,6 +758,52 @@ async def test_path_grants_are_authoritative_when_legacy_allowlist_also_present(
 
 
 @pytest.mark.asyncio
+async def test_path_grants_treat_fs_edit_as_edit_action() -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    allowed = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read", "edit"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.edit",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="edit"),
+    )
+    denied = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {
+                "path_scope_mode": "workspace_root",
+                "path_grants": [
+                    {"prefix": "documents", "actions": ["read"]},
+                ],
+            },
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.edit",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="edit"),
+    )
+
+    assert allowed["within_scope"] is True  # nosec B101
+    assert allowed["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
+    assert denied["within_scope"] is False  # nosec B101
+    assert denied["reason"] == "path_action_not_granted"  # nosec B101
+    assert denied["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_empty_path_grants_fail_closed_even_with_legacy_allowlist() -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
