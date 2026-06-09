@@ -5,11 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerDeleteNodeResponse,
+    ExplainerJobAcceptedResponse,
+    ExplainerJobStatusResponse,
+    ExplainerNodeExpandRequest,
     ExplainerNodeCreateRequest,
     ExplainerNodePatchRequest,
     ExplainerNodeResponse,
+    ExplainerQuestionAnswerRequest,
     ExplainerSessionCreateRequest,
     ExplainerSessionListResponse,
     ExplainerSessionPatchRequest,
@@ -18,11 +23,13 @@ from tldw_Server_API.app.api.v1.schemas.explainer import (
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
+from tldw_Server_API.app.core.Explainer.jobs import EXPLAINER_DOMAIN
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 from tldw_Server_API.app.core.Explainer.service import (
     ExplainerService,
     map_explainer_service_error,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 router = APIRouter(prefix="/explainer", tags=["explainer"])
 
@@ -33,8 +40,8 @@ def _owner_user_id(current_user: User) -> str:
     return str(current_user.id)
 
 
-def _service(db: ExplainerDatabase) -> ExplainerService:
-    return ExplainerService(ExplainerRepository(db))
+def _service(db: ExplainerDatabase, job_manager=None) -> ExplainerService:
+    return ExplainerService(ExplainerRepository(db), job_manager=job_manager)
 
 
 def _source_payloads(sources) -> list[dict]:
@@ -48,6 +55,20 @@ def _citation_payloads(citations) -> list[dict]:
 def _raise_http(exc: Exception) -> None:
     status_code, detail = map_explainer_service_error(exc)
     raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+def _job_payload(job: dict) -> dict:
+    payload = job.get("payload") or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _public_job_error(job: dict) -> str | None:
+    raw_status = str(job.get("status") or "").strip().lower()
+    if raw_status == "failed":
+        return "Explainer job failed."
+    if raw_status == "cancelled":
+        return "Explainer job was cancelled."
+    return None
 
 
 @router.post(
@@ -238,3 +259,83 @@ async def delete_explainer_node(
     except Exception as exc:
         _raise_http(exc)
     return ExplainerDeleteNodeResponse(**result)
+
+
+@router.post(
+    "/sessions/{session_id}/nodes/{node_id}/expand",
+    response_model=ExplainerJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue Explainer node expansion",
+)
+async def expand_explainer_node(
+    session_id: str,
+    node_id: str,
+    body: ExplainerNodeExpandRequest,
+    current_user: User = Depends(get_request_user),
+    db: ExplainerDatabase = Depends(get_explainer_db),
+    jm: JobManager = Depends(get_job_manager),
+) -> ExplainerJobAcceptedResponse:
+    try:
+        accepted = _service(db, jm).enqueue_node_expansion(
+            session_id=session_id,
+            node_id=node_id,
+            owner_user_id=_owner_user_id(current_user),
+            intent=body.intent,
+        )
+    except Exception as exc:
+        _raise_http(exc)
+    return ExplainerJobAcceptedResponse.from_domain(accepted)
+
+
+@router.post(
+    "/sessions/{session_id}/nodes/{node_id}/answer-question",
+    response_model=ExplainerNodeResponse,
+    summary="Persist an Explainer question answer",
+)
+async def answer_explainer_question(
+    session_id: str,
+    node_id: str,
+    body: ExplainerQuestionAnswerRequest,
+    current_user: User = Depends(get_request_user),
+    db: ExplainerDatabase = Depends(get_explainer_db),
+) -> ExplainerNodeResponse:
+    try:
+        node = _service(db).answer_question(
+            session_id,
+            node_id,
+            owner_user_id=_owner_user_id(current_user),
+            selected_option_id=body.selected_option_id,
+            selected_custom_answer=body.selected_custom_answer,
+        )
+    except Exception as exc:
+        _raise_http(exc)
+    return ExplainerNodeResponse.from_domain(node)
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=ExplainerJobStatusResponse,
+    summary="Get an ownership-scoped Explainer job",
+)
+async def get_explainer_job_status(
+    job_id: int,
+    current_user: User = Depends(get_request_user),
+    jm: JobManager = Depends(get_job_manager),
+) -> ExplainerJobStatusResponse:
+    job = jm.get_job(job_id)
+    if (
+        not job
+        or str(job.get("domain") or "").strip().lower() != EXPLAINER_DOMAIN
+        or str(job.get("owner_user_id") or "").strip() != _owner_user_id(current_user)
+    ):
+        raise HTTPException(status_code=404, detail="Explainer job not found")
+    payload = _job_payload(job)
+    return ExplainerJobStatusResponse(
+        job_id=str(job.get("id")),
+        session_id=payload.get("session_id"),
+        node_id=payload.get("node_id"),
+        status=str(job.get("status") or "queued"),
+        progress_percent=job.get("progress_percent"),
+        progress_message=job.get("progress_message"),
+        error=_public_job_error(job),
+    )

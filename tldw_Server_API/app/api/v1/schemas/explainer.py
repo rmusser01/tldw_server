@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerSession,
     ExplainerSessionSummary,
 )
+from tldw_Server_API.app.core.Explainer.jobs import ExplainerJobAccepted
 
 
 class _ExplainerSchema(BaseModel):
@@ -176,6 +177,41 @@ class ExplainerNodePatchRequest(_ExplainerSchema):
     question_options: list[dict[str, Any]] | None = Field(default=None, alias="questionOptions")
     generation_metadata: dict[str, Any] | None = Field(default=None, alias="generationMetadata")
     citations: list[ExplainerCitationRequest] | None = None
+
+
+class ExplainerNodeExpandRequest(_ExplainerSchema):
+    intent: ExplainerOutputIntent | None = None
+
+
+class ExplainerQuestionAnswerRequest(_ExplainerSchema):
+    selected_option_id: str | None = Field(default=None, alias="selectedOptionId")
+    selected_custom_answer: str | None = Field(default=None, alias="selectedCustomAnswer")
+
+
+class ExplainerJobAcceptedResponse(_ExplainerSchema):
+    job_id: str = Field(alias="jobId")
+    session_id: str = Field(alias="sessionId")
+    node_id: str = Field(alias="nodeId")
+    status: str
+
+    @classmethod
+    def from_domain(cls, accepted: ExplainerJobAccepted) -> "ExplainerJobAcceptedResponse":
+        return cls(
+            job_id=accepted.job_id,
+            session_id=accepted.session_id,
+            node_id=accepted.node_id,
+            status=accepted.status,
+        )
+
+
+class ExplainerJobStatusResponse(_ExplainerSchema):
+    job_id: str = Field(alias="jobId")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    node_id: str | None = Field(default=None, alias="nodeId")
+    status: str
+    progress_percent: float | None = Field(default=None, alias="progressPercent")
+    progress_message: str | None = Field(default=None, alias="progressMessage")
+    error: str | None = None
 
 
 class ExplainerSessionResponse(_ExplainerSchema):

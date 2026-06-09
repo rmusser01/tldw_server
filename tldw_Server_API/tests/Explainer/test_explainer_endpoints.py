@@ -5,12 +5,42 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.endpoints.explainer import router as explainer_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
+from tldw_Server_API.app.core.Explainer.jobs import (
+    EXPLAINER_DOMAIN,
+    EXPLAINER_JOB_TYPE,
+    EXPLAINER_QUEUE,
+)
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 
 pytestmark = pytest.mark.integration
+
+
+class FakeJobManager:
+    def __init__(self) -> None:
+        self.jobs: dict[int, dict] = {}
+        self.next_id = 700
+
+    def create_job(self, **kwargs):
+        job = {
+            "id": self.next_id,
+            "uuid": f"job-{self.next_id}",
+            "status": "queued",
+            "progress_percent": None,
+            "progress_message": None,
+            "result": None,
+            "last_error": None,
+            **kwargs,
+        }
+        self.jobs[self.next_id] = job
+        self.next_id += 1
+        return job
+
+    def get_job(self, job_id: int):
+        return self.jobs.get(int(job_id))
 
 
 @pytest.fixture()
@@ -19,6 +49,7 @@ def explainer_client(tmp_path):
     app.include_router(explainer_router, prefix="/api/v1", tags=["explainer"])
     db = ExplainerDatabase(tmp_path / "Explainer.db", client_id="test")
     current_user_id = {"value": 7}
+    fake_job_manager = FakeJobManager()
 
     async def _override_user():
         user_id = current_user_id["value"]
@@ -27,8 +58,13 @@ def explainer_client(tmp_path):
     async def _override_db():
         return db
 
+    def _override_job_manager():
+        return fake_job_manager
+
     app.dependency_overrides[get_request_user] = _override_user
     app.dependency_overrides[get_explainer_db] = _override_db
+    app.dependency_overrides[get_job_manager] = _override_job_manager
+    app.state.fake_job_manager = fake_job_manager
 
     def _set_user(user_id: int) -> None:
         current_user_id["value"] = user_id
@@ -430,3 +466,73 @@ def test_delete_node_removes_descendant_subtree_and_citations(explainer_client) 
     assert "Parent citation." not in str(body)
     assert "Child citation." not in str(body)
     assert "Grandchild citation." not in str(body)
+
+
+def test_expand_endpoint_returns_queued_job_and_marks_node(explainer_client) -> None:
+    client, db, _set_user = explainer_client
+    created = client.post("/api/v1/explainer/sessions", json=_create_goal_payload(outputIntent="both"))
+    assert created.status_code == 201
+    session_body = created.json()
+    node_id = session_body["rootNodeIds"][0]
+
+    response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{node_id}/expand",
+        json={"intent": "both"},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["jobId"]
+    assert body["sessionId"] == session_body["id"]
+    assert body["nodeId"] == node_id
+    assert body["status"] == "queued"
+    loaded = ExplainerRepository(db).get_session(session_body["id"], owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[node_id].status == "queued"
+    fake_job_manager = client.app.state.fake_job_manager
+    [job] = fake_job_manager.jobs.values()
+    assert job["domain"] == EXPLAINER_DOMAIN
+    assert job["queue"] == EXPLAINER_QUEUE
+    assert job["job_type"] == EXPLAINER_JOB_TYPE
+    assert job["owner_user_id"] == "7"
+
+
+def test_answer_question_endpoint_persists_selected_answer(explainer_client) -> None:
+    client, db, _set_user = explainer_client
+    created = client.post("/api/v1/explainer/sessions", json=_create_goal_payload())
+    assert created.status_code == 201
+    session_body = created.json()
+    node_id = session_body["rootNodeIds"][0]
+
+    response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{node_id}/answer-question",
+        json={"selectedOptionId": "option-1", "selectedCustomAnswer": "Use practical examples"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selectedOptionId"] == "option-1"
+    assert body["selectedCustomAnswer"] == "Use practical examples"
+    loaded = ExplainerRepository(db).get_session(session_body["id"], owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[node_id].selected_option_id == "option-1"
+    assert loaded.nodes[node_id].selected_custom_answer == "Use practical examples"
+
+
+def test_job_status_returns_404_for_cross_user_job(explainer_client) -> None:
+    client, _db, set_user = explainer_client
+    fake_job_manager = client.app.state.fake_job_manager
+    job = fake_job_manager.create_job(
+        domain=EXPLAINER_DOMAIN,
+        queue=EXPLAINER_QUEUE,
+        job_type=EXPLAINER_JOB_TYPE,
+        payload={"session_id": "session-1", "node_id": "node-1", "intent": "explain"},
+        owner_user_id="7",
+        priority=5,
+        idempotency_key="explainer:session-1:node-1:explain:rev",
+    )
+
+    set_user(8)
+    response = client.get(f"/api/v1/explainer/jobs/{job['id']}")
+
+    assert response.status_code == 404

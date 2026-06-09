@@ -9,9 +9,15 @@ from tldw_Server_API.app.core.DB_Management.Explainer_DB import InputError
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerGrounding,
     ExplainerNode,
+    ExplainerNodeStatus,
+    ExplainerOutputIntent,
     ExplainerSelectedSource,
     ExplainerSession,
     ExplainerSessionSummary,
+)
+from tldw_Server_API.app.core.Explainer.jobs import (
+    ExplainerJobAccepted,
+    enqueue_explainer_node_expansion_job,
 )
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 
@@ -27,8 +33,9 @@ class ExplainerNotFoundError(LookupError):
 class ExplainerService:
     """Application service for ownership-aware Explainer CRUD behavior."""
 
-    def __init__(self, repo: ExplainerRepository) -> None:
+    def __init__(self, repo: ExplainerRepository, job_manager: Any | None = None) -> None:
         self.repo = repo
+        self.job_manager = job_manager
 
     def create_session(
         self,
@@ -173,6 +180,65 @@ class ExplainerService:
             raise ExplainerNotFoundError("Explainer node not found")
         return {"status": "deleted", "id": node_id}
 
+    def enqueue_node_expansion(
+        self,
+        *,
+        session_id: str,
+        node_id: str,
+        owner_user_id: str,
+        intent: str | None = None,
+    ) -> ExplainerJobAccepted:
+        if self.job_manager is None:
+            raise ExplainerValidationError("Explainer Jobs backend unavailable")
+        session = self.get_session(session_id, owner_user_id=owner_user_id)
+        node = session.nodes.get(node_id)
+        if node is None:
+            raise ExplainerNotFoundError("Explainer node not found")
+        effective_intent = intent or node.intent or session.output_intent
+        self._validate_intent(effective_intent)
+        accepted = enqueue_explainer_node_expansion_job(
+            jm=self.job_manager,
+            session=session,
+            node=node,
+            owner_user_id=owner_user_id,
+            intent=effective_intent,
+        )
+        queued = self.repo.update_node(
+            session_id,
+            node_id,
+            owner_user_id=owner_user_id,
+            status=ExplainerNodeStatus.QUEUED.value,
+        )
+        if queued is None:
+            raise ExplainerNotFoundError("Explainer node not found")
+        return accepted
+
+    def answer_question(
+        self,
+        session_id: str,
+        node_id: str,
+        *,
+        owner_user_id: str,
+        selected_option_id: str | None = None,
+        selected_custom_answer: str | None = None,
+    ) -> ExplainerNode:
+        if not (selected_option_id or selected_custom_answer):
+            raise ExplainerValidationError("selected answer is required")
+        session = self.get_session(session_id, owner_user_id=owner_user_id)
+        if node_id not in session.nodes:
+            raise ExplainerNotFoundError("Explainer node not found")
+        node = self.repo.update_node(
+            session_id,
+            node_id,
+            owner_user_id=owner_user_id,
+            selected_option_id=selected_option_id,
+            selected_custom_answer=selected_custom_answer,
+            status=ExplainerNodeStatus.COMPLETE.value,
+        )
+        if node is None:
+            raise ExplainerNotFoundError("Explainer node not found")
+        return node
+
     @staticmethod
     def _validate_grounding(
         *,
@@ -181,6 +247,12 @@ class ExplainerService:
     ) -> None:
         if grounding == ExplainerGrounding.SOURCE_ONLY.value and not selected_sources:
             raise ExplainerValidationError("source_only grounding requires at least one selected source")
+
+    @staticmethod
+    def _validate_intent(intent: str) -> None:
+        allowed = {item.value for item in ExplainerOutputIntent}
+        if intent not in allowed:
+            raise ExplainerValidationError(f"intent must be one of {sorted(allowed)}")
 
 
 def map_explainer_service_error(exc: Exception) -> tuple[int, str]:
