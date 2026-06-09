@@ -131,11 +131,11 @@ accepts unified diff text, derives affected paths before execution for path
 policy checks, validates context in memory, and only writes after preimage
 checks pass. For small literal replacements where a unified diff is unnecessary,
 `fs.edit` replaces one exact UTF-8 string in an existing file. It rejects missing
-or non-unique matches unless `replace_all=true`, and it also requires either
-`expected_sha256` or a valid `read_receipt` from `fs.read`. For whole-file
-creation or deliberate replacement, use `fs.write`. `fs.write` `mode="create"`
-fails if the file already exists. `mode="replace"` requires either
-`expected_sha256` or a valid `read_receipt` from `fs.read`.
+or non-unique matches unless `replace_all=true`, rejects overlapping matches,
+and it also requires either `expected_sha256` or a valid `read_receipt` from
+`fs.read`. For whole-file creation or deliberate replacement, use `fs.write`.
+`fs.write` `mode="create"` fails if the file already exists. `mode="replace"`
+requires either `expected_sha256` or a valid `read_receipt` from `fs.read`.
 
 This read-before-mutate flow protects against stale edits: if a file changes
 after the model read it, the expected hash or receipt no longer matches and the

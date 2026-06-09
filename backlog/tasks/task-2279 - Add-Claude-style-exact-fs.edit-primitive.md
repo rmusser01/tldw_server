@@ -41,6 +41,8 @@ Use the existing filesystem module/read-receipt/preimage helpers. Add tests firs
 - Added `fs.edit` tool definition, argument validation, async dispatch, exact replacement helper, edit-specific preimage/read-receipt validation, and structured eval metadata.
 - Added regression coverage for metadata, exact replacement, required preimage, missing/non-unique old strings, `replace_all`, dry-run, read receipts, receipt context mismatch, binary rejection, and path-grant enforcement.
 - Updated `mcp_unified/USER_GUIDE.md` to document `fs.edit` as the small exact-replacement primitive while keeping `fs.patch` preferred for diff-first edits.
+- Addressed PR review feedback by preserving raw exact-match strings, enforcing expected-SHA precedence over receipts, rejecting overlapping matches, using no-follow descriptor reads for edit preimages, adding post-read size enforcement, and adding docstrings for the new helpers.
+- Skipped the `_atomic_write_text_file` AttributeError finding as invalid: the helper is a `@staticmethod` on `FilesystemModule`, not a module-level function, and the edit path now calls it through the class explicitly.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -49,6 +51,7 @@ Use the existing filesystem module/read-receipt/preimage helpers. Add tests firs
 - Implemented the Claude-style exact `fs.edit` primitive as a bounded `edit` action in the existing filesystem module.
 - Verification run before commit: focused filesystem/path-enforcement pytest suite, ruff on touched Python, py_compile on the production module, Bandit on the production module, and `git diff --check`.
 - Draft PR: https://github.com/rmusser01/tldw_server/pull/2321
+- Review follow-up verification: review regression tests, full focused filesystem/path-enforcement suite, ruff, py_compile, Bandit on production filesystem module, and `git diff --check`.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

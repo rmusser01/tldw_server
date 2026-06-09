@@ -17,6 +17,7 @@ Exposes:
 from __future__ import annotations
 
 import asyncio
+import errno
 import fnmatch
 import hashlib
 import os
@@ -386,7 +387,14 @@ class FilesystemModule(BaseModule):
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        args = self.sanitize_input(arguments or {})
+        raw_args = arguments or {}
+        if tool_name == "fs.edit":
+            args = {
+                key: value if key in {"old_string", "new_string"} else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
+        else:
+            args = self.sanitize_input(raw_args)
         self.validate_tool_arguments(tool_name, args)
 
         workspace_root = await self._resolve_workspace_root(context)
@@ -1751,6 +1759,85 @@ class FilesystemModule(BaseModule):
                 if tmp_path.exists():
                     tmp_path.unlink()
 
+    @staticmethod
+    def _read_existing_regular_file_no_follow(target: Path, *, max_bytes: int) -> tuple[bytes, os.stat_result]:
+        """Read a regular file through a descriptor opened without following symlinks when supported.
+
+        The helper performs the size check both before and after reading so a file
+        that grows between `fstat()` and `read()` cannot bypass the configured
+        preimage limit. Platforms without `O_NOFOLLOW` fall back to opening the
+        file and then rejecting paths that still identify as symlinks.
+        """
+
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+
+        try:
+            fd = os.open(target, flags)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise ValueError("file_not_regular") from exc
+            raise
+
+        try:
+            if not hasattr(os, "O_NOFOLLOW") and target.is_symlink():
+                raise ValueError("file_not_regular")
+            file_stat = os.fstat(fd)
+            if not stat_module.S_ISREG(file_stat.st_mode):
+                raise ValueError("file_not_regular")
+            if file_stat.st_size > max_bytes:
+                raise ValueError("edit_preimage_too_large")
+
+            chunks: list[bytes] = []
+            remaining = max_bytes + 1
+            while remaining > 0:
+                chunk = os.read(fd, min(remaining, 1024 * 1024))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            payload = b"".join(chunks)
+            if len(payload) > max_bytes:
+                raise ValueError("edit_preimage_too_large")
+            return payload, file_stat
+        finally:
+            os.close(fd)
+
+    @classmethod
+    def _assert_edit_preimage_unchanged_no_follow(
+        cls,
+        target: Path,
+        expected_sha256: str,
+        expected_size: int,
+        expected_stat: os.stat_result,
+    ) -> None:
+        """Recheck an edit target using no-follow descriptor reads before committing."""
+
+        try:
+            payload, current_stat = cls._read_existing_regular_file_no_follow(target, max_bytes=expected_size)
+        except (OSError, ValueError) as exc:
+            raise ValueError("preimage_changed_during_commit") from exc
+        if (
+            current_stat.st_dev != expected_stat.st_dev
+            or current_stat.st_ino != expected_stat.st_ino
+            or current_stat.st_size != expected_size
+            or len(payload) != expected_size
+            or hashlib.sha256(payload).hexdigest() != expected_sha256
+        ):
+            raise ValueError("preimage_changed_during_commit")
+
+    @staticmethod
+    def _find_overlapping_matches(text: str, old_string: str) -> list[int]:
+        """Return every match start for exact edit uniqueness checks, including overlaps."""
+
+        matches: list[int] = []
+        index = text.find(old_string)
+        while index != -1:
+            matches.append(index)
+            index = text.find(old_string, index + 1)
+        return matches
+
     def _edit_file(
         self,
         workspace_root: Path,
@@ -1765,21 +1852,19 @@ class FilesystemModule(BaseModule):
         write_max_bytes: int,
         context: Any | None,
     ) -> dict[str, Any]:
+        """Apply a bounded exact string replacement to an existing UTF-8 file.
+
+        The operation rejects binary payloads, requires an explicit expected hash
+        or read receipt, rejects ambiguous matches unless `replace_all` is set,
+        and performs a no-follow preimage recheck immediately before the atomic
+        replacement. Returned metadata intentionally excludes raw file content.
+        """
+
         if "\x00" in old_string or "\x00" in new_string:
             raise ValueError("binary content is not supported by fs.edit")
 
         rel_path = self._to_workspace_relative_path(workspace_root, target)
-        if target.is_symlink():
-            raise ValueError("file_not_regular")
-        if not target.exists():
-            raise FileNotFoundError(f"path not found: {target}")
-        if not target.is_file():
-            raise ValueError("file_not_regular")
-
-        file_size = target.stat(follow_symlinks=False).st_size
-        if file_size > preimage_max_bytes:
-            raise ValueError("edit_preimage_too_large")
-        payload = target.read_bytes()
+        payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
         if b"\x00" in payload:
             raise ValueError("binary content is not supported by fs.edit")
         try:
@@ -1798,11 +1883,18 @@ class FilesystemModule(BaseModule):
             context,
         )
 
-        matches = text_before.count(old_string)
+        match_positions = self._find_overlapping_matches(text_before, old_string)
+        matches = len(match_positions)
         if matches == 0:
             raise ValueError("edit_old_string_not_found")
         if matches > 1 and not replace_all:
             raise ValueError("edit_old_string_not_unique")
+        has_overlapping_matches = any(
+            next_position < position + len(old_string)
+            for position, next_position in zip(match_positions, match_positions[1:], strict=False)
+        )
+        if has_overlapping_matches:
+            raise ValueError("edit_old_string_overlaps")
 
         replacements = matches if replace_all else 1
         text_after = text_before.replace(old_string, new_string) if replace_all else text_before.replace(
@@ -1816,8 +1908,8 @@ class FilesystemModule(BaseModule):
 
         sha256_after = hashlib.sha256(data_after).hexdigest()
         if not dry_run:
-            self._assert_preimage_unchanged(target, sha256_before, bytes_before)
-            self._atomic_write_text_file(target, text_after)
+            self._assert_edit_preimage_unchanged_no_follow(target, sha256_before, bytes_before, file_stat)
+            FilesystemModule._atomic_write_text_file(target, text_after)
 
         result: dict[str, Any] = {
             "path": rel_path,
@@ -1851,16 +1943,24 @@ class FilesystemModule(BaseModule):
         read_receipt: Any,
         context: Any | None,
     ) -> None:
+        """Authorize an edit preimage using either an expected hash or a read receipt.
+
+        If the caller supplies `expected_sha256`, it is treated as the stricter
+        assertion and must match the current preimage even when a valid receipt
+        is also supplied.
+        """
+
         has_expected = isinstance(expected_sha256, str) and bool(expected_sha256)
         has_receipt = isinstance(read_receipt, str) and bool(read_receipt)
         if not has_expected and not has_receipt:
             raise ValueError("edit_preimage_required")
-        if has_expected and str(expected_sha256) == sha256_before:
+        if has_expected:
+            if str(expected_sha256) != sha256_before:
+                raise ValueError("edit_preimage_mismatch")
             return
         if has_receipt:
             self._validate_edit_read_receipt(str(read_receipt), rel_path, sha256_before, bytes_before, context)
             return
-        raise ValueError("edit_preimage_mismatch")
 
     def _validate_edit_read_receipt(
         self,
@@ -1870,6 +1970,8 @@ class FilesystemModule(BaseModule):
         bytes_before: int,
         context: Any | None,
     ) -> None:
+        """Validate that a read receipt still describes the current edit preimage."""
+
         try:
             payload = self._read_receipts.validate(receipt)
         except ReadReceiptError as exc:
