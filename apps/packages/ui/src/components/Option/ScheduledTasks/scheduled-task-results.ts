@@ -1,6 +1,8 @@
 import type { CompanionHomeItem } from "@/services/companion-home"
 import type { NotificationItem } from "@/services/notifications"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import { BLOCKED_STATE_LABEL } from "@/design-system"
+import type { BadgeVariant } from "@/components/ui/primitives"
 
 import {
   buildScheduledTaskResultDedupeKey,
@@ -386,7 +388,7 @@ const buildStatusLabel = (
   }
 
   if (state === "blocked") {
-    return "Blocked"
+    return BLOCKED_STATE_LABEL
   }
 
   if (state === "paused") {
@@ -402,6 +404,35 @@ const buildStatusLabel = (
   }
 
   return "Completed"
+}
+
+export const getScheduledTaskResultStatusLabel = (
+  result: Pick<ScheduledTaskResultItem, "signalKind" | "state">
+): string => {
+  if (result.signalKind === "result") return "Found results"
+  if (result.state === "blocked") return BLOCKED_STATE_LABEL
+  if (result.signalKind === "failure") return "Needs attention"
+  if (result.state === "paused") return "Paused"
+  if (result.signalKind === "running") return "Running now"
+  return "Completed/no results"
+}
+
+export const scheduledTaskResultSeverityToBadgeVariant = (
+  severity: ScheduledTaskResultSeverity
+): BadgeVariant => {
+  switch (severity) {
+    case "success":
+      return "success"
+    case "warning":
+      return "warning"
+    case "error":
+      return "danger"
+    case "info":
+      return "info"
+  }
+
+  const _exhaustive: never = severity
+  return _exhaustive
 }
 
 const canMutateResults = (mode: ScheduledTaskResultsCapabilityMode): boolean =>

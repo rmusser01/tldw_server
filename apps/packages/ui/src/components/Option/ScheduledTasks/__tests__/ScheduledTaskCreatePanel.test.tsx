@@ -5,6 +5,8 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
+
 import { ScheduledTaskCreatePanel } from "../ScheduledTaskCreatePanel"
 import {
   REQUIRED_WATCH_AVAILABILITY_GATES,
@@ -263,6 +265,7 @@ describe("ScheduledTaskCreatePanel", () => {
     )
 
     expect(screen.getByText(/private-looking values/)).toBeInTheDocument()
+    expectInsideDesignSystemAlert(/private-looking values/)
     expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent(
       "https://example.com/feed?token=secret"
     )

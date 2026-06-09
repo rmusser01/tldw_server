@@ -1,7 +1,13 @@
 import React, { useMemo, useState } from "react"
-import { Alert, Button, Card, Empty, Input, Segmented, Space, Tag, Typography } from "antd"
+import { Button, Card, Input, Segmented, Space, Typography } from "antd"
 import type { SegmentedValue } from "antd/es/segmented"
 
+import { EmptyState } from "@/components/ui/feedback"
+import {
+  Alert as DesignSystemAlert,
+  Badge as DesignSystemBadge,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 import type { CreateScheduledTaskReminderPayload } from "@/services/scheduled-tasks-control-plane"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import {
@@ -42,6 +48,28 @@ const isTemplateFilterId = (value: SegmentedValue): value is ScheduledTaskTempla
 
 const requiresWatchlistsHandoff = (template: ScheduledTaskTemplate): boolean =>
   template.id === "watch" || template.id === "ingest"
+
+const templateStateToBadgeVariant = (
+  state: ScheduledTaskTemplate["state"]
+): BadgeVariant => {
+  switch (state) {
+    case "available":
+      return "success"
+    case "limited_availability":
+    case "needs_setup":
+      return "warning"
+    case "unavailable":
+      return "danger"
+    case "planned":
+      return "secondary"
+    case "managed_in_watchlists":
+    case "handoff_only":
+      return "info"
+  }
+
+  const _exhaustive: never = state
+  return _exhaustive
+}
 
 const PRIVATE_LOOKING_PROSE_PATTERN =
   /\b(api[_ -]?key|password|passphrase|secret|bearer\s+token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)\b|sk-[A-Za-z0-9_-]+/i
@@ -105,7 +133,9 @@ const TemplateCard: React.FC<{
     title={
       <Space wrap size={8}>
         <Typography.Text strong>{template.title}</Typography.Text>
-        <Tag>{stateLabel}</Tag>
+        <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+          {stateLabel}
+        </DesignSystemBadge>
       </Space>
     }
   >
@@ -155,7 +185,9 @@ const HandoffPanel: React.FC<{
   return (
     <Card title={template.title} size="small">
       <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-        <Tag>{getScheduledTaskTemplateStateLabel(template.state)}</Tag>
+        <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+          {getScheduledTaskTemplateStateLabel(template.state)}
+        </DesignSystemBadge>
         <Typography.Text>{template.intent}</Typography.Text>
         <Typography.Paragraph style={{ marginBottom: 0 }}>
           {watchlistsHandoff
@@ -177,9 +209,8 @@ const HandoffPanel: React.FC<{
           onChange={(event) => setSourceNote(event.target.value)}
         />
         {hasUnsafeSource ? (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title="This source contains private-looking values. Remove secrets before copying or opening setup."
           />
         ) : null}
@@ -206,7 +237,9 @@ const HandoffPanel: React.FC<{
 const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => (
   <Card title={template.title} size="small">
     <Space orientation="vertical" size={8}>
-      <Tag>{getScheduledTaskTemplateStateLabel(template.state)}</Tag>
+      <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+        {getScheduledTaskTemplateStateLabel(template.state)}
+      </DesignSystemBadge>
       <Typography.Text>{template.intent}</Typography.Text>
       <Typography.Paragraph style={{ marginBottom: 0 }}>
         {template.description}
@@ -333,7 +366,11 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
                 ))}
               </div>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No templates match this filter." />
+              <EmptyState
+                variant="inline"
+                size="sm"
+                title="No templates match this filter."
+              />
             )}
           </>
         )}

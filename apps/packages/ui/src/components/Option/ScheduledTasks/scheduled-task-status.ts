@@ -1,4 +1,6 @@
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import { BLOCKED_STATE_LABEL } from "@/design-system"
+import type { BadgeVariant } from "@/components/ui/primitives"
 
 export type ScheduledTaskStatusTone =
   | "success"
@@ -86,20 +88,20 @@ export const SCHEDULED_TASK_ATTENTION_STATUS_KEYS: readonly ScheduledTaskStatusK
 export const isNativeReminderTask = (task: ScheduledTask): boolean =>
   task.primitive === "reminder_task" && task.edit_mode === "native"
 
-export const scheduledTaskStatusToneToTagColor = (
+export const scheduledTaskStatusToneToBadgeVariant = (
   status: ScheduledTaskProductStatus
-): string => {
+): BadgeVariant => {
   switch (status.tone) {
     case "success":
-      return "green"
+      return "success"
     case "processing":
-      return "processing"
+      return "info"
     case "warning":
-      return "gold"
+      return "warning"
     case "error":
-      return "red"
+      return "danger"
     default:
-      return "default"
+      return "secondary"
   }
 }
 
@@ -227,7 +229,7 @@ export const getScheduledTaskProductStatus = (
   ) {
     return {
       key: "blocked",
-      label: "Blocked",
+      label: BLOCKED_STATE_LABEL,
       tone: "warning",
       description: "This task cannot run until a required dependency is fixed."
     }

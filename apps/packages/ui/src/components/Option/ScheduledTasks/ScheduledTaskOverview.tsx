@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, Card, Col, Row, Space, Tag, Typography } from "antd"
+import { Button, Card, Col, Row, Space, Typography } from "antd"
+import { Badge as DesignSystemBadge } from "@/components/ui/primitives"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import {
   SCHEDULED_TASK_ATTENTION_STATUS_KEYS,
@@ -94,7 +95,11 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
             title="Total scheduled tasks"
             value={countLabel(tasks.length, "scheduled task")}
           >
-            {partial ? <Tag color="gold">Partial data</Tag> : <Tag color="blue">Loaded</Tag>}
+            {partial ? (
+              <DesignSystemBadge variant="warning">Partial data</DesignSystemBadge>
+            ) : (
+              <DesignSystemBadge variant="success">Loaded</DesignSystemBadge>
+            )}
           </OverviewPanel>
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -102,7 +107,9 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
             title="Needs attention"
             value={`${needsAttentionCount} needs attention`}
           >
-            {needsAttentionCount > 0 ? <Tag color="red">Review required</Tag> : null}
+            {needsAttentionCount > 0 ? (
+              <DesignSystemBadge variant="danger">Review required</DesignSystemBadge>
+            ) : null}
           </OverviewPanel>
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -110,7 +117,9 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
             title="Running now"
             value={`${runningNowCount} running now`}
           >
-            {runningNowCount > 0 ? <Tag color="processing">Active</Tag> : null}
+            {runningNowCount > 0 ? (
+              <DesignSystemBadge variant="info">Active</DesignSystemBadge>
+            ) : null}
           </OverviewPanel>
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -118,7 +127,9 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
             title="Next upcoming run"
             value={formatRunDate(nextRunTimestamp)}
           >
-            {nextRunTimestamp === null ? <Tag color="gold">Not scheduled</Tag> : null}
+            {nextRunTimestamp === null ? (
+              <DesignSystemBadge variant="warning">Not scheduled</DesignSystemBadge>
+            ) : null}
           </OverviewPanel>
         </Col>
       </Row>

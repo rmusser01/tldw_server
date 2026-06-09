@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 
 import { ScheduledTaskResultsPanel } from "../ScheduledTaskResultsPanel"
 import { projectScheduledTaskResults } from "../scheduled-task-results"
@@ -72,6 +73,20 @@ const buildResults = () =>
     { includeCompletedNoResults: true }
   )
 
+const expectInsideDesignSystemComponent = (
+  text: string | RegExp,
+  componentName: string
+): HTMLElement => {
+  const marker = `[data-ds-component="${componentName}"]`
+  const match = screen
+    .getAllByText(text)
+    .map((node) => node.closest(marker))
+    .find((node): node is HTMLElement => node instanceof HTMLElement)
+
+  expect(match).toBeTruthy()
+  return match
+}
+
 describe("ScheduledTaskResultsPanel", () => {
   it("renders projected success, failure, running, paused, and completed-no-results signals", () => {
     render(
@@ -86,12 +101,15 @@ describe("ScheduledTaskResultsPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Scheduled task results" })).toBeInTheDocument()
     expect(screen.getByText("Latest automation signals")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Latest automation signals")
     expect(screen.getByText("Release monitor")).toBeInTheDocument()
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
     expect(screen.getByText("Follow up")).toBeInTheDocument()
     expect(screen.getByText("Needs attention")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("Needs attention", "Badge")
     expect(screen.getByText("Running monitor")).toBeInTheDocument()
     expect(screen.getByText("Running now")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("Running now", "Badge")
     expect(screen.getByText("Paused monitor")).toBeInTheDocument()
     expect(screen.getByText("Paused monitor is paused.")).toBeInTheDocument()
     expect(screen.getByText("Paused")).toBeInTheDocument()
@@ -123,6 +141,7 @@ describe("ScheduledTaskResultsPanel", () => {
     await user.click(await screen.findByTitle("Watchlist monitor"))
 
     expect(screen.getByText("No results match these filters")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("No results match these filters", "EmptyState")
 
     await user.click(screen.getByRole("button", { name: "Clear filters" }))
     await user.click(screen.getByRole("combobox", { name: "Owner filter" }))
@@ -172,6 +191,7 @@ describe("ScheduledTaskResultsPanel", () => {
     )
 
     expect(screen.getByText("No scheduled tasks yet")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("No scheduled tasks yet", "EmptyState")
     await user.click(screen.getByRole("button", { name: "Create scheduled task" }))
     expect(onCreateTask).toHaveBeenCalledTimes(1)
 
@@ -186,6 +206,7 @@ describe("ScheduledTaskResultsPanel", () => {
     )
 
     expect(screen.getByText("No automation signals yet")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("No automation signals yet", "EmptyState")
   })
 
   it("opens a result with an accessible action name", async () => {

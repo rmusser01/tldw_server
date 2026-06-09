@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import { UNAVAILABLE_STATE_LABEL } from "@/design-system"
+
 import {
   SCHEDULED_TASK_TEMPLATE_FILTERS,
   SCHEDULED_TASK_TEMPLATES,
@@ -141,7 +143,7 @@ describe("scheduled task templates", () => {
       "Managed in Watchlists"
     )
     expect(getScheduledTaskTemplateStateLabel("planned")).toBe("Planned capability")
-    expect(getScheduledTaskTemplateStateLabel("unavailable")).toBe("Unavailable")
+    expect(getScheduledTaskTemplateStateLabel("unavailable")).toBe(UNAVAILABLE_STATE_LABEL)
   })
 
   it("exposes the expected filter list", () => {
