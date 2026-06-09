@@ -215,7 +215,9 @@ def create_filesystem_lock_manager(settings: Mapping[str, Any] | None = None) ->
     silently downgrading operator intent.
     """
 
-    raw_backend = (settings or {}).get("lock_manager_backend") or "memory"
+    raw_backend = (settings or {}).get("lock_manager_backend")
+    if raw_backend is None:
+        raw_backend = "memory"
     backend = str(raw_backend).strip().lower()
     if backend in {"", "memory", "in_memory"}:
         return InMemoryFilesystemLockManager()

@@ -460,9 +460,10 @@ async def test_filesystem_lock_manager_injection_shares_leases_between_modules(t
     assert reacquired["lease_id"] != first["lease_id"]  # nosec B101
 
 
-def test_filesystem_lock_manager_rejects_unsupported_backend_config() -> None:
+@pytest.mark.parametrize("backend", ["sqlite", False, 0])
+def test_filesystem_lock_manager_rejects_unsupported_backend_config(backend: Any) -> None:
     with pytest.raises(ValueError, match="unsupported filesystem lock_manager_backend"):
-        FilesystemModule(ModuleConfig(name="filesystem", settings={"lock_manager_backend": "sqlite"}))
+        FilesystemModule(ModuleConfig(name="filesystem", settings={"lock_manager_backend": backend}))
 
 
 @pytest.mark.asyncio
