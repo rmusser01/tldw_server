@@ -9,30 +9,10 @@ const registryLabels = vi.hoisted(() => ({
   ready: "Registry Ready",
 }))
 
-vi.mock("@/design-system", async (importActual) => {
-  const actual = await importActual<typeof import("@/design-system")>()
-
-  return {
-    ...actual,
-    BLOCKED_STATE_LABEL: registryLabels.blocked,
-    READY_STATE_LABEL: registryLabels.ready,
-    getDesignSystemState: vi.fn(
-      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
-        const state = actual.getDesignSystemState(key)
-
-        return {
-          ...state,
-          label:
-            key === "blocked"
-              ? registryLabels.blocked
-              : key === "ready"
-                ? registryLabels.ready
-                : state.label,
-        }
-      }
-    ),
-  }
-})
+vi.mock("@/design-system", () => ({
+  BLOCKED_STATE_LABEL: registryLabels.blocked,
+  READY_STATE_LABEL: registryLabels.ready,
+}))
 
 import { KnowledgeQASetupDiagnostics } from "../SetupDiagnostics"
 
