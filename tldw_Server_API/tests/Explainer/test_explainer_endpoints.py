@@ -141,3 +141,113 @@ def test_delete_session_archives_instead_of_hard_deleting(explainer_client) -> N
     archived = repo.get_session(session_id, owner_user_id="7", include_archived=True)
     assert archived is not None
     assert archived.status == "archived"
+
+
+def test_create_node_accepts_and_persists_citation_snapshots(explainer_client) -> None:
+    client, db, _set_user = explainer_client
+    created = client.post(
+        "/api/v1/explainer/sessions",
+        json=_create_goal_payload(
+            grounding="source_led",
+            selectedSources=[
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                }
+            ],
+        ),
+    )
+    assert created.status_code == 201
+    session_body = created.json()
+
+    response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes",
+        json={
+            "parentId": session_body["rootNodeIds"][0],
+            "title": "Scaled dot product attention",
+            "body": "Attention compares every token against every other token.",
+            "citations": [
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                    "excerpt": "Attention weights are computed from query-key similarity.",
+                    "locationLabel": "chunk 3",
+                    "startOffset": 120,
+                    "endOffset": 178,
+                    "url": "https://example.test/attention",
+                    "snapshotHash": "sha256:abc123",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["citations"][0]["sourceId"] == "media-42"
+    assert body["citations"][0]["excerpt"] == "Attention weights are computed from query-key similarity."
+
+    loaded = ExplainerRepository(db).get_session(session_body["id"], owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[body["id"]].citations[0].snapshot_hash == "sha256:abc123"
+
+
+def test_patch_node_replaces_citation_snapshots(explainer_client) -> None:
+    client, db, _set_user = explainer_client
+    created = client.post(
+        "/api/v1/explainer/sessions",
+        json=_create_goal_payload(
+            grounding="source_led",
+            selectedSources=[
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                }
+            ],
+        ),
+    )
+    assert created.status_code == 201
+    session_body = created.json()
+    node_response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes",
+        json={
+            "parentId": session_body["rootNodeIds"][0],
+            "title": "Scaled dot product attention",
+            "citations": [
+                {
+                    "sourceId": "media-42",
+                    "sourceType": "media",
+                    "title": "Attention paper notes",
+                    "excerpt": "Initial citation.",
+                }
+            ],
+        },
+    )
+    assert node_response.status_code == 201
+    node_id = node_response.json()["id"]
+
+    response = client.patch(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{node_id}",
+        json={
+            "citations": [
+                {
+                    "sourceId": "media-99",
+                    "sourceType": "note",
+                    "title": "Updated note",
+                    "excerpt": "Replacement citation.",
+                    "locationLabel": "paragraph 2",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["citations"][0]["sourceId"] == "media-99"
+    assert body["citations"][0]["excerpt"] == "Replacement citation."
+
+    loaded = ExplainerRepository(db).get_session(session_body["id"], owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[node_id].citations[0].location_label == "paragraph 2"

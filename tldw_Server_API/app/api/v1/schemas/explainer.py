@@ -76,6 +76,18 @@ class ExplainerCitationResponse(_ExplainerSchema):
         )
 
 
+class ExplainerCitationRequest(_ExplainerSchema):
+    source_id: str = Field(alias="sourceId")
+    source_type: str = Field(alias="sourceType")
+    title: str
+    excerpt: str
+    location_label: str | None = Field(default=None, alias="locationLabel")
+    start_offset: int | None = Field(default=None, alias="startOffset")
+    end_offset: int | None = Field(default=None, alias="endOffset")
+    url: str | None = None
+    snapshot_hash: str | None = Field(default=None, alias="snapshotHash")
+
+
 class ExplainerNodeResponse(_ExplainerSchema):
     id: str
     session_id: str = Field(alias="sessionId")
@@ -149,6 +161,7 @@ class ExplainerNodeCreateRequest(_ExplainerSchema):
     status: ExplainerNodeStatus = ExplainerNodeStatus.IDLE
     evidence_state: ExplainerEvidenceState = Field(default=ExplainerEvidenceState.UNCITED, alias="evidenceState")
     outside_knowledge_used: bool = Field(default=False, alias="outsideKnowledgeUsed")
+    citations: list[ExplainerCitationRequest] = Field(default_factory=list)
 
 
 class ExplainerNodePatchRequest(_ExplainerSchema):
@@ -161,6 +174,7 @@ class ExplainerNodePatchRequest(_ExplainerSchema):
     selected_custom_answer: str | None = Field(default=None, alias="selectedCustomAnswer")
     question_options: list[dict[str, Any]] | None = Field(default=None, alias="questionOptions")
     generation_metadata: dict[str, Any] | None = Field(default=None, alias="generationMetadata")
+    citations: list[ExplainerCitationRequest] | None = None
 
 
 class ExplainerSessionResponse(_ExplainerSchema):

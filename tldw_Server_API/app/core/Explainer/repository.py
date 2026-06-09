@@ -321,6 +321,7 @@ class ExplainerRepository:
         status: str = ExplainerNodeStatus.IDLE.value,
         evidence_state: str = ExplainerEvidenceState.UNCITED.value,
         outside_knowledge_used: bool = False,
+        citations: list[ExplainerCitation | dict[str, Any]] | None = None,
     ) -> ExplainerNode | None:
         session = self.get_session(session_id, owner_user_id=owner_user_id)
         if session is None:
@@ -333,6 +334,10 @@ class ExplainerRepository:
         _require_enum(evidence_state, ExplainerEvidenceState, "evidence_state")
         now = self.db.utcnow_iso()
         node_id = _new_id("exp_node")
+        normalized_citations = [
+            _normalize_citation(citation)
+            for citation in citations or []
+        ]
         with self.db.transaction() as conn:
             ordinal = self._next_child_ordinal(conn, session_id=session_id, parent_id=parent_id)
             conn.execute(
@@ -361,6 +366,14 @@ class ExplainerRepository:
                     now,
                 ),
             )
+            self._replace_node_citations(
+                conn,
+                session_id=session_id,
+                node_id=node_id,
+                owner_user_id=owner_user_id,
+                citations=normalized_citations,
+                now=now,
+            )
             conn.execute(
                 """
                 UPDATE explainer_sessions
@@ -387,6 +400,7 @@ class ExplainerRepository:
         selected_custom_answer: str | None = None,
         question_options: list[dict[str, Any]] | None = None,
         generation_metadata: dict[str, Any] | None = None,
+        citations: list[ExplainerCitation | dict[str, Any]] | None = None,
     ) -> ExplainerNode | None:
         session = self.get_session(session_id, owner_user_id=owner_user_id)
         if session is None or node_id not in session.nodes:
@@ -409,6 +423,7 @@ class ExplainerRepository:
                 selected_custom_answer,
                 question_options,
                 generation_metadata,
+                citations,
             )
         ):
             return existing_node
@@ -452,6 +467,18 @@ class ExplainerRepository:
                     session_id,
                 ),
             )
+            if citations is not None:
+                self._replace_node_citations(
+                    conn,
+                    session_id=session_id,
+                    node_id=node_id,
+                    owner_user_id=owner_user_id,
+                    citations=[
+                        _normalize_citation(citation)
+                        for citation in citations
+                    ],
+                    now=now,
+                )
             conn.execute(
                 """
                 UPDATE explainer_sessions
@@ -616,6 +643,53 @@ class ExplainerRepository:
                 ),
             )
 
+    def _replace_node_citations(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        node_id: str,
+        owner_user_id: str,
+        citations: list[ExplainerCitation],
+        now: str,
+    ) -> None:
+        conn.execute(
+            """
+            UPDATE explainer_citations
+            SET deleted_at = ?
+            WHERE session_id = ? AND node_id = ? AND owner_user_id = ? AND deleted_at IS NULL
+            """,
+            (now, session_id, node_id, owner_user_id),
+        )
+        for ordinal, citation in enumerate(citations):
+            conn.execute(
+                """
+                INSERT INTO explainer_citations (
+                    id, session_id, node_id, owner_user_id, ordinal, source_id, source_type,
+                    title, excerpt, location_label, start_offset, end_offset, url,
+                    snapshot_hash, created_at, deleted_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    citation.id,
+                    session_id,
+                    node_id,
+                    owner_user_id,
+                    ordinal,
+                    citation.source_id,
+                    citation.source_type,
+                    citation.title,
+                    citation.excerpt,
+                    citation.location_label,
+                    citation.start_offset,
+                    citation.end_offset,
+                    citation.url,
+                    citation.snapshot_hash,
+                    now,
+                ),
+            )
+
     @staticmethod
     def _next_child_ordinal(
         conn: sqlite3.Connection,
@@ -675,6 +749,25 @@ def _normalize_source(
         added_at=str(source.get("added_at") or fallback_added_at),
         snapshot_version=source.get("snapshot_version"),
         metadata=source.get("metadata"),
+    )
+
+
+def _normalize_citation(
+    citation: ExplainerCitation | dict[str, Any],
+) -> ExplainerCitation:
+    if isinstance(citation, ExplainerCitation):
+        return citation
+    return ExplainerCitation(
+        id=str(citation.get("id") or _new_id("exp_cite")),
+        source_id=_require_text(str(citation.get("source_id", "")), "citation source_id"),
+        source_type=_require_text(str(citation.get("source_type", "")), "citation source_type"),
+        title=_require_text(str(citation.get("title", "")), "citation title"),
+        excerpt=_require_text(str(citation.get("excerpt", "")), "citation excerpt"),
+        location_label=citation.get("location_label"),
+        start_offset=citation.get("start_offset"),
+        end_offset=citation.get("end_offset"),
+        url=citation.get("url"),
+        snapshot_hash=citation.get("snapshot_hash"),
     )
 
 

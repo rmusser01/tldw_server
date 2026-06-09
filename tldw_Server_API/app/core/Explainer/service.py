@@ -116,6 +116,7 @@ class ExplainerService:
         status: str,
         evidence_state: str,
         outside_knowledge_used: bool,
+        citations: list[dict[str, Any]] | None = None,
     ) -> ExplainerNode:
         node = self.repo.create_node(
             session_id,
@@ -128,6 +129,7 @@ class ExplainerService:
             status=status,
             evidence_state=evidence_state,
             outside_knowledge_used=outside_knowledge_used,
+            citations=citations,
         )
         if node is None:
             raise ExplainerNotFoundError("Explainer session not found")
