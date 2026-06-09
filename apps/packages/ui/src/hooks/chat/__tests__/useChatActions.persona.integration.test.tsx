@@ -343,19 +343,20 @@ describe("useChatActions persona integration", () => {
   })
 
   it("routes an inherited workspace persona default when no explicit assistant is selected", async () => {
+    const inheritedWorkspaceAssistant = {
+      kind: "persona" as const,
+      id: "workspace-helper",
+      name: "Workspace Helper",
+      metadata: {
+        selectionMode: "tracked",
+        source: "workspace",
+        personaMemoryMode: "read_write"
+      }
+    }
     const options = {
       ...createHookOptions(),
-      selectedAssistant: null,
-      inheritedAssistant: {
-        kind: "persona" as const,
-        id: "workspace-helper",
-        name: "Workspace Helper",
-        metadata: {
-          selectionMode: "tracked",
-          source: "workspace",
-          personaMemoryMode: "read_write"
-        }
-      },
+      selectedAssistant: inheritedWorkspaceAssistant,
+      inheritedAssistant: inheritedWorkspaceAssistant,
       inheritedPersonaMemoryMode: "read_write" as const
     }
     createChatMock.mockResolvedValueOnce({

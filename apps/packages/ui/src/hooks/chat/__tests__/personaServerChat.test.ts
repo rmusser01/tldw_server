@@ -439,7 +439,7 @@ describe("ensurePersonaServerChat", () => {
     expect(result).toEqual({
       chatId: "restored-chat",
       historyId: "history-restored",
-      personaMemoryMode: "read_only"
+      personaMemoryMode: "read_write"
     })
   })
 })

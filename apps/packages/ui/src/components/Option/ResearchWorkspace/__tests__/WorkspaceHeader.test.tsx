@@ -339,11 +339,28 @@ vi.mock("antd", async () => {
   }
 })
 
-vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+vi.mock("@/store/workspace", () => {
+  const useWorkspaceStore = ((
     selector: (state: typeof mockStoreState) => unknown
-  ) => selector(mockStoreState)
-}))
+  ) => selector(mockStoreState)) as ((
+    selector: (state: typeof mockStoreState) => unknown
+  ) => unknown) & {
+    getState: () => typeof mockStoreState
+    setState: (
+      update:
+        | Partial<typeof mockStoreState>
+        | ((state: typeof mockStoreState) => Partial<typeof mockStoreState>)
+    ) => void
+  }
+
+  useWorkspaceStore.getState = () => mockStoreState
+  useWorkspaceStore.setState = (update) => {
+    const next = typeof update === "function" ? update(mockStoreState) : update
+    Object.assign(mockStoreState, next)
+  }
+
+  return { useWorkspaceStore }
+})
 
 vi.mock("@/store/tutorials", () => ({
   useTutorialStore: (
@@ -1178,6 +1195,86 @@ describe("WorkspaceHeader workspace browser modal", () => {
         })
       )
     })
+    await waitFor(() => {
+      expect(mockStoreState.assistantDefaults).toEqual(
+        expect.objectContaining({
+          assistantKind: "persona",
+          assistantId: "persona-lit-reviewer",
+          personaMemoryMode: "read_only"
+        })
+      )
+      expect(mockSaveCurrentWorkspace).toHaveBeenCalled()
+    })
+  })
+
+  it("clears default assistant modal state before failed reloads can reuse stale values", async () => {
+    mockGetWorkspace.mockResolvedValueOnce(
+      createWorkspaceApiResponse({
+        version: 11,
+        assistantDefaults: {
+          assistantKind: "persona",
+          assistantId: "persona-lit-reviewer",
+          personaMemoryMode: "read_only",
+          voice: null,
+          style: null,
+          toolPolicyProfileId: null
+        },
+        effectiveAssistantDefault: {
+          status: "available",
+          source: "workspace",
+          assistantKind: "persona",
+          assistantId: "persona-lit-reviewer",
+          label: "Literature Reviewer",
+          personaMemoryMode: "read_only",
+          degradedReason: null
+        }
+      })
+    )
+    mockGetWorkspace.mockRejectedValueOnce(new Error("temporary failure"))
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Default assistant"))
+
+    const modal = await screen.findByTestId("workspace-default-assistant-modal")
+    await waitFor(() => {
+      expect(
+        within(modal).getByTestId("workspace-default-assistant-select")
+      ).toHaveValue("persona-lit-reviewer")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    const defaultAssistantItems = await screen.findAllByText("Default assistant")
+    const reopenedDefaultAssistantItem =
+      defaultAssistantItems.find((item) =>
+        item.closest(".ant-dropdown-menu")
+      ) ?? defaultAssistantItems[0]
+    fireEvent.click(reopenedDefaultAssistantItem)
+
+    const reopenedModal = await screen.findByTestId(
+      "workspace-default-assistant-modal"
+    )
+    await waitFor(() => {
+      expect(
+        within(reopenedModal).getByText(
+          "Could not load default assistant settings."
+        )
+      ).toBeInTheDocument()
+    })
+    expect(
+      within(reopenedModal).getByTestId("workspace-default-assistant-select")
+    ).toHaveValue("")
+    expect(screen.getByRole("button", { name: "Save default" })).toBeDisabled()
+    expect(mockPatchWorkspace).not.toHaveBeenCalled()
   })
 
   it("requires confirmation before saving a read-write Persona default", async () => {
@@ -1194,6 +1291,11 @@ describe("WorkspaceHeader workspace browser modal", () => {
     fireEvent.click(await screen.findByText("Default assistant"))
 
     const modal = await screen.findByTestId("workspace-default-assistant-modal")
+    await waitFor(() => {
+      expect(
+        within(modal).getByTestId("workspace-default-assistant-select")
+      ).toBeEnabled()
+    })
     fireEvent.change(
       within(modal).getByTestId("workspace-default-assistant-select"),
       { target: { value: "persona-methods" } }
@@ -1211,7 +1313,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     fireEvent.click(
       within(modal).getByTestId("workspace-default-assistant-read-write-confirm")
     )
-    expect(screen.getByRole("button", { name: "Save default" })).toBeEnabled()
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save default" })).toBeEnabled()
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Save default" }))
 
@@ -1275,6 +1379,10 @@ describe("WorkspaceHeader workspace browser modal", () => {
         version: 11,
         assistantDefaults: null
       })
+    })
+    await waitFor(() => {
+      expect(mockStoreState.assistantDefaults).toBeNull()
+      expect(mockSaveCurrentWorkspace).toHaveBeenCalled()
     })
   })
 

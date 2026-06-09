@@ -358,6 +358,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     React.useState<WorkspacePersonaMemoryMode>("read_only")
   const [defaultAssistantConfirmReadWrite, setDefaultAssistantConfirmReadWrite] =
     React.useState(false)
+  const defaultAssistantRequestIdRef = React.useRef(0)
   const lastConnectivityStatusRef = React.useRef<string | null>(null)
   const importFileInputRef = React.useRef<HTMLInputElement | null>(null)
   const bannerFileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -691,20 +692,50 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     setDefaultAssistantConfirmReadWrite(false)
   }
 
+  const resetDefaultAssistantModalState = () => {
+    setDefaultAssistantWorkspace(null)
+    setPersonaProfiles([])
+    setDefaultAssistantPersonaId("")
+    setDefaultAssistantMemoryMode("read_only")
+    setDefaultAssistantConfirmReadWrite(false)
+  }
+
+  const syncDefaultAssistantWorkspaceState = (
+    workspace: WorkspaceApiResponse
+  ) => {
+    useWorkspaceStore.setState((state) => {
+      if (state.workspaceId !== workspace.id) return {}
+      return {
+        assistantDefaults: workspace.assistantDefaults ?? null,
+        effectiveAssistantDefault: workspace.effectiveAssistantDefault ?? null
+      }
+    })
+
+    const currentState = useWorkspaceStore.getState()
+    if (currentState.workspaceId === workspace.id) {
+      currentState.saveCurrentWorkspace()
+    }
+  }
+
   const handleOpenDefaultAssistantModal = async () => {
     if (!workspaceId) return
+    const requestId = ++defaultAssistantRequestIdRef.current
 
     setDefaultAssistantModalOpen(true)
     setDefaultAssistantLoading(true)
     setDefaultAssistantError(null)
+    resetDefaultAssistantModalState()
     try {
       const [workspace, personas] = await Promise.all([
         tldwClient.getWorkspace(workspaceId),
         tldwClient.listPersonaProfiles()
       ])
+      if (requestId !== defaultAssistantRequestIdRef.current) return
       applyDefaultAssistantWorkspaceState(workspace)
       setPersonaProfiles(personas)
     } catch {
+      if (requestId !== defaultAssistantRequestIdRef.current) return
+      resetDefaultAssistantModalState()
       setDefaultAssistantError(
         t(
           "playground:workspace.defaultAssistantLoadError",
@@ -712,14 +743,18 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         )
       )
     } finally {
+      if (requestId !== defaultAssistantRequestIdRef.current) return
       setDefaultAssistantLoading(false)
     }
   }
 
   const handleCloseDefaultAssistantModal = () => {
+    defaultAssistantRequestIdRef.current += 1
     setDefaultAssistantModalOpen(false)
+    setDefaultAssistantLoading(false)
     setDefaultAssistantError(null)
     setDefaultAssistantSaving(false)
+    resetDefaultAssistantModalState()
   }
 
   const handleDefaultAssistantMemoryModeChange = (
@@ -776,6 +811,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           : {})
       })
       applyDefaultAssistantWorkspaceState(updatedWorkspace)
+      syncDefaultAssistantWorkspaceState(updatedWorkspace)
       setDefaultAssistantModalOpen(false)
       messageApi.success(
         t(
@@ -806,6 +842,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         assistantDefaults: null
       })
       applyDefaultAssistantWorkspaceState(updatedWorkspace)
+      syncDefaultAssistantWorkspaceState(updatedWorkspace)
       setDefaultAssistantModalOpen(false)
       messageApi.success(
         t(
@@ -2100,6 +2137,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const defaultAssistantSaveDisabled =
     defaultAssistantLoading ||
     defaultAssistantSaving ||
+    !defaultAssistantWorkspace ||
     !defaultAssistantPersonaId.trim() ||
     !selectedDefaultAssistantAvailable ||
     (defaultAssistantMemoryMode === "read_write" &&
@@ -2412,6 +2450,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             disabled={
               defaultAssistantLoading ||
               defaultAssistantSaving ||
+              !defaultAssistantWorkspace ||
               !storedDefaultAssistant
             }
             onClick={() => void handleClearDefaultAssistant()}

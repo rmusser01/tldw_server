@@ -157,26 +157,27 @@ export const WorkspaceChatPanel = ({
     serverChatAssistantId
   } = useMessageOption(messageOptionArgs)
 
-  const hasExistingChatSession = Boolean(serverChatId)
-  const hasExistingAssistantMetadata = Boolean(
-    serverChatAssistantKind || serverChatAssistantId
-  )
+  const selectedMatchesWorkspaceAssistant =
+    selectedAssistantSource === "workspace" &&
+    selectedAssistant?.kind === "persona" &&
+    inheritedAssistant?.kind === "persona" &&
+    selectedAssistant.id === inheritedAssistant.id
   const usingWorkspaceAssistant =
     Boolean(inheritedAssistant) &&
-    !hasExistingChatSession &&
-    !hasExistingAssistantMetadata &&
-    (selectedAssistantSource === "workspace" ||
-      (!selectedAssistant && messages.length === 0))
+    (selectedMatchesWorkspaceAssistant ||
+      (selectedAssistantSource === "workspace" &&
+        !selectedAssistant &&
+        messages.length === 0))
   const assistantSource: ChatWorkspaceAssistantSource = usingWorkspaceAssistant
     ? "workspace"
-    : selectedAssistant || hasExistingAssistantMetadata
+    : selectedAssistant || serverChatAssistantKind || serverChatAssistantId
       ? "explicit"
       : effectiveAssistantDefault?.status === "unavailable"
         ? "unavailable"
         : "none"
   const runtimeSelectedPersonaLabel =
     assistantSource === "workspace"
-      ? inheritedAssistant?.name ?? selectedAssistant?.name ?? null
+      ? selectedAssistant?.name ?? inheritedAssistant?.name ?? null
       : selectedAssistant?.name ??
         (assistantSource === "explicit" && serverChatAssistantKind === "persona"
           ? "Persona"

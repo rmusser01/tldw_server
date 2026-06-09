@@ -252,6 +252,26 @@ export const useMessageOption = (
     historyId,
     serverChatId,
   });
+  const inheritedAssistantRef = React.useRef<AssistantSelection | null>(null);
+  const canCaptureInheritedAssistant =
+    !selectedAssistant &&
+    opts.inheritedAssistant?.kind === "persona" &&
+    opts.inheritedAssistant.id != null &&
+    !serverChatId &&
+    !serverChatAssistantKind &&
+    !serverChatAssistantId &&
+    !serverChatCharacterId &&
+    messages.length === 0 &&
+    history.length === 0;
+
+  if (selectedAssistant) {
+    inheritedAssistantRef.current = null;
+  } else if (canCaptureInheritedAssistant) {
+    inheritedAssistantRef.current = opts.inheritedAssistant;
+  }
+
+  const assistantDraftSelection =
+    selectedAssistant ?? inheritedAssistantRef.current;
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -261,11 +281,11 @@ export const useMessageOption = (
           characterId: serverChatCharacterId,
         },
         settings: chatSettings ?? null,
-        draftSelection: selectedAssistant,
+        draftSelection: assistantDraftSelection,
       }),
     [
+      assistantDraftSelection,
       chatSettings,
-      selectedAssistant,
       serverChatAssistantId,
       serverChatAssistantKind,
       serverChatCharacterId,
@@ -282,38 +302,12 @@ export const useMessageOption = (
       opts.inheritedPersonaMemoryMode,
     ],
   );
-  const inheritedAssistant = React.useMemo<AssistantSelection | null>(() => {
-    if (
-      effectiveAssistantState.mode !== "plain" ||
-      selectedAssistant ||
-      serverChatId ||
-      serverChatAssistantKind ||
-      serverChatAssistantId ||
-      serverChatCharacterId ||
-      messages.length > 0 ||
-      history.length > 0
-    ) {
-      return null;
-    }
-    if (
-      opts.inheritedAssistant?.kind !== "persona" ||
-      opts.inheritedAssistant.id == null
-    ) {
-      return null;
-    }
-
-    return opts.inheritedAssistant;
-  }, [
-    effectiveAssistantState.mode,
-    history.length,
-    messages.length,
-    opts.inheritedAssistant,
-    selectedAssistant,
-    serverChatAssistantId,
-    serverChatAssistantKind,
-    serverChatCharacterId,
-    serverChatId,
-  ]);
+  const inheritedAssistant =
+    !selectedAssistant &&
+    inheritedAssistantRef.current?.kind === "persona" &&
+    inheritedAssistantRef.current.id != null
+      ? inheritedAssistantRef.current
+      : null;
   const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
     if (effectiveAssistantState.mode === "plain") {
       return inheritedAssistant ?? selectedAssistant;
@@ -339,11 +333,14 @@ export const useMessageOption = (
         null,
     };
   }, [effectiveAssistantState, inheritedAssistant, selectedAssistant]);
-  const selectedAssistantSource = inheritedAssistant
-    ? "workspace"
-    : effectiveSelectedAssistant
-      ? "explicit"
-      : "none";
+  const selectedAssistantSource =
+    inheritedAssistant &&
+    effectiveSelectedAssistant?.kind === inheritedAssistant.kind &&
+    effectiveSelectedAssistant.id === inheritedAssistant.id
+      ? "workspace"
+      : effectiveSelectedAssistant
+        ? "explicit"
+        : "none";
 
   React.useEffect(() => {
     if (!serverChatId || temporaryChat) return;

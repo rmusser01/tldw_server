@@ -600,6 +600,24 @@ describe("workspace API domain contract", () => {
     )
   })
 
+  it("rejects malformed assistant defaults patch payloads before sending", async () => {
+    await expect(
+      workspaceApiMethods.patchWorkspace("ws-1", {
+        version: 2,
+        assistantDefaults: {
+          assistantKind: "persona",
+          assistantId: "   ",
+          personaMemoryMode: "read_only",
+          voice: null,
+          style: null,
+          toolPolicyProfileId: null
+        } as any
+      })
+    ).rejects.toThrow(/assistant_defaults/)
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
   it("exposes raw workspace delete API support without manager semantics", async () => {
     mocks.bgRequest.mockResolvedValue(undefined)
 

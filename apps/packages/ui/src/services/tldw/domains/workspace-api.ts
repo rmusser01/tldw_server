@@ -877,12 +877,26 @@ export const normalizeWorkspaceAssistantDefaults = (
   }
 }
 
+const describeWorkspaceAssistantDefaultsPayload = (value: unknown): string => {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return Object.prototype.toString.call(value)
+  }
+}
+
 export const serializeWorkspaceAssistantDefaults = (
   value: WorkspaceAssistantDefaults | WorkspaceAssistantDefaultsApiPayload | null
 ): WorkspaceAssistantDefaultsApiPayload | null => {
   if (value === null) return null
   const normalized = normalizeWorkspaceAssistantDefaults(value)
-  if (!normalized) return null
+  if (!normalized) {
+    throw new Error(
+      `Invalid assistant_defaults payload: expected persona assistant_kind and non-empty assistant_id; received ${describeWorkspaceAssistantDefaultsPayload(
+        value
+      )}.`
+    )
+  }
   return {
     assistant_kind: normalized.assistantKind,
     assistant_id: normalized.assistantId,

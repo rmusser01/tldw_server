@@ -148,15 +148,19 @@ export const ensurePersonaServerChat = async ({
   const newChatPersonaMemoryMode =
     normalizePersonaMemoryMode(requestedPersonaMemoryMode) ??
     DEFAULT_PERSONA_MEMORY_MODE
+  const isReusingUnhydratedChat =
+    Boolean(resolvedServerChatId) && !serverChatMetaLoaded
   const isMatchingPersonaChat =
     Boolean(resolvedServerChatId) &&
     serverChatMetaLoaded &&
     serverChatAssistantKind === "persona" &&
     Boolean(serverChatAssistantId) &&
     String(serverChatAssistantId) === assistantId
-  const personaMemoryMode = isMatchingPersonaChat
-    ? serverChatPersonaMemoryMode ?? newChatPersonaMemoryMode
-    : newChatPersonaMemoryMode
+  const personaMemoryMode =
+    isMatchingPersonaChat || isReusingUnhydratedChat
+      ? normalizePersonaMemoryMode(serverChatPersonaMemoryMode) ??
+        newChatPersonaMemoryMode
+      : newChatPersonaMemoryMode
   const shouldResetServerChat =
     Boolean(resolvedServerChatId) &&
     serverChatMetaLoaded &&

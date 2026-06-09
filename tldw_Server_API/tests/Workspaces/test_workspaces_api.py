@@ -74,6 +74,21 @@ def _create_workspace_test_persona(
     user_id: str = "1",
     name: str = "Workspace Persona",
 ) -> str:
+    """Create a test Persona profile for workspace endpoint tests.
+
+    Args:
+        db: CharactersRAGDB test database that already contains "Test Char".
+        persona_id: Stable Persona id to write into the profile row.
+        user_id: Owner user id for permission-scoped Persona lookups.
+        name: Display name to store on the Persona profile.
+
+    Returns:
+        The Persona id returned by ``db.create_persona_profile``.
+
+    Side Effects:
+        Asserts that the "Test Char" character card exists, then creates a
+        session-scoped Persona profile linked to that character.
+    """
     character = db.get_character_card_by_name("Test Char")
     assert character is not None  # nosec B101
     return db.create_persona_profile(

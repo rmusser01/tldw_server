@@ -23,6 +23,8 @@ const chatHookState = vi.hoisted(() => {
     stopStreamingRequest,
     selectedModel: "gpt-test",
     selectedAssistant: { kind: "persona", id: "p1", name: "Analyst" },
+    selectedAssistantSource: "explicit",
+    serverChatId: null,
     serverChatAssistantKind: null,
     serverChatAssistantId: null,
     serverChatMetaLoaded: false
@@ -122,6 +124,8 @@ describe("WorkspaceChatPanel", () => {
       id: "p1",
       name: "Analyst"
     }
+    chatHookState.value.selectedAssistantSource = "explicit"
+    chatHookState.value.serverChatId = null
     chatHookState.value.serverChatAssistantKind = null
     chatHookState.value.serverChatAssistantId = null
     chatHookState.value.serverChatMetaLoaded = false
@@ -549,7 +553,12 @@ describe("WorkspaceChatPanel", () => {
   })
 
   it("inherits the available workspace persona default on first submit", async () => {
-    chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistant = {
+      kind: "persona",
+      id: "workspace-persona",
+      name: "Workspace Analyst"
+    }
+    chatHookState.value.selectedAssistantSource = "workspace"
     const onRuntimeStateChange = vi.fn()
 
     render(
@@ -600,6 +609,37 @@ describe("WorkspaceChatPanel", () => {
     })
   })
 
+  it("keeps workspace provenance after the inherited persona chat is created", () => {
+    chatHookState.value.selectedAssistant = {
+      kind: "persona",
+      id: "workspace-persona",
+      name: "Workspace Analyst"
+    }
+    chatHookState.value.selectedAssistantSource = "workspace"
+    chatHookState.value.serverChatId = "workspace-persona-chat"
+    chatHookState.value.serverChatAssistantKind = "persona"
+    chatHookState.value.serverChatAssistantId = "workspace-persona"
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPersonaLabel: "Workspace Analyst",
+        assistantSource: "workspace"
+      })
+    )
+  })
+
   it("keeps an explicit selected persona ahead of the workspace default", async () => {
     chatHookState.value.selectedAssistant = {
       kind: "persona",
@@ -633,6 +673,7 @@ describe("WorkspaceChatPanel", () => {
 
   it("does not inherit an unavailable workspace default", async () => {
     chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistantSource = "none"
     const onRuntimeStateChange = vi.fn()
 
     render(
@@ -668,6 +709,7 @@ describe("WorkspaceChatPanel", () => {
 
   it("does not mutate existing chat assistant metadata when the workspace default changes", async () => {
     chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistantSource = "none"
     chatHookState.value.serverChatAssistantKind = "persona"
     chatHookState.value.serverChatAssistantId = "session-persona"
     chatHookState.value.serverChatMetaLoaded = true

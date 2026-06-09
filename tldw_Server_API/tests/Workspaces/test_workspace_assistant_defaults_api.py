@@ -176,6 +176,48 @@ def test_get_and_list_workspaces_include_effective_default(
 
 
 @pytest.mark.integration
+def test_list_workspaces_caches_repeated_persona_default_lookups(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persona_id = _create_persona(db)
+    first_workspace = db.upsert_workspace("ws-assistant-a", "Assistant A")
+    second_workspace = db.upsert_workspace("ws-assistant-b", "Assistant B")
+    for workspace in (first_workspace, second_workspace):
+        db.update_workspace(
+            workspace["id"],
+            {"assistant_defaults_json": _assistant_defaults_payload(persona_id)},
+            expected_version=int(workspace["version"]),
+        )
+
+    original_get_persona_profile = db.get_persona_profile
+    profile_lookup_count = 0
+
+    def _counting_get_persona_profile(*args: Any, **kwargs: Any) -> Any:
+        nonlocal profile_lookup_count
+        profile_lookup_count += 1
+        return original_get_persona_profile(*args, **kwargs)
+
+    monkeypatch.setattr(db, "get_persona_profile", _counting_get_persona_profile)
+    _install_workspace_overrides(workspace_app, db)
+
+    try:
+        with TestClient(workspace_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["id"] for item in payload["items"]} == {
+        "ws-assistant-a",
+        "ws-assistant-b",
+    }
+    assert profile_lookup_count == 1
+
+
+@pytest.mark.integration
 def test_patch_workspace_rejects_missing_persona_default(
     workspace_app: FastAPI,
     db: CharactersRAGDB,
