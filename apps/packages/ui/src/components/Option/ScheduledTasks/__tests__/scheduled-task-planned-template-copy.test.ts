@@ -2,8 +2,17 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildPlannedScheduledTaskPanelModel,
-  isPlannedAutomationTemplate
+  isPlannedAutomationTemplate,
+  type PlannedScheduledTaskLink,
+  type PlannedScheduledTaskRequirement
 } from "../scheduled-task-planned-template-copy"
+
+interface MutablePlannedModel {
+  requirements: PlannedScheduledTaskRequirement[]
+  resultDestinations: string[]
+  safetyLines: string[]
+  links: PlannedScheduledTaskLink[]
+}
 
 describe("scheduled task planned template copy", () => {
   it("builds API-first Recurring Question copy without executable support", () => {
@@ -92,5 +101,37 @@ describe("scheduled task planned template copy", () => {
 
   it("treats non-planned families as unsupported by this helper", () => {
     expect(buildPlannedScheduledTaskPanelModel("watch")).toBeNull()
+  })
+
+  it("returns defensive copies so caller mutations cannot leak to later callers", () => {
+    const first = buildPlannedScheduledTaskPanelModel("recurring_question")
+    const second = buildPlannedScheduledTaskPanelModel("recurring_question")
+
+    expect(first).not.toBeNull()
+    expect(second).not.toBeNull()
+    expect(first).not.toBe(second)
+    expect(first?.requirements).not.toBe(second?.requirements)
+    expect(first?.resultDestinations).not.toBe(second?.resultDestinations)
+    expect(first?.safetyLines).not.toBe(second?.safetyLines)
+    expect(first?.links).not.toBe(second?.links)
+
+    const mutableFirst = first as MutablePlannedModel
+    mutableFirst.requirements.push({
+      label: "Leaked mutation",
+      detail: "This should not persist.",
+      status: "missing"
+    })
+    mutableFirst.resultDestinations.push("Leaked destination")
+    mutableFirst.safetyLines.push("Leaked safety line")
+    mutableFirst.links[0] = { label: "Leaked link", href: "/leaked" }
+
+    const later = buildPlannedScheduledTaskPanelModel("recurring_question")
+
+    expect(later?.requirements).not.toContainEqual(
+      expect.objectContaining({ label: "Leaked mutation" })
+    )
+    expect(later?.resultDestinations).not.toContain("Leaked destination")
+    expect(later?.safetyLines).not.toContain("Leaked safety line")
+    expect(later?.links[0]).toEqual({ label: "Open Research", href: "/research" })
   })
 })

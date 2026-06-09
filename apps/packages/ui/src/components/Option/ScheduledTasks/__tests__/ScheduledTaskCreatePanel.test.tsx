@@ -7,6 +7,26 @@ import { describe, expect, it, vi } from "vitest"
 
 import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+
+  return {
+    ...actual,
+    Link: ({
+      children,
+      to,
+      ...props
+    }: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+      children: React.ReactNode
+      to: string
+    }) => (
+      <a {...props} href={to} data-router-link="true">
+        {children}
+      </a>
+    )
+  }
+})
+
 import { ScheduledTaskCreatePanel } from "../ScheduledTaskCreatePanel"
 import {
   REQUIRED_WATCH_AVAILABILITY_GATES,
@@ -362,6 +382,29 @@ describe("ScheduledTaskCreatePanel", () => {
       "/scheduled-tasks/results"
     )
     expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("renders planned related destinations through router links", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="agent_task"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("link", { name: "Open Agent Tasks" })).toHaveAttribute(
+      "data-router-link",
+      "true"
+    )
+    expect(screen.getByRole("link", { name: "Open ACP Playground" })).toHaveAttribute(
+      "data-router-link",
+      "true"
+    )
+    expect(screen.getByRole("link", { name: "Open Results" })).toHaveAttribute(
+      "data-router-link",
+      "true"
+    )
   })
 
   it("renders Reminder editor and delegates create payload", async () => {

@@ -127,6 +127,16 @@ const PLANNED_TEMPLATE_PANEL_MODELS: Record<
   }
 }
 
+const clonePlannedScheduledTaskPanelModel = (
+  model: PlannedScheduledTaskPanelModel
+): PlannedScheduledTaskPanelModel => ({
+  ...model,
+  requirements: model.requirements.map((requirement) => ({ ...requirement })),
+  resultDestinations: [...model.resultDestinations],
+  safetyLines: [...model.safetyLines],
+  links: model.links.map((link) => ({ ...link }))
+})
+
 export const isPlannedAutomationTemplate = (
   templateId: ScheduledTaskTemplateId
 ): templateId is PlannedScheduledTaskTemplateId =>
@@ -136,5 +146,5 @@ export const buildPlannedScheduledTaskPanelModel = (
   templateId: ScheduledTaskTemplateId
 ): PlannedScheduledTaskPanelModel | null =>
   isPlannedAutomationTemplate(templateId)
-    ? PLANNED_TEMPLATE_PANEL_MODELS[templateId]
+    ? clonePlannedScheduledTaskPanelModel(PLANNED_TEMPLATE_PANEL_MODELS[templateId])
     : null

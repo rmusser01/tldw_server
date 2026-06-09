@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react"
 import { Button, Card, Input, Segmented, Space, Typography } from "antd"
 import type { SegmentedValue } from "antd/es/segmented"
+import { Link } from "react-router-dom"
 
 import { EmptyState } from "@/components/ui/feedback"
 import {
@@ -324,9 +325,9 @@ const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template 
           <Typography.Text strong>Related destinations</Typography.Text>
           <Space wrap size={12}>
             {model.links.map((link) => (
-              <Typography.Link key={link.href} href={link.href}>
+              <Link key={link.href} to={link.href}>
                 {link.label}
-              </Typography.Link>
+              </Link>
             ))}
           </Space>
         </Space>
