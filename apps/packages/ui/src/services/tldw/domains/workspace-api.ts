@@ -3,7 +3,7 @@ import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { OffsetPaginationMeta } from "@/services/response-envelope"
-import type { SkillsListResponse } from "@/types/skill"
+import type { SkillsListParams, SkillsListResponse } from "@/types/skill"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -700,25 +700,36 @@ const workspacePath = (workspaceId: string, suffix = ""): AllowedPath =>
     "workspaceId"
   )}${suffix}` as AllowedPath
 
+const trimmedOptionalString = (value: string | undefined): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
 export const workspaceApiMethods = {
   // ── Skills API ──
 
   async listSkills(
     this: TldwApiClientCore,
-    params?: {
-      q?: string
-      limit?: number
-      offset?: number
-      abortSignal?: AbortSignal
-    }
+    params?: SkillsListParams
   ): Promise<SkillsListPayload> {
     const { abortSignal, ...queryParams } = params ?? {}
+    const q = trimmedOptionalString(queryParams.q)
+    const model = trimmedOptionalString(queryParams.model)
     const normalizedParams = params
       ? {
-          ...queryParams,
-          q: typeof queryParams.q === "string" && queryParams.q.trim().length > 0
-            ? queryParams.q.trim()
-            : undefined
+          q,
+          include_hidden: queryParams.includeHidden,
+          user_invocable: queryParams.userInvocable,
+          has_tools: queryParams.hasTools,
+          context: queryParams.context,
+          model,
+          sort: queryParams.sort,
+          order: queryParams.order,
+          limit: queryParams.limit,
+          offset: queryParams.offset
         }
       : undefined
     const query = buildQuery(normalizedParams)

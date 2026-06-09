@@ -444,6 +444,12 @@ class SkillsService:
         self,
         include_hidden: bool = False,
         q: str | None = None,
+        context: str | None = None,
+        user_invocable: bool | None = None,
+        has_tools: bool | None = None,
+        model: str | None = None,
+        sort: str = "name",
+        order: str = "asc",
         limit: int = 100,
         offset: int = 0,
     ) -> list[SkillMetadata]:
@@ -453,6 +459,12 @@ class SkillsService:
         Args:
             include_hidden: If True, include skills with user_invocable=False
             q: Optional case-insensitive search query for skill name or description
+            context: Optional execution context filter ("inline" or "fork").
+            user_invocable: Optional explicit visibility filter.
+            has_tools: Optional filter for skills with non-empty allowed_tools.
+            model: Optional exact model override filter.
+            sort: Whitelisted sort field.
+            order: Sort direction, "asc" or "desc".
             limit: Maximum number of skills to return
             offset: Offset for pagination
 
@@ -465,6 +477,12 @@ class SkillsService:
             include_hidden=include_hidden,
             include_deleted=False,
             q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+            sort=sort,
+            order=order,
             limit=limit,
             offset=offset,
         )
@@ -1028,7 +1046,15 @@ class SkillsService:
         rows = self._list_context_rows()
         return self._build_context_payload(rows)
 
-    async def get_total_count(self, include_hidden: bool = False, q: str | None = None) -> int:
+    async def get_total_count(
+        self,
+        include_hidden: bool = False,
+        q: str | None = None,
+        context: str | None = None,
+        user_invocable: bool | None = None,
+        has_tools: bool | None = None,
+        model: str | None = None,
+    ) -> int:
         """
         Get total count of skills.
 
@@ -1036,6 +1062,10 @@ class SkillsService:
             include_hidden: Include skills hidden from user invocation.
             q: Optional search string filtering skills by name or description;
                 empty values are ignored.
+            context: Optional execution context filter ("inline" or "fork").
+            user_invocable: Optional explicit visibility filter.
+            has_tools: Optional filter for skills with non-empty allowed_tools.
+            model: Optional exact model override filter.
         """
         await self._sync_registry_async()
         db = self._get_db()
@@ -1043,6 +1073,10 @@ class SkillsService:
             include_hidden=include_hidden,
             include_deleted=False,
             q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
         )
 
     def _get_builtin_skills_dir(self) -> Path:

@@ -4,6 +4,22 @@
  */
 
 export type SkillContext = "inline" | "fork"
+export type SkillListSort = "name" | "context" | "created_at" | "last_modified"
+export type SkillListOrder = "asc" | "desc"
+
+export interface SkillsListParams {
+  q?: string
+  includeHidden?: boolean
+  userInvocable?: boolean
+  hasTools?: boolean
+  context?: SkillContext
+  model?: string
+  sort?: SkillListSort
+  order?: SkillListOrder
+  limit?: number
+  offset?: number
+  abortSignal?: AbortSignal
+}
 
 export interface SkillSummary {
   name: string

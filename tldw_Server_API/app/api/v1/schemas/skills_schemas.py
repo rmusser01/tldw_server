@@ -23,6 +23,9 @@ from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 # Skill name validation: lowercase letters, numbers, and hyphens only
 SKILL_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,63}$')
+SkillContext = Literal["inline", "fork"]
+SkillListSort = Literal["name", "context", "created_at", "last_modified"]
+SkillListOrder = Literal["asc", "desc"]
 
 
 def _default_offset_pagination_aliases(response):
@@ -104,7 +107,7 @@ class SkillFrontmatter(BaseModel):
     user_invocable: bool = Field(True, description="If false, hidden from user UI (background knowledge only)")
     allowed_tools: list[str] | None = Field(None, description="Tools allowed without permission when skill is active")
     model: str | None = Field(None, description="Override model for this skill")
-    context: Literal["inline", "fork"] = Field("inline", description="'inline' or 'fork' (fork runs in isolated subagent)")
+    context: SkillContext = Field("inline", description="'inline' or 'fork' (fork runs in isolated subagent)")
 
     model_config = ConfigDict(extra='ignore')
 
@@ -118,7 +121,7 @@ class SkillBase(BaseModel):
     user_invocable: bool = Field(True, description="If false, hidden from user UI")
     allowed_tools: list[str] | None = Field(None, description="Tools allowed during skill execution")
     model: str | None = Field(None, description="Override model for this skill")
-    context: Literal["inline", "fork"] = Field("inline", description="Execution context mode")
+    context: SkillContext = Field("inline", description="Execution context mode")
 
     @field_validator("name")
     @classmethod
@@ -190,7 +193,7 @@ class SkillSummary(BaseModel):
     argument_hint: str | None = Field(None, description="Hint shown in UI")
     user_invocable: bool = Field(..., description="If false, hidden from user UI")
     disable_model_invocation: bool = Field(..., description="If true, only user can invoke")
-    context: Literal["inline", "fork"] = Field(..., description="Execution context mode")
+    context: SkillContext = Field(..., description="Execution context mode")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -224,7 +227,7 @@ class SkillExecutionResult(BaseModel):
     rendered_prompt: str = Field(..., description="Prompt with arguments substituted")
     allowed_tools: list[str] | None = Field(None, description="Tools allowed for this skill")
     model_override: str | None = Field(None, description="Model override if specified")
-    execution_mode: Literal["inline", "fork"] = Field(..., description="How the skill was executed")
+    execution_mode: SkillContext = Field(..., description="How the skill was executed")
     fork_output: str | None = Field(None, description="Output from fork execution (if applicable)")
 
     model_config = ConfigDict(from_attributes=True)

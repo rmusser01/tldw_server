@@ -420,6 +420,285 @@ describe("SkillsManager imports", () => {
     expect(await screen.findByText("omega-research")).toBeInTheDocument()
   })
 
+  it("requests server-backed filter results from filter controls", async () => {
+    const visibleSkill = {
+      name: "visible-inline",
+      description: "Visible inline skill",
+      argument_hint: null,
+      user_invocable: true,
+      disable_model_invocation: false,
+      context: "inline" as const
+    }
+    const hiddenForkSkill = {
+      name: "hidden-fork-tools",
+      description: "Hidden fork skill with tools",
+      argument_hint: null,
+      user_invocable: false,
+      disable_model_invocation: false,
+      context: "fork" as const
+    }
+
+    tldwClientMock.listSkills.mockImplementation(
+      (params: {
+        context?: string
+        userInvocable?: boolean
+        includeHidden?: boolean
+        hasTools?: boolean
+        limit: number
+        offset: number
+      }) => {
+        if (
+          params.context === "fork"
+          && params.userInvocable === false
+          && params.includeHidden === true
+          && params.hasTools === true
+        ) {
+          return Promise.resolve({
+            skills: [hiddenForkSkill],
+            count: 1,
+            total: 1,
+            limit: params.limit,
+            offset: 0
+          })
+        }
+
+        return Promise.resolve({
+          skills: [visibleSkill],
+          count: 1,
+          total: 2,
+          limit: params.limit,
+          offset: params.offset
+        })
+      }
+    )
+
+    renderManager()
+
+    expect(await screen.findByText("2 skills")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Fork" }))
+    fireEvent.click(screen.getByRole("button", { name: "Hidden" }))
+    fireEvent.click(screen.getByRole("button", { name: "Has tools" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          context: "fork",
+          includeHidden: true,
+          userInvocable: false,
+          hasTools: true,
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+    expect(await screen.findByText("hidden-fork-tools")).toBeInTheDocument()
+  })
+
+  it("shows a filter empty state instead of onboarding when filters match no skills", async () => {
+    const visibleSkill = {
+      name: "visible-inline",
+      description: "Visible inline skill",
+      argument_hint: null,
+      user_invocable: true,
+      disable_model_invocation: false,
+      context: "inline" as const
+    }
+
+    tldwClientMock.listSkills.mockImplementation(
+      (params: { context?: string; limit: number; offset: number }) => {
+        if (params.context === "fork") {
+          return Promise.resolve({
+            skills: [],
+            count: 0,
+            total: 0,
+            limit: params.limit,
+            offset: 0
+          })
+        }
+
+        return Promise.resolve({
+          skills: [visibleSkill],
+          count: 1,
+          total: 1,
+          limit: params.limit,
+          offset: params.offset
+        })
+      }
+    )
+
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Fork" }))
+
+    expect(await screen.findByText("No skills match these filters.")).toBeInTheDocument()
+    expect(screen.queryByTestId("skills-empty-state")).not.toBeInTheDocument()
+  })
+
+  it("requests server-backed name sorting from the table header", async () => {
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [
+        {
+          name: "alpha",
+          description: "Alpha skill",
+          argument_hint: null,
+          user_invocable: true,
+          disable_model_invocation: false,
+          context: "inline" as const
+        },
+        {
+          name: "beta",
+          description: "Beta skill",
+          argument_hint: null,
+          user_invocable: true,
+          disable_model_invocation: false,
+          context: "inline" as const
+        }
+      ],
+      count: 2,
+      total: 2,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("2 skills")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("columnheader", { name: /Name/ }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sort: "name",
+          order: "asc",
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+  })
+
+  it("resets pagination when server-backed filters change", async () => {
+    const pageOneSkills = Array.from({ length: 10 }, (_, index) => makeSkill(index + 1))
+    const pageTwoSkills = [makeSkill(11), makeSkill(12)]
+    const forkSkill = {
+      name: "fork-only",
+      description: "Fork skill",
+      argument_hint: null,
+      user_invocable: true,
+      disable_model_invocation: false,
+      context: "fork" as const
+    }
+
+    tldwClientMock.listSkills.mockImplementation(
+      (params: { context?: string; limit: number; offset: number }) => {
+        if (params.context === "fork") {
+          return Promise.resolve({
+            skills: [forkSkill],
+            count: 1,
+            total: 1,
+            limit: params.limit,
+            offset: 0
+          })
+        }
+
+        return Promise.resolve({
+          skills: params.offset === 10 ? pageTwoSkills : pageOneSkills,
+          count: params.offset === 10 ? pageTwoSkills.length : pageOneSkills.length,
+          total: 12,
+          limit: params.limit,
+          offset: params.offset
+        })
+      }
+    )
+
+    renderManager()
+
+    expect(await screen.findByText("12 skills")).toBeInTheDocument()
+    const secondPageItem = await screen.findByTitle("2")
+    fireEvent.click(within(secondPageItem).getByText("2"))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 10, offset: 10 })
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Fork" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          context: "fork",
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+    expect(await screen.findByText("fork-only")).toBeInTheDocument()
+  })
+
+  it("debounces model filter requests while typing", async () => {
+    const firstPage = Array.from({ length: 10 }, (_, index) => makeSkill(index + 1))
+    const modelResult = {
+      name: "model-specific",
+      description: "Model-specific skill",
+      argument_hint: null,
+      user_invocable: true,
+      disable_model_invocation: false,
+      context: "inline" as const
+    }
+
+    tldwClientMock.listSkills.mockImplementation(
+      (params: { model?: string; limit: number; offset: number }) => {
+        if (params.model === "gpt-4o") {
+          return Promise.resolve({
+            skills: [modelResult],
+            count: 1,
+            total: 1,
+            limit: params.limit,
+            offset: 0
+          })
+        }
+
+        return Promise.resolve({
+          skills: firstPage,
+          count: firstPage.length,
+          total: 12,
+          limit: params.limit,
+          offset: params.offset
+        })
+      }
+    )
+
+    renderManager()
+
+    expect(await screen.findByText("12 skills")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Filter by model"), {
+      target: { value: "gpt-4o" }
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(tldwClientMock.listSkills).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-4o",
+        limit: 10,
+        offset: 0
+      })
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          model: "gpt-4o",
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+    expect(await screen.findByText("model-specific")).toBeInTheDocument()
+  })
+
   it("imports a skill from text via importSkill", async () => {
     renderManager()
 
