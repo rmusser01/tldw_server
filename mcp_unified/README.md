@@ -21,6 +21,10 @@ surface for early standalone gateway work.
   helpers.
 - Metadata-only tool-use reporting for aggregate profile, model, tool, and
   prompt-version analysis.
+- Package-local filesystem advisory lock backends for coordinating
+  read-before-mutate workflows. The memory backend is the default.
+  An optional SQLite backend can coordinate cooperating processes that point at
+  the same local database file.
 - A package CLI, `mcp-unified-gateway`, for local config management and remote
   gateway runtime operations.
 
