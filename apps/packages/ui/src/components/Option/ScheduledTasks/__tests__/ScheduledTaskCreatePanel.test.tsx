@@ -311,6 +311,7 @@ describe("ScheduledTaskCreatePanel", () => {
         "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
       )
     ).toBeInTheDocument()
+    expect(screen.queryByText("Safety")).not.toBeInTheDocument()
     expect(screen.getByText("Scheduled RAG query support")).toBeInTheDocument()
     expect(screen.getByText("Task visibility policy")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Open Research" })).toHaveAttribute(

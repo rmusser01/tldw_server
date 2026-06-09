@@ -9,6 +9,12 @@ labels:
 priority: High
 references:
 - https://github.com/rmusser01/tldw_server/pull/2332
+modified_files:
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskCreatePanel.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx
+- backlog/tasks/task-2342 - Design-Scheduled-Tasks-Phase-4-API-first-recurring-question-and-agent-task-contract.md
+- backlog/tasks/task-2343 - Plan-Scheduled-Tasks-Phase-4A-API-first-planned-shell-implementation.md
+- backlog/tasks/task-2345 - Rebase-PR-2332-and-address-scheduled-tasks-Phase-4A-review-comments.md
 ---
 
 ## Description

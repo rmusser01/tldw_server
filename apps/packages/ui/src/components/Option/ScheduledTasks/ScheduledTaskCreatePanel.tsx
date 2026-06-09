@@ -317,7 +317,9 @@ const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template 
         <Typography.Text>No scheduled task can be created from this template yet.</Typography.Text>
         <PlannedRequirementList requirements={model.requirements} />
         <CapabilityCopyGroup title="Result destinations" lines={model.resultDestinations} />
-        <CapabilityCopyGroup title="Safety" lines={model.safetyLines} />
+        {model.safetyLines.length > 0 ? (
+          <CapabilityCopyGroup title="Safety" lines={model.safetyLines} />
+        ) : null}
         <Space orientation="vertical" size={4}>
           <Typography.Text strong>Related destinations</Typography.Text>
           <Space wrap size={12}>
