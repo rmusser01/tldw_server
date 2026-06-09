@@ -706,11 +706,20 @@ export const workspaceApiMethods = {
   async listSkills(
     this: TldwApiClientCore,
     params?: {
+      q?: string
       limit?: number
       offset?: number
     }
   ): Promise<SkillsListPayload> {
-    const query = buildQuery(params)
+    const normalizedParams = params
+      ? {
+          ...params,
+          q: typeof params.q === "string" && params.q.trim().length > 0
+            ? params.q.trim()
+            : undefined
+        }
+      : undefined
+    const query = buildQuery(normalizedParams)
     const base = await this.resolveApiPath("skills.list", [
       "/api/v1/skills",
       "/api/v1/skills/"

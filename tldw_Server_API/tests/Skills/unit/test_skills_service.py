@@ -230,6 +230,34 @@ Content""")
         assert names1.isdisjoint(names2)
 
     @pytest.mark.asyncio
+    async def test_list_skills_search_filters_before_pagination(self, service):
+        """Search should find matching skills outside the first unfiltered page."""
+        for i in range(12):
+            await service.create_skill(
+                f"alpha-{i:02d}",
+                """---
+description: General utility skill
+---
+
+Common content
+""",
+            )
+        await service.create_skill(
+            "omega-research",
+            """---
+description: Needle workflow for longform research synthesis
+---
+
+Use this for longform synthesis.
+""",
+        )
+
+        skills = await service.list_skills(q="needle", limit=5, offset=0)
+
+        assert [skill.name for skill in skills] == ["omega-research"]
+        assert await service.get_total_count(q="needle") == 1
+
+    @pytest.mark.asyncio
     async def test_update_skill_content(self, service):
         """Test updating skill content."""
         await service.create_skill("update-test", "Original content")

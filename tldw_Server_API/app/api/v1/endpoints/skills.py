@@ -113,6 +113,11 @@ def _metadata_to_summary(metadata) -> SkillSummary:
 @router.get("/", response_model=SkillsListResponse)
 async def list_skills(
     include_hidden: bool = Query(False, description="Include hidden skills (user_invocable=false)"),
+    q: Optional[str] = Query(
+        None,
+        max_length=200,
+        description="Case-insensitive search across skill names and descriptions",
+    ),
     limit: int = Query(100, ge=1, le=500, description="Maximum number of skills to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     service: SkillsService = Depends(get_skills_service),
@@ -125,10 +130,11 @@ async def list_skills(
     try:
         skills = await service.list_skills(
             include_hidden=include_hidden,
+            q=q,
             limit=limit,
             offset=offset,
         )
-        total = await service.get_total_count(include_hidden=include_hidden)
+        total = await service.get_total_count(include_hidden=include_hidden, q=q)
 
         return SkillsListResponse(
             skills=[_metadata_to_summary(s) for s in skills],

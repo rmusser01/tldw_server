@@ -330,6 +330,47 @@ class TestListSkills:
         assert data["has_more"] is False
         assert data["next_offset"] is None
 
+    def test_list_skills_search_filters_before_pagination(self, client):
+        for i in range(12):
+            r = client.post(
+                f"{SKILLS_PREFIX}/",
+                json={
+                    "name": f"alpha-{i:02d}",
+                    "content": "---\ndescription: General utility skill\n---\n\nCommon content",
+                },
+            )
+            assert r.status_code == 201, r.text
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={
+                "name": "omega-research",
+                "content": (
+                    "---\n"
+                    "description: Needle workflow for longform research synthesis\n"
+                    "---\n\n"
+                    "Use this for longform synthesis."
+                ),
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        r = client.get(f"{SKILLS_PREFIX}/?q=needle&limit=5&offset=0")
+        assert r.status_code == 200, r.text
+        data = r.json()
+
+        assert [skill["name"] for skill in data["skills"]] == ["omega-research"]
+        assert data["count"] == 1
+        assert data["total"] == 1
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 5,
+            "offset": 0,
+            "total": 1,
+            "has_more": False,
+            "next_offset": None,
+        }
+
 
 class TestCreateAndGetSkill:
     def test_create_skill_and_get(self, client):

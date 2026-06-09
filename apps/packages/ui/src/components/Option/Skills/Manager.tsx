@@ -93,6 +93,7 @@ export const SkillsManager: React.FC = () => {
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
 
   const offset = (page - 1) * pageSize
+  const searchQuery = search.trim()
 
   const {
     data,
@@ -101,24 +102,18 @@ export const SkillsManager: React.FC = () => {
     error,
     refetch
   } = useQuery<SkillsListResponse>({
-    queryKey: ["skills", page, pageSize],
-    queryFn: () => tldwClient.listSkills({ limit: pageSize, offset })
+    queryKey: ["skills", page, pageSize, searchQuery],
+    queryFn: () =>
+      tldwClient.listSkills({
+        ...(searchQuery ? { q: searchQuery } : {}),
+        limit: pageSize,
+        offset
+      })
   })
-
-  const filteredSkills = React.useMemo(() => {
-    if (!data?.skills) return []
-    if (!search.trim()) return data.skills
-    const q = search.toLowerCase()
-    return data.skills.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.description && s.description.toLowerCase().includes(q))
-      )
-  }, [data?.skills, search])
 
   const hasLoadedSkills = data != null && !isError
   const totalSkills = data?.total ?? 0
-  const hasSearch = search.trim().length > 0
+  const hasSearch = searchQuery.length > 0
   const isLibraryEmpty =
     hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch
   const skillCountLabel = isError
@@ -609,7 +604,10 @@ export const SkillsManager: React.FC = () => {
             defaultValue: "Search skills..."
           })}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setPage(1)
+          }}
           allowClear
           style={{ maxWidth: 360 }}
         />
@@ -697,7 +695,7 @@ export const SkillsManager: React.FC = () => {
       )}
 
       <Table
-        dataSource={filteredSkills}
+        dataSource={data?.skills ?? []}
         columns={columns}
         rowKey="name"
         loading={isLoading}

@@ -443,6 +443,7 @@ class SkillsService:
     async def list_skills(
         self,
         include_hidden: bool = False,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[SkillMetadata]:
@@ -451,6 +452,7 @@ class SkillsService:
 
         Args:
             include_hidden: If True, include skills with user_invocable=False
+            q: Optional case-insensitive search query for skill name or description
             limit: Maximum number of skills to return
             offset: Offset for pagination
 
@@ -462,6 +464,7 @@ class SkillsService:
         rows = db.list_skill_registry(
             include_hidden=include_hidden,
             include_deleted=False,
+            q=q,
             limit=limit,
             offset=offset,
         )
@@ -1025,13 +1028,14 @@ class SkillsService:
         rows = self._list_context_rows()
         return self._build_context_payload(rows)
 
-    async def get_total_count(self, include_hidden: bool = False) -> int:
+    async def get_total_count(self, include_hidden: bool = False, q: str | None = None) -> int:
         """Get total count of skills."""
         await self._sync_registry_async()
         db = self._get_db()
         return db.count_skill_registry(
             include_hidden=include_hidden,
             include_deleted=False,
+            q=q,
         )
 
     def _get_builtin_skills_dir(self) -> Path:
