@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from "react"
-import { Button, Input, Select, Space, Table, Tag, Typography } from "antd"
+import { Button, Input, Select, Space, Table, Typography } from "antd"
 import type { ColumnsType } from "antd/es/table"
+import { BLOCKED_STATE_LABEL } from "@/design-system"
+import {
+  Badge as DesignSystemBadge,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 import type {
   ScheduledTask,
   ScheduledTaskPrimitive
@@ -11,7 +16,7 @@ import {
   getScheduledTaskProductStatus,
   getScheduledTaskTypeLabel,
   isNativeReminderTask,
-  scheduledTaskStatusToneToTagColor,
+  scheduledTaskStatusToneToBadgeVariant,
   type ScheduledTaskProductStatus,
   type ScheduledTaskStatusKey
 } from "./scheduled-task-status"
@@ -35,8 +40,8 @@ export interface ScheduledTaskTableProps {
 type ScheduledTaskStatusFilter = "all" | ScheduledTaskStatusKey
 type ScheduledTaskTypeFilter = "all" | ScheduledTaskPrimitive
 
-const typeTagColor = (task: ScheduledTask): string =>
-  task.primitive === "watchlist_job" ? "gold" : "blue"
+const typeBadgeVariant = (task: ScheduledTask): BadgeVariant =>
+  task.primitive === "watchlist_job" ? "warning" : "info"
 
 const rowActionLabel = (action: string, task: ScheduledTask): string =>
   `${action} ${task.title}`
@@ -81,7 +86,7 @@ const statusFilterOptions: Array<{
   { value: "running", label: "Running now" },
   { value: "waiting", label: "Waiting" },
   { value: "found_results", label: "Found results" },
-  { value: "blocked", label: "Blocked" },
+  { value: "blocked", label: BLOCKED_STATE_LABEL },
   { value: "paused", label: "Paused" },
   { value: "disabled", label: "Disabled" },
   { value: "draft", label: "Draft" },
@@ -160,7 +165,9 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
             {task.description || task.schedule_summary || "—"}
           </Typography.Text>
           <div>
-            <Tag color={typeTagColor(task)}>{getScheduledTaskTypeLabel(task)}</Tag>
+            <DesignSystemBadge variant={typeBadgeVariant(task)}>
+              {getScheduledTaskTypeLabel(task)}
+            </DesignSystemBadge>
           </div>
         </div>
       )
@@ -174,9 +181,11 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
         return (
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div>
-              <Tag color={scheduledTaskStatusToneToTagColor(productStatus)}>
+              <DesignSystemBadge
+                variant={scheduledTaskStatusToneToBadgeVariant(productStatus)}
+              >
                 {productStatus.label}
-              </Tag>
+              </DesignSystemBadge>
             </div>
             <Typography.Text type="secondary">
               {productStatus.description}
@@ -219,9 +228,9 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       title: "Management",
       key: "management",
       render: (_, task) => (
-        <Tag color={isNativeReminderTask(task) ? "blue" : "gold"}>
+        <DesignSystemBadge variant={isNativeReminderTask(task) ? "info" : "warning"}>
           {isNativeReminderTask(task) ? "Managed here" : "Managed in Watchlists"}
-        </Tag>
+        </DesignSystemBadge>
       )
     },
     {

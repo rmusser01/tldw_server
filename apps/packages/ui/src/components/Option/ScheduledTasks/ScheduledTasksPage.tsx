@@ -1,8 +1,10 @@
 import React, { useState } from "react"
-import { Alert, Button, Empty, Space, Spin, Tabs, Typography, message } from "antd"
+import { Button, Space, Tabs, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
+import { EmptyState, LoadingState as DesignSystemLoadingState } from "@/components/ui/feedback"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
@@ -40,15 +42,6 @@ import {
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 const SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS = 8000
-
-const LoadingState: React.FC = () => (
-  <div role="status" aria-live="polite">
-    <Space>
-      <Spin size="small" />
-      <Typography.Text type="secondary">Loading tasks and latest run state</Typography.Text>
-    </Space>
-  </div>
-)
 
 export const ScheduledTasksPage: React.FC = () => {
   const location = useLocation()
@@ -431,9 +424,8 @@ export const ScheduledTasksPage: React.FC = () => {
       ) : null}
 
       {hasLoadedTasks && hasWatchlistJob ? (
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
         />
       ) : null}
@@ -456,7 +448,7 @@ export const ScheduledTasksPage: React.FC = () => {
   const renderResultsTab = () => (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       {missingRouteResult ? (
-        <Alert type="warning" showIcon title="Result signal not found." />
+        <DesignSystemAlert variant="warning" title="Result signal not found." />
       ) : null}
       <ScheduledTaskResultsPanel
         results={projectedResults}
@@ -470,26 +462,20 @@ export const ScheduledTasksPage: React.FC = () => {
 
   const renderTasksTab = () => (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      {missingRouteTask ? <Alert type="warning" showIcon title="Task not found." /> : null}
+      {missingRouteTask ? (
+        <DesignSystemAlert variant="warning" title="Task not found." />
+      ) : null}
 
       {hasLoadedTasks && tasks.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Typography.Text strong>No scheduled tasks yet.</Typography.Text>
-              <Typography.Text type="secondary">
-                Create a reminder now. Watch and Ingest setup continue in their owner
-                workspaces until capability, preview, duplicate, creation, and result
-                contracts are available.
-              </Typography.Text>
-            </div>
-          }
-        >
-          <Button type="primary" onClick={openCreateReminder}>
-            Create scheduled task
-          </Button>
-        </Empty>
+        <EmptyState
+          variant="inline"
+          title="No scheduled tasks yet."
+          description="Create a reminder now. Watch and Ingest setup continue in their owner workspaces until capability, preview, duplicate, creation, and result contracts are available."
+          primaryAction={{
+            label: "Create scheduled task",
+            onClick: openCreateReminder
+          }}
+        />
       ) : null}
 
       {hasLoadedTasks && tasks.length > 0 ? (
@@ -520,11 +506,19 @@ export const ScheduledTasksPage: React.FC = () => {
         </Typography.Paragraph>
       </div>
 
-      {isLoadingTasks ? <LoadingState /> : null}
+      {isLoadingTasks ? (
+        <div role="status" aria-live="polite">
+          <DesignSystemLoadingState
+            mode="inline"
+            size="sm"
+            label="Loading tasks and latest run state"
+            className="w-full"
+          />
+        </div>
+      ) : null}
       {routeState.invalidTab ? (
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title="That tab is not available. Showing Overview."
         />
       ) : null}

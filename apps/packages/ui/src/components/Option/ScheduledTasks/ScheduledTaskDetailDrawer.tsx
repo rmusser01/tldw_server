@@ -1,12 +1,13 @@
 import React from "react"
-import { Button, Descriptions, Drawer, Space, Tag, Typography } from "antd"
+import { Button, Descriptions, Drawer, Space, Typography } from "antd"
+import { Badge as DesignSystemBadge } from "@/components/ui/primitives"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import {
   formatScheduledTaskTimestamp,
   getScheduledTaskProductStatus,
   getScheduledTaskTypeLabel,
   isNativeReminderTask,
-  scheduledTaskStatusToneToTagColor
+  scheduledTaskStatusToneToBadgeVariant
 } from "./scheduled-task-status"
 import { WatchlistTaskActionLinks } from "./WatchlistTaskActionLinks"
 import type { ScheduledTaskResultItem } from "./scheduled-task-results"
@@ -135,9 +136,11 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="Product status">
               <Space orientation="vertical" size={2}>
-                <Tag color={scheduledTaskStatusToneToTagColor(productStatus)}>
+                <DesignSystemBadge
+                  variant={scheduledTaskStatusToneToBadgeVariant(productStatus)}
+                >
                   {productStatus.label}
-                </Tag>
+                </DesignSystemBadge>
                 <Typography.Text type="secondary">
                   {productStatus.description}
                 </Typography.Text>

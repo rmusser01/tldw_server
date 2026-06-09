@@ -1,8 +1,16 @@
 import React from "react"
-import { Alert, Button, Descriptions, Drawer, Space, Tag, Typography } from "antd"
+import { Button, Descriptions, Drawer, Space, Typography } from "antd"
+import {
+  Alert as DesignSystemAlert,
+  Badge as DesignSystemBadge,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 
 import { formatScheduledTaskTimestamp } from "./scheduled-task-status"
-import type { ScheduledTaskResultItem } from "./scheduled-task-results"
+import {
+  getScheduledTaskResultStatusLabel,
+  type ScheduledTaskResultItem
+} from "./scheduled-task-results"
 
 export interface ScheduledTaskResultDetailDrawerProps {
   open: boolean
@@ -15,26 +23,19 @@ export interface ScheduledTaskResultDetailDrawerProps {
 const UNSUPPORTED_ACTION_COPY =
   "Review and retry actions appear when this server supports them for the selected result."
 
-const severityToTagColor = (severity: ScheduledTaskResultItem["severity"]): string => {
+const severityToBadgeVariant = (
+  severity: ScheduledTaskResultItem["severity"]
+): BadgeVariant => {
   switch (severity) {
     case "success":
-      return "green"
+      return "success"
     case "warning":
-      return "gold"
+      return "warning"
     case "error":
-      return "red"
+      return "danger"
     default:
-      return "processing"
+      return "info"
   }
-}
-
-const statusLabel = (result: ScheduledTaskResultItem): string => {
-  if (result.signalKind === "result") return "Found results"
-  if (result.state === "blocked") return "Blocked"
-  if (result.signalKind === "failure") return "Needs attention"
-  if (result.state === "paused") return "Paused"
-  if (result.signalKind === "running") return "Running now"
-  return "Completed/no results"
 }
 
 const optionalDescriptionItem = (
@@ -102,9 +103,9 @@ export const ScheduledTaskResultDetailDrawer: React.FC<
 
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="State">
-              <Tag color={severityToTagColor(result.severity)}>
-                {statusLabel(result)}
-              </Tag>
+              <DesignSystemBadge variant={severityToBadgeVariant(result.severity)}>
+                {getScheduledTaskResultStatusLabel(result)}
+              </DesignSystemBadge>
             </Descriptions.Item>
             <Descriptions.Item label="Owner">{result.ownerLabel}</Descriptions.Item>
             <Descriptions.Item label="Task type">{result.taskTypeLabel}</Descriptions.Item>
@@ -141,7 +142,7 @@ export const ScheduledTaskResultDetailDrawer: React.FC<
                 ) : null}
               </Space>
             ) : (
-              <Alert type="info" showIcon title={UNSUPPORTED_ACTION_COPY} />
+              <DesignSystemAlert variant="info" title={UNSUPPORTED_ACTION_COPY} />
             )}
           </div>
         </Space>

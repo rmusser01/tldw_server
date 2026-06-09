@@ -1,10 +1,17 @@
 import React, { useMemo, useState } from "react"
-import { Alert, Button, Empty, Input, Select, Space, Table, Tag, Typography } from "antd"
+import { Button, Input, Select, Space, Table, Typography } from "antd"
 import type { ColumnsType } from "antd/es/table"
+import { EmptyState } from "@/components/ui/feedback"
+import {
+  Alert as DesignSystemAlert,
+  Badge as DesignSystemBadge,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 
 import { formatScheduledTaskTimestamp } from "./scheduled-task-status"
 import {
   filterScheduledTaskResults,
+  getScheduledTaskResultStatusLabel,
   type ScheduledTaskResultItem,
   type ScheduledTaskResultOwner,
   type ScheduledTaskResultSignalKind,
@@ -43,26 +50,19 @@ const reviewStateOptions: Array<{ value: ReviewStateFilter; label: string }> = [
   { value: "reviewed", label: "Reviewed" }
 ]
 
-const severityToTagColor = (severity: ScheduledTaskResultItem["severity"]): string => {
+const severityToBadgeVariant = (
+  severity: ScheduledTaskResultItem["severity"]
+): BadgeVariant => {
   switch (severity) {
     case "success":
-      return "green"
+      return "success"
     case "warning":
-      return "gold"
+      return "warning"
     case "error":
-      return "red"
+      return "danger"
     default:
-      return "processing"
+      return "info"
   }
-}
-
-const resultStatusLabel = (result: ScheduledTaskResultItem): string => {
-  if (result.signalKind === "result") return "Found results"
-  if (result.state === "blocked") return "Blocked"
-  if (result.signalKind === "failure") return "Needs attention"
-  if (result.state === "paused") return "Paused"
-  if (result.signalKind === "running") return "Running now"
-  return "Completed/no results"
 }
 
 const stateFilterToSignalKinds = (
@@ -169,7 +169,7 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
           result.sourceLabel,
           result.matchedRuleLabel,
           result.outputLabel,
-          resultStatusLabel(result)
+          getScheduledTaskResultStatusLabel(result)
         ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch))
 
       return taskTypeMatches && searchMatches
@@ -209,8 +209,8 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
           <Typography.Text strong>{result.title}</Typography.Text>
           <Typography.Text type="secondary">{result.summary}</Typography.Text>
           <Space wrap size={4}>
-            <Tag>{result.taskTypeLabel}</Tag>
-            <Tag>{result.ownerLabel}</Tag>
+            <DesignSystemBadge variant="secondary">{result.taskTypeLabel}</DesignSystemBadge>
+            <DesignSystemBadge variant="secondary">{result.ownerLabel}</DesignSystemBadge>
           </Space>
         </Space>
       )
@@ -219,9 +219,9 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
       title: "State",
       key: "state",
       render: (_, result) => (
-        <Tag color={severityToTagColor(result.severity)}>
-          {resultStatusLabel(result)}
-        </Tag>
+        <DesignSystemBadge variant={severityToBadgeVariant(result.severity)}>
+          {getScheduledTaskResultStatusLabel(result)}
+        </DesignSystemBadge>
       )
     },
     {
@@ -252,21 +252,15 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
     return (
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <PanelHeader capabilityMode={capabilityMode} />
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <Space orientation="vertical" size={4}>
-              <Typography.Text strong>No scheduled tasks yet</Typography.Text>
-              <Typography.Text type="secondary">
-                Results and failures appear here after an automation runs.
-              </Typography.Text>
-            </Space>
-          }
-        >
-          <Button type="primary" onClick={onCreateTask}>
-            Create scheduled task
-          </Button>
-        </Empty>
+        <EmptyState
+          variant="inline"
+          title="No scheduled tasks yet"
+          description="Results and failures appear here after an automation runs."
+          primaryAction={{
+            label: "Create scheduled task",
+            onClick: onCreateTask
+          }}
+        />
       </Space>
     )
   }
@@ -275,16 +269,10 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
     return (
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <PanelHeader capabilityMode={capabilityMode} />
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <Space orientation="vertical" size={4}>
-              <Typography.Text strong>No automation signals yet</Typography.Text>
-              <Typography.Text type="secondary">
-                The latest scheduled runs have not produced new results or failures.
-              </Typography.Text>
-            </Space>
-          }
+        <EmptyState
+          variant="inline"
+          title="No automation signals yet"
+          description="The latest scheduled runs have not produced new results or failures."
         />
       </Space>
     )
@@ -347,19 +335,19 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
       </Space>
 
       {filteredResults.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <Space orientation="vertical" size={4}>
-              <Typography.Text strong>No results match these filters</Typography.Text>
-              <Typography.Text type="secondary">
-                Adjust the result state, task type, owner, or search filters.
-              </Typography.Text>
-            </Space>
+        <EmptyState
+          variant="inline"
+          title="No results match these filters"
+          description="Adjust the result state, task type, owner, or search filters."
+          primaryAction={
+            activeFilters
+              ? {
+                  label: "Clear filters",
+                  onClick: resetFilters
+                }
+              : undefined
           }
-        >
-          {activeFilters ? <Button onClick={resetFilters}>Clear filters</Button> : null}
-        </Empty>
+        />
       ) : (
         <Table<ScheduledTaskResultItem>
           rowKey="id"
@@ -386,16 +374,14 @@ const PanelHeader: React.FC<{ capabilityMode: ScheduledTaskResultsCapabilityMode
         Source-specific setup stays in the owning workspace.
       </Typography.Paragraph>
     </div>
-    <Alert
-      type="info"
-      showIcon
+    <DesignSystemAlert
+      variant="info"
       title={capabilityMode === "projected_signals" ? "Latest automation signals" : "Results"}
-      description={
-        capabilityMode === "projected_signals"
-          ? "Latest signals inferred from task status. Result history and item actions appear when the results API is available."
-          : "Review state comes from the scheduled-task results API."
-      }
-    />
+    >
+      {capabilityMode === "projected_signals"
+        ? "Latest signals inferred from task status. Result history and item actions appear when the results API is available."
+        : "Review state comes from the scheduled-task results API."}
+    </DesignSystemAlert>
   </Space>
 )
 

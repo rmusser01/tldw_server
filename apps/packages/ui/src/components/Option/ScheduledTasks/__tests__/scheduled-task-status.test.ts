@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import { BLOCKED_STATE_LABEL } from "@/design-system"
+
 import {
   buildWatchlistTaskLinks,
   getScheduledTaskProductStatus,
@@ -88,7 +90,7 @@ describe("scheduled task status helpers", () => {
         edit_mode: "external",
         source_ref: {}
       }).label
-    ).toBe("Blocked")
+    ).toBe(BLOCKED_STATE_LABEL)
 
     expect(
       getScheduledTaskProductStatus({

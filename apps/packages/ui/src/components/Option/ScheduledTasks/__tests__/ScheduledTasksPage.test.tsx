@@ -7,6 +7,8 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
+
 const mocks = vi.hoisted(() => ({
   useCanonicalConnectionConfig: vi.fn(),
   listScheduledTasks: vi.fn(),
@@ -44,6 +46,20 @@ const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
 const SLOW_SCHEDULE_FORM_TIMEOUT_MS = 20000
+
+const expectInsideDesignSystemComponent = (
+  text: string | RegExp,
+  componentName: string
+): HTMLElement => {
+  const marker = `[data-ds-component="${componentName}"]`
+  const match = screen
+    .getAllByText(text)
+    .map((node) => node.closest(marker))
+    .find((node): node is HTMLElement => node instanceof HTMLElement)
+
+  expect(match).toBeTruthy()
+  return match
+}
 
 const renderWithQueryClient = (
   ui: React.ReactElement,
@@ -339,6 +355,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByText("Result signal not found.")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Result signal not found.")
     expect(screen.getByText("No scheduled tasks yet")).toBeInTheDocument()
   })
 
@@ -401,6 +418,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=runs")
 
     expect(await screen.findByText("That tab is not available. Showing Overview.")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("That tab is not available. Showing Overview.")
     expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByText("0 scheduled tasks")).toBeInTheDocument()
   })
@@ -419,6 +437,7 @@ describe("ScheduledTasksPage", () => {
     )
 
     expect(await screen.findByText("Task not found.")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Task not found.")
     expect(screen.getByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
@@ -479,6 +498,9 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByRole("button", { name: "Open latest result signal" })).toBeInTheDocument()
     expect(screen.getAllByText(/2030/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
+    expectInsideDesignSystemAlert(/Watchlists remains the full workspace/)
+    expectInsideDesignSystemComponent("Review required", "Badge")
+    expectInsideDesignSystemComponent("Active", "Badge")
     expect(screen.queryByRole("columnheader", { name: "Task" })).not.toBeInTheDocument()
   })
 
@@ -535,6 +557,11 @@ describe("ScheduledTasksPage", () => {
     const reminderRow = screen.getByText("Review notes").closest("tr")
     expect(reminderRow).not.toBeNull()
     expect(within(reminderRow as HTMLElement).getByText("Needs attention")).toBeInTheDocument()
+    expect(
+      within(reminderRow as HTMLElement)
+        .getByText("Needs attention")
+        .closest('[data-ds-component="Badge"]')
+    ).not.toBeNull()
     expect(within(reminderRow as HTMLElement).getByText("No completed runs yet")).toBeInTheDocument()
 
     expect(screen.getByRole("button", { name: "Inspect Review notes" })).toBeInTheDocument()
@@ -733,7 +760,7 @@ describe("ScheduledTasksPage", () => {
       expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
     })
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("filters scheduled tasks by product status and search text", async () => {
     const user = userEvent.setup()
@@ -882,6 +909,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />)
 
     expect(await screen.findByText("Loading tasks and latest run state")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("Loading tasks and latest run state", "LoadingState")
   })
 
   it("shows an actionable empty state when no scheduled tasks exist", async () => {
@@ -897,6 +925,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("No scheduled tasks yet.", "EmptyState")
     await user.click(screen.getByRole("button", { name: "Create scheduled task" }))
     expect(
       await screen.findByRole("heading", {
