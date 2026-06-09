@@ -42,7 +42,7 @@ Write a design-only spec for the persisted Explainer workspace, review it for pr
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Wrote the Explainer workspace design spec covering the Breakdowner-inspired UX, explicit Goal/Sources tabs, backend-persisted sessions and nodes from day one, Jobs-backed node expansion, configurable grounding modes, citation snapshots, security/privacy constraints, accessibility requirements, and frontend/backend testing strategy. Verification: reviewed the spec locally after the subagent review tool was unavailable under current delegation policy; checked the spec for ASCII-only content and confirmed the expected Backlog reference. Bandit skipped because this task only changes documentation and Backlog task metadata, not Python code.
+Updated the Explainer workspace design spec after review. The spec now makes Chatbook export a first-release requirement: exporting creates one Chatbook item containing the complete explainer session tree, clarifying questions, selected answers, citations, grounding metadata, generation metadata, and rendered reading form. It also notes the current Chatbooks implementation constraint: either add a first-class explainer_session ContentType or use generated_document with metadata.subtype = explainer_session as a compatibility bridge. Verification: reviewed the edited spec against the existing Chatbooks schemas/models/service shape; scoped diff review showed only the spec and TASK-546 changes; ASCII scan found no non-ASCII content. Bandit skipped because this revision only changes documentation and Backlog metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

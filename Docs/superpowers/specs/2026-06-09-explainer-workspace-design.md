@@ -15,6 +15,7 @@ tldw should adopt the recursive breakdown pattern without copying the toy-like c
 - Make grounding behavior configurable and enforceable.
 - Let users choose the output intent per session and per expansion: `Explain`, `Plan`, or `Both`.
 - Provide clear handoff actions into notes, quiz generation, flashcard generation, and follow-up prompts.
+- Export the full explainer session as a single Chatbook item containing all explainer content.
 
 ## Non-Goals
 
@@ -23,6 +24,7 @@ tldw should adopt the recursive breakdown pattern without copying the toy-like c
 - Do not rely on local-only persistence for explainer sessions.
 - Do not allow `Source-only` mode to silently fill unsupported claims with outside knowledge.
 - Do not build a new generic job system; use the existing Jobs backend for user-visible generation work.
+- Do not make Markdown, note, or multi-item exports the primary first-release export path.
 
 ## Reference Page Review
 
@@ -73,6 +75,27 @@ The main workspace has two reading levels:
 - Detail panel: the selected node's readable explanation, plan steps, citations, outside-knowledge labels, retry controls, and handoff actions.
 
 On desktop, the source/session/settings rail can sit on the right. On mobile, it becomes a drawer. The tree remains the primary navigation surface, but the detail panel is the primary reading surface.
+
+## Chatbook Export
+
+Explainer export should create one Chatbook content item for the session, not a set of separate notes or Markdown files. The item contains the full explainer content:
+
+- Session title, mode, output intent, grounding mode, depth preset, and timestamps.
+- Selected source references and source snapshot metadata.
+- The complete node tree in stable order.
+- Clarifying questions, quick-answer options, selected answers, and custom answers.
+- Node titles, bodies, plan steps, summaries, statuses, evidence states, and outside-knowledge flags.
+- Citations with source IDs, source titles, excerpts, locations, and snapshot hashes.
+- Generation metadata: provider, model, prompt template version, retrieval settings, job IDs, timestamps, and token usage when available.
+
+The exported item should preserve both a structured JSON payload and a rendered reading form. The structured payload enables round-trip import into an Explainer session; the rendered form makes the item useful in Chatbook previews and downstream readers.
+
+Implementation should integrate with the existing Chatbooks system rather than invent a parallel export archive. There are two viable implementation paths:
+
+- Preferred: add a first-class Chatbook content type such as `explainer_session`, with export/import handling that restores an Explainer session.
+- Compatibility fallback: materialize the session as a `generated_document` Chatbook item with `metadata.subtype = "explainer_session"`, while still implementing import routing that can restore it to Explainer.
+
+Whichever path is chosen, the user-facing export action is "Export to Chatbook" and returns the normal Chatbooks export job/download flow. Linked source records are references by default; the full original source documents are not bundled unless a later explicit "include linked sources" option is added.
 
 ## Grounding Modes
 
@@ -222,6 +245,7 @@ DELETE /api/v1/explainer/sessions/{session_id}/nodes/{node_id}
 
 POST   /api/v1/explainer/sessions/{session_id}/nodes/{node_id}/expand
 POST   /api/v1/explainer/sessions/{session_id}/nodes/{node_id}/answer-question
+POST   /api/v1/explainer/sessions/{session_id}/export-chatbook
 ```
 
 Deletes should behave as soft deletes or archival operations by default, consistent with the project's user-data recovery expectations. Permanent deletion can be a later explicit admin/user-data-management feature if needed.
@@ -238,6 +262,8 @@ Deletes should behave as soft deletes or archival operations by default, consist
 ```
 
 The UI follows existing Jobs status endpoints for progress and refreshes the session or affected node after the job completes.
+
+`export-chatbook` delegates to the Chatbooks service and returns a Chatbooks export job reference or completed download metadata, matching existing Chatbooks behavior. The frontend should not assemble the Chatbook item itself because export must be ownership-checked, citation-safe, and consistent with server-side Chatbook validation.
 
 ## Generation Flow
 
@@ -285,6 +311,7 @@ Primary components:
 - `ExplainerCitationList`
 - `ExplainerSessionRail`
 - `ExplainerJobStatusBanner`
+- `ExplainerChatbookExportButton`
 
 ## Backend Implementation Shape
 
@@ -302,6 +329,7 @@ The core module should keep generation orchestration separate from persistence:
 - Service: create sessions, answer questions, enqueue expansion jobs.
 - Worker handler: retrieval, prompt execution, grounding validation, citation extraction, child-node persistence.
 - Prompt templates: versioned strings or structured prompt builders.
+- Chatbook export adapter: serialize a complete session into one Chatbook item and delegate archive/job handling to the existing Chatbooks service.
 
 ## Security And Privacy
 
@@ -310,6 +338,7 @@ The core module should keep generation orchestration separate from persistence:
 - Do not log prompts, source excerpts, API keys, or generated content unless existing debug settings explicitly allow safe redacted logging.
 - Treat selected source IDs as untrusted input and verify ownership before retrieval.
 - Store citation excerpts only to the extent needed for provenance display.
+- Chatbook export must re-check session ownership and selected-source ownership server-side. The export payload must include explainer content and citation excerpts, not unrestricted full source text.
 
 ## Accessibility
 
@@ -330,6 +359,8 @@ The core module should keep generation orchestration separate from persistence:
 - Worker writes error state on provider failure.
 - `Source-only` insufficient retrieval writes an `insufficient` node without outside knowledge.
 - Citation snapshots include source ID, title, excerpt, and location metadata.
+- Chatbook export serializes the complete session as one item and rejects export attempts by non-owners.
+- Chatbook import restores the item as an Explainer session or routes the compatibility fallback through a documented generated-document subtype.
 
 ### Frontend
 
@@ -340,6 +371,7 @@ The core module should keep generation orchestration separate from persistence:
 - Detail panel shows citations and outside-knowledge labels.
 - Grounding and output-intent controls persist in session settings.
 - Jobs-backed expansion transitions through queued/generating/complete/error states.
+- Chatbook export action surfaces queued, completed, failed, and download states using existing Chatbooks job semantics.
 
 ### E2E
 
@@ -347,11 +379,12 @@ The core module should keep generation orchestration separate from persistence:
 - Mocked API flow creates a Goal session and renders the first node.
 - Mocked Sources flow selects a source and renders citation chips.
 - Job polling completion updates an expanded node.
+- Mocked export flow posts to the explainer Chatbook export endpoint and receives a Chatbooks job/download response.
 
 ## Open Questions
 
 - Should Explainer sessions live in the per-user notes/chats database or a new explainer-specific table group?
-- Should session exports produce Chatbooks, notes, Markdown, or all three in the first release?
+- Should the first implementation add `explainer_session` to the Chatbook `ContentType` enum immediately, or use a `generated_document` subtype as a compatibility bridge?
 - Should imported Research Workspace sources be supported in the first release or a follow-up?
 - Which existing prompt/template registry should own Explainer prompt versions?
 
