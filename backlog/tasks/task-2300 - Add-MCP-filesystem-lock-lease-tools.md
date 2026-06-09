@@ -68,7 +68,9 @@ Verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented in PR #2331: https://github.com/rmusser01/tldw_server/pull/2331
 
+This slice adds process-local advisory filesystem lock leases, exposes `fs.lock_acquire` and `fs.lock_release`, wires optional lease validation into `fs.edit`, `fs.patch`, and `fs.write`, and documents that shared/persistent lock stores are deferred. Verification completed with focused MCP filesystem tests, compile checks, Bandit on touched implementation scope, and `git diff --check`.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -77,6 +79,6 @@ Verification:
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
