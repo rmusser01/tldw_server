@@ -19,7 +19,9 @@ from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .tool_discovery import (
     describe_profile_tool,
+    list_direct_profile_backend_tools,
     list_profile_tools,
+    profile_has_deferred_tools,
     resolve_profile_tool_call,
     search_profile_tools,
 )
@@ -192,26 +194,25 @@ class ProfileAwareGatewayRuntime:
             return []
 
         tools = await self._safe_backend_tools(context)
-        allowed_tools: list[dict[str, Any]] = []
-        allowed_tool_names: set[str] = set()
-        for tool in tools:
-            if not isinstance(tool, dict):
-                continue
-            name = _tool_name(tool)
-            if (
-                name is not None
-                and _tool_allowed_by_profile(
-                    profile_result.profile,
-                    tool,
-                )
-            ):
-                allowed_tool_names.add(name)
-                allowed_tools.append(deepcopy(tool))
+        direct_tools = list_direct_profile_backend_tools(
+            profile_result.profile,
+            tools,
+        )
+        allowed_tool_names = {
+            name
+            for tool in direct_tools
+            if (name := _tool_name(tool)) is not None
+        }
+        include_tool_call = (
+            _profile_has_deferred_categories(profile_result.profile)
+            or profile_has_deferred_tools(profile_result.profile, tools)
+        )
         return [
-            *allowed_tools,
+            *direct_tools,
             *_profile_bridge_tool_descriptors(
                 profile_result.profile,
                 suppressed_names=allowed_tool_names,
+                include_tool_call=include_tool_call,
             ),
         ]
 
@@ -528,11 +529,10 @@ def _allowed_backend_tool_by_name(
 ) -> dict[str, Any] | None:
     """Return an allowed backend descriptor matching a bridge-reserved name."""
 
-    for tool in backend_tools:
+    for tool in list_direct_profile_backend_tools(profile, backend_tools):
         if (
             isinstance(tool, dict)
             and _tool_name(tool) == name
-            and _tool_allowed_by_profile(profile, tool)
         ):
             return tool
     return None
@@ -542,6 +542,7 @@ def _profile_bridge_tool_descriptors(
     profile: MCPProfile,
     *,
     suppressed_names: set[str],
+    include_tool_call: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Return caller-owned synthetic discovery tool descriptors for a profile."""
 
@@ -551,7 +552,12 @@ def _profile_bridge_tool_descriptors(
         _TOOL_SEARCH,
         _TOOL_DESCRIBE,
     ]
-    if _profile_has_deferred_categories(profile):
+    should_include_tool_call = (
+        _profile_has_deferred_categories(profile)
+        if include_tool_call is None
+        else include_tool_call
+    )
+    if should_include_tool_call:
         names.append(_TOOL_CALL)
     return [
         deepcopy(_BRIDGE_TOOL_DESCRIPTORS[name])

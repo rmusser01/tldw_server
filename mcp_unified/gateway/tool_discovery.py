@@ -17,6 +17,11 @@ _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
 _DEFAULT_CATEGORY = "uncategorized"
 _INSTALLED = "installed"
 _RECOMMENDED_UNAVAILABLE = "recommended_unavailable"
+_EXPOSURE_DIRECT = "direct"
+_EXPOSURE_DEFERRED = "deferred"
+_EXPOSURE_RECOMMENDED_UNAVAILABLE = "recommended_unavailable"
+_REASON_INSTALLED_DIRECT = "installed_direct"
+_REASON_INSTALLED_DEFERRED = "installed_deferred"
 _RANKING_METADATA: dict[str, Any] = {
     "semantic_search": False,
     "scoring": "bm25_standard_library",
@@ -42,6 +47,8 @@ class _ToolEntry:
     category: str
     capabilities: tuple[str, ...]
     installation_status: str
+    exposure: str
+    availability_reason_code: str
     source: str
     text: str
     backend_tool: dict[str, Any] | None = None
@@ -59,6 +66,7 @@ def list_profile_tools(profile: MCPProfile, backend_tools: Any) -> dict[str, Any
         "profile_id": profile.id,
         "tools": [_entry_payload(entry, score=0.0) for entry in ordered],
         "categories": _category_payload(profile, ordered),
+        "availability": _availability_payload(ordered),
         "progressive_disclosure": _progressive_disclosure(profile),
         "ranking": _ranking_metadata(),
     }
@@ -144,6 +152,32 @@ def resolve_profile_tool_call(
     }
 
 
+def list_direct_profile_backend_tools(
+    profile: MCPProfile,
+    backend_tools: Any,
+) -> list[dict[str, Any]]:
+    """Return caller-owned installed backend tools exposed directly to a profile."""
+
+    return [
+        deepcopy(entry.backend_tool)
+        for entry in _visible_entries(profile, backend_tools)
+        if (
+            entry.installation_status == _INSTALLED
+            and entry.exposure == _EXPOSURE_DIRECT
+            and entry.backend_tool is not None
+        )
+    ]
+
+
+def profile_has_deferred_tools(profile: MCPProfile, backend_tools: Any) -> bool:
+    """Return whether a profile has searchable tools outside direct exposure."""
+
+    return any(
+        entry.exposure in {_EXPOSURE_DEFERRED, _EXPOSURE_RECOMMENDED_UNAVAILABLE}
+        for entry in _visible_entries(profile, backend_tools)
+    )
+
+
 def _visible_entries(profile: MCPProfile, backend_tools: Any) -> list[_ToolEntry]:
     """Return installed and recommendation-only tools visible for a profile."""
 
@@ -207,6 +241,12 @@ def _installed_entry(profile: MCPProfile, tool: Any) -> _ToolEntry | None:
         _first_text(metadata, "unavailable_reason", "reason", "reason_code")
         or _first_text(tool, "unavailable_reason", "reason", "reason_code")
     )
+    exposure = _installed_exposure(profile, category)
+    availability_reason_code = (
+        _REASON_INSTALLED_DIRECT
+        if exposure == _EXPOSURE_DIRECT
+        else _REASON_INSTALLED_DEFERRED
+    )
     text = _search_text(
         tool_id,
         display_name,
@@ -224,6 +264,8 @@ def _installed_entry(profile: MCPProfile, tool: Any) -> _ToolEntry | None:
         category=category,
         capabilities=capabilities,
         installation_status=_INSTALLED,
+        exposure=exposure,
+        availability_reason_code=availability_reason_code,
         source="backend",
         text=text,
         backend_tool=tool,
@@ -293,6 +335,8 @@ def _recommended_entry(
         category=category,
         capabilities=capabilities,
         installation_status=_RECOMMENDED_UNAVAILABLE,
+        exposure=_EXPOSURE_RECOMMENDED_UNAVAILABLE,
+        availability_reason_code=_RECOMMENDED_UNAVAILABLE,
         source="profile_recommendation",
         text=text,
         activation=activation,
@@ -389,6 +433,31 @@ def _progressive_disclosure(profile: MCPProfile) -> dict[str, Any]:
     }
 
 
+def _has_progressive_disclosure_metadata(profile: MCPProfile) -> bool:
+    """Return whether profile metadata explicitly configures disclosure behavior."""
+
+    tooling = _tooling_metadata(profile)
+    return isinstance(tooling.get("progressive_disclosure"), dict)
+
+
+def _installed_exposure(profile: MCPProfile, category: str) -> str:
+    """Return direct or deferred exposure for an installed profile-visible tool."""
+
+    if not _has_progressive_disclosure_metadata(profile):
+        return _EXPOSURE_DIRECT
+
+    progressive = _progressive_disclosure(profile)
+    normalized_category = _normalize_category(category) or _DEFAULT_CATEGORY
+    direct_categories = {
+        normalized
+        for value in progressive["direct_categories"]
+        if (normalized := _normalize_category(value)) is not None
+    }
+    if normalized_category in direct_categories:
+        return _EXPOSURE_DIRECT
+    return _EXPOSURE_DEFERRED
+
+
 def _category_priority(profile: MCPProfile) -> dict[str, int]:
     """Return category priority from profile progressive-disclosure order."""
 
@@ -433,6 +502,7 @@ def _sort_entries(
         entries,
         key=lambda entry: (
             0 if entry.installation_status == _INSTALLED else 1,
+            _exposure_priority(entry),
             -scores.get(entry.tool_id, 0.0),
             category_priorities.get(
                 _normalize_category(entry.category) or "",
@@ -456,17 +526,24 @@ def _category_payload(
     for entry in entries:
         category = _normalize_category(entry.category) or _DEFAULT_CATEGORY
         categories.setdefault(category, Counter())
-        categories[category][entry.installation_status] += 1
+        categories[category]["count"] += 1
+        if entry.installation_status == _INSTALLED:
+            categories[category]["installed_count"] += 1
+        if entry.installation_status == _RECOMMENDED_UNAVAILABLE:
+            categories[category]["recommended_unavailable_count"] += 1
+        if entry.exposure == _EXPOSURE_DIRECT:
+            categories[category]["direct_count"] += 1
+        if entry.exposure == _EXPOSURE_DEFERRED:
+            categories[category]["deferred_installed_count"] += 1
 
     return [
         {
             "category": category,
-            "count": sum(counts.values()),
-            "installed_count": counts.get(_INSTALLED, 0),
-            "recommended_unavailable_count": counts.get(
-                _RECOMMENDED_UNAVAILABLE,
-                0,
-            ),
+            "count": counts.get("count", 0),
+            "direct_count": counts.get("direct_count", 0),
+            "deferred_installed_count": counts.get("deferred_installed_count", 0),
+            "installed_count": counts.get("installed_count", 0),
+            "recommended_unavailable_count": counts.get("recommended_unavailable_count", 0),
         }
         for category, counts in sorted(
             categories.items(),
@@ -481,6 +558,29 @@ def _category_payload(
     ]
 
 
+def _availability_payload(entries: list[_ToolEntry]) -> dict[str, int]:
+    """Return whole-catalog availability counts for profile discovery clients."""
+
+    counts: Counter[str] = Counter()
+    for entry in entries:
+        counts["count"] += 1
+        if entry.installation_status == _INSTALLED:
+            counts["installed_count"] += 1
+        if entry.installation_status == _RECOMMENDED_UNAVAILABLE:
+            counts["recommended_unavailable_count"] += 1
+        if entry.exposure == _EXPOSURE_DIRECT:
+            counts["direct_count"] += 1
+        if entry.exposure == _EXPOSURE_DEFERRED:
+            counts["deferred_installed_count"] += 1
+    return {
+        "count": counts.get("count", 0),
+        "installed_count": counts.get("installed_count", 0),
+        "direct_count": counts.get("direct_count", 0),
+        "deferred_installed_count": counts.get("deferred_installed_count", 0),
+        "recommended_unavailable_count": counts.get("recommended_unavailable_count", 0),
+    }
+
+
 def _entry_payload(entry: _ToolEntry, *, score: float) -> dict[str, Any]:
     """Return a JSON-safe public payload for one discovery entry."""
 
@@ -491,6 +591,8 @@ def _entry_payload(entry: _ToolEntry, *, score: float) -> dict[str, Any]:
         "category": entry.category,
         "capabilities": list(entry.capabilities),
         "installation_status": entry.installation_status,
+        "exposure": entry.exposure,
+        "availability_reason_code": entry.availability_reason_code,
         "source": entry.source,
         "ranking": _ranking_metadata(score),
     }
@@ -503,6 +605,16 @@ def _entry_payload(entry: _ToolEntry, *, score: float) -> dict[str, Any]:
     if entry.metadata:
         payload["metadata"] = deepcopy(entry.metadata)
     return payload
+
+
+def _exposure_priority(entry: _ToolEntry) -> int:
+    """Return stable sort priority for direct, deferred, and unavailable tools."""
+
+    if entry.exposure == _EXPOSURE_DIRECT:
+        return 0
+    if entry.exposure == _EXPOSURE_DEFERRED:
+        return 1
+    return 2
 
 
 def _ranking_metadata(score: float | None = None) -> dict[str, Any]:
@@ -629,7 +741,9 @@ def _normalize_sort_text(value: str) -> str:
 
 __all__ = [
     "describe_profile_tool",
+    "list_direct_profile_backend_tools",
     "list_profile_tools",
+    "profile_has_deferred_tools",
     "resolve_profile_tool_call",
     "search_profile_tools",
 ]

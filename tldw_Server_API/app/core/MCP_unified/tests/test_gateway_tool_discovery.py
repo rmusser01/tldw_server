@@ -93,11 +93,74 @@ def test_list_profile_tools_consolidates_category_counts_by_normalized_name() ->
         {
             "category": "code",
             "count": 2,
+            "direct_count": 0,
+            "deferred_installed_count": 2,
             "installed_count": 2,
             "recommended_unavailable_count": 0,
         }
     ]
     assert {item["tool_id"] for item in results} == {"code.search", "code.symbols"}
+
+
+def test_profile_tools_classify_direct_deferred_and_recommended_availability() -> None:
+    profile = MCPProfile(
+        id="engineer",
+        name="Engineer",
+        policy_document=ProfilePolicy(capabilities=["code_search", "browser.inspect"]),
+        metadata={
+            "tooling": {
+                "recommended_tools": [
+                    {
+                        "id": "browser.trace",
+                        "category": "browser",
+                        "description": "Browser trace capture",
+                        "capability": "browser.inspect",
+                        "activation": "requires_browser_runtime",
+                    }
+                ],
+                "progressive_disclosure": {
+                    "direct_categories": ["code"],
+                    "deferred_categories": ["browser"],
+                    "max_direct_tools": 24,
+                },
+            }
+        },
+    )
+    tools = [
+        {
+            "name": "code.search",
+            "description": "Search code",
+            "metadata": {"capability": "code_search", "category": "code"},
+        },
+        {
+            "name": "browser.snapshot",
+            "description": "Browser DOM snapshot",
+            "metadata": {"capability": "browser.inspect", "category": "browser"},
+        },
+    ]
+
+    payload = list_profile_tools(profile, tools)
+    entries = {item["tool_id"]: item for item in payload["tools"]}
+    categories = {item["category"]: item for item in payload["categories"]}
+
+    assert entries["code.search"]["exposure"] == "direct"
+    assert entries["code.search"]["availability_reason_code"] == "installed_direct"
+    assert entries["browser.snapshot"]["exposure"] == "deferred"
+    assert entries["browser.snapshot"]["availability_reason_code"] == "installed_deferred"
+    assert entries["browser.trace"]["exposure"] == "recommended_unavailable"
+    assert entries["browser.trace"]["availability_reason_code"] == "recommended_unavailable"
+    assert categories["code"]["direct_count"] == 1
+    assert categories["code"]["deferred_installed_count"] == 0
+    assert categories["browser"]["direct_count"] == 0
+    assert categories["browser"]["deferred_installed_count"] == 1
+    assert categories["browser"]["recommended_unavailable_count"] == 1
+    assert payload["availability"] == {
+        "count": 3,
+        "installed_count": 2,
+        "direct_count": 1,
+        "deferred_installed_count": 1,
+        "recommended_unavailable_count": 1,
+    }
 
 
 def test_tool_search_orders_installed_before_unavailable_then_bm25() -> None:

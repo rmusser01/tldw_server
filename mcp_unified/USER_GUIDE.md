@@ -99,17 +99,23 @@ mcp-unified-gateway get-default-profile \
 ### Profile Tooling Discovery
 
 `list-presets` includes compact tooling discovery metadata for role presets.
-Direct categories describe tools the profile can expose immediately, subject to
-the profile policy and any assignment constraints. Deferred categories describe
-recommended unavailable tools or server-backed capabilities that may be useful
-for the role but are not executable until explicitly registered, granted, and
-allowed by policy.
+Direct categories describe installed tools the profile can expose immediately
+through `tools/list`, subject to the profile policy and any assignment
+constraints. Deferred categories keep installed tools out of the initial model
+tool surface while still making them discoverable through the profile discovery
+bridge. Recommendation-only tools remain setup hints until an operator installs
+or registers the matching backend tool and profile policy grants it.
 
 Profiles can expose progressive disclosure bridge tools such as
 `tool_categories.list`, `tool_search`, `tool_describe`, and
 `profile.tools.list`. These help clients inspect available direct tools first,
-then discover recommended next-step tools without expanding the executable tool
-surface by default.
+then discover deferred installed tools and recommended next-step tools without
+expanding the executable tool surface by default. `profile.tools.list` and
+`tool_search` report per-tool availability metadata, including whether a tool is
+`direct`, `deferred`, or `recommended_unavailable`, plus category-level counts.
+When `tool_call` is present, clients can delegate to an installed profile-visible
+tool by id after discovery; recommendation-only tools return `tool_not_enabled`
+until their backend becomes available.
 
 Filesystem-capable presets expose portable workspace-bounded helpers for common
 read workflows: `fs.stat` for metadata, `fs.glob` for cross-platform path
