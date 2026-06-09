@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType, RunSpec, Session, SessionSpec, TrustLevel
 from tldw_Server_API.app.core.Sandbox.orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.store import get_store
 
@@ -31,6 +32,26 @@ def _configure_sqlite_store(monkeypatch, tmp_path: Path) -> None:
     if hasattr(app_settings, "SANDBOX_SNAPSHOT_PATH"):
         monkeypatch.setattr(app_settings, "SANDBOX_SNAPSHOT_PATH", snapshot_dir)
     clear_config_cache()
+
+
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
 
 
 def test_session_metadata_rehydrates_across_orchestrator_instances(monkeypatch, tmp_path: Path) -> None:
@@ -69,6 +90,7 @@ def test_session_metadata_rehydrates_across_orchestrator_instances(monkeypatch, 
 
 def test_clone_session_works_after_service_restart(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
+    _force_docker_preflight_available(monkeypatch)
 
     source_service = SandboxService()
     spec = SessionSpec(runtime=RuntimeType.docker, base_image="python:3.11-slim")

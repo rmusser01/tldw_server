@@ -415,7 +415,6 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
         "Popen",
         lambda *args, **kwargs: _TimeoutProc(),
     )
-    has_killpg = hasattr(worktree_module.os, "killpg")
     monkeypatch.setattr(
         worktree_module.os,
         "killpg",
@@ -440,8 +439,7 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
         assert result.phase == RunPhase.timed_out
         assert result.message == "execution_timeout"
         assert destroy_calls == [(str(created_worktree), str(repo))]
-        expected_killpg_calls = [(9876, signal.SIGTERM)] if has_killpg else []
-        assert killpg_calls == expected_killpg_calls
+        assert killpg_calls == [(9876, signal.SIGTERM)]
         assert not created_worktree.exists()
         assert not run_dir.exists()
         with WorktreeRunner._active_lock:  # type: ignore[attr-defined]

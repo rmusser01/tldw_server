@@ -84,6 +84,16 @@ def client_with_workflows_db(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
+def _wait_for_run_row(db: WorkflowsDatabase, run_id: str, timeout: float = 5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        run = db.get_run(run_id)
+        if run is not None:
+            return run
+        time.sleep(0.02)
+    pytest.fail(f"workflow run row was not created for {run_id}")
+
+
 def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     client = client_with_workflows_db
 
@@ -369,8 +379,14 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
     from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
     db: WorkflowsDatabase = client.app.dependency_overrides[wf_mod._get_db]()
-    c1 = db.get_run(r1).created_at
-    c2 = db.get_run(r2).created_at
+    _wait_for_run_row(db, r1)
+    _wait_for_run_row(db, r2)
+
+    c1 = "2026-01-01T00:00:00+00:00"
+    c2 = "2026-01-01T00:00:01+00:00"
+    db._conn.execute("UPDATE workflow_runs SET created_at = ? WHERE run_id = ?", (c1, r1))
+    db._conn.execute("UPDATE workflow_runs SET created_at = ? WHERE run_id = ?", (c2, r2))
+    db._conn.commit()
 
     # created_after just after c1 should include r2 only
     from datetime import datetime, timedelta

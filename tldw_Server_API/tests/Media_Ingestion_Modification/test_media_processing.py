@@ -349,6 +349,7 @@ def _is_fixture_download_failure(message: str) -> bool:
             "host not in allowlist",
             "timed out",
             "too many requests",
+            "video processing failed",
         )
     )
 

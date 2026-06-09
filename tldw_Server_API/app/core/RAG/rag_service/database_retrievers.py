@@ -172,6 +172,7 @@ def _extract_file_uri_path(raw: str) -> str:
 
 
 def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
+    """Normalize FTS syntax without changing the initial query's retrieval intent."""
     if query is None:
         return None
     try:
@@ -184,8 +185,6 @@ def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
         return text
     if "-" in text and " " not in text:
         return f"\"{text}\""
-    if re.search(r"[?!:;,.()[\]{}]", text):
-        return _derive_bounded_media_term_query(text) or text
     return text
 
 

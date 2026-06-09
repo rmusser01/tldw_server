@@ -135,8 +135,11 @@ def test_helper_client_default_uses_expected_protocol_version(monkeypatch) -> No
     assert requests[0]["protocol_version"] == EXPECTED_HELPER_PROTOCOL_VERSION
 
 
-def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
+def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
+    template_path = str(tmp_path / "template.img")
+    manifest_path = str(tmp_path / "image-store" / "runs" / "run-1" / "manifest.json")
+    workspace_path = str(tmp_path / "workspace")
 
     client = MacOSVirtualizationHelperClient()
     created = client.create_vm(
@@ -148,10 +151,10 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
             "session_id": "session-1",
             "session_mode": True,
             "template_id": "vz_linux:debian-bookworm-arm64",
-            "template": "/tmp/template.img",
-            "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+            "template": template_path,
+            "run_manifest_path": manifest_path,
             "planning_source": "image_store",
-            "workspace_path": "/tmp/workspace",
+            "workspace_path": workspace_path,
         }
     )
 
@@ -162,10 +165,10 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     assert created.metadata.session_id == "session-1"
     assert created.metadata.session_mode is True
     assert created.metadata.template_id == "vz_linux:debian-bookworm-arm64"
-    assert created.metadata.template_path == "/tmp/template.img"
-    assert created.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
+    assert created.metadata.template_path == template_path
+    assert created.metadata.run_manifest_path == manifest_path
     assert created.metadata.planning_source == "image_store"
-    assert created.metadata.workspace_path == "/tmp/workspace"
+    assert created.metadata.workspace_path == workspace_path
     assert created.metadata.network_policy == "deny_all"
     assert created.metadata.created_at != ""
     assert "runtime" not in created.details
