@@ -1,7 +1,7 @@
 ---
 id: TASK-2328
 title: Implement Scheduled Tasks Phase 2B capability-aware frontend shell
-status: In Progress
+status: Done
 labels:
 - scheduled-tasks
 - webui
@@ -52,7 +52,7 @@ modified_files:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the Phase 2B.2 capability-aware Scheduled Tasks frontend shell. Added a pure capability model with required Watch/Ingest gates, explicit creationAdapterSupported guard, source-intent/result/notification copy helpers, and private-source redaction. Added limited_availability state support, effective-template filtering/lookup, Create panel capability rendering, extension-width coverage, and page-level default empty capability wiring. Watch/Ingest remain non-creating by default and the empty state no longer frames GitHub or YouTube as primary IA. Verification: capability/template/Create panel/page focused suite passed with 65 tests using --testTimeout=20000 after the exact plan command exposed an existing 5s page-test timing variance; route-state regression passed with 8 tests; git diff --check exited 0; product touched-file placeholder scan had no matches. Bandit skipped because no Python files were touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
