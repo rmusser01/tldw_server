@@ -62,7 +62,8 @@ const getContentEditor = () =>
   screen.getByLabelText("SKILL.md Content") as HTMLTextAreaElement
 
 describe("SkillDrawer guided templates", () => {
-  let confirmSpy: ReturnType<typeof vi.spyOn>
+  let confirmSpy: ReturnType<typeof vi.fn>
+  let useModalSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -91,18 +92,16 @@ describe("SkillDrawer guided templates", () => {
       } as unknown as typeof ResizeObserver
     }
 
-    confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation((config) => {
-      return {
-        destroy: vi.fn(),
-        update: vi.fn(),
-        config
-      } as unknown as ReturnType<typeof Modal.confirm>
-    })
+    confirmSpy = vi.fn()
+    useModalSpy = vi.spyOn(Modal, "useModal").mockReturnValue([
+      { confirm: confirmSpy },
+      null
+    ] as unknown as ReturnType<typeof Modal.useModal>)
   })
 
   afterEach(() => {
     cleanup()
-    confirmSpy.mockRestore()
+    useModalSpy.mockRestore()
   })
 
   it("opens new skills with a beginner-friendly template draft", () => {
@@ -128,7 +127,7 @@ describe("SkillDrawer guided templates", () => {
     const editor = getContentEditor()
     expect(editor.value).toContain('name: "concept-coach"')
     expect(editor.value).toContain("Explain the following concept")
-    expect(Modal.confirm).not.toHaveBeenCalled()
+    expect(confirmSpy).not.toHaveBeenCalled()
   })
 
   it("confirms before replacing manually edited content with a different template", () => {
@@ -141,7 +140,7 @@ describe("SkillDrawer guided templates", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "Extractor" }))
 
-    expect(Modal.confirm).toHaveBeenCalledWith(
+    expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Replace draft with template?",
         content: "This will replace your current SKILL.md draft with the selected template."
@@ -149,7 +148,9 @@ describe("SkillDrawer guided templates", () => {
     )
     expect(editor.value).toBe("custom draft")
 
-    const [dialogConfig] = confirmSpy.mock.calls[0]
+    const [dialogConfig] = confirmSpy.mock.calls[0] as [
+      { onOk?: () => void | Promise<void> }
+    ]
     act(() => {
       dialogConfig.onOk?.()
     })

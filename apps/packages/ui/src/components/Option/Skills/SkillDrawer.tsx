@@ -44,6 +44,7 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
   const notification = useAntdNotification()
   const [form] = Form.useForm<SkillDrawerFormValues>()
   const isEdit = Boolean(skill)
+  const [modal, contextHolder] = Modal.useModal()
   const [selectedTemplateId, setSelectedTemplateId] =
     React.useState<SkillTemplateId>(DEFAULT_TEMPLATE_ID)
   const lastGeneratedContentRef = React.useRef("")
@@ -106,7 +107,7 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
       return
     }
 
-    Modal.confirm({
+    modal.confirm({
       title: t("option:skills.replaceTemplateTitle", {
         defaultValue: "Replace draft with template?"
       }),
@@ -263,6 +264,7 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
         </Space>
       }
     >
+      {contextHolder}
       <Form
         form={form}
         layout="vertical"
