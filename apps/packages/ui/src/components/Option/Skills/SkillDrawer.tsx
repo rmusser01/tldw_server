@@ -49,10 +49,15 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
     React.useState<SkillTemplateId>(DEFAULT_TEMPLATE_ID)
   const lastGeneratedContentRef = React.useRef("")
 
+  const getTemplateNameForContent = React.useCallback(() => {
+    const name = form.getFieldValue("name") ?? ""
+    return !name || SKILL_NAME_REGEX.test(name) ? name : ""
+  }, [form])
+
   const generateTemplateContent = React.useCallback(
     (templateId: SkillTemplateId) =>
-      buildSkillTemplateContent(templateId, form.getFieldValue("name") ?? ""),
-    [form]
+      buildSkillTemplateContent(templateId, getTemplateNameForContent()),
+    [getTemplateNameForContent]
   )
 
   const applyTemplate = React.useCallback(
@@ -127,6 +132,11 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
 
   const handleFormValuesChange = (changedValues: Partial<SkillDrawerFormValues>) => {
     if (isEdit || !Object.prototype.hasOwnProperty.call(changedValues, "name")) {
+      return
+    }
+
+    const nextName = changedValues.name ?? ""
+    if (nextName && !SKILL_NAME_REGEX.test(nextName)) {
       return
     }
 

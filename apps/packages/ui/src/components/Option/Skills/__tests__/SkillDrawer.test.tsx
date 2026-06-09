@@ -68,21 +68,20 @@ describe("SkillDrawer guided templates", () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
-    if (!window.matchMedia) {
-      Object.defineProperty(window, "matchMedia", {
-        writable: true,
-        value: vi.fn().mockImplementation((query: string) => ({
-          matches: false,
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn()
-        }))
-      })
-    }
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn()
+      }))
+    })
 
     if (typeof globalThis.ResizeObserver === "undefined") {
       globalThis.ResizeObserver = class {
@@ -120,7 +119,7 @@ describe("SkillDrawer guided templates", () => {
     renderDrawer()
 
     fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Concept Coach" }
+      target: { value: "concept-coach" }
     })
     fireEvent.click(screen.getByRole("radio", { name: "Explainer" }))
 
@@ -128,6 +127,26 @@ describe("SkillDrawer guided templates", () => {
     expect(editor.value).toContain('name: "concept-coach"')
     expect(editor.value).toContain("Explain the following concept")
     expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it("does not silently slugify invalid name input into the generated draft", () => {
+    renderDrawer()
+
+    const editor = getContentEditor()
+    const originalDraft = editor.value
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Concept Coach" }
+    })
+
+    expect(editor.value).toBe(originalDraft)
+    expect(editor.value).not.toContain('name: "concept-coach"')
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "concept-coach" }
+    })
+
+    expect(editor.value).toContain('name: "concept-coach"')
   })
 
   it("confirms before replacing manually edited content with a different template", () => {
