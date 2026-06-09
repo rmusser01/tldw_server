@@ -1110,6 +1110,38 @@ async def test_filesystem_patch_applies_existing_file_with_expected_hash(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_filesystem_patch_preserves_tab_header_metadata_during_sanitization(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    original = "alpha\nbeta\ngamma\n"
+    target = docs_dir / "story.txt"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-patch-tab-header", user_id="1", metadata={})
+
+    result = await mod.execute_tool(
+        "fs.patch",
+        {
+            "diff": """--- a/docs/story.txt\t2026-06-09 12:00:00.000000000 +0000
++++ b/docs/story.txt\t2026-06-09 12:00:01.000000000 +0000
+@@ -1,3 +1,3 @@
+ alpha
+-beta
++BETTA
+ gamma
+""",
+            "expected_sha256_by_path": {"docs/story.txt": hashlib.sha256(original.encode("utf-8")).hexdigest()},
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "alpha\nBETTA\ngamma\n"  # nosec B101
+    assert result["files"][0]["path"] == "docs/story.txt"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_patch_rolls_back_previous_writes_on_partial_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1253,6 +1285,39 @@ async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
     assert (
         result["files"][0]["sha256_after"] == hashlib.sha256(b"alpha\nBETTA\ngamma\n").hexdigest()
     )  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_patch_preserves_no_final_newline(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    original = "alpha\nbeta\n"
+    target = docs_dir / "story.txt"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-patch-no-final-newline", user_id="1", metadata={})
+
+    result = await mod.execute_tool(
+        "fs.patch",
+        {
+            "diff": """--- a/docs/story.txt
++++ b/docs/story.txt
+@@ -1,2 +1,2 @@
+ alpha
+-beta
++BETTA
+\\ No newline at end of file
+""",
+            "expected_sha256_by_path": {"docs/story.txt": hashlib.sha256(original.encode("utf-8")).hexdigest()},
+        },
+        context=context,
+    )
+
+    assert target.read_bytes() == b"alpha\nBETTA"  # nosec B101
+    assert result["files"][0]["sha256_after"] == hashlib.sha256(b"alpha\nBETTA").hexdigest()  # nosec B101
+    assert result["files"][0]["bytes_after"] == len(b"alpha\nBETTA")  # nosec B101
 
 
 @pytest.mark.asyncio
