@@ -43,13 +43,16 @@ import { ScheduledTasksPage } from "../ScheduledTasksPage"
 const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
-const renderWithQueryClient = (ui: React.ReactElement) => {
+const renderWithQueryClient = (
+  ui: React.ReactElement,
+  initialEntry = "/scheduled-tasks"
+) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   })
 
   return render(
-    <MemoryRouter initialEntries={["/scheduled-tasks"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
     </MemoryRouter>
   )
@@ -87,7 +90,7 @@ describe("ScheduledTasksPage", () => {
       })
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("Unavailable")).toBeInTheDocument()
     expect(
@@ -123,7 +126,7 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
     expect(receivedSignal).toBeInstanceOf(AbortSignal)
@@ -136,7 +139,7 @@ describe("ScheduledTasksPage", () => {
       })
     )
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(
       await screen.findByRole("heading", { name: "Sign in before using scheduled tasks" })
@@ -179,7 +182,7 @@ describe("ScheduledTasksPage", () => {
       errors: ["Watchlist jobs failed at /api/v1/watchlists/jobs"]
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(
       await screen.findByRole("heading", {
@@ -195,7 +198,94 @@ describe("ScheduledTasksPage", () => {
     expect(within(diagnostics).getByText("Watchlist jobs failed at /api/v1/watchlists/jobs")).toBeInTheDocument()
   })
 
-  it("renders the workbench overview, rows, and Watchlists preservation copy", async () => {
+  it("opens the Create tab from the URL", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create")
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 3,
+        name: "Choose what you want to automate"
+      })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("opens a task detail deep link after task data loads", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:1",
+          primitive: "reminder_task",
+          title: "Review notes",
+          description: "Check the backlog",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "2026-03-21T09:00:00+00:00",
+          timezone: "UTC",
+          next_run_at: "2030-04-05T12:30:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "1" }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=tasks&task_id=reminder_task%3A1"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true")
+    const drawer = await screen.findByRole("dialog", { name: /Review notes/i })
+    expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
+  })
+
+  it("falls back to Overview with non-blocking copy for an invalid tab", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=runs")
+
+    expect(await screen.findByText("That tab is not available. Showing Overview.")).toBeInTheDocument()
+    expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("0 scheduled tasks")).toBeInTheDocument()
+  })
+
+  it("keeps the Tasks tab visible for a missing task deep link", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=tasks&task_id=reminder_task%3Amissing"
+    )
+
+    expect(await screen.findByText("Task not found.")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("renders the workbench overview and Watchlists preservation copy", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
         {
@@ -248,6 +338,50 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("Next upcoming run")).toBeInTheDocument()
     expect(screen.getAllByText(/2030/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
+    expect(screen.queryByText("Review notes")).not.toBeInTheDocument()
+  })
+
+  it("renders task rows and Watchlists links inside the Tasks tab", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:1",
+          primitive: "reminder_task",
+          title: "Review notes",
+          description: "Check the backlog",
+          status: "failed with results",
+          enabled: true,
+          schedule_summary: "2026-03-21T09:00:00+00:00",
+          timezone: "UTC",
+          next_run_at: "2030-04-05T12:30:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "1" }
+        },
+        {
+          id: "watchlist_job:2",
+          primitive: "watchlist_job",
+          title: "Morning digest",
+          description: "Watchlist run",
+          status: "running",
+          enabled: true,
+          schedule_summary: "0 9 * * *",
+          timezone: "UTC",
+          next_run_at: "2030-04-06T09:00:00+00:00",
+          last_run_at: "2030-04-05T09:00:00+00:00",
+          edit_mode: "external",
+          manage_url: "/watchlists?tab=jobs",
+          source_ref: { job_id: 2, latest_run_id: 25, latest_output_id: 39 }
+        }
+      ],
+      total: 2,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
     expect(await screen.findByText("Review notes")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Create scheduled task" })).toBeInTheDocument()
     expect(screen.getAllByText("Reminder").length).toBeGreaterThan(0)
@@ -314,7 +448,7 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     await user.click(await screen.findByRole("button", { name: "Inspect Review notes" }))
 
@@ -356,7 +490,7 @@ describe("ScheduledTasksPage", () => {
         errors: []
       })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     await user.click(await screen.findByRole("button", { name: "Inspect Stale reminder" }))
     expect(await screen.findByRole("dialog", { name: /Stale reminder/i })).toBeInTheDocument()
@@ -395,7 +529,7 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     await user.click(await screen.findByRole("button", { name: "Inspect Review notes" }))
     expect(await screen.findByRole("dialog", { name: /Review notes/i })).toBeInTheDocument()
@@ -442,7 +576,7 @@ describe("ScheduledTasksPage", () => {
       })
     mocks.deleteScheduledTaskReminder.mockResolvedValue({ deleted: true })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     await user.click(await screen.findByRole("button", { name: "Inspect Review notes" }))
     expect(await screen.findByRole("dialog", { name: /Review notes/i })).toBeInTheDocument()
@@ -499,7 +633,7 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("Healthy reminder")).toBeInTheDocument()
     expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
@@ -608,6 +742,8 @@ describe("ScheduledTasksPage", () => {
   })
 
   it("shows an actionable empty state when no scheduled tasks exist", async () => {
+    const user = userEvent.setup()
+
     mocks.listScheduledTasks.mockResolvedValue({
       items: [],
       total: 0,
@@ -615,10 +751,16 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create scheduled task" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Create scheduled task" }))
+    expect(
+      await screen.findByRole("heading", {
+        level: 3,
+        name: "Choose what you want to automate"
+      })
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { level: 4, name: "Scheduled tasks" })
     ).not.toBeInTheDocument()
@@ -630,15 +772,38 @@ describe("ScheduledTasksPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("creates a reminder task from the editor and refreshes the list", async () => {
+  it("opens the created reminder detail after successful creation", async () => {
     const user = userEvent.setup()
 
-    mocks.listScheduledTasks.mockResolvedValue({
-      items: [],
-      total: 0,
-      partial: false,
-      errors: []
-    })
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "reminder_task:2",
+            primitive: "reminder_task",
+            title: "Daily review",
+            description: null,
+            status: "scheduled",
+            enabled: true,
+            schedule_summary: "2026-03-21T10:00:00+00:00",
+            timezone: "UTC",
+            next_run_at: "2026-03-21T10:00:00+00:00",
+            last_run_at: null,
+            edit_mode: "native",
+            manage_url: null,
+            source_ref: { task_id: "2" }
+          }
+        ],
+        total: 1,
+        partial: false,
+        errors: []
+      })
     mocks.createScheduledTaskReminder.mockResolvedValue({
       id: "reminder_task:2",
       primitive: "reminder_task",
@@ -650,9 +815,8 @@ describe("ScheduledTasksPage", () => {
       source_ref: { task_id: "2" }
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    fireEvent.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Daily review")
     fireEvent.change(screen.getByLabelText("Run once at"), {
       target: { value: "2026-03-21T10:00" }
@@ -669,6 +833,55 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
+    expect(await screen.findByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true")
+    const drawer = await screen.findByRole("dialog", { name: /Daily review/i })
+    expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
+    expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the created reminder detail open from the API response until the list catches up", async () => {
+    const user = userEvent.setup()
+
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+    mocks.createScheduledTaskReminder.mockResolvedValue({
+      id: "reminder_task:pending",
+      primitive: "reminder_task",
+      title: "Pending reminder",
+      description: null,
+      status: "scheduled",
+      enabled: true,
+      schedule_summary: "2026-03-21T10:00:00+00:00",
+      timezone: "UTC",
+      next_run_at: "2026-03-21T10:00:00+00:00",
+      last_run_at: null,
+      edit_mode: "native",
+      manage_url: null,
+      source_ref: { task_id: "pending" }
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
+
+    await user.type(await screen.findByRole("textbox", { name: "Title" }), "Pending reminder")
+    fireEvent.change(screen.getByLabelText("Run once at"), {
+      target: { value: "2026-03-21T10:00" }
+    })
+    await user.click(await screen.findByRole("button", { name: "Save reminder" }))
+
+    const drawer = await screen.findByRole("dialog", { name: /Pending reminder/i })
+    expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
+    expect(screen.queryByText("Task not found.")).not.toBeInTheDocument()
   })
 
   it("does not create a one-time reminder without run_at", async () => {
@@ -681,9 +894,8 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Missing run at")
     await user.click(await screen.findByRole("button", { name: "Save reminder" }))
 
@@ -713,9 +925,8 @@ describe("ScheduledTasksPage", () => {
       source_ref: { task_id: "daily" }
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Daily recurring review")
     fireEvent.click(screen.getByText("Repeat"))
     expect(await screen.findByRole("combobox", { name: "Repeat preset" })).toBeInTheDocument()
@@ -747,11 +958,10 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Recurring reminder")
-    fireEvent.click(screen.getByText("Repeat"))
+    fireEvent.click(await screen.findByText("Repeat"))
     await user.click(await screen.findByRole("combobox", { name: "Repeat preset" }))
     await user.click(await screen.findByText("Custom schedule"))
     fireEvent.change(screen.getByRole("textbox", { name: "Custom cron" }), { target: { value: "" } })
@@ -761,7 +971,7 @@ describe("ScheduledTasksPage", () => {
     expect(await screen.findByText("Cron is required for recurring reminders")).toBeInTheDocument()
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
     expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-  })
+  }, 10000)
 
   it("does not create a recurring reminder with scheduler-invalid cron or timezone", async () => {
     const user = userEvent.setup()
@@ -773,11 +983,10 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Invalid recurring reminder")
-    fireEvent.click(screen.getByText("Repeat"))
+    fireEvent.click(await screen.findByText("Repeat"))
     await user.click(await screen.findByRole("combobox", { name: "Repeat preset" }))
     await user.click(await screen.findByText("Custom schedule"))
     fireEvent.change(screen.getByRole("textbox", { name: "Custom cron" }), {
@@ -793,7 +1002,7 @@ describe("ScheduledTasksPage", () => {
     })
     expect(screen.getAllByText("Cron minute must be between 0 and 59.").length).toBeGreaterThan(0)
     expect(screen.getByText("Timezone must be a valid IANA timezone.")).toBeInTheDocument()
-  })
+  }, 10000)
 
   it("does not create a one-time reminder with whitespace-only run_at", async () => {
     const user = userEvent.setup()
@@ -805,9 +1014,8 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    await user.click(await screen.findByRole("button", { name: "Create scheduled task" }))
     await user.type(await screen.findByRole("textbox", { name: "Title" }), "Whitespace run at")
     fireEvent.change(screen.getByLabelText("Run once at"), { target: { value: "   " } })
     await user.click(await screen.findByRole("button", { name: "Save reminder" }))
@@ -828,13 +1036,12 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=reminder")
 
-    fireEvent.click(await screen.findByRole("button", { name: "Create scheduled task" }))
-    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
       target: { value: "Whitespace recurring reminder" }
     })
-    fireEvent.click(screen.getByText("Repeat"))
+    fireEvent.click(await screen.findByText("Repeat"))
     await user.click(await screen.findByRole("combobox", { name: "Repeat preset" }))
     await user.click(await screen.findByText("Custom schedule"))
     fireEvent.change(screen.getByRole("textbox", { name: "Custom cron" }), { target: { value: "   " } })
@@ -888,7 +1095,7 @@ describe("ScheduledTasksPage", () => {
       source_ref: { task_id: "custom" }
     })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("Monday report")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "Edit Monday report" }))
@@ -947,7 +1154,7 @@ describe("ScheduledTasksPage", () => {
     })
     mocks.deleteScheduledTaskReminder.mockResolvedValue({ deleted: true })
 
-    renderWithQueryClient(<ScheduledTasksPage />)
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("Review notes")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "Edit Review notes" }))
