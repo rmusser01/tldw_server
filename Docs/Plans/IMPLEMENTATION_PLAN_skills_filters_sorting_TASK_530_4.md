@@ -25,7 +25,17 @@
 ## Verification Results
 
 - `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Skills/unit/test_skill_registry_queries.py tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q` - 100 passed, 6 warnings.
-- `bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx` - 24 passed.
+- `bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx` - 26 passed after review fixes.
 - `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_skills_filters_sorting_TASK_530_4.json` - exit 0; remaining warnings are baseline `nosec` comments in the large DB module.
 - `git diff --check` - passed.
 - `bunx tsc --noEmit -p tsconfig.json` - attempted as an extra guard; default heap run OOMed, 8GB retry reached existing package-level type failures in Notes tests, background response result handling, and voice-cloning ArrayBuffer typing, so this was not used as the completion gate.
+
+## Review Fixes
+
+- Rebased on `origin/dev` at `e00d57b68a7f390ee3c057b2626e593374431a1a`.
+- Prevented filtered-empty results from falling through to the beginner onboarding state.
+- Debounced the model filter before it updates the Skills query key.
+- Replaced registry `ValueError` validation with the DB-layer `InputError`.
+- Replaced interpolated sort clause construction with prebuilt constant ORDER BY clauses.
+- Reused `SkillContext` for `SkillExecutionResult.execution_mode`.
+- Renamed frontend sort/order aliases to `SkillListSort` and `SkillListOrder` for backend naming parity.

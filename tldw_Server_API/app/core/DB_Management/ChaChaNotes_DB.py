@@ -15387,15 +15387,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return value if self.backend_type == BackendType.POSTGRESQL else int(value)
 
     _SKILL_REGISTRY_CONTEXTS = {"inline", "fork"}
-    _SKILL_REGISTRY_SORT_COLUMNS = {
-        "name": "name",
-        "context": "context",
-        "created_at": "created_at",
-        "last_modified": "last_modified",
-    }
+    _SKILL_REGISTRY_SORT_FIELDS = {"name", "context", "created_at", "last_modified"}
     _SKILL_REGISTRY_SORT_DIRECTIONS = {
-        "asc": "ASC",
-        "desc": "DESC",
+        "asc",
+        "desc",
+    }
+    _SKILL_REGISTRY_SORT_CLAUSES = {
+        ("name", "asc"): "ORDER BY name ASC",
+        ("name", "desc"): "ORDER BY name DESC",
+        ("context", "asc"): "ORDER BY context ASC, name ASC",
+        ("context", "desc"): "ORDER BY context DESC, name ASC",
+        ("created_at", "asc"): "ORDER BY created_at ASC, name ASC",
+        ("created_at", "desc"): "ORDER BY created_at DESC, name ASC",
+        ("last_modified", "asc"): "ORDER BY last_modified ASC, name ASC",
+        ("last_modified", "desc"): "ORDER BY last_modified DESC, name ASC",
     }
 
     @staticmethod
@@ -15421,18 +15426,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _skill_registry_sort_clause(self, sort: str, order: str) -> str:
         """Return a safe ORDER BY clause for whitelisted skill registry fields."""
         sort_key = (sort or "name").strip().lower()
-        column = self._SKILL_REGISTRY_SORT_COLUMNS.get(sort_key)
-        if column is None:
-            raise ValueError("Unsupported skill registry sort field")
+        if sort_key not in self._SKILL_REGISTRY_SORT_FIELDS:
+            raise InputError("Unsupported skill registry sort field")
 
         order_key = (order or "asc").strip().lower()
-        direction = self._SKILL_REGISTRY_SORT_DIRECTIONS.get(order_key)
-        if direction is None:
-            raise ValueError("Unsupported skill registry sort order")
+        if order_key not in self._SKILL_REGISTRY_SORT_DIRECTIONS:
+            raise InputError("Unsupported skill registry sort order")
 
-        if column == "name":
-            return f"ORDER BY {column} {direction}"  # nosec B608
-        return f"ORDER BY {column} {direction}, name ASC"  # nosec B608
+        return self._SKILL_REGISTRY_SORT_CLAUSES[(sort_key, order_key)]
 
     def _skill_registry_filter_clauses(
         self,
@@ -15473,7 +15474,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         context_filter = self._normalized_skill_text_filter(context)
         if context_filter is not None:
             if context_filter not in self._SKILL_REGISTRY_CONTEXTS:
-                raise ValueError("Unsupported skill registry context")
+                raise InputError("Unsupported skill registry context")
             clauses.append("context = ?")
             params.append(context_filter)
 

@@ -55,6 +55,7 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_filters_sorting_TASK_530_4.md
 - Extended the UI client with typed `SkillsListParams` and centralized camelCase-to-snake_case serialization.
 - Added compact Skills manager controls for mode, visibility, tools, and model filtering; table sorting now requests server-backed ordering and resets pagination.
 - Added accessible names for icon-only row action buttons while preserving the existing compact table layout.
+- Review fixes: debounced model filtering, corrected filtered-empty state behavior, switched registry validation to `InputError`, replaced dynamic sort clause construction with prebuilt constants, reused `SkillContext` for execution mode, and aligned frontend sort/order type names with backend aliases.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -64,7 +65,7 @@ Implemented server-backed Skills filters and sorting across the API, registry qu
 
 Verification:
 - `python -m pytest tldw_Server_API/tests/Skills/unit/test_skill_registry_queries.py tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q` - 100 passed, 6 warnings.
-- `bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx` - 24 passed.
+- `bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx` - 26 passed after review fixes.
 - `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_skills_filters_sorting_TASK_530_4.json` - exit 0; remaining warnings are existing `nosec` comments in the large DB module.
 - `git diff --check` - passed.
 

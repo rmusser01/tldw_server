@@ -34,11 +34,11 @@ import { SkillDrawer } from "./SkillDrawer"
 import { SkillPreview } from "./SkillPreview"
 import type {
   SkillContext,
+  SkillListOrder,
+  SkillListSort,
   SkillSummary,
   SkillResponse,
-  SkillsListOrder,
-  SkillsListResponse,
-  SkillsListSort
+  SkillsListResponse
 } from "@/types/skill"
 
 const DEFAULT_PAGE_SIZE = 10
@@ -69,8 +69,8 @@ type SkillVisibilityFilter = "visible" | "hidden" | "all"
 type SkillToolsFilter = "any" | "with-tools" | "without-tools"
 
 interface SkillSortState {
-  field?: SkillsListSort
-  order?: SkillsListOrder
+  field?: SkillListSort
+  order?: SkillListOrder
 }
 
 const getResponseSkillName = (result: unknown): string | undefined => {
@@ -89,7 +89,7 @@ const getSeededSkillNames = (result: SeedSkillsResult | undefined): string[] => 
 
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
 
-const isSkillTableSortField = (value: React.Key | undefined): value is SkillsListSort =>
+const isSkillTableSortField = (value: React.Key | undefined): value is SkillListSort =>
   value === "name" || value === "context"
 
 export const SkillsManager: React.FC = () => {
@@ -107,6 +107,7 @@ export const SkillsManager: React.FC = () => {
     React.useState<SkillVisibilityFilter>("visible")
   const [toolsFilter, setToolsFilter] = React.useState<SkillToolsFilter>("any")
   const [modelFilter, setModelFilter] = React.useState("")
+  const [debouncedModelFilter, setDebouncedModelFilter] = React.useState("")
   const [sortState, setSortState] = React.useState<SkillSortState>({})
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
@@ -118,7 +119,7 @@ export const SkillsManager: React.FC = () => {
 
   const offset = (page - 1) * pageSize
   const searchQuery = debouncedSearch.trim()
-  const modelQuery = modelFilter.trim()
+  const modelQuery = debouncedModelFilter.trim()
   const contextQuery = contextFilter === "all" ? undefined : contextFilter
   const includeHiddenQuery =
     visibilityFilter === "hidden" || visibilityFilter === "all" ? true : undefined
@@ -145,6 +146,17 @@ export const SkillsManager: React.FC = () => {
 
     return () => window.clearTimeout(timer)
   }, [debouncedSearch, search])
+
+  React.useEffect(() => {
+    if (modelFilter === debouncedModelFilter) return
+
+    const timer = window.setTimeout(() => {
+      setDebouncedModelFilter(modelFilter)
+      setPage(1)
+    }, SKILLS_SEARCH_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [debouncedModelFilter, modelFilter])
 
   const {
     data,
@@ -185,7 +197,7 @@ export const SkillsManager: React.FC = () => {
   const totalSkills = data?.total ?? 0
   const hasSearch = searchQuery.length > 0
   const isLibraryEmpty =
-    hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch
+    hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch && !hasActiveFilters
   const skillCountLabel = isError
     ? t("option:skills.countUnavailable", {
         defaultValue: "Count unavailable"
@@ -227,7 +239,6 @@ export const SkillsManager: React.FC = () => {
 
   const handleModelFilterChange = (nextValue: string) => {
     setModelFilter(nextValue)
-    setPage(1)
   }
 
   const handleTableChange: TableProps<SkillSummary>["onChange"] = (

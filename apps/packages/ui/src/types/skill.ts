@@ -4,8 +4,8 @@
  */
 
 export type SkillContext = "inline" | "fork"
-export type SkillsListSort = "name" | "context" | "created_at" | "last_modified"
-export type SkillsListOrder = "asc" | "desc"
+export type SkillListSort = "name" | "context" | "created_at" | "last_modified"
+export type SkillListOrder = "asc" | "desc"
 
 export interface SkillsListParams {
   q?: string
@@ -14,8 +14,8 @@ export interface SkillsListParams {
   hasTools?: boolean
   context?: SkillContext
   model?: string
-  sort?: SkillsListSort
-  order?: SkillsListOrder
+  sort?: SkillListSort
+  order?: SkillListOrder
   limit?: number
   offset?: number
   abortSignal?: AbortSignal

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
 pytestmark = pytest.mark.unit
@@ -92,5 +92,5 @@ def test_skill_registry_explicit_user_invocable_filter_can_find_hidden(
 def test_skill_registry_rejects_unapproved_sort_fields(skills_db: CharactersRAGDB) -> None:
     _insert_skill(skills_db, "visible")
 
-    with pytest.raises(ValueError, match="Unsupported skill registry sort field"):
+    with pytest.raises(InputError, match="Unsupported skill registry sort field"):
         skills_db.list_skill_registry(sort="directory_path")

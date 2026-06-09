@@ -227,7 +227,7 @@ class SkillExecutionResult(BaseModel):
     rendered_prompt: str = Field(..., description="Prompt with arguments substituted")
     allowed_tools: list[str] | None = Field(None, description="Tools allowed for this skill")
     model_override: str | None = Field(None, description="Model override if specified")
-    execution_mode: Literal["inline", "fork"] = Field(..., description="How the skill was executed")
+    execution_mode: SkillContext = Field(..., description="How the skill was executed")
     fork_output: str | None = Field(None, description="Output from fork execution (if applicable)")
 
     model_config = ConfigDict(from_attributes=True)
