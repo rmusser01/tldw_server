@@ -384,11 +384,7 @@ def _enforce_selected_citations(
                 body=child.body,
                 kind=child.kind,
                 intent=child.intent,
-                evidence_state=(
-                    ExplainerEvidenceState.UNCITED.value
-                    if child.citations
-                    else child.evidence_state
-                ),
+                evidence_state=_evidence_state_after_citation_filter(child=child, citations=[]),
                 outside_knowledge_used=child.outside_knowledge_used,
                 citations=[],
             )
@@ -400,23 +396,21 @@ def _enforce_selected_citations(
             citation
             for citation in child.citations
             if (str(citation.get("source_type")), str(citation.get("source_id"))) in selected
+            and _citation_matches_authoritative_context(
+                citation=citation,
+                source_context=source_context,
+            )
         ]
         if session.grounding == ExplainerGrounding.SOURCE_ONLY.value:
-            if len(citations) != len(child.citations) or not _citations_match_authoritative_context(
-                citations=citations,
-                source_context=source_context,
-            ):
+            if len(citations) != len(child.citations):
                 return [_insufficient_source_child(intent=child.intent)]
-        evidence_state = child.evidence_state
-        if child.citations and not citations:
-            evidence_state = ExplainerEvidenceState.UNCITED.value
         filtered_children.append(
             GroundedExplainerChild(
                 title=child.title,
                 body=child.body,
                 kind=child.kind,
                 intent=child.intent,
-                evidence_state=evidence_state,
+                evidence_state=_evidence_state_after_citation_filter(child=child, citations=citations),
                 outside_knowledge_used=child.outside_knowledge_used,
                 citations=citations,
             )
@@ -506,17 +500,17 @@ def _existing_batch_child_ids(
     return child_ids
 
 
-def _citations_match_authoritative_context(
+def _citation_matches_authoritative_context(
     *,
-    citations: list[dict[str, Any]],
+    citation: dict[str, Any],
     source_context: ExplainerSourceContext,
 ) -> bool:
     authoritative_excerpts = source_context.normalized_excerpts()
-    if not citations or not authoritative_excerpts:
+    if not authoritative_excerpts:
         return False
-    return all(
-        any(_citation_matches_excerpt(citation, excerpt.to_citation_payload()) for excerpt in authoritative_excerpts)
-        for citation in citations
+    return any(
+        _citation_matches_excerpt(citation, excerpt.to_citation_payload())
+        for excerpt in authoritative_excerpts
     )
 
 
@@ -543,6 +537,20 @@ def _citation_matches_excerpt(citation: dict[str, Any], excerpt: dict[str, Any])
     if citation_location and excerpt_location and str(citation_location) != str(excerpt_location):
         return False
     return True
+
+
+def _evidence_state_after_citation_filter(
+    *,
+    child: GroundedExplainerChild,
+    citations: list[dict[str, Any]],
+) -> str:
+    if child.evidence_state == ExplainerEvidenceState.INSUFFICIENT.value:
+        return ExplainerEvidenceState.INSUFFICIENT.value
+    if citations and child.outside_knowledge_used:
+        return ExplainerEvidenceState.PARTIALLY_SUPPORTED.value
+    if citations:
+        return ExplainerEvidenceState.SUPPORTED.value
+    return ExplainerEvidenceState.UNCITED.value
 
 
 def _insufficient_source_child(*, intent: str) -> GroundedExplainerChild:
