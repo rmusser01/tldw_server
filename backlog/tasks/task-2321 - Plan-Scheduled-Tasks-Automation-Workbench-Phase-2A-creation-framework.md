@@ -1,7 +1,7 @@
 ---
 id: TASK-2321
 title: Plan Scheduled Tasks Automation Workbench Phase 2A creation framework
-status: In Progress
+status: Done
 labels:
 - scheduled-tasks
 - webui
@@ -29,11 +29,11 @@ Write the implementation plan for Scheduled Tasks Automation Workbench Phase 2A.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Plan is saved under Docs/superpowers/plans with exact file paths, tasks, tests, commands, and commit boundaries.
-- [ ] #2 Plan keeps Phase 2A frontend-first and does not introduce new backend contracts.
-- [ ] #3 Plan preserves Watchlists as the deep workspace and uses handoff-only panels where creation is not supported.
-- [ ] #4 Plan includes tests for routing, template matching, capability states, reminder success detail navigation, handoff copy, invalid tab/template/task links, and accessibility/responsive requirements where feasible.
-- [ ] #5 Plan records verification and Bandit skip rationale for documentation-only planning.
+- [x] #1 Plan is saved under Docs/superpowers/plans with exact file paths, tasks, tests, commands, and commit boundaries.
+- [x] #2 Plan keeps Phase 2A frontend-first and does not introduce new backend contracts.
+- [x] #3 Plan preserves Watchlists as the deep workspace and uses handoff-only panels where creation is not supported.
+- [x] #4 Plan includes tests for routing, template matching, capability states, reminder success detail navigation, handoff copy, invalid tab/template/task links, and accessibility/responsive requirements where feasible.
+- [x] #5 Plan records verification and Bandit skip rationale for documentation-only planning.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -56,10 +56,10 @@ Created the Phase 2A create-framework implementation plan. The plan preserves Wa
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

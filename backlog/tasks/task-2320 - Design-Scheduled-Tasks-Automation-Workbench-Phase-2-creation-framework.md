@@ -1,7 +1,7 @@
 ---
 id: TASK-2320
 title: Design Scheduled Tasks Automation Workbench Phase 2 creation framework
-status: In Progress
+status: Done
 labels:
 - scheduled-tasks
 - ux
@@ -28,11 +28,11 @@ Write the Phase 2 product/UX design spec for the Scheduled Tasks Automation Work
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Spec preserves Watchlists as a separate persona/job surface and does not collapse Watchlists into Scheduled Tasks.
-- [ ] #2 Spec treats GitHub and YouTube only as examples, not as primary source assumptions.
-- [ ] #3 Spec clearly separates Phase 2A frontend-only creation framework from Phase 2B backend/product contract dependencies.
-- [ ] #4 Spec covers Reminder, Watch for new items, Ingest new content, Recurring question, Agent task, and Advanced domain handoff states.
-- [ ] #5 Spec includes IA, create flow, prompt matcher behavior, capability states, home/task visibility expectations, error states, success states, deep links, accessibility, and implementation acceptance criteria.
+- [x] #1 Spec preserves Watchlists as a separate persona/job surface and does not collapse Watchlists into Scheduled Tasks.
+- [x] #2 Spec treats GitHub and YouTube only as examples, not as primary source assumptions.
+- [x] #3 Spec clearly separates Phase 2A frontend-only creation framework from Phase 2B backend/product contract dependencies.
+- [x] #4 Spec covers Reminder, Watch for new items, Ingest new content, Recurring question, Agent task, and Advanced domain handoff states.
+- [x] #5 Spec includes IA, create flow, prompt matcher behavior, capability states, home/task visibility expectations, error states, success states, deep links, accessibility, and implementation acceptance criteria.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -55,10 +55,10 @@ Created the Phase 2 creation design spec and refined it after product/UX review.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
