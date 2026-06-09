@@ -403,6 +403,7 @@ class DatabasePaths:
     RESEARCH_SESSIONS_DB_NAME = "ResearchSessions.db"
     KANBAN_DB_NAME = "Kanban.db"
     SLIDES_DB_NAME = "Slides.db"
+    EXPLAINER_DB_NAME = "Explainer.db"
     VOICE_REGISTRY_DB_NAME = "voice_registry.db"
     CIRCUIT_BREAKER_REGISTRY_DB_NAME = "circuit_breaker_registry.db"
 
@@ -671,6 +672,12 @@ class DatabasePaths:
         return user_dir / DatabasePaths.SLIDES_DB_NAME
 
     @staticmethod
+    def get_explainer_db_path(user_id: Optional[UserId]) -> Path:
+        """Get the path to the user's Explainer database."""
+        user_dir = DatabasePaths.get_user_base_directory(user_id)
+        return user_dir / DatabasePaths.EXPLAINER_DB_NAME
+
+    @staticmethod
     def get_prompt_studio_db_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's Prompt Studio database."""
         user_dir = DatabasePaths.get_user_base_directory(user_id)
@@ -829,6 +836,7 @@ class DatabasePaths:
             "research_sessions": DatabasePaths.get_research_sessions_db_path(user_id),
             "kanban": DatabasePaths.get_kanban_db_path(user_id),
             "slides": DatabasePaths.get_slides_db_path(user_id),
+            "explainer": DatabasePaths.get_explainer_db_path(user_id),
         }
 
     @staticmethod

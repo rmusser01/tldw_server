@@ -254,6 +254,144 @@ MINIMAL_TAIL_ROUTER_DEFINITION_DATA = (
         "/authnz-debug/status",
     ),
 )
+MINIMAL_REQUIRED_ROUTER_DEFINITION_DATA = (
+    {
+        "name": "health",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.health",
+        "attr_name": "router",
+        "path": "/health",
+        "prefix": "/api/v1",
+        "tags": ("health",),
+        "route_key": "health",
+    },
+    {
+        "name": "auth",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.auth",
+        "attr_name": "router",
+        "path": "/auth/login",
+        "prefix": "/api/v1",
+        "tags": ("authentication",),
+        "route_key": "auth",
+    },
+    {
+        "name": "research",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.research",
+        "attr_name": "router",
+        "path": "/search",
+        "prefix": "/api/v1/research",
+        "tags": ("research",),
+        "route_key": "research",
+    },
+    {
+        "name": "research_runs",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.research_runs",
+        "attr_name": "router",
+        "path": "/runs",
+        "prefix": "/api/v1",
+        "tags": ("research-runs",),
+        "route_key": "research",
+    },
+    {
+        "name": "paper_search",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.paper_search",
+        "attr_name": "router",
+        "path": "/papers",
+        "prefix": "/api/v1/paper-search",
+        "tags": ("paper-search",),
+        "route_key": "paper-search",
+    },
+    {
+        "name": "chat",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.chat",
+        "attr_name": "router",
+        "path": "/completions",
+        "prefix": "/api/v1/chat",
+        "tags": (),
+        "route_key": "chat",
+    },
+    {
+        "name": "chat_loop",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.chat_loop",
+        "attr_name": "router",
+        "path": "/chat/loop/start",
+        "prefix": "/api/v1",
+        "tags": (),
+        "route_key": "chat",
+    },
+    {
+        "name": "conversations_alias",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.chat",
+        "attr_name": "conversations_alias_router",
+        "path": "/conversations",
+        "prefix": "/api/v1/chats",
+        "tags": ("chat",),
+        "route_key": "chat",
+    },
+    {
+        "name": "characters",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.characters_endpoint",
+        "attr_name": "router",
+        "path": "/characters",
+        "prefix": "/api/v1/characters",
+        "tags": ("characters",),
+        "route_key": "characters",
+    },
+    {
+        "name": "character_memory",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.character_memory",
+        "attr_name": "router",
+        "path": "/memory",
+        "prefix": "/api/v1/characters",
+        "tags": ("character-memory",),
+        "route_key": "character-memory",
+    },
+    {
+        "name": "character_chat_sessions",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
+        "attr_name": "router",
+        "path": "/sessions",
+        "prefix": "/api/v1/chats",
+        "tags": ("character-chat-sessions",),
+        "route_key": "character-chat-sessions",
+    },
+    {
+        "name": "character_messages",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.character_messages",
+        "attr_name": "router",
+        "path": "/messages",
+        "prefix": "/api/v1",
+        "tags": ("character-messages",),
+        "route_key": "character-messages",
+    },
+    {
+        "name": "workspace_migrations",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
+        "attr_name": "router",
+        "path": "/migrations",
+        "prefix": "/api/v1/workspaces",
+        "tags": ("workspaces",),
+        "route_key": "workspaces",
+    },
+    {
+        "name": "workspaces",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.workspaces",
+        "attr_name": "router",
+        "path": "/workspaces",
+        "prefix": "/api/v1/workspaces",
+        "tags": ("workspaces",),
+        "route_key": "workspaces",
+    },
+    {
+        "name": "calendar",
+        "module_name": "tldw_Server_API.app.api.v1.endpoints.calendar",
+        "attr_name": "router",
+        "path": "/calendar/calendars",
+        "prefix": "/api/v1",
+        "tags": ("calendar",),
+        "route_key": "calendar",
+        "default_stable": False,
+    },
+)
 
 
 def _main_source_text() -> str:
@@ -361,6 +499,18 @@ def _first_router_path(router: APIRouter | Callable[[], APIRouter]) -> str:
     raise AssertionError("router had no path-bearing routes")
 
 
+def _install_minimal_required_fake_router_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for definition in MINIMAL_REQUIRED_ROUTER_DEFINITION_DATA:
+        _install_fake_router_module(
+            monkeypatch,
+            str(definition["module_name"]),
+            attr_name=str(definition["attr_name"]),
+            path=str(definition["path"]),
+        )
+
+
 def test_install_fake_router_module_does_not_mutate_existing_real_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -418,6 +568,63 @@ def test_append_imported_router_spec_preserves_metadata(
         "OptionalRouterMissingModule",
         "OptionalRouterMissingAttribute",
     ]
+
+
+def test_router_spec_selection_preserves_policy_metadata() -> None:
+    """Verify selected canonical specs retain route policy metadata."""
+    from tldw_Server_API.app.api.v1.router_groups.selection import (
+        select_router_specs_by_name,
+    )
+
+    canonical_specs = {
+        spec.name or spec.route_key: spec
+        for spec in iter_core_router_specs()
+    }
+
+    selected_specs = select_router_specs_by_name(
+        iter_core_router_specs(),
+        ("health", "auth"),
+    )
+
+    assert [
+        (spec.name, spec.prefix, spec.tags, spec.route_key, spec.default_stable)
+        for spec in selected_specs
+    ] == [
+        (
+            canonical_specs["health"].name,
+            canonical_specs["health"].prefix,
+            canonical_specs["health"].tags,
+            canonical_specs["health"].route_key,
+            canonical_specs["health"].default_stable,
+        ),
+        (
+            canonical_specs["auth"].name,
+            canonical_specs["auth"].prefix,
+            canonical_specs["auth"].tags,
+            canonical_specs["auth"].route_key,
+            canonical_specs["auth"].default_stable,
+        ),
+    ]
+
+
+def test_router_spec_selection_allows_explicit_overrides() -> None:
+    """Verify explicit minimal overrides preserve unmentioned metadata."""
+    from tldw_Server_API.app.api.v1.router_groups.selection import (
+        RouterSpecOverride,
+        select_router_specs_by_name,
+    )
+
+    selected_spec = select_router_specs_by_name(
+        iter_core_router_specs(),
+        ("auth",),
+        overrides={"auth": RouterSpecOverride(tags=("minimal-auth",))},
+    )[0]
+
+    assert selected_spec.prefix == "/api/v1"
+    assert selected_spec.tags == ("minimal-auth",)
+    assert selected_spec.route_key == "auth"
+    assert selected_spec.default_stable is True
+    assert selected_spec.name == "auth"
 
 
 def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
@@ -3008,6 +3215,14 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
 
     router_definitions = [
         {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
+            "expected_name": "workspace_migrations",
+            "path": "/workspace-migrations/run",
+            "prefix": "/api/v1/workspaces",
+            "tags": ("workspaces",),
+            "route_key": "workspaces",
+        },
+        {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.workspaces",
             "expected_name": "workspaces",
             "path": "/workspaces/list",
@@ -3099,13 +3314,10 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
     selected_specs = [
         spec
         for spec in specs
-        if spec.route_key
+        if spec.name
         in {
-            "workspaces",
-            "character-chat-sessions",
-            "character-memory",
-            "characters",
-            "character-messages",
+            str(definition["expected_name"])
+            for definition in router_definitions
         }
     ]
     assert len(selected_specs) == len(router_definitions)
@@ -3400,6 +3612,13 @@ def test_iter_content_router_specs_defers_learning_writing_router_attr_lookup(
             "prefix": "/api/v1",
             "tags": ("slides",),
             "route_key": "slides",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.explainer",
+            "path": "/explainer/sessions",
+            "prefix": "/api/v1",
+            "tags": ("explainer",),
+            "route_key": "explainer",
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.flashcards",
@@ -4005,89 +4224,23 @@ def test_iter_admin_router_specs_uses_policy_key_for_sandbox_in_pytest(
 def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
 
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.research",
-        path="/search",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.research_runs",
-        path="/runs",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.paper_search",
-        path="/papers",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.chat",
-        path="/completions",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.chat",
-        attr_name="conversations_alias_router",
-        path="/conversations",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.chat_loop",
-        path="/chat/loop/start",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
-        path="/sessions",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.character_memory",
-        path="/memory",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.character_messages",
-        path="/messages",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.workspaces",
-        path="/workspaces",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.characters_endpoint",
-        path="/characters",
-    )
+    _install_minimal_required_fake_router_modules(monkeypatch)
 
     specs = list(iter_minimal_test_router_specs())
+    assert [spec.name for spec in specs] == [
+        str(definition["name"])
+        for definition in MINIMAL_REQUIRED_ROUTER_DEFINITION_DATA
+    ]
+
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
 
-    assert by_first_path["/search"].prefix == "/api/v1/research"
-    assert by_first_path["/search"].tags == ("research",)
-    assert by_first_path["/search"].route_key == ""
-    assert by_first_path["/runs"].prefix == "/api/v1"
-    assert by_first_path["/runs"].tags == ("research-runs",)
-    assert by_first_path["/papers"].prefix == "/api/v1/paper-search"
-    assert by_first_path["/papers"].tags == ("paper-search",)
-    assert by_first_path["/completions"].prefix == "/api/v1/chat"
-    assert by_first_path["/completions"].tags == ()
-    assert by_first_path["/chat/loop/start"].prefix == "/api/v1"
-    assert by_first_path["/chat/loop/start"].tags == ()
-    assert by_first_path["/conversations"].prefix == "/api/v1/chats"
-    assert by_first_path["/conversations"].tags == ("chat",)
-    assert by_first_path["/characters"].prefix == "/api/v1/characters"
-    assert by_first_path["/characters"].tags == ("characters",)
-    assert by_first_path["/memory"].prefix == "/api/v1/characters"
-    assert by_first_path["/memory"].tags == ("character-memory",)
-    assert by_first_path["/sessions"].prefix == "/api/v1/chats"
-    assert by_first_path["/sessions"].tags == ("character-chat-sessions",)
-    assert by_first_path["/messages"].prefix == "/api/v1"
-    assert by_first_path["/messages"].tags == ("character-messages",)
-    assert by_first_path["/workspaces"].prefix == "/api/v1/workspaces"
-    assert by_first_path["/workspaces"].tags == ("workspaces",)
+    for definition in MINIMAL_REQUIRED_ROUTER_DEFINITION_DATA:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.default_stable is definition.get("default_stable", True)
+        assert spec.skip_exceptions == ()
 
 
 def test_iter_minimal_test_router_specs_includes_health_and_auth(
@@ -4095,26 +4248,48 @@ def test_iter_minimal_test_router_specs_includes_health_and_auth(
 ) -> None:
     from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
 
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.health",
-        path="/health",
-    )
-    _install_fake_router_module(
-        monkeypatch,
-        "tldw_Server_API.app.api.v1.endpoints.auth",
-        path="/auth/login",
-    )
+    _install_minimal_required_fake_router_modules(monkeypatch)
 
     specs = list(iter_minimal_test_router_specs())
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
 
     assert by_first_path["/health"].prefix == "/api/v1"
     assert by_first_path["/health"].tags == ("health",)
-    assert by_first_path["/health"].route_key == ""
+    assert by_first_path["/health"].route_key == "health"
     assert by_first_path["/auth/login"].prefix == "/api/v1"
     assert by_first_path["/auth/login"].tags == ("authentication",)
-    assert by_first_path["/auth/login"].route_key == ""
+    assert by_first_path["/auth/login"].route_key == "auth"
+
+
+def test_iter_minimal_test_router_specs_participates_in_route_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
+
+    _install_minimal_required_fake_router_modules(monkeypatch)
+    policy_calls: list[tuple[str, bool]] = []
+
+    def _route_enabled(route_key: str, default_stable: bool = True) -> bool:
+        policy_calls.append((route_key, default_stable))
+        return False
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.route_enabled",
+        _route_enabled,
+    )
+
+    specs = list(iter_minimal_test_router_specs())
+
+    assert register_router_specs(FastAPI(), specs) == 0
+    assert policy_calls == [
+        (spec.route_key, spec.default_stable)
+        for spec in specs
+        if spec.route_key
+    ]
+    assert {route_key for route_key, _default_stable in policy_calls} == {
+        str(definition["route_key"])
+        for definition in MINIMAL_REQUIRED_ROUTER_DEFINITION_DATA
+    }
 
 
 def test_iter_minimal_test_router_specs_defers_endpoint_imports(
@@ -4125,6 +4300,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
 
     endpoint_modules = {
         "tldw_Server_API.app.api.v1.endpoints.auth",
+        "tldw_Server_API.app.api.v1.endpoints.calendar",
         "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
         "tldw_Server_API.app.api.v1.endpoints.character_memory",
         "tldw_Server_API.app.api.v1.endpoints.character_messages",
@@ -4135,6 +4311,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
         "tldw_Server_API.app.api.v1.endpoints.paper_search",
         "tldw_Server_API.app.api.v1.endpoints.research",
         "tldw_Server_API.app.api.v1.endpoints.research_runs",
+        "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
         "tldw_Server_API.app.api.v1.endpoints.workspaces",
     }
     real_import = builtins.__import__
@@ -4154,7 +4331,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
 
     specs = list(iter_minimal_test_router_specs())
 
-    assert len(specs) == 13
+    assert len(specs) == len(MINIMAL_REQUIRED_ROUTER_DEFINITION_DATA)
     assert all(not isinstance(spec.router, APIRouter) for spec in specs)
 
 
@@ -4177,7 +4354,9 @@ def test_minimal_source_delegates_always_included_routers_to_imported_specs() ->
     assert "from tldw_Server_API.app.api.v1.endpoints.paper_search import router as paper_search_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.research import router as research_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.research_runs import router as research_runs_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.workspace_migrations import router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.workspaces import router as workspaces_router" not in source
+    assert "select_router_specs_by_name" in source
 
 
 def test_iter_minimal_test_router_specs_propagates_runtime_import_failures(
@@ -9618,6 +9797,11 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         "tldw_Server_API.app.api.v1.endpoints.slides",
         path="/slides",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.explainer",
+        path="/explainer/sessions",
+    )
     for module_suffix, path in (
         ("kanban_boards", "/boards"),
         ("kanban_lists", "/lists"),
@@ -9965,6 +10149,9 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/slides"].prefix == "/api/v1"
     assert by_first_path["/slides"].tags == ("slides",)
     assert by_first_path["/slides"].route_key == ""
+    assert by_first_path["/explainer/sessions"].prefix == "/api/v1"
+    assert by_first_path["/explainer/sessions"].tags == ("explainer",)
+    assert by_first_path["/explainer/sessions"].route_key == ""
     kanban_specs = [spec for spec in specs if spec.route_key == "kanban"]
     assert len(kanban_specs) == 9
     assert {
@@ -10936,6 +11123,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.explainer",
+        path="/explainer/sessions",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.flashcards",
         path="/flashcards",
     )
@@ -11205,6 +11397,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["translation"].tags == ("translation",)
     assert by_key["slides"].prefix == "/api/v1"
     assert by_key["slides"].tags == ("slides",)
+    assert by_key["explainer"].prefix == "/api/v1"
+    assert by_key["explainer"].tags == ("explainer",)
     assert by_key["flashcards"].prefix == "/api/v1"
     assert by_key["flashcards"].tags == ("flashcards",)
     assert by_key["quizzes"].prefix == "/api/v1"

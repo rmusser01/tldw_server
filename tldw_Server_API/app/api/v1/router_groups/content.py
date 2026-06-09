@@ -572,6 +572,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             route_key="slides",
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.explainer",
+            log_name="explainer",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("explainer",),
+            route_key="explainer",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.flashcards",
             log_name="flashcards",
             prefix=f"{API_V1_PREFIX}",

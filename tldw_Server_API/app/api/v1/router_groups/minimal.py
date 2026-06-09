@@ -601,6 +601,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             tags=("slides",),
             skip_context=minimal_skip_context,
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.explainer",
+            log_name="explainer",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("explainer",),
+            skip_context=minimal_skip_context,
+        ),
     ):
         append_imported_router_spec(specs, utility_spec)
 
