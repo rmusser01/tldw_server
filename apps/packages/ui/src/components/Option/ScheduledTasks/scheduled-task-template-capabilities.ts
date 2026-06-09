@@ -150,3 +150,80 @@ export const buildScheduledTaskTemplateCapability = (
   reason: null,
   ...overrides
 })
+
+const REDACTED_CAPABILITY_PREVIEW = "[redacted private source]"
+
+const SENSITIVE_CAPABILITY_URL_PARAM_PATTERN =
+  /(^|[?&#])([a-z0-9]+[_-])*(token|api[_-]?key|key|secret|session|sid|auth|code|invite|password)([_-][a-z0-9]+)*=/i
+
+const PRIVATE_CAPABILITY_PROSE_PATTERN =
+  /\b(api[_ -]?key|password|passphrase|secret|bearer\s+[A-Za-z0-9._-]+|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)\b|sk-[A-Za-z0-9_-]+/i
+
+const PROVIDER_SECRET_SNIPPET_PATTERN =
+  /\b(provider response|authorization|credential|header)\b.*\b(token|secret|api[_ -]?key|password|auth)\s*[:=]/i
+
+const appearsToBeUrl = (value: string): boolean =>
+  /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
+  /^www\./i.test(value) ||
+  /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}([/:?#]|$)/i.test(value)
+
+export const redactCapabilityPreviewText = (value: string): string => {
+  const trimmed = value.trim()
+
+  if (
+    SENSITIVE_CAPABILITY_URL_PARAM_PATTERN.test(trimmed) ||
+    (appearsToBeUrl(trimmed) && trimmed.includes("#")) ||
+    PRIVATE_CAPABILITY_PROSE_PATTERN.test(trimmed) ||
+    PROVIDER_SECRET_SNIPPET_PATTERN.test(trimmed)
+  ) {
+    return REDACTED_CAPABILITY_PREVIEW
+  }
+
+  return trimmed
+}
+
+export const buildSourceIntentCopy = (
+  intent: ScheduledTaskSourceIntentCapability | null | undefined
+): string[] => {
+  if (!intent) {
+    return ["Source support: configured in Watchlists."]
+  }
+
+  return [
+    `Detected source: ${intent.sourceFamily.replace(/_/g, " ")}.`,
+    intent.can_watch ? "Watch: supported." : "Watch: not supported for this source yet.",
+    intent.can_ingest ? "Ingest: supported." : "Ingest: not supported for this source yet.",
+    ...(intent.reason ? [redactCapabilityPreviewText(intent.reason)] : [])
+  ]
+}
+
+export const buildResultDestinationCopy = (
+  metadata: ScheduledTaskResultDestinationMetadata | null | undefined
+): string[] => {
+  if (!metadata) {
+    return ["Results destination: configured in Watchlists."]
+  }
+
+  return [
+    metadata.home_supported ? "Home: latest results will appear." : "Home: not yet shown.",
+    metadata.notifications_supported
+      ? "Notifications: available when the task policy triggers."
+      : "Notifications: not available for this source yet.",
+    metadata.search_indexed
+      ? "Search: indexed when ingest completes."
+      : "Search: content may be saved but not searchable.",
+    metadata.rag_scope_included
+      ? "RAG: included in the selected knowledge scope."
+      : "RAG: not included in the selected knowledge scope."
+  ]
+}
+
+export const buildNotificationPolicyCopy = (
+  metadata:
+    | Pick<ScheduledTaskResultDestinationMetadata, "notifications_supported">
+    | null
+    | undefined
+): string =>
+  metadata?.notifications_supported
+    ? "Notifications can open exact task, run, or result detail when supported."
+    : "Notifications are not available for this source yet."
