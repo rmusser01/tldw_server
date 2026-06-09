@@ -259,6 +259,21 @@ def test_embedding_model_cache_restore_is_non_blocking() -> None:
         assert "github.event_name != 'workflow_dispatch'" in str(step.get("if"))
 
 
+def test_embedding_model_setup_skips_non_embedding_chunking_shard() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    embedding_setup_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") in {"Cache embedding models", "Pre-download embedding models"}
+    ]
+
+    assert len(embedding_setup_steps) == 10
+    for step in embedding_setup_steps:
+        condition = str(step.get("if"))
+        assert "ai-chunking-code-json-xml" not in condition
+
+
 def test_full_suite_test_result_uploads_are_non_blocking() -> None:
     workflow = _load(".github/workflows/ci.yml")
     upload_steps = [

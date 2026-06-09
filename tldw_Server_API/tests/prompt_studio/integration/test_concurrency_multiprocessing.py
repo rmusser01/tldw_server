@@ -114,13 +114,15 @@ def test_parallel_acquire_distinct_jobs_multiprocessing(
     try:
         # Prepare a moderate number of jobs
         total = 18
+        seeded_job_ids: set[int] = set()
         for i in range(total):
-            db_to_use.create_job(
+            job = db_to_use.create_job(
                 job_type="evaluation",
                 entity_id=100 + i,
                 payload={"i": i},
                 priority=5,
             )
+            seeded_job_ids.add(int(job["id"]))
 
         spec = _spec_from_db(db_to_use)
 
@@ -151,8 +153,13 @@ def test_parallel_acquire_distinct_jobs_multiprocessing(
                     p.join(2)
 
             got = list(out_ids)
-            assert len(got) == total, f"Expected {total} acquired jobs, got {len(got)} for backend {label}"
-            assert len(set(got)) == total, "Duplicate job acquisitions detected across processes"
+            assert len(set(got)) == len(got), "Duplicate job acquisitions detected across processes"
+            seeded_acquisitions = [job_id for job_id in got if job_id in seeded_job_ids]
+            assert len(seeded_acquisitions) == total, (
+                f"Expected {total} seeded jobs to be acquired, got {len(seeded_acquisitions)} "
+                f"for backend {label}"
+            )
+            assert set(seeded_acquisitions) == seeded_job_ids
     finally:
         if mp_db is not None:
             try:

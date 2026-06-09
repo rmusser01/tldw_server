@@ -106,6 +106,11 @@ class SnapshotManager:
                     rel = entry.relative_to(workspace_root)
                     raise ValueError(f"Refusing symlink workspace entry: {rel}")
 
+    @staticmethod
+    def _is_atomic_temp_entry(path: Path) -> bool:
+        """Return True for common atomic-write scratch entries."""
+        return path.name.endswith(".tmp")
+
     def create_snapshot(self, session_id: str, workspace_path: str) -> dict:
         """Create a snapshot of the session workspace.
 
@@ -150,6 +155,12 @@ class SnapshotManager:
                         # Concurrent atomic writers can remove temporary files
                         # between directory enumeration and archive insertion.
                         continue
+                    except PermissionError:
+                        # On Windows, an atomic-write scratch file can be
+                        # visible but locked while a writer replaces it.
+                        if self._is_atomic_temp_entry(Path(item_path)):
+                            continue
+                        raise
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             # Clean up on failure
             with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):

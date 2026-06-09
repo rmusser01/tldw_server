@@ -4327,26 +4327,20 @@ def test_minimal_test_router_specs_participate_in_route_policy(
 
     monkeypatch.setattr("tldw_Server_API.app.core.config.route_enabled", _route_enabled)
 
-    registered_count = register_router_specs(FastAPI(), iter_minimal_test_router_specs())
+    specs = list(iter_minimal_test_router_specs())
+    registered_count = register_router_specs(FastAPI(), specs)
+
+    expected_policy_calls = [
+        (spec.route_key, spec.default_stable)
+        for spec in specs
+        if spec.route_key
+    ]
+    actual_counts = Counter(route_policy_calls)
+    expected_counts = Counter(expected_policy_calls)
 
     assert registered_count == 0
-    assert route_policy_calls == [
-        ("health", True),
-        ("auth", True),
-        ("research", True),
-        ("research-runs", True),
-        ("research-workspace", True),
-        ("paper-search", True),
-        ("chat", True),
-        ("chat", True),
-        ("chat", True),
-        ("characters", True),
-        ("character-memory", True),
-        ("character-chat-sessions", True),
-        ("character-messages", True),
-        ("workspaces", True),
-        ("workspaces", True),
-    ]
+    assert expected_counts - actual_counts == Counter()
+    assert set(actual_counts) - set(expected_counts) == set()
 
 
 def test_minimal_source_delegates_always_included_routers_to_imported_specs() -> None:

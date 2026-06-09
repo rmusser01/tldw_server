@@ -117,6 +117,40 @@ def test_create_snapshot_during_concurrent_atomic_writes_is_consistent(tmp_path:
     assert restored.startswith("version-")
 
 
+def test_create_snapshot_skips_locked_atomic_temp_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    state_file = workspace / "state.txt"
+    state_file.write_text("stable", encoding="utf-8")
+    (workspace / "state.tmp").write_text("in progress", encoding="utf-8")
+
+    original_add = tarfile.TarFile.add
+
+    def _raise_for_atomic_tmp(
+        self: tarfile.TarFile,
+        name: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if Path(name).name == "state.tmp":
+            raise PermissionError("locked atomic temp file")
+        original_add(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "add", _raise_for_atomic_tmp)
+
+    snapshot = manager.create_snapshot("sess-locked-temp", str(workspace))
+
+    state_file.write_text("mutated", encoding="utf-8")
+    (workspace / "state.tmp").unlink()
+    assert manager.restore_snapshot("sess-locked-temp", snapshot["snapshot_id"], str(workspace)) is True
+    assert state_file.read_text(encoding="utf-8") == "stable"
+    assert not (workspace / "state.tmp").exists()
+
+
 def test_clone_session_rejects_symlink_escape(tmp_path: Path) -> None:
     manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
     source_workspace = tmp_path / "source"

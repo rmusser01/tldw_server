@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperExecReply,
+    HelperVMMetadata,
     HelperVMReply,
     HelperVMStatusReply,
 )
@@ -23,6 +24,8 @@ class _FakeSessionControlStore:
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         self._rows[str(session_id)] = {
             "id": str(session_id),
@@ -31,6 +34,8 @@ class _FakeSessionControlStore:
             "template_id": template_id,
             "workspace_mount": workspace_mount,
             "agent_ready": bool(agent_ready),
+            "helper_instance_id": helper_instance_id,
+            "helper_started_at": helper_started_at,
         }
 
     def get_vz_session_control(self, session_id: str) -> dict[str, object] | None:
@@ -61,7 +66,22 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
             assert request["session_mode"] is True
             assert request["template"] == "ubuntu-24.04"
             calls.append("create_vm")
-            return HelperVMReply(vm_id="vm-session-1", state="created", details={"session_mode": True})
+            return HelperVMReply(
+                vm_id="vm-session-1",
+                state="created",
+                metadata=HelperVMMetadata(
+                    owner="tldw",
+                    runtime="vz_linux",
+                    run_id="run-1",
+                    session_id="sess-vz-1",
+                    session_mode=True,
+                ),
+                details={
+                    "session_mode": True,
+                    "helper_instance_id": "helper-a",
+                    "helper_started_at": "2026-05-09T00:00:00Z",
+                },
+            )
 
         def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
             calls.append(f"get_vm_status:{vm_id}")
@@ -71,6 +91,17 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
                 vm_id=vm_id,
                 state="running",
                 healthy=True,
+                metadata=HelperVMMetadata(
+                    owner="tldw",
+                    runtime="vz_linux",
+                    run_id="run-1",
+                    session_id="sess-vz-1",
+                    session_mode=True,
+                ),
+                details={
+                    "helper_instance_id": "helper-a",
+                    "helper_started_at": "2026-05-09T00:00:00Z",
+                },
             )
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
@@ -117,3 +148,5 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
     assert control is not None
     assert control["vm_id"] == "vm-session-1"
     assert control["agent_ready"] is True
+    assert control["helper_instance_id"] == "helper-a"
+    assert control["helper_started_at"] == "2026-05-09T00:00:00Z"

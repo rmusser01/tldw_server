@@ -76,6 +76,11 @@ def _install_fake_helper_socket(monkeypatch, responses: dict[str, object], socke
         "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.socket",
         _socket_factory,
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.AF_UNIX",
+        1,
+        raising=False,
+    )
     monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", socket_path)
     return requests
 
@@ -109,6 +114,10 @@ def test_helper_client_default_uses_expected_protocol_version(monkeypatch) -> No
     )
 
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delattr(
+        "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.AF_UNIX",
+        raising=False,
+    )
     requests = _install_fake_helper_socket(
         monkeypatch,
         {
@@ -433,6 +442,18 @@ def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
 
     with pytest.raises(MacOSVirtualizationHelperUnavailable):
         client.create_vm(_valid_create_vm_request(vm_name="vz-linux-run-2"))
+
+
+def test_helper_client_fails_closed_when_unix_sockets_unavailable(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", "/tmp/vz-helper.sock")
+    monkeypatch.delattr(
+        "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.AF_UNIX",
+        raising=False,
+    )
+
+    with pytest.raises(MacOSVirtualizationHelperUnavailable):
+        MacOSVirtualizationHelperClient().ping()
 
 
 def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:

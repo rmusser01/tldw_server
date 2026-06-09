@@ -1939,6 +1939,8 @@ class WorkflowEngine:
                 last_outputs: dict[str, Any] | None = None
                 try:
                     last = self.db.get_last_completed_step_run(run_id=rid, before_ts=target.get("started_at"))
+                    if not last:
+                        last = self.db.get_last_completed_step_run(run_id=rid)
                     if last:
                         after_step_id = last.get("step_id") or step_id
                         try:

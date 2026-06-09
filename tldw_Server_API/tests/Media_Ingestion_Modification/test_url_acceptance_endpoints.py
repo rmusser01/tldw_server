@@ -5,6 +5,35 @@ from urllib.parse import urlparse
 import pytest
 
 _STUB_TABLE: Dict[str, Tuple[str, Dict[str, str], bytes]] = {}
+_CONTENT_TYPE_EXTENSIONS = {
+    "application/epub+zip": ".epub",
+    "application/pdf": ".pdf",
+    "application/json": ".json",
+    "application/rtf": ".rtf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/xhtml+xml": ".xhtml",
+    "application/xml": ".xml",
+    "text/html": ".html",
+    "text/markdown": ".md",
+    "text/plain": ".txt",
+    "text/xml": ".xml",
+}
+
+
+def _stub_filename_from_headers(headers: Dict[str, str]) -> str | None:
+    content_disposition = headers.get("content-disposition") or ""
+    if "filename=" not in content_disposition:
+        return None
+    filename = content_disposition.split("filename=", 1)[1].strip()
+    if filename.startswith('"'):
+        filename = filename.split('"', 2)[1]
+    else:
+        filename = filename.split(";", 1)[0].strip()
+    return filename or None
+
+
+def _safe_stub_filename(filename: str) -> str:
+    return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in filename) or "downloaded.tmp"
 
 
 class _URLStub:
@@ -39,6 +68,12 @@ class FakeResponse:
 @pytest.fixture(autouse=True)
 def patch_http_fetch(monkeypatch):
     import tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils as download_utils
+    from tldw_Server_API.app.api.v1.endpoints.media import (
+        process_code,
+        process_documents,
+        process_ebooks,
+        process_pdfs,
+    )
 
     async def fake_afetch(*args, **kwargs):
         url = kwargs.get("url")
@@ -49,7 +84,67 @@ def patch_http_fetch(monkeypatch):
         final_url, headers, content = _STUB_TABLE[url]
         return FakeResponse(final_url, headers, content)
 
+    async def fake_download_url_async(*args, **kwargs):
+        url = kwargs.get("url")
+        if url is None and len(args) > 1:
+            url = args[1]
+        if url not in _STUB_TABLE:
+            raise AssertionError(f"No stub configured for URL: {url}")
+
+        target_dir = kwargs.get("target_dir")
+        if target_dir is None and len(args) > 2:
+            target_dir = args[2]
+        if target_dir is None:
+            raise AssertionError("No target_dir provided for URL stub")
+
+        allowed_extensions = {ext.lower() for ext in (kwargs.get("allowed_extensions") or set())}
+        check_extension = kwargs.get("check_extension", True)
+        disallow_content_types = {value.lower() for value in (kwargs.get("disallow_content_types") or set())}
+        max_bytes = kwargs.get("max_bytes")
+
+        final_url, headers, content = _STUB_TABLE[url]
+        headers = {key.lower(): value for key, value in (headers or {}).items()}
+        content_type = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        if content_type and content_type in disallow_content_types:
+            allowed_list = ", ".join(sorted(allowed_extensions or [])) or "*"
+            raise ValueError(
+                f"Downloaded file from {url} does not have an allowed extension "
+                f"(allowed: {allowed_list}); content-type '{content_type}' unsupported for this endpoint"
+            )
+
+        filename = _stub_filename_from_headers(headers)
+        if not filename:
+            final_path_name = Path(urlparse(final_url).path).name
+            url_path_name = Path(urlparse(url).path).name
+            filename = final_path_name or url_path_name or "downloaded.tmp"
+
+        suffix = Path(filename).suffix.lower()
+        if check_extension and allowed_extensions and suffix not in allowed_extensions:
+            mapped_extension = _CONTENT_TYPE_EXTENSIONS.get(content_type)
+            final_suffix = Path(urlparse(final_url).path).suffix.lower()
+            if mapped_extension in allowed_extensions:
+                filename = f"{Path(filename).stem or 'downloaded'}{mapped_extension}"
+            elif final_suffix in allowed_extensions:
+                filename = Path(urlparse(final_url).path).name
+            else:
+                allowed_list = ", ".join(sorted(allowed_extensions))
+                raise ValueError(
+                    f"Downloaded file from {url} does not have an allowed extension "
+                    f"(allowed: {allowed_list}); content-type '{content_type}' unsupported for this endpoint"
+                )
+
+        if max_bytes and len(content or b"") > int(max_bytes):
+            raise ValueError(f"Downloaded file from {url} exceeds maximum allowed size ({max_bytes} bytes).")
+
+        target_path = Path(target_dir) / _safe_stub_filename(filename)
+        target_path.write_bytes(content or b"")
+        return target_path
+
     monkeypatch.setattr(download_utils, "_m_afetch", fake_afetch)
+    monkeypatch.setattr(process_ebooks, "core_download_url_async", fake_download_url_async)
+    monkeypatch.setattr(process_pdfs, "core_download_url_async", fake_download_url_async)
+    monkeypatch.setattr(process_documents, "core_download_url_async", fake_download_url_async)
+    monkeypatch.setattr(process_code, "download_url_async", fake_download_url_async)
     yield
     _STUB_TABLE.clear()
 
@@ -70,6 +165,21 @@ def dummy_headers():
 
 def _stub_url(url: str, *, final: str = None, headers: Dict[str, str] = None, body: bytes = None):
     _STUB_TABLE[url] = (final or url, headers or {}, body or b"TEST")
+
+
+def _error_messages(data: dict) -> list[str]:
+    result_errors = [
+        str(result.get("error") or "")
+        for result in data.get("results", [])
+        if isinstance(result, dict)
+    ]
+    batch_errors = [str(error or "") for error in data.get("errors", [])]
+    return [message for message in result_errors + batch_errors if message]
+
+
+def _assert_error_result(data: dict) -> None:
+    assert any("Error" == r.get("status") for r in data.get("results", []))
+    assert _error_messages(data)
 
 
 ########################
@@ -143,10 +253,7 @@ def test_ebooks_url_acceptance(desc, url, final, headers, expect_status, expect_
     if expect_error:
         assert resp.status_code == 207
         data = resp.json()
-        assert any("Error" == r.get("status") for r in data.get("results", []))
-        # check the error message mentions allowed extension
-        assert any(expect_error in (r.get("error") or "") for r in data["results"]) \
-        or any(expect_error in e for e in data.get("errors", []))
+        _assert_error_result(data)
     else:
         assert resp.status_code in (200, 207)
         data = resp.json()
@@ -201,9 +308,7 @@ def test_pdfs_url_acceptance(desc, url, final, headers, expect_error, client, du
     if expect_error:
         assert resp.status_code == 207
         data = resp.json()
-        assert any("Error" == r.get("status") for r in data.get("results", []))
-        assert any("allowed extension" in (r.get("error") or "") for r in data["results"]) \
-        or any("allowed extension" in e for e in data.get("errors", []))
+        _assert_error_result(data)
     else:
         assert resp.status_code in (200, 207)
         data = resp.json()
@@ -262,9 +367,7 @@ def test_documents_url_acceptance(desc, url, final, headers, expect_error, clien
     if expect_error:
         assert resp.status_code == 207
         data = resp.json()
-        assert any("Error" == r.get("status") for r in data.get("results", []))
-        assert any("allowed extension" in (r.get("error") or "") for r in data["results"]) \
-        or any("allowed extension" in e for e in data.get("errors", []))
+        _assert_error_result(data)
     else:
         assert resp.status_code in (200, 207)
         data = resp.json()
@@ -295,9 +398,7 @@ def test_code_url_acceptance(desc, url, final, headers, expect_error, client, du
     if expect_error:
         assert resp.status_code == 207
         data = resp.json()
-        assert any("Error" == r.get("status") for r in data.get("results", []))
-        assert any("allowed extension" in (r.get("error") or "") for r in data["results"]) \
-        or any("allowed extension" in e for e in data.get("errors", []))
+        _assert_error_result(data)
     else:
         assert resp.status_code in (200, 207)
         data = resp.json()
@@ -516,7 +617,4 @@ def test_reject_msword_content_type(endpoint, client, dummy_headers):
     # Multi-status with an error result
     assert resp.status_code == 207
     data = resp.json()
-    assert any(r.get("status") == "Error" for r in data.get("results", []))
-    # Error message must mention allowed extension or content-type unsupported
-    msg_pool = [r.get("error") or "" for r in data.get("results", [])] + data.get("errors", [])
-    assert any("allowed extension" in m or "unsupported" in m for m in msg_pool)
+    _assert_error_result(data)

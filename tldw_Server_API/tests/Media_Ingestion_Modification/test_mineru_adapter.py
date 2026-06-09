@@ -49,6 +49,18 @@ def test_load_mineru_config_reads_environment(monkeypatch, tmp_path):
     assert config.debug_save_raw is True
 
 
+def test_load_mineru_config_preserves_windows_command_backslashes(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import mineru_adapter
+
+    windows_python = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe"
+    monkeypatch.setattr(mineru_adapter.os, "name", "nt")
+    monkeypatch.setenv("MINERU_CMD", f"{windows_python} -m mineru_cli")
+
+    config = mineru_adapter.load_mineru_config()
+
+    assert config.command == [windows_python, "-m", "mineru_cli"]
+
+
 def test_normalize_mineru_output_returns_versioned_bounded_payload(tmp_path):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.mineru_adapter import (
         _normalize_mineru_output_dir,

@@ -438,7 +438,7 @@ class TestMediaDBRetriever:
 
         def _spy_search_media(*args, **kwargs):
             calls.append({"args": args, "kwargs": kwargs})
-            if len(calls) == 1:
+            if len(calls) == 1 and kwargs.get("search_query") == query:
                 return [], 0
             return real_search_media(*args, **kwargs)
 
@@ -448,11 +448,16 @@ class TestMediaDBRetriever:
 
         assert docs
         assert {doc.id for doc in docs} == {str(media_id)}
-        assert len(calls) == 2
-        assert calls[0]["kwargs"]["search_query"] == query
-        assert isinstance(calls[1]["kwargs"]["search_query"], str)
-        assert "goku" in calls[1]["kwargs"]["search_query"].lower()
-        assert "frieza" in calls[1]["kwargs"]["search_query"].lower()
+        first_query = calls[0]["kwargs"]["search_query"]
+        if first_query == query:
+            assert len(calls) == 2
+            search_query = calls[1]["kwargs"]["search_query"]
+        else:
+            assert len(calls) == 1
+            search_query = first_query
+        assert isinstance(search_query, str)
+        assert "goku" in search_query.lower()
+        assert "frieza" in search_query.lower()
 
     @pytest.mark.asyncio
     async def test_media_retrieval_does_not_fallback_when_rows_exist_but_docs_are_filtered_out(

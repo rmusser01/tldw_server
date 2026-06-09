@@ -3,8 +3,8 @@ import importlib.util
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.tests.LLamaCpp.llamacpp_test_app import llamacpp_test_client
 
 
 def _has_sentence_transformers() -> bool:
@@ -27,7 +27,7 @@ def _model_available() -> bool:
 def client():
     settings = get_settings()
     headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-    with TestClient(app, headers=headers) as c:
+    with llamacpp_test_client(headers=headers) as c:
         yield c
 
 
