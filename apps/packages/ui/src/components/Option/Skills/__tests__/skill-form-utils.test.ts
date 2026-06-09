@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest"
 import type { SkillResponse } from "@/types/skill"
 import {
   buildInitialSkillContent,
+  buildSkillTemplateContent,
   buildSupportingFilesForCreate,
-  buildSupportingFilesForUpdate
+  buildSupportingFilesForUpdate,
+  type SkillTemplateId
 } from "../skill-form-utils"
 
 const makeSkill = (overrides?: Partial<SkillResponse>): SkillResponse => ({
@@ -44,6 +46,28 @@ describe("skill-form-utils", () => {
     expect(result).toContain('allowed-tools: "Read, Grep"')
     expect(result).toContain("context: fork")
     expect(result).toContain("\n\nBody content")
+  })
+
+  it.each<SkillTemplateId>(["summarizer", "explainer", "extractor", "blank"])(
+    "builds a valid %s starter template with normalized skill name",
+    (templateId) => {
+      const result = buildSkillTemplateContent(templateId, "Research Summary!!")
+
+      expect(result).toMatch(/^---\n/)
+      expect(result).toContain('name: "research-summary"')
+      expect(result).toContain("description:")
+      expect(result).toContain("argument-hint:")
+      expect(result).toContain("context: inline")
+      expect(result).toContain("---\n\n")
+      expect(result).toContain("$ARGUMENTS")
+    }
+  )
+
+  it("uses a deterministic fallback name when no skill name has been entered", () => {
+    const result = buildSkillTemplateContent("explainer", "")
+
+    expect(result).toContain('name: "explainer-skill"')
+    expect(result).toContain("Explain the following concept")
   })
 
   it("builds update payload with add/edit/remove operations", () => {
