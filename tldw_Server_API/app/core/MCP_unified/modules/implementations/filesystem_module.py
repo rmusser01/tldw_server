@@ -44,7 +44,12 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
 from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
-from .filesystem_locks import FilesystemLockConflict, FilesystemLockMissing, InMemoryFilesystemLockManager
+from .filesystem_locks import (
+    FilesystemLockConflict,
+    FilesystemLockManager,
+    FilesystemLockMissing,
+    create_filesystem_lock_manager,
+)
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 
 
@@ -104,6 +109,7 @@ class FilesystemModule(BaseModule):
         self,
         config: ModuleConfig,
         workspace_root_resolver: McpHubWorkspaceRootResolver | Any | None = None,
+        lock_manager: FilesystemLockManager | None = None,
     ) -> None:
         super().__init__(config)
         self._workspace_root_resolver = workspace_root_resolver or McpHubWorkspaceRootResolver()
@@ -111,7 +117,11 @@ class FilesystemModule(BaseModule):
             secret=config.settings.get("read_receipt_secret"),
             ttl_seconds=self._setting_positive_int("read_receipt_ttl_seconds", 1_800),
         )
-        self._lock_leases = InMemoryFilesystemLockManager()
+        self._lock_leases = (
+            lock_manager
+            if lock_manager is not None
+            else create_filesystem_lock_manager(config.settings)
+        )
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Filesystem module: {self.name}")

@@ -407,6 +407,66 @@ async def test_filesystem_lock_lifecycle_conflicts_and_expiry(
 
 
 @pytest.mark.asyncio
+async def test_filesystem_lock_manager_injection_shares_leases_between_modules(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_locks import (
+        InMemoryFilesystemLockManager,
+    )
+
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "story.txt").write_text("alpha\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    shared_locks = InMemoryFilesystemLockManager()
+    mod_a = FilesystemModule(
+        ModuleConfig(name="filesystem-a"),
+        workspace_root_resolver=resolver,
+        lock_manager=shared_locks,
+    )
+    mod_b = FilesystemModule(
+        ModuleConfig(name="filesystem-b"),
+        workspace_root_resolver=resolver,
+        lock_manager=shared_locks,
+    )
+    context = RequestContext(request_id="req-fs-shared-locks", user_id="1", metadata={"workspace_id": "ws-1"})
+
+    first = await mod_a.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a", "ttl_seconds": 60},
+        context=context,
+    )
+    conflict = await mod_b.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-b", "ttl_seconds": 60},
+        context=context,
+    )
+    released = await mod_b.execute_tool(
+        "fs.lock_release",
+        {"path": "docs/story.txt", "lease_id": first["lease_id"]},
+        context=context,
+    )
+    reacquired = await mod_b.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-b", "ttl_seconds": 60},
+        context=context,
+    )
+
+    assert first["acquired"] is True  # nosec B101
+    assert conflict["acquired"] is False  # nosec B101
+    assert conflict["reason_code"] == "lock_conflict"  # nosec B101
+    assert conflict["held_owner"] == "agent-a"  # nosec B101
+    assert released["released"] is True  # nosec B101
+    assert reacquired["acquired"] is True  # nosec B101
+    assert reacquired["lease_id"] != first["lease_id"]  # nosec B101
+
+
+@pytest.mark.parametrize("backend", ["sqlite", False, 0])
+def test_filesystem_lock_manager_rejects_unsupported_backend_config(backend: Any) -> None:
+    with pytest.raises(ValueError, match="unsupported filesystem lock_manager_backend"):
+        FilesystemModule(ModuleConfig(name="filesystem", settings={"lock_manager_backend": backend}))
+
+
+@pytest.mark.asyncio
 async def test_filesystem_lock_acquire_offloads_lockable_path_checks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
