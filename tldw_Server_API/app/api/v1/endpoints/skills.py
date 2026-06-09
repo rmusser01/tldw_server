@@ -121,7 +121,7 @@ async def list_skills(
     limit: int = Query(100, ge=1, le=500, description="Maximum number of skills to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     service: SkillsService = Depends(get_skills_service),
-):
+) -> SkillsListResponse:
     """
     List available skills.
 

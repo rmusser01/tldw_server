@@ -709,13 +709,15 @@ export const workspaceApiMethods = {
       q?: string
       limit?: number
       offset?: number
+      abortSignal?: AbortSignal
     }
   ): Promise<SkillsListPayload> {
+    const { abortSignal, ...queryParams } = params ?? {}
     const normalizedParams = params
       ? {
-          ...params,
-          q: typeof params.q === "string" && params.q.trim().length > 0
-            ? params.q.trim()
+          ...queryParams,
+          q: typeof queryParams.q === "string" && queryParams.q.trim().length > 0
+            ? queryParams.q.trim()
             : undefined
         }
       : undefined
@@ -726,7 +728,8 @@ export const workspaceApiMethods = {
     ])
     return await bgRequest<SkillsListPayload>({
       path: appendPathQuery(base, query),
-      method: "GET"
+      method: "GET",
+      abortSignal
     })
   },
 

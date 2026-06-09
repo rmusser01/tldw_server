@@ -1029,7 +1029,14 @@ class SkillsService:
         return self._build_context_payload(rows)
 
     async def get_total_count(self, include_hidden: bool = False, q: str | None = None) -> int:
-        """Get total count of skills."""
+        """
+        Get total count of skills.
+
+        Args:
+            include_hidden: Include skills hidden from user invocation.
+            q: Optional search string filtering skills by name or description;
+                empty values are ignored.
+        """
         await self._sync_registry_async()
         db = self._get_db()
         return db.count_skill_registry(

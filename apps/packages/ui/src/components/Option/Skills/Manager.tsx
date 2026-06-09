@@ -39,6 +39,7 @@ import type {
 } from "@/types/skill"
 
 const DEFAULT_PAGE_SIZE = 10
+const SKILLS_SEARCH_DEBOUNCE_MS = 300
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
 
 interface ImportTextFormValues {
@@ -84,6 +85,7 @@ export const SkillsManager: React.FC = () => {
   const [page, setPage] = React.useState(1)
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = React.useState("")
+  const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
   const [editingSkill, setEditingSkill] = React.useState<SkillResponse | null>(null)
@@ -93,7 +95,18 @@ export const SkillsManager: React.FC = () => {
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
 
   const offset = (page - 1) * pageSize
-  const searchQuery = search.trim()
+  const searchQuery = debouncedSearch.trim()
+
+  React.useEffect(() => {
+    if (search === debouncedSearch) return
+
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, SKILLS_SEARCH_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [debouncedSearch, search])
 
   const {
     data,
@@ -103,11 +116,12 @@ export const SkillsManager: React.FC = () => {
     refetch
   } = useQuery<SkillsListResponse>({
     queryKey: ["skills", page, pageSize, searchQuery],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       tldwClient.listSkills({
         ...(searchQuery ? { q: searchQuery } : {}),
         limit: pageSize,
-        offset
+        offset,
+        abortSignal: signal
       })
   })
 
@@ -604,10 +618,7 @@ export const SkillsManager: React.FC = () => {
             defaultValue: "Search skills..."
           })}
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
-            setPage(1)
-          }}
+          onChange={(e) => setSearch(e.target.value)}
           allowClear
           style={{ maxWidth: 360 }}
         />

@@ -4,12 +4,12 @@ title: Implement Skills power-user server-backed search
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-09 16:16'
+updated_date: 2026-06-09 16:20
 labels:
-  - skills
-  - webui
-  - ux
-  - power-user
+- skills
+- webui
+- ux
+- power-user
 dependencies: []
 priority: high
 ---
@@ -53,6 +53,8 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_power_user_server_search_TASK_2342.md
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Review follow-up: Gemini requested debouncing Skills search input and moving page reset from onChange to a debounced-query effect. Reopened TASK-2342 for the PR review fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -60,12 +62,23 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_power_user_server_search_TASK_2342.md
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented server-backed Skills search for the first power-user discovery slice. The Skills list API now accepts optional q, the service/database apply the search to name/description before pagination with parameterized LIKE patterns, and filtered totals drive pagination metadata. The frontend client serializes trimmed q values and omits blank searches. The Skills manager now keys queries by search text, requests server-filtered results, resets to page 1 on search changes, and renders backend-returned rows instead of filtering only the current page.
 
+Review follow-up:
+- Added an explicit SkillsListResponse return annotation to the list endpoint.
+- Documented include_hidden and q behavior on SkillsService.get_total_count.
+- Debounced Skills search input at 300ms before issuing server-backed q requests.
+- Moved page reset out of the input onChange handler and batched it with the debounced query update.
+- Forwarded React Query abort signals through listSkills to bgRequest and covered the transport behavior with a regression test.
+- Updated manager tests to assert query params while tolerating the transport abortSignal.
+- Kept verification commands portable in this task record rather than using machine-specific venv paths.
+
 Verification:
-- Red checks confirmed missing behavior before implementation: service rejected q, API ignored q and returned the first page, client sent blank q, and manager did not request q.
-- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q -> 92 passed, 6 warnings.
-- bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx -> 18 passed.
-- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/core/Skills/skills_service.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py -f json -o /tmp/bandit_task2342.json -> 0 findings, 0 errors.
-- git diff --check -> passed.
+- Red checks confirmed the debounce regression failed before implementation because listSkills was called with q immediately.
+- Red check confirmed abortSignal was serialized as a query parameter before the client transport fix.
+- bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx -t "debounces server-backed search" -> 1 passed, 12 skipped.
+- bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts -t "forwards listSkills abort signals" -> 1 passed, 6 skipped.
+- bunx vitest run src/services/__tests__/tldw-api-client.boundary-slices.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx -> 20 passed.
+- After activating the project virtual environment: python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q -> 92 passed, 6 warnings.
+- After activating the project virtual environment: python -m bandit tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/core/Skills/skills_service.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py -f json -o /tmp/bandit_task2342_review.json -> 0 findings, 0 errors.
 
 Known skips/blockers: none.
 
