@@ -603,6 +603,14 @@ class CharactersRAGDB:
     """
     _CURRENT_SCHEMA_VERSION = 49  # Schema v49 adds Workspace Assistant Defaults storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
+    _SQLITE_CORE_SCHEMA_TABLES = frozenset(
+        {
+            "character_cards",
+            "conversations",
+            "messages",
+            "notes",
+        }
+    )
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
     _ALLOWED_CONVERSATION_SEARCH_ORDER: tuple[str, ...] = ("bm25", "recency", "hybrid", "topic")
@@ -9860,6 +9868,63 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         return any(marker in message for marker in missing_markers)
 
+    def _missing_current_schema_core_tables_sqlite(self, conn: sqlite3.Connection) -> set[str]:
+        """Return required core tables missing from a current-version SQLite schema."""
+        required = set(self._SQLITE_CORE_SCHEMA_TABLES)
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed checking current SQLite schema tables: {exc}") from exc  # noqa: TRY003
+        existing = {row[0] for row in rows} & required
+        return required - existing
+
+    def _reset_empty_partial_current_schema_marker_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        missing_tables: set[str],
+    ) -> None:
+        """
+        Reset an empty partial bootstrap marker so normal schema creation can run.
+
+        A crash or competing initializer can leave only a current db_schema_version
+        row behind. That state is safe to rebuild because there are no user tables
+        to preserve. If any other table exists, fail closed rather than risk data
+        loss from an automatic rebuild.
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT name
+                  FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name NOT LIKE 'sqlite_%'
+                """
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed checking partial SQLite schema tables: {exc}") from exc  # noqa: TRY003
+
+        user_tables = {row[0] for row in rows}
+        if user_tables - {"db_schema_version"}:
+            raise SchemaError(  # noqa: TRY003
+                "Current SQLite schema marker is present but required tables are missing "
+                f"({', '.join(sorted(missing_tables))}); existing user tables: "
+                f"{', '.join(sorted(user_tables))}. Manual repair is required."
+            )
+
+        logger.warning(
+            "Detected empty partial current SQLite schema for '{}' at {}; missing tables: {}. "
+            "Resetting version marker so schema creation can rebuild it.",
+            self._SCHEMA_NAME,
+            self.db_path_str,
+            ", ".join(sorted(missing_tables)),
+        )
+        conn.execute(
+            "DELETE FROM db_schema_version WHERE schema_name = ?",
+            (self._SCHEMA_NAME,),
+        )
+
     def _initialize_schema_sqlite(self):
         """
         Initializes or migrates the database schema to `_CURRENT_SCHEMA_VERSION`.
@@ -9890,69 +9955,75 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     f"Checking DB schema '{self._SCHEMA_NAME}'. Current version: {current_db_version}. Code supports: {target_version}")
 
                 if current_db_version == target_version:
-                    logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
-                    # Ensure helpful indexes that may have been introduced post-creation
-                    try:
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_conversation ON flashcards(conversation_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_message ON flashcards(message_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_state ON conversations(state)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_cluster ON conversations(cluster_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_topic_label ON conversations(topic_label)")
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_source_external_ref ON conversations(source, external_ref)"
-                        )
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_last_modified "
-                            "ON conversations(client_id, deleted, last_modified DESC)"
-                        )
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_client_character_deleted_last_modified "
-                            "ON conversations(client_id, character_id, deleted, last_modified DESC)"
-                        )
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_created_at "
-                            "ON conversations(client_id, deleted, created_at DESC)"
-                        )
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_conversation ON notes(conversation_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_message ON notes(message_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_last_modified ON writing_sessions(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_deleted ON writing_sessions(deleted)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_last_modified ON writing_templates(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_deleted ON writing_templates(deleted)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_last_modified ON writing_themes(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_deleted ON writing_themes(deleted)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_order ON writing_themes(order_index)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_status ON writing_wordclouds(status)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_last_modified ON writing_wordclouds(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_character ON character_exemplars(character_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_scenario_emotion ON character_exemplars(scenario, emotion)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_novelty ON character_exemplars(novelty_hint)")
-                    except sqlite3.Error:
-                        pass
-                    # Verify core FTS tables exist to avoid silent search failures
-                    self._verify_required_fts_tables_sqlite(conn)
-                    self._ensure_workspace_subresource_schema_sqlite(conn)
-                    self._ensure_workspace_migration_schema_sqlite(conn)
-                    self._ensure_flashcard_asset_schema_sqlite(conn)
-                    self._ensure_flashcard_template_schema_sqlite(conn)
-                    self._ensure_flashcard_scheduler_schema_sqlite(conn)
-                    self._ensure_study_pack_schema_sqlite(conn)
-                    self._ensure_study_assistant_schema_sqlite(conn)
-                    self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
-                    self._ensure_flashcard_fts_triggers_sqlite(conn)
-                    self._ensure_character_cards_fts_triggers_sqlite(conn)
-                    self._ensure_notes_fts_triggers_sqlite(conn)
-                    self._ensure_recent_persona_schema_sqlite(conn)
-                    self._ensure_recent_voice_command_schema_sqlite(conn)
-                    self._ensure_note_folder_schema_sqlite(conn)
-                    self._ensure_note_studio_schema_sqlite(conn)
-                    self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
-                    # Seed/heal character_cards_fts before request traffic. Schema V4
-                    # inserts "Default Assistant" before FTS triggers are created.
-                    self._self_heal_character_cards_fts_sqlite(conn)
-                    return
+                    missing_core_tables = self._missing_current_schema_core_tables_sqlite(conn)
+                    if missing_core_tables:
+                        self._reset_empty_partial_current_schema_marker_sqlite(conn, missing_core_tables)
+                        current_db_version = 0
+                        current_initial_version = 0
+                    else:
+                        logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
+                        # Ensure helpful indexes that may have been introduced post-creation
+                        try:
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_conversation ON flashcards(conversation_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_message ON flashcards(message_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_state ON conversations(state)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_cluster ON conversations(cluster_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_topic_label ON conversations(topic_label)")
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_source_external_ref ON conversations(source, external_ref)"
+                            )
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_last_modified "
+                                "ON conversations(client_id, deleted, last_modified DESC)"
+                            )
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_client_character_deleted_last_modified "
+                                "ON conversations(client_id, character_id, deleted, last_modified DESC)"
+                            )
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_created_at "
+                                "ON conversations(client_id, deleted, created_at DESC)"
+                            )
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_conversation ON notes(conversation_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_message ON notes(message_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_last_modified ON writing_sessions(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_deleted ON writing_sessions(deleted)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_last_modified ON writing_templates(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_deleted ON writing_templates(deleted)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_last_modified ON writing_themes(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_deleted ON writing_themes(deleted)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_order ON writing_themes(order_index)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_status ON writing_wordclouds(status)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_last_modified ON writing_wordclouds(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_character ON character_exemplars(character_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_scenario_emotion ON character_exemplars(scenario, emotion)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_novelty ON character_exemplars(novelty_hint)")
+                        except sqlite3.Error:
+                            pass
+                        # Verify core FTS tables exist to avoid silent search failures
+                        self._verify_required_fts_tables_sqlite(conn)
+                        self._ensure_workspace_subresource_schema_sqlite(conn)
+                        self._ensure_workspace_migration_schema_sqlite(conn)
+                        self._ensure_flashcard_asset_schema_sqlite(conn)
+                        self._ensure_flashcard_template_schema_sqlite(conn)
+                        self._ensure_flashcard_scheduler_schema_sqlite(conn)
+                        self._ensure_study_pack_schema_sqlite(conn)
+                        self._ensure_study_assistant_schema_sqlite(conn)
+                        self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
+                        self._ensure_flashcard_fts_triggers_sqlite(conn)
+                        self._ensure_character_cards_fts_triggers_sqlite(conn)
+                        self._ensure_notes_fts_triggers_sqlite(conn)
+                        self._ensure_recent_persona_schema_sqlite(conn)
+                        self._ensure_recent_voice_command_schema_sqlite(conn)
+                        self._ensure_note_folder_schema_sqlite(conn)
+                        self._ensure_note_studio_schema_sqlite(conn)
+                        self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
+                        # Seed/heal character_cards_fts before request traffic. Schema V4
+                        # inserts "Default Assistant" before FTS triggers are created.
+                        self._self_heal_character_cards_fts_sqlite(conn)
+                        return
                 if current_db_version > target_version:
                     raise SchemaError(  # noqa: TRY003, TRY301
                         f"Database schema '{self._SCHEMA_NAME}' version ({current_db_version}) is newer than supported by code ({target_version}). Aborting.")

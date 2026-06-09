@@ -121,6 +121,33 @@ class TestDBInitialization:
         ).fetchone() is not None
         db.close_connection()
 
+    def test_current_version_marker_without_core_tables_rebuilds_empty_schema(self, db_path, client_id):
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "CREATE TABLE db_schema_version (schema_name TEXT PRIMARY KEY NOT NULL, version INTEGER NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO db_schema_version (schema_name, version) VALUES (?, ?)",
+                (CharactersRAGDB._SCHEMA_NAME, CharactersRAGDB._CURRENT_SCHEMA_VERSION),
+            )
+            conn.commit()
+
+        db = CharactersRAGDB(db_path, client_id)
+        try:
+            conn = db.get_connection()
+            for table_name in ("character_cards", "conversations", "messages", "notes"):
+                assert conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (table_name,),
+                ).fetchone() is not None
+            version = conn.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = ?",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).fetchone()["version"]
+            assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        finally:
+            db.close_connection()
+
     def test_in_memory_db(self, client_id):
 
         db = CharactersRAGDB(":memory:", client_id)
