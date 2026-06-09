@@ -65,7 +65,7 @@ def test_compile_hierarchical_path_grants_reports_invalid_rules() -> None:
                 {"prefix": "/etc", "actions": ["read"]},
                 {"prefix": "docs/../secrets", "actions": ["read"]},
                 {"prefix": "C:secrets", "actions": ["read"]},
-                {"prefix": "docs", "actions": ["share"]},
+                {"prefix": "docs", "actions": ["destroy"]},
                 {"prefix": "docs", "actions": ["read"], "effect": "prompt"},
             ]
         }
@@ -80,6 +80,51 @@ def test_compile_hierarchical_path_grants_reports_invalid_rules() -> None:
         "invalid_actions",
         "invalid_effect",
     ]
+    assert "share" in result.diagnostics[3]["message"]
+    assert "lock" in result.diagnostics[3]["message"]
+
+
+def test_compile_hierarchical_path_grants_accepts_reserved_file_policy_actions() -> None:
+    from mcp_unified.profiles.path_grants import compile_hierarchical_path_grants
+
+    result = compile_hierarchical_path_grants(
+        {
+            "workspace": [
+                {
+                    "prefix": "documents",
+                    "actions": ["delete", "rename", "move", "share", "export", "chmod", "admin", "lock"],
+                },
+            ],
+            "folders": [
+                {"path": "documents/private", "actions": ["share", "export"], "effect": "deny"},
+            ],
+        }
+    )
+
+    assert result.has_errors is False
+    assert result.path_grants == [
+        {
+            "prefix": "documents",
+            "actions": ["admin", "chmod", "delete", "export", "lock", "move", "rename", "share"],
+            "effect": "allow",
+        },
+        {"prefix": "documents/private", "actions": ["export", "share"], "effect": "deny"},
+    ]
+
+
+def test_path_scope_candidate_accepts_reserved_file_policy_action() -> None:
+    from mcp_unified.interfaces.path_scope import normalize_path_scope_candidate
+
+    candidate = normalize_path_scope_candidate(
+        {
+            "path": "documents/story.md",
+            "action": "lock",
+            "source": "lock_tool",
+        }
+    )
+
+    assert candidate.action == "lock"
+    assert candidate.path == "documents/story.md"
 
 
 def test_compile_policy_path_grants_prefers_explicit_flat_grants() -> None:

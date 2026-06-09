@@ -363,6 +363,38 @@ async def test_create_profile_calls_permission_governor_with_redacted_summary() 
 
 
 @pytest.mark.asyncio
+async def test_create_profile_permission_governor_flags_reserved_path_grant_risks() -> None:
+    governor = RecordingPermissionGovernor()
+    manager = _manager(
+        InMemoryProfileStore(),
+        audit_store=InMemoryAuditStore(),
+        permission_governor=governor,
+    )
+
+    await manager.create_profile(
+        {
+            "id": "custom-exporter",
+            "name": "Custom Exporter",
+            "policy_document": {
+                "path_grants": [
+                    {
+                        "prefix": "docs",
+                        "actions": ["delete", "share", "export", "chmod", "admin", "lock"],
+                    }
+                ],
+            },
+        }
+    )
+
+    request = governor.requests[0]
+    assert "path_grants_changed" in request.risk_flags
+    assert "path_grants_destructive" in request.risk_flags
+    assert "path_grants_exfiltration" in request.risk_flags
+    assert "path_grants_admin" in request.risk_flags
+    assert "path_grants_lock" in request.risk_flags
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "policy_document",
     [

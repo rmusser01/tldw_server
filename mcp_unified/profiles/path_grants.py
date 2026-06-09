@@ -7,7 +7,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-PATH_GRANT_ACTIONS = frozenset({"read", "edit", "write"})
+from mcp_unified.interfaces.file_policy_actions import FILE_POLICY_ACTIONS, format_file_policy_action_list
+
+PATH_GRANT_ACTIONS = FILE_POLICY_ACTIONS
 PATH_GRANT_EFFECTS = frozenset({"allow", "deny"})
 PATH_GRANT_AUTHORING_KEYS = (
     "path_grant_authoring",
@@ -153,7 +155,13 @@ def _compile_rules(rules: Iterable[tuple[Mapping[str, Any], str, str]]) -> PathG
         invalid_actions = [action for action in actions if action not in PATH_GRANT_ACTIONS]
         actions = [action for action in actions if action in PATH_GRANT_ACTIONS]
         if invalid_actions or not actions:
-            diagnostics.append(_diagnostic("invalid_actions", "path grant actions must be read, edit, or write", source))
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_actions",
+                    f"path grant actions must be {format_file_policy_action_list(PATH_GRANT_ACTIONS)}",
+                    source,
+                )
+            )
             continue
 
         effect = str(rule.get("effect") or "allow").strip().lower()

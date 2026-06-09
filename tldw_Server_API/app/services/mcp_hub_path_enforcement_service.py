@@ -5,6 +5,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from mcp_unified.interfaces.file_policy_actions import FILE_POLICY_ACTIONS
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 from mcp_unified.profiles.path_grants import (
     PathGrantCompilationResult,
@@ -21,7 +22,7 @@ from tldw_Server_API.app.services.mcp_hub_path_scope_service import McpHubPathSc
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import McpHubWorkspaceRootResolver
 
 _FILESYSTEM_CAPABILITIES = frozenset({"filesystem.read", "filesystem.write", "filesystem.delete"})
-_PATH_GRANT_ACTIONS = frozenset({"read", "edit", "write"})
+_PATH_GRANT_ACTIONS = FILE_POLICY_ACTIONS
 _PATH_GRANT_EFFECTS = frozenset({"allow", "deny"})
 _SUPPORTED_PATH_ARGUMENT_HINTS = frozenset(
     {"path", "file_path", "target_path", "cwd", "paths", "file_paths", "files[].path"}
@@ -307,6 +308,9 @@ def _preview_outcome(enforcement_result: dict[str, Any]) -> str:
         return "allow"
     if bool(enforcement_result.get("force_approval", False)):
         return "ask"
+    for decision in _safe_path_decisions(enforcement_result):
+        if decision.get("grant_outcome") in {"denied", "not_granted"}:
+            return "deny"
     return "deny"
 
 
@@ -316,7 +320,8 @@ def _safe_path_decisions(enforcement_result: dict[str, Any]) -> list[dict[str, A
     raw_decisions = enforcement_result.get("path_decisions")
     if not isinstance(raw_decisions, list):
         scope_payload = enforcement_result.get("scope_payload")
-        raw_decisions = scope_payload.get("path_decisions") if isinstance(scope_payload, dict) else []
+        scope_decisions = scope_payload.get("path_decisions") if isinstance(scope_payload, dict) else []
+        raw_decisions = scope_decisions if isinstance(scope_decisions, list) else []
     return [dict(decision) for decision in raw_decisions if isinstance(decision, Mapping)]
 
 
@@ -883,7 +888,7 @@ class McpHubPathEnforcementService:
         reason: str,
         path_decisions: list[dict[str, Any]],
         path_grant_diagnostics: list[dict[str, str]] | None = None,
-        force_approval: bool = True,
+        force_approval: bool = False,
     ) -> dict[str, Any]:
         return {
             "enabled": bool(scope.get("enabled")),
