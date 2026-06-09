@@ -28276,6 +28276,7 @@ for _note_store_method in (
     "restore_note",
     "search_notes",
     "search_notes_with_keywords",
+    "count_notes_matching_keywords",
     "link_note_to_keyword",
     "unlink_note_from_keyword",
     "unlink_note_to_keyword",

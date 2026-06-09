@@ -17,12 +17,23 @@ const capabilityMocks = vi.hoisted(() => ({
   useServerCapabilities: vi.fn()
 }))
 
+const apiMocks = vi.hoisted(() => ({
+  listWorkspaces: vi.fn()
+}))
+
 vi.mock("@/hooks/useServerOnline", () => ({
   useServerOnline: () => onlineMocks.useServerOnline()
 }))
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => capabilityMocks.useServerCapabilities()
+}))
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    listWorkspaces: (...args: unknown[]) =>
+      apiMocks.listWorkspaces(...args)
+  }
 }))
 
 vi.mock("~/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
@@ -96,6 +107,7 @@ describe("sidepanel clipper route", () => {
         hasWebClipper: true
       }
     })
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [], total: 0 })
   })
 
   it("hydrates the pending draft into the review sheet", () => {

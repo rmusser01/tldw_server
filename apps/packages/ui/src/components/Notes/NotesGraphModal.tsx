@@ -355,8 +355,8 @@ const NotesGraphModal: React.FC<NotesGraphModalProps> = ({
         <span>{t('option:notesSearch.graphLegendManual', { defaultValue: 'Manual = linked by you' })}</span>
         <span>{t('option:notesSearch.graphLegendWikilink', { defaultValue: 'Note link = [[ ]] syntax' })}</span>
         <span>{t('option:notesSearch.graphLegendBacklink', { defaultValue: 'Backlink = linked from another note' })}</span>
-        <span>{t('option:notesSearch.graphLegendTagMembership', { defaultValue: 'Tag = shared tag' })}</span>
-        <span>{t('option:notesSearch.graphLegendSourceMembership', { defaultValue: 'Source = shared source' })}</span>
+        <span>{t('option:notesSearch.graphLegendTagEdge', { defaultValue: 'Tag = shared tag' })}</span>
+        <span>{t('option:notesSearch.graphLegendSourceEdge', { defaultValue: 'Source = linked source' })}</span>
       </div>
     </Modal>
   )

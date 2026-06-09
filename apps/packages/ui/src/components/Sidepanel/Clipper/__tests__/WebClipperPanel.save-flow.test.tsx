@@ -385,6 +385,46 @@ describe("WebClipperPanel save flow", () => {
     )
   })
 
+  it("clears stale manual workspace IDs when picker options load", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "workspace-alpha",
+            name: "Alpha Workspace",
+            archived: false,
+            study_materials_policy: "general",
+            deleted: false,
+            created_at: "2026-05-27T00:00:00Z",
+            last_modified: "2026-05-27T00:00:00Z",
+            version: 1
+          }
+        ],
+        total: 1
+      })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    expect(
+      await screen.findByText("Workspace picker could not load. Enter a workspace ID manually.")
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Workspace ID"), "workspace-stale")
+
+    await user.click(screen.getByRole("radio", { name: "Note" }))
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    expect(await screen.findByRole("combobox", { name: "Workspace" })).toHaveValue("")
+
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    expect(
+      await screen.findByText("Choose a workspace before saving to Workspace or Both.")
+    ).toBeInTheDocument()
+    expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
+  })
+
   it("retries workspace picker loading after a transient failure when returning to workspace mode", async () => {
     const user = userEvent.setup()
     apiMocks.listWorkspaces
@@ -449,6 +489,42 @@ describe("WebClipperPanel save flow", () => {
       screen.getByText("Choose a workspace before saving to Workspace or Both.")
     ).toBeInTheDocument()
     expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
+  })
+
+  it("loads workspace choices and submits the selected workspace id", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces.mockResolvedValueOnce({
+      items: [
+        {
+          id: "workspace-alpha",
+          name: "Research Workspace",
+          archived: false,
+          deleted: false
+        }
+      ],
+      total: 1
+    })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    await waitFor(() => {
+      expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(1)
+    })
+    const workspaceSelect = await screen.findByRole("combobox", { name: "Workspace" })
+    await user.selectOptions(workspaceSelect, "workspace-alpha")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination_mode: "workspace",
+        workspace: { workspace_id: "workspace-alpha" }
+      })
+    )
   })
 
   it.each([
@@ -710,6 +786,32 @@ describe("WebClipperPanel save flow", () => {
         content: expect.objectContaining({
           visible_body: "Visible article summary",
           full_extract: "Full article body with more detail"
+        })
+      })
+    )
+  })
+
+  it("marks note saves as captured while preserving user tags and provenance", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText("Tags"), "research, planning")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_url: "https://example.com/story",
+        capture_metadata: expect.objectContaining({
+          requested_type: "article",
+          actual_type: "article"
+        }),
+        note: expect.objectContaining({
+          keywords: ["research", "planning", "captured"]
         })
       })
     )

@@ -241,6 +241,32 @@ describe("NotesManagerPage stage 38 productivity extensions", () => {
     expect(mockMessageSuccess).toHaveBeenCalledWith("Created duplicate draft. Save to keep it.")
   })
 
+  it("duplicates the current draft from a guarded power-user shortcut", async () => {
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+
+    fireEvent.change(titleInput, {
+      target: { value: "Shortcut source" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Shortcut body" }
+    })
+
+    contentInput.focus()
+    fireEvent.keyDown(contentInput, { key: "d", altKey: true, shiftKey: true })
+    expect(titleInput).toHaveValue("Shortcut source")
+
+    fireEvent.keyDown(window, { key: "d", altKey: true, shiftKey: true })
+
+    await waitFor(() => {
+      expect(titleInput).toHaveValue("Shortcut source (Copy)")
+    })
+    expect(contentInput).toHaveValue("Shortcut body")
+    expect(mockMessageSuccess).toHaveBeenCalledWith("Created duplicate draft. Save to keep it.")
+  })
+
   it("pins a note and reorders the visible list with persistence", async () => {
     renderPage()
 

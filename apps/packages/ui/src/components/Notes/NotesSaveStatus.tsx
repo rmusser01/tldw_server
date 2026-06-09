@@ -11,7 +11,22 @@ interface NotesSaveStatusProps {
 const NotesSaveStatus: React.FC<NotesSaveStatusProps> = ({ state, lastSavedAt, onRetry }) => {
   const { t } = useTranslation(['option'])
 
-  if (state === 'idle') return null
+  if (state === 'idle') {
+    return (
+      <span
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="notes-save-status"
+        data-state="idle"
+      >
+        {t('option:notesSearch.saveStatusIdle', {
+          defaultValue: 'No server save status yet'
+        })}
+      </span>
+    )
+  }
 
   const config = (() => {
     switch (state) {

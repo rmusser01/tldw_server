@@ -971,6 +971,22 @@ class TestNotes:
         titles = sorted([r['title'] for r in results])  # Sort for predictable assertion
         assert titles == ["Alpha Note", "Beta Note"]
 
+    def test_count_notes_matching_keywords(self, db_instance: CharactersRAGDB):
+        note1 = db_instance.add_note("Topic One", "Shared search body")
+        note2 = db_instance.add_note("Topic Two", "Shared search body")
+        note3 = db_instance.add_note("Other Topic", "Shared search body")
+        kw_topic = db_instance.add_keyword("topic-filter")
+        kw_other = db_instance.add_keyword("other-filter")
+        assert note1 and note2 and note3 and kw_topic and kw_other
+
+        db_instance.link_note_to_keyword(note1, kw_topic)
+        db_instance.link_note_to_keyword(note2, kw_topic)
+        db_instance.link_note_to_keyword(note3, kw_other)
+
+        assert db_instance.count_notes_matching_keywords(None, ["topic-filter"]) == 2
+        assert db_instance.count_notes_matching_keywords("Shared", ["topic-filter"]) == 2
+        assert db_instance.count_notes_matching_keywords("Missing", ["topic-filter"]) == 0
+
     def test_sync_note_source_folders_preserves_manual_and_other_sources(self, db_instance: CharactersRAGDB):
         note_id = db_instance.add_note("Foldered Note", "Body")
         assert note_id is not None

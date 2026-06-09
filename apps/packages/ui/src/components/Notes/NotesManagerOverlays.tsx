@@ -585,6 +585,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             <div className="space-y-1">
               <div><strong>Ctrl/Cmd + S</strong>: {t("option:notesSearch.shortcutSaveDescription", { defaultValue: "Save the current note." })}</div>
               <div><strong>Alt + N</strong>: {t("option:notesSearch.shortcutNewNoteDescription", { defaultValue: "Create a new note." })}</div>
+              <div><strong>Alt + Shift + D</strong>: {t("option:notesSearch.shortcutDuplicateDescription", { defaultValue: "Duplicate the current note into a new draft." })}</div>
               <div><strong>Ctrl/Cmd + K</strong>: {t("option:notesSearch.shortcutFocusSearchDescription", { defaultValue: "Focus the search input." })}</div>
               <div><strong>Ctrl/Cmd + Shift + E/S/P</strong>: {t("option:notesSearch.shortcutEditorModesDescription", { defaultValue: "Switch editor mode (Edit / Split / Preview)." })}</div>
               <div><strong>?</strong>: {t("option:notesSearch.shortcutOpenHelpDescription", { defaultValue: "Open keyboard shortcut help." })}</div>

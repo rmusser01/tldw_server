@@ -31,7 +31,7 @@ describe("workspace API status and capabilities methods", () => {
     const result = await workspaceApiMethods.listWorkspaces()
 
     expect(bgRequest).toHaveBeenCalledWith({
-      path: "/api/v1/workspaces/",
+      path: "/api/v1/workspaces",
       method: "GET"
     })
     expect(result.items).toHaveLength(1)

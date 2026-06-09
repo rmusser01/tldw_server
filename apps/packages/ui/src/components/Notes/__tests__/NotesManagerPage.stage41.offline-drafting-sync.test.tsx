@@ -257,6 +257,9 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
         'Offline: changes stored locally and queued for sync.'
       )
     })
+    expect(screen.getByTestId('notes-save-status')).not.toHaveAttribute('data-state', 'saved')
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument()
+    expect(screen.getByTestId('notes-editor-revision-meta')).toHaveTextContent('Not saved yet')
 
     expect(mockMessageInfo).toHaveBeenCalledWith(
       'Saved locally. Sync will resume when connection returns.'

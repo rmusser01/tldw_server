@@ -244,6 +244,8 @@ def test_keywords_crud_and_linking(client_with_notes_db: TestClient):
     assert lst.status_code == 200 and isinstance(lst.json(), list)
     srch = client.get("/api/v1/notes/keywords/search/", params={"query": "fru"})
     assert srch.status_code == 200 and any(k.get("id") == kw_id for k in srch.json())
+    srch_no_slash = client.get("/api/v1/notes/keywords/search", params={"query": "fru"})
+    assert srch_no_slash.status_code == 200 and any(k.get("id") == kw_id for k in srch_no_slash.json())
 
     # Link to note 1 and note 2
     link1 = client.post(f"/api/v1/notes/{n1['id']}/keywords/{kw_id}")
@@ -316,12 +318,97 @@ def test_keywords_list_can_include_note_counts(client_with_notes_db: TestClient)
     assert by_keyword.get("beta", {}).get("note_count") == 1
 
 
+def test_search_notes_with_keyword_tokens_returns_pagination_total(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    note_ids = []
+    for i in range(3):
+        note = client.post(
+            "/api/v1/notes/",
+            json={"title": f"Topic Note {i}", "content": f"Tagged content {i}"},
+        ).json()
+        note_ids.append(note["id"])
+    client.post("/api/v1/notes/", json={"title": "Other Note", "content": "Not tagged"})
+
+    kw_resp = client.post("/api/v1/notes/keywords/", json={"keyword": "topic-filter"})
+    assert kw_resp.status_code == 201, kw_resp.text
+    kw_id = kw_resp.json()["id"]
+    for note_id in note_ids:
+        link = client.post(f"/api/v1/notes/{note_id}/keywords/{kw_id}")
+        assert link.status_code == 200
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "topic-filter"), ("limit", "2"), ("offset", "0")],
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert isinstance(payload, dict)
+    assert payload["count"] == 2
+    assert payload["total"] == 3
+    assert len(payload["notes"]) == 2
+    assert payload["pagination"]["total"] == 3
+    assert payload["pagination"]["has_more"] is True
+    assert payload["pagination"]["next_offset"] == 2
+
+
+def test_search_notes_falls_back_to_integer_total_when_count_fails(
+    client_with_notes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = client_with_notes_db
+
+    note_ids = []
+    for i in range(3):
+        note = client.post(
+            "/api/v1/notes/",
+            json={"title": f"Fallback Search {i}", "content": f"Fallback searchable content {i}"},
+        ).json()
+        note_ids.append(note["id"])
+
+    kw_resp = client.post("/api/v1/notes/keywords/", json={"keyword": "fallback-topic"})
+    assert kw_resp.status_code == 201, kw_resp.text
+    kw_id = kw_resp.json()["id"]
+    for note_id in note_ids:
+        link = client.post(f"/api/v1/notes/{note_id}/keywords/{kw_id}")
+        assert link.status_code == 200
+
+    def fail_count(*args, **kwargs):
+        raise RuntimeError("count unavailable")
+
+    monkeypatch.setattr(CharactersRAGDB, "count_notes_matching", fail_count)
+    response = client.get(
+        "/api/v1/notes/search/",
+        params={"query": "Fallback", "limit": 2, "offset": 1},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["total"] == 3
+    assert payload["pagination"]["total"] == 3
+
+    monkeypatch.setattr(CharactersRAGDB, "count_notes_matching_keywords", fail_count)
+    keyword_response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "fallback-topic"), ("limit", "2"), ("offset", "1")],
+    )
+    assert keyword_response.status_code == 200, keyword_response.text
+    keyword_payload = keyword_response.json()
+    assert keyword_payload["count"] == 2
+    assert keyword_payload["total"] == 3
+    assert keyword_payload["pagination"]["total"] == 3
+
+
 def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     client = client_with_notes_db
 
     # Create several notes
     for i in range(5):
-        client.post("/api/v1/notes/", json={"title": f"T{i}", "content": f"C{i}"})
+        client.post(
+            "/api/v1/notes/",
+            json={"title": f"Searchable Topic {i}", "content": f"Searchable Content {i}"},
+        )
 
     # Paginate list
     page1 = client.get("/api/v1/notes/", params={"limit": 2, "offset": 0})
@@ -354,11 +441,30 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     if len(ids1) == 2 and len(ids2) == 2:
         assert len(ids1 | ids2) == 4
 
-    # Search notes
-    search = client.get("/api/v1/notes/search/", params={"query": "T", "limit": 3})
-    assert search.status_code == 200 and isinstance(search.json(), list)
+    # Search notes returns the same canonical pagination envelope as list endpoints.
+    search = client.get("/api/v1/notes/search/", params={"query": "Searchable", "limit": 3})
+    assert search.status_code == 200
+    search_data = search.json()
+    assert isinstance(search_data, dict)
+    assert isinstance(search_data.get("notes"), list)
+    assert isinstance(search_data.get("items"), list)
+    assert isinstance(search_data.get("results"), list)
+    assert search_data["count"] == len(search_data["notes"])
+    assert search_data["limit"] == 3
+    assert search_data["offset"] == 0
+    assert search_data["pagination"]["mode"] == "offset"
+    assert search_data["pagination"]["limit"] == 3
+    assert search_data["pagination"]["offset"] == 0
+    assert search_data["pagination"]["total"] == search_data["total"]
+    assert search_data["total"] >= 5
+    assert search_data["total"] > search_data["count"]
     empty_search = client.get("/api/v1/notes/search/", params={"query": "zzznotfound", "limit": 3})
-    assert empty_search.status_code == 200 and empty_search.json() == []
+    assert empty_search.status_code == 200
+    empty_data = empty_search.json()
+    assert empty_data["notes"] == []
+    assert empty_data["count"] == 0
+    assert empty_data["total"] == 0
+    assert empty_data["pagination"]["has_more"] is False
 
     # Non-existent note 404
     nf = client.get("/api/v1/notes/non-existent-id")

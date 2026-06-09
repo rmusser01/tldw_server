@@ -665,7 +665,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           />
         ) : (
           <>
-        <div className="flex items-center gap-2">
+        <div
+          className="flex flex-wrap items-center gap-2"
+          data-testid="notes-title-row"
+        >
           <Input
             placeholder={t('option:notesSearch.titlePlaceholder', {
               defaultValue: 'Title'
@@ -684,7 +687,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             }}
             disabled={editorDisabled}
             ref={titleInputRef}
-            className="bg-transparent hover:bg-surface2 focus:bg-surface2 transition-colors"
+            className="!min-w-full flex-1 bg-transparent hover:bg-surface2 focus:bg-surface2 transition-colors sm:!min-w-[18rem]"
+            style={{
+              flex: '1 1 0%'
+            }}
           />
           <Tooltip
             title={t('option:notesSearch.generateTitleTooltip', {

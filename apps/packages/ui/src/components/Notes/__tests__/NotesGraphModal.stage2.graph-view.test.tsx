@@ -238,6 +238,29 @@ describe('NotesGraphModal stage 2 graph view', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('passes user-readable edge labels to the graph and legend', async () => {
+    renderModal()
+
+    await waitFor(() => {
+      expect(mockCytoscapeFactory).toHaveBeenCalled()
+    })
+
+    const elements = mockCytoscapeFactory.mock.calls[0]?.[0]?.elements as Array<{ data?: Record<string, unknown> }>
+    const edgeLabels = new Map(
+      elements
+        .filter((element) => String(element.data?.id || '').startsWith('e'))
+        .map((element) => [element.data?.id, element.data?.label])
+    )
+
+    expect(edgeLabels.get('e1')).toBe('Manual link')
+    expect(edgeLabels.get('e2')).toBe('Tag')
+    expect(edgeLabels.get('e3')).toBe('Backlink')
+    expect(edgeLabels.get('e4')).toBe('Source')
+    expect(Array.from(edgeLabels.values()).join(' ')).not.toContain('_')
+    expect(screen.getByTestId('notes-graph-legend')).toHaveTextContent('Tag = shared tag')
+    expect(screen.getByTestId('notes-graph-legend')).toHaveTextContent('Source = linked source')
+  })
+
   it('closes on Escape key', async () => {
     const { onClose } = renderModal()
 
