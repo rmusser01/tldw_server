@@ -366,7 +366,7 @@ const PanelHeader: React.FC<{ capabilityMode: ScheduledTaskResultsCapabilityMode
       title={capabilityMode === "projected_signals" ? "Latest automation signals" : "Results"}
     >
       {capabilityMode === "projected_signals"
-        ? "Latest signals inferred from task status. Result history and item actions appear when the results API is available."
+        ? "Future scheduled questions and agent outputs appear here only when the results API and each task visibility policy route them here."
         : "Review state comes from the scheduled-task results API."}
     </DesignSystemAlert>
   </Space>

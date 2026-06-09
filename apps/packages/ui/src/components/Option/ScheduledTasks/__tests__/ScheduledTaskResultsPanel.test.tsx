@@ -102,6 +102,11 @@ describe("ScheduledTaskResultsPanel", () => {
     expect(screen.getByRole("heading", { name: "Scheduled task results" })).toBeInTheDocument()
     expect(screen.getByText("Latest automation signals")).toBeInTheDocument()
     expectInsideDesignSystemAlert("Latest automation signals")
+    expect(
+      screen.getByText(
+        "Future scheduled questions and agent outputs appear here only when the results API and each task visibility policy route them here."
+      )
+    ).toBeInTheDocument()
     expect(screen.getByText("Release monitor")).toBeInTheDocument()
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
     expect(screen.getByText("Follow up")).toBeInTheDocument()

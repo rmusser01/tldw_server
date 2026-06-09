@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react"
 import { Button, Card, Input, Segmented, Space, Typography } from "antd"
 import type { SegmentedValue } from "antd/es/segmented"
+import { Link } from "react-router-dom"
 
 import { EmptyState } from "@/components/ui/feedback"
 import {
@@ -20,6 +21,11 @@ import {
   type ScheduledTaskTemplateCapability,
   type ScheduledTaskTemplateCapabilityMap
 } from "./scheduled-task-template-capabilities"
+import {
+  buildPlannedScheduledTaskPanelModel,
+  type PlannedRequirementStatus,
+  type PlannedScheduledTaskPanelModel
+} from "./scheduled-task-planned-template-copy"
 import {
   SCHEDULED_TASK_TEMPLATES,
   SCHEDULED_TASK_TEMPLATE_FILTERS,
@@ -84,6 +90,28 @@ const WATCHLISTS_ADAPTER_UNAVAILABLE_COPY =
 
 const OWNER_WORKSPACE_ADAPTER_UNAVAILABLE_COPY =
   "Creation from Scheduled Tasks is not available yet. Choose the owner workspace to continue setup."
+
+const PLANNED_REQUIREMENT_STATUS_LABELS: Record<PlannedRequirementStatus, string> = {
+  planned: "Planned",
+  related_available: "Related available",
+  missing: "Missing"
+}
+
+const plannedRequirementStatusToBadgeVariant = (
+  status: PlannedRequirementStatus
+): BadgeVariant => {
+  switch (status) {
+    case "planned":
+      return "secondary"
+    case "related_available":
+      return "success"
+    case "missing":
+      return "warning"
+  }
+
+  const _exhaustive: never = status
+  return _exhaustive
+}
 
 const buildAvailabilityCopy = (
   template: ScheduledTaskTemplate,
@@ -234,19 +262,79 @@ const HandoffPanel: React.FC<{
   )
 }
 
-const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => (
-  <Card title={template.title} size="small">
-    <Space orientation="vertical" size={8}>
-      <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
-        {getScheduledTaskTemplateStateLabel(template.state)}
-      </DesignSystemBadge>
-      <Typography.Text>{template.intent}</Typography.Text>
-      <Typography.Paragraph style={{ marginBottom: 0 }}>
-        {template.description}
-      </Typography.Paragraph>
-    </Space>
-  </Card>
+const PlannedRequirementList: React.FC<{
+  requirements: PlannedScheduledTaskPanelModel["requirements"]
+}> = ({ requirements }) => (
+  <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+    <Typography.Text strong>Requirements</Typography.Text>
+    {requirements.map((requirement) => (
+      <Space key={requirement.label} orientation="vertical" size={2} style={{ width: "100%" }}>
+        <Space wrap size={6}>
+          <Typography.Text strong>{requirement.label}</Typography.Text>
+          <DesignSystemBadge variant={plannedRequirementStatusToBadgeVariant(requirement.status)}>
+            {PLANNED_REQUIREMENT_STATUS_LABELS[requirement.status]}
+          </DesignSystemBadge>
+        </Space>
+        <Typography.Text type="secondary">{requirement.detail}</Typography.Text>
+      </Space>
+    ))}
+  </Space>
 )
+
+const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => {
+  const model = buildPlannedScheduledTaskPanelModel(template.id)
+
+  if (!model) {
+    return (
+      <Card title={template.title} size="small">
+        <Space orientation="vertical" size={8}>
+          <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+            {getScheduledTaskTemplateStateLabel(template.state)}
+          </DesignSystemBadge>
+          <Typography.Text>{template.intent}</Typography.Text>
+          <Typography.Paragraph style={{ marginBottom: 0 }}>
+            {template.description}
+          </Typography.Paragraph>
+        </Space>
+      </Card>
+    )
+  }
+
+  return (
+    <Card
+      title={
+        <Space wrap size={8}>
+          <Typography.Text strong>{template.title}</Typography.Text>
+          <DesignSystemBadge variant="secondary">{model.statusLabel}</DesignSystemBadge>
+        </Space>
+      }
+      size="small"
+    >
+      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Typography.Text>{model.jobStatement}</Typography.Text>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          {model.availabilityReason}
+        </Typography.Paragraph>
+        <Typography.Text>No scheduled task can be created from this template yet.</Typography.Text>
+        <PlannedRequirementList requirements={model.requirements} />
+        <CapabilityCopyGroup title="Result destinations" lines={model.resultDestinations} />
+        {model.safetyLines.length > 0 ? (
+          <CapabilityCopyGroup title="Safety" lines={model.safetyLines} />
+        ) : null}
+        <Space orientation="vertical" size={4}>
+          <Typography.Text strong>Related destinations</Typography.Text>
+          <Space wrap size={12}>
+            {model.links.map((link) => (
+              <Link key={link.href} to={link.href}>
+                {link.label}
+              </Link>
+            ))}
+          </Space>
+        </Space>
+      </Space>
+    </Card>
+  )
+}
 
 export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> = ({
   selectedTemplateId,
