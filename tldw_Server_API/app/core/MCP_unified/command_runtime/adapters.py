@@ -248,8 +248,11 @@ class PhaseOneCommandAdapters:
         if command == "cat":
             if len(argv) != 2:
                 return _UsageError("usage: cat <path>")
+            tool_name = self._visible_backend_tool("cat", ("fs.read", "fs.read_text"))
+            if tool_name is None:
+                return _UsageError(self._unknown_command_message(command), exit_code=127)
             return _GovernedCallPlan(
-                tool_name="fs.read_text",
+                tool_name=tool_name,
                 arguments={"path": argv[1]},
                 renderer=self._render_cat,
             )
@@ -259,6 +262,14 @@ class PhaseOneCommandAdapters:
             return _GovernedCallPlan(
                 tool_name="fs.write_text",
                 arguments={"path": argv[1], "content": " ".join(argv[2:])},
+                renderer=self._render_write,
+            )
+        if command == "write-create":
+            if len(argv) < 3:
+                return _UsageError("usage: write-create <path> <content>")
+            return _GovernedCallPlan(
+                tool_name="fs.write",
+                arguments={"path": argv[1], "content": " ".join(argv[2:]), "mode": "create"},
                 renderer=self._render_write,
             )
         if command == "stat":
@@ -307,6 +318,23 @@ class PhaseOneCommandAdapters:
             )
         return _UsageError(self._unknown_command_message(command), exit_code=127)
 
+    def _visible_backend_tool(self, command: str, preferred: tuple[str, ...]) -> str | None:
+        descriptor = self.context.visible_commands.get(command)
+        if descriptor is None:
+            return None
+        available = set(descriptor.backend_tools)
+        for tool_name in preferred:
+            if tool_name in available:
+                return tool_name
+        return None
+
+    def _command_has_visible_backend(self, command: str, tool_name: str) -> bool:
+        return self._visible_backend_tool(command, (tool_name,)) is not None
+
+    @staticmethod
+    def _unavailable_backend_error(tool_name: str) -> _UsageError:
+        return _UsageError(f"{tool_name} unavailable in this context")
+
     def _knowledge_plan(self, argv: list[str]) -> _GovernedCallPlan | _UsageError:
         if len(argv) < 2:
             return _UsageError("usage: knowledge <search|get> ...")
@@ -314,6 +342,8 @@ class PhaseOneCommandAdapters:
         if sub == "search":
             if len(argv) < 3:
                 return _UsageError("usage: knowledge search <query>")
+            if not self._command_has_visible_backend("knowledge", "knowledge.search"):
+                return self._unavailable_backend_error("knowledge.search")
             return _GovernedCallPlan(
                 tool_name="knowledge.search",
                 arguments={"query": " ".join(argv[2:])},
@@ -322,6 +352,8 @@ class PhaseOneCommandAdapters:
         if sub == "get":
             if len(argv) != 4:
                 return _UsageError("usage: knowledge get <source> <id>")
+            if not self._command_has_visible_backend("knowledge", "knowledge.get"):
+                return self._unavailable_backend_error("knowledge.get")
             return _GovernedCallPlan(
                 tool_name="knowledge.get",
                 arguments={"source": argv[2], "id": self._coerce_scalar(argv[3])},
@@ -336,6 +368,8 @@ class PhaseOneCommandAdapters:
         if sub == "search":
             if len(argv) < 3:
                 return _UsageError("usage: media search <query>")
+            if not self._command_has_visible_backend("media", "media.search"):
+                return self._unavailable_backend_error("media.search")
             return _GovernedCallPlan(
                 tool_name="media.search",
                 arguments={"query": " ".join(argv[2:])},
@@ -344,6 +378,8 @@ class PhaseOneCommandAdapters:
         if sub == "get":
             if len(argv) != 3:
                 return _UsageError("usage: media get <media_id>")
+            if not self._command_has_visible_backend("media", "media.get"):
+                return self._unavailable_backend_error("media.get")
             return _GovernedCallPlan(
                 tool_name="media.get",
                 arguments={"media_id": self._coerce_scalar(argv[2])},
@@ -356,18 +392,24 @@ class PhaseOneCommandAdapters:
             return _UsageError("usage: mcp <tools|modules|catalogs>")
         sub = argv[1]
         if sub == "tools":
+            if not self._command_has_visible_backend("mcp", "mcp.tools.list"):
+                return self._unavailable_backend_error("mcp.tools.list")
             return _GovernedCallPlan(
                 tool_name="mcp.tools.list",
                 arguments={},
                 renderer=self._render_json_payload,
             )
         if sub == "modules":
+            if not self._command_has_visible_backend("mcp", "mcp.modules.list"):
+                return self._unavailable_backend_error("mcp.modules.list")
             return _GovernedCallPlan(
                 tool_name="mcp.modules.list",
                 arguments={},
                 renderer=self._render_json_payload,
             )
         if sub == "catalogs":
+            if not self._command_has_visible_backend("mcp", "mcp.catalogs.list"):
+                return self._unavailable_backend_error("mcp.catalogs.list")
             return _GovernedCallPlan(
                 tool_name="mcp.catalogs.list",
                 arguments={},
@@ -589,7 +631,11 @@ class PhaseOneCommandAdapters:
             text = decoded.get("text")
             if text is None:
                 text = decoded.get("content")
-            return str(text or "")
+            rendered = str(text or "")
+            if decoded.get("truncated") is True:
+                separator = "" if not rendered or rendered.endswith("\n") else "\n"
+                rendered = f"{rendered}{separator}{self._render_cat_truncation_marker(decoded)}"
+            return rendered
         return str(decoded or "")
 
     def _render_write(self, payload: Any) -> str:
@@ -602,6 +648,19 @@ class PhaseOneCommandAdapters:
             if path:
                 return f"wrote file: {path}"
         return str(decoded or "")
+
+    @staticmethod
+    def _render_cat_truncation_marker(decoded: dict[str, Any]) -> str:
+        metadata: list[str] = []
+        for key in ("bytes_returned", "bytes_total", "lines_returned"):
+            value = decoded.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                metadata.append(f"{key}={value}")
+        reason = decoded.get("truncation_reason")
+        if isinstance(reason, str) and reason.strip():
+            metadata.append(f"truncation_reason={reason.strip().replace(chr(10), ' ').replace(chr(13), ' ')}")
+        details = f": {' '.join(metadata)}" if metadata else ""
+        return f"[truncated{details}]"
 
     def _render_json_payload(self, payload: Any) -> str:
         decoded = self._extract_json_content(payload)

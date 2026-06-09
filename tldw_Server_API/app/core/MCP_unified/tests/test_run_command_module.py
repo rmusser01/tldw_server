@@ -42,7 +42,9 @@ class _ProtocolStub:
         return {
             "tools": [
                 {"name": "fs.list", "module": "filesystem", "canExecute": True},
+                {"name": "fs.read", "module": "filesystem", "canExecute": True},
                 {"name": "fs.read_text", "module": "filesystem", "canExecute": True},
+                {"name": "fs.write", "module": "filesystem", "canExecute": True},
                 {"name": "fs.write_text", "module": "filesystem", "canExecute": True},
                 {"name": "fs.stat", "module": "filesystem", "canExecute": True},
                 {"name": "fs.glob", "module": "filesystem", "canExecute": True},
@@ -91,6 +93,16 @@ class _ProtocolStub:
         if tool_name == "fs.write_text":
             return {
                 "content": [{"type": "json", "json": {"path": "notes.txt", "bytes_written": 5}}],
+                "tool": tool_name,
+            }
+        if tool_name == "fs.write":
+            return {
+                "content": [{"type": "json", "json": {"path": "notes.txt", "bytes_written": 5}}],
+                "tool": tool_name,
+            }
+        if tool_name == "fs.read":
+            return {
+                "content": [{"type": "json", "json": {"path": "notes.txt", "content": self.read_text_content}}],
                 "tool": tool_name,
             }
         if tool_name == "fs.read_text":
@@ -259,8 +271,72 @@ async def test_run_plain_grep_still_filters_stdin_instead_of_calling_fs_grep() -
 
     assert "ERROR one" in rendered
     assert "INFO two" not in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read"]
+    assert [call.params["name"] for call in protocol.execute_calls] == ["fs.read"]
+
+
+@pytest.mark.asyncio
+async def test_run_cat_falls_back_to_legacy_read_text_when_structured_read_is_hidden() -> None:
+    class _LegacyReadOnlyProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            self.tools_list_calls += 1
+            return {
+                "tools": [
+                    {"name": "fs.read_text", "module": "filesystem", "canExecute": True},
+                ]
+            }
+
+    protocol = _LegacyReadOnlyProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cat-legacy-read", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cat notes.txt"}, context=context)
+
+    assert "hello" in rendered
     assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read_text"]
-    assert [call.params["name"] for call in protocol.execute_calls] == ["fs.read_text"]
+    assert [call.params["arguments"] for call in protocol.prepare_calls] == [{"path": "notes.txt"}]
+
+
+@pytest.mark.asyncio
+async def test_run_cat_surfaces_structured_read_truncation_metadata() -> None:
+    class _TruncatedReadProtocolStub(_ProtocolStub):
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            tool_name = str(prepared.params.get("name") or "")
+            if tool_name == "fs.read":
+                return {
+                    "content": [
+                        {
+                            "type": "json",
+                            "json": {
+                                "path": "/private/workspace/notes.txt",
+                                "content": "first chunk\n",
+                                "truncated": True,
+                                "bytes_returned": 12,
+                                "bytes_total": 128,
+                                "lines_returned": 1,
+                                "truncation_reason": "byte_limit",
+                            },
+                        }
+                    ],
+                    "tool": tool_name,
+                }
+            return await super().execute_prepared_tool_call(prepared)
+
+    protocol = _TruncatedReadProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cat-truncated", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cat notes.txt"}, context=context)
+
+    assert "first chunk" in rendered
+    assert "truncated" in rendered.lower()
+    assert "bytes_returned=12" in rendered
+    assert "bytes_total=128" in rendered
+    assert "lines_returned=1" in rendered
+    assert "truncation_reason=byte_limit" in rendered
+    assert "/private/workspace" not in rendered
 
 
 @pytest.mark.asyncio
@@ -289,6 +365,72 @@ async def test_run_help_policy_filters_filesystem_aliases() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_help_shows_write_create_only_when_structured_write_is_visible() -> None:
+    class _StructuredWriteProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {
+                "tools": [
+                    {"name": "fs.write", "module": "filesystem", "canExecute": True},
+                ]
+            }
+
+    module = _build_module(_StructuredWriteProtocolStub())
+    context = RequestContext(request_id="run-help-write-create", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "--help"}, context=context)
+
+    commands = {line.split()[0] for line in rendered.splitlines() if line.startswith("  ")}
+    assert "write-create" in commands
+    assert "write" not in commands
+
+
+@pytest.mark.asyncio
+async def test_run_help_shows_legacy_write_only_when_legacy_write_text_is_visible() -> None:
+    class _LegacyWriteProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {
+                "tools": [
+                    {"name": "fs.write_text", "module": "filesystem", "canExecute": True},
+                ]
+            }
+
+    module = _build_module(_LegacyWriteProtocolStub())
+    context = RequestContext(request_id="run-help-legacy-write", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "--help"}, context=context)
+
+    commands = {line.split()[0] for line in rendered.splitlines() if line.startswith("  ")}
+    assert "write" in commands
+    assert "write-create" not in commands
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_catalogs_does_not_prepare_hidden_catalogs_subtool() -> None:
+    class _McpToolsOnlyProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {
+                "tools": [
+                    {"name": "mcp.tools.list", "module": "mcp", "canExecute": True},
+                ]
+            }
+
+    protocol = _McpToolsOnlyProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-mcp-hidden-catalogs", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "mcp catalogs"}, context=context)
+
+    assert "unavailable in this context" in rendered
+    assert "mcp.catalogs.list" in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.asyncio
 async def test_bash_alias_returns_governed_alias_usage_errors() -> None:
     protocol = _ProtocolStub()
     module = _build_module(protocol)
@@ -314,6 +456,23 @@ async def test_run_cat_without_path_returns_usage() -> None:
     assert "[exit:2 |" in rendered
     assert protocol.prepare_calls == []
     assert protocol.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_write_create_uses_structured_write_create_mode() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-write-create", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "write-create notes.txt hello"}, context=context)
+
+    assert "wrote 5 bytes to notes.txt" in rendered
+    assert protocol.prepare_calls[0].params["name"] == "fs.write"
+    assert protocol.prepare_calls[0].params["arguments"] == {
+        "path": "notes.txt",
+        "content": "hello",
+        "mode": "create",
+    }
 
 
 @pytest.mark.asyncio
@@ -364,7 +523,7 @@ async def test_run_derives_step_idempotency_from_parent_key() -> None:
 @pytest.mark.asyncio
 async def test_run_uses_lexical_preflighted_step_for_identical_command_after_skipped_branch() -> None:
     protocol = _ProtocolStub()
-    protocol.execute_errors["fs.read_text"] = FileNotFoundError("Path not found: missing.txt")
+    protocol.execute_errors["fs.read"] = FileNotFoundError("Path not found: missing.txt")
     module = _build_module(protocol)
     context = RequestContext(request_id="run-skipped-branch", user_id="1", client_id="unit")
 
@@ -379,12 +538,12 @@ async def test_run_uses_lexical_preflighted_step_for_identical_command_after_ski
 
     assert "[exit:0 |" in rendered
     assert [call.params["name"] for call in protocol.prepare_calls] == [
-        "fs.read_text",
+        "fs.read",
         "fs.write_text",
         "fs.write_text",
     ]
     assert [call.params["name"] for call in protocol.execute_calls] == [
-        "fs.read_text",
+        "fs.read",
         "fs.write_text",
     ]
     assert protocol.execute_calls[1].idempotency_key == derive_step_idempotency_key(
@@ -397,7 +556,7 @@ async def test_run_uses_lexical_preflighted_step_for_identical_command_after_ski
 @pytest.mark.asyncio
 async def test_run_converts_governed_file_errors_into_cli_result() -> None:
     protocol = _ProtocolStub()
-    protocol.execute_errors["fs.read_text"] = FileNotFoundError("Path not found: notes.txt")
+    protocol.execute_errors["fs.read"] = FileNotFoundError("Path not found: notes.txt")
     module = _build_module(protocol)
     context = RequestContext(request_id="run-cat-missing", user_id="1", client_id="unit")
 
@@ -581,3 +740,9 @@ async def test_run_resolve_protocol_uses_standalone_protocol_when_server_protoco
     protocol = await module._resolve_protocol()
 
     assert isinstance(protocol, MCPProtocol)
+
+
+def test_run_write_classification_detects_structured_write_create_command() -> None:
+    module = _build_module(_ProtocolStub())
+
+    assert module.is_write_tool_call("run", {"command": "write-create notes.txt hi"}) is True
