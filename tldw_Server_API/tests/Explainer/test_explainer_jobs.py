@@ -171,6 +171,59 @@ def test_expand_does_not_mark_queued_for_terminal_idempotent_job(
 
 
 @pytest.mark.asyncio()
+async def test_fresh_queued_job_revision_survives_queue_status_update(
+    fake_job_manager: FakeJobManager,
+    explainer_repo: ExplainerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "openai")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "test-model")
+    session = _create_session(explainer_repo)
+    node_id = session.root_node_ids[0]
+    service = ExplainerService(repo=explainer_repo, job_manager=fake_job_manager)
+    monkeypatch.setattr(
+        explainer_repo.db,
+        "utcnow_iso",
+        lambda: "2099-01-01T00:00:00+00:00",
+    )
+
+    service.enqueue_node_expansion(
+        session_id=session.id,
+        node_id=node_id,
+        owner_user_id="7",
+        intent="explain",
+    )
+    [job] = fake_job_manager.jobs
+
+    async def fake_generator(_prompt):
+        return {
+            "children": [
+                {
+                    "title": "Fresh queued child",
+                    "body": "A newly queued job should still generate.",
+                    "kind": "explanation",
+                    "intent": "explain",
+                    "outside_knowledge_used": True,
+                }
+            ],
+            "generation_metadata": {"provider": "fake", "model": "fake"},
+        }
+
+    result = await handle_explainer_node_expansion_job(
+        job,
+        repo=explainer_repo,
+        generator=fake_generator,
+    )
+
+    assert result["children_created"] == 1
+    loaded = explainer_repo.get_session(session.id, owner_user_id="7")
+    assert loaded is not None
+    [child_id] = loaded.nodes[node_id].child_node_ids
+    assert loaded.nodes[child_id].title == "Fresh queued child"
+
+
+@pytest.mark.asyncio()
 async def test_job_handler_writes_child_nodes_and_generation_metadata(
     explainer_repo: ExplainerRepository,
 ) -> None:

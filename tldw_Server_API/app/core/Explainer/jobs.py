@@ -469,12 +469,14 @@ def _source_only_without_evidence(
 
 
 def current_answer_revision(node: ExplainerNode) -> str:
-    raw = "|".join(
-        [
-            node.updated_at,
-            node.selected_option_id or "",
-            node.selected_custom_answer or "",
-        ]
+    raw = json.dumps(
+        {
+            "question_options": node.question_options or [],
+            "selected_custom_answer": node.selected_custom_answer or "",
+            "selected_option_id": node.selected_option_id or "",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
