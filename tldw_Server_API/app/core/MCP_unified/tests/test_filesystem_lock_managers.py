@@ -251,6 +251,54 @@ def test_sqlite_lock_manager_expired_row_does_not_block_new_acquire(
         manager.close()
 
 
+def test_sqlite_lock_manager_batches_expired_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.filesystem_locks import FilesystemLockMissing, SQLiteFilesystemLockManager
+    import mcp_unified.filesystem_locks.sqlite as sqlite_locks
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path, cleanup_interval=100)
+    try:
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_000.0)
+        first, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/one.txt",
+            owner="agent-a",
+            ttl_seconds=1,
+        )
+        second, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/two.txt",
+            owner="agent-a",
+            ttl_seconds=1,
+        )
+
+        def _fail_per_row_cleanup(*args: object, **kwargs: object) -> None:
+            raise AssertionError("cleanup should not delete expired rows one at a time")
+
+        monkeypatch.setattr(manager, "_delete_key", _fail_per_row_cleanup)
+        manager._cleanup_interval = 1
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_002.0)
+
+        lease, renewed = manager.acquire(
+            workspace_key="ws",
+            path="docs/three.txt",
+            owner="agent-b",
+            ttl_seconds=60,
+        )
+
+        assert renewed is False  # nosec B101
+        assert lease.path == "docs/three.txt"  # nosec B101
+        with pytest.raises(FilesystemLockMissing):
+            manager.validate(workspace_key="ws", path="docs/one.txt", lease_id=first.lease_id)
+        with pytest.raises(FilesystemLockMissing):
+            manager.validate(workspace_key="ws", path="docs/two.txt", lease_id=second.lease_id)
+    finally:
+        manager.close()
+
+
 def test_sqlite_lock_manager_expired_token_renew_raises_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

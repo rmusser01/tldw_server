@@ -17,8 +17,10 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    and_,
     create_engine,
     delete,
+    or_,
     select,
     update,
 )
@@ -334,13 +336,21 @@ class SQLiteFilesystemLockManager:
             .mappings()
             .all()
         )
-        for row in expired_rows:
-            self._delete_key(
-                connection,
-                workspace_key=str(row["workspace_key"]),
-                path=str(row["path"]),
-                expires_at_or_before_us=now_us,
+        if not expired_rows:
+            return
+        keys = [
+            and_(
+                self._table.c.workspace_key == str(row["workspace_key"]),
+                self._table.c.path == str(row["path"]),
             )
+            for row in expired_rows
+        ]
+        connection.execute(
+            delete(self._table).where(
+                self._table.c.expires_at_epoch_us <= now_us,
+                or_(*keys),
+            )
+        )
 
     def _classify_missing_or_conflict(
         self,
