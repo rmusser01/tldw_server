@@ -55,12 +55,17 @@ Review fix pass:
 - Tightened source-only citation validation so citations must match retrieved authoritative excerpts by source, excerpt text, snapshot hash, and offsets when present.
 - Added stale answer revision checks before generation, duplicate expansion batch detection for retries, and rollback of newly created children if metadata persistence fails mid-batch.
 - Wired the worker through `build_explainer_job_handler` so production worker jobs use the configured generator path while tests can inject fakes.
+
+Spec re-review follow-up:
+- Fixed `current_answer_revision()` so queued/status lifecycle writes cannot invalidate fresh jobs. The revision now hashes only stable answer/question option state: `selected_option_id`, `selected_custom_answer`, and `question_options`.
+- Added a regression test that enqueues a job through the service, forces the queue status write to change `updated_at`, then runs the handler with the original payload revision and verifies children are created.
+- Kept the stale answer-change regression test intact so actual answer changes still skip older jobs.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 2 complete with review blockers addressed. Added Jobs-backed Explainer node expansion, deterministic generation seams, source-context ownership validation, source-only grounding enforcement, ownership/domain checked job status, and answer-question persistence. Review fix verification: RED observed first with collection failure for missing `ExplainerGenerationNotConfiguredError`, `current_answer_revision`, `make_configured_explainer_generator`, and `build_explainer_job_handler`; targeted Explainer job tests now pass (14/14); combined Explainer job+endpoint tests pass (28/28); router group contract passes (173/173); Bandit on touched backend app scope reports zero findings. Global `git diff --check` remains blocked by unrelated pre-existing trailing whitespace in `Docs/Design/Agents.md`, which is outside the assigned file set.
+Task 2 complete with review blockers addressed. Added Jobs-backed Explainer node expansion, deterministic generation seams, source-context ownership validation, source-only grounding enforcement, ownership/domain checked job status, and answer-question persistence. Review fix verification: RED observed first with collection failure for missing `ExplainerGenerationNotConfiguredError`, `current_answer_revision`, `make_configured_explainer_generator`, and `build_explainer_job_handler`; targeted Explainer job tests now pass (15/15); Explainer endpoint tests pass (14/14); router group contract passes (173/173); Bandit on touched backend app scope reports zero findings. Spec re-review follow-up RED observed with the fresh queued job regression returning `children_created = 0` before the stable answer revision fix. Global `git diff --check` remains blocked by unrelated pre-existing trailing whitespace in `Docs/Design/Agents.md`, which is outside the assigned file set.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
