@@ -1,7 +1,7 @@
 ---
 id: TASK-2320
 title: Address PR 2311 review comments for MCP file-policy action taxonomy
-status: In Progress
+status: Done
 priority: High
 references:
 - https://github.com/rmusser01/tldw_server/pull/2311
@@ -43,7 +43,7 @@ Review current unresolved threads, patch valid issues in file-policy metadata, p
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Pending commit/push: review comments addressed locally and focused validation passed.
+Rebased PR #2311 on origin/dev and pushed codex/mcp-file-policy-action-taxonomy at 92892b7121. Addressed still-valid review findings: metadata lookup now fails with ValueError on action/metadata drift; effective permission preview now returns ask for true force-approval scope blocks while explicit path-grant deny/not_granted remains hard deny; missing nested path_decisions are normalized safely; fs.patch rollback catches/logs unexpected restore failures without masking the original partial-write error. Validation passed: focused review regression pytest set (9 passed), broader touched-scope pytest set (35 passed), ruff touched files, py_compile touched production files, Bandit touched production files, and git diff --check.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
