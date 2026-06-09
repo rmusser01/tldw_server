@@ -1321,7 +1321,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             return (
               <List.Item>
                 <div className="w-full space-y-2">
-                    <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="font-medium">
                       <span className="block text-xs text-text-muted">
                         {t("option:quiz.questionNumberLabel", {
@@ -1334,12 +1334,14 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                     <DesignSystemBadge
                       variant={isCorrect ? "success" : "danger"}
                       size="md"
-                      className="shrink-0"
+                      className="inline-flex shrink-0 items-center gap-1"
                     >
                       {isCorrect ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-                      {isCorrect
-                        ? t("option:quiz.correct", { defaultValue: "Correct" })
-                        : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
+                      <span>
+                        {isCorrect
+                          ? t("option:quiz.correct", { defaultValue: "Correct" })
+                          : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
+                      </span>
                     </DesignSystemBadge>
                   </div>
                   <div className="text-sm text-text-muted">

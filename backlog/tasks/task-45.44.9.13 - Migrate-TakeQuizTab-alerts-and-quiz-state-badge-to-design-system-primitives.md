@@ -13,6 +13,8 @@ references:
 - apps/packages/ui/src/components/Quiz/tabs/TakeQuizTab.tsx
 - apps/packages/ui/src/components/Quiz/tabs/__tests__
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- apps/packages/ui/src/components/ui/primitives/Alert.tsx
+- apps/packages/ui/src/components/ui/primitives/__tests__/Alert.test.tsx
 documentation:
 - Docs/Design/tldw_web_design_system_contract.md
 - Docs/Design/tldw_web_design_system_inventory.md
@@ -46,7 +48,7 @@ Continue the tldw_server WebUI design-system product-state migration by replacin
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated TakeQuizTab product-state Alerts and flagged quiz-state Tags to design-system Alert/Badge primitives, added focused design-system regression coverage, and removed the nine matching TakeQuizTab baseline exceptions. Verification: RED focused test failed on missing design-system markers before implementation; focused test now passes 5/5; combined product-state guard plus TakeQuizTab suites pass 90/90; direct guard API over TakeQuizTab reports no product-state findings; git diff --check passes. Full verify:design-system-state remains red on 24 unrelated current-dev findings outside TakeQuizTab, mostly ScheduledTasks plus Skills/KnowledgeQA/Onboarding/ACP readiness drift. Full UI TypeScript remains red on inherited Notes/background/voice-cloning diagnostics with no touched-file diagnostics. Bandit is not applicable because this slice touches frontend TypeScript/JSON/Backlog markdown only.
+Migrated TakeQuizTab product-state Alerts and flagged quiz-state Tags to design-system Alert/Badge primitives, added focused design-system regression coverage, and removed the nine matching TakeQuizTab baseline exceptions. Review follow-up rebased the PR on latest dev, split the bundled TakeQuizTab design-system regression tests into 16 focused state cases, made Alert ignore null/boolean/whitespace-only children before rendering its body wrapper, added Alert primitive regression coverage for whitespace-only children, and made the result correctness Badge spacing explicit with flex/gap classes plus a text span. Verification: RED Alert regression failed before the primitive fix; Alert regression now passes 1/1; focused TakeQuizTab design-system suite passes 16/16; combined product-state guard plus adjacent TakeQuizTab suites pass 102/102; direct guard API over TakeQuizTab reports no product-state findings; git diff --check passes. Full verify:design-system-state remains red on 24 unrelated current-dev findings outside TakeQuizTab: 12 antd-product-state-import, 11 canonical-state-label, and 1 local-loading-state across KnowledgeQA, Onboarding, ScheduledTasks, Skills, and ACP readiness files. UI TypeScript with NODE_OPTIONS=--max-old-space-size=8192 still fails on inherited Notes/background/voice-cloning diagnostics with no touched-file diagnostics; the default-heap tsc run OOMed before diagnostics. Bandit is not applicable because this slice touches frontend TypeScript/TSX and Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

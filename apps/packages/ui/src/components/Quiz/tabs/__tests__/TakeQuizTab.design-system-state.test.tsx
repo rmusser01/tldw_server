@@ -160,6 +160,112 @@ const expectInsideDesignSystemBadge = (text: string | RegExp) => {
   return badge
 }
 
+const assignmentProps = {
+  assignmentMode: "shared",
+  assignmentDueAt: "2099-03-01T14:30:00.000Z",
+  assignmentNote: "Complete before the lab session.",
+  assignedByRole: "lead"
+} satisfies Partial<React.ComponentProps<typeof TakeQuizTab>>
+
+const reviewModeTitle =
+  "Review mode is read-only. No graded attempt is created and no score is recorded."
+const practiceModeTitle =
+  "Practice mode gives immediate feedback after each answer and does not create a graded attempt."
+const scoreSummaryText = "Score: 1 / 2 (50%)"
+
+const createAutoSaveMock = (storageUnavailable = false) => ({
+  storageUnavailable,
+  restoreSavedAnswers: vi.fn(async () => false),
+  clearSavedProgress: vi.fn(async () => {}),
+  hasSavedProgress: vi.fn(async () => false),
+  getSavedProgress: vi.fn(async () => null),
+  forceSave: vi.fn(async () => {})
+})
+
+const mockQuestionList = () => {
+  vi.mocked(listQuestions).mockResolvedValue({
+    items: defaultQuestions,
+    count: defaultQuestions.length
+  } as any)
+}
+
+const openStartConfirmation = (
+  props: Partial<React.ComponentProps<typeof TakeQuizTab>> = {}
+) => {
+  renderTakeQuizTab(props)
+  fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+}
+
+const openStudyMode = async (mode: "review" | "practice") => {
+  mockQuestionList()
+  window.sessionStorage.setItem(TAKE_QUIZ_LIST_PREFS_KEY, JSON.stringify({ modePreference: mode }))
+  renderTakeQuizTab()
+
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: mode === "review" ? /Open Review/i : /Start Practice/i
+    })
+  )
+
+  await screen.findByText(mode === "review" ? reviewModeTitle : practiceModeTitle)
+}
+
+const startGradedAttempt = async () => {
+  renderTakeQuizTab()
+
+  fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+  fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+  await screen.findByTestId("quiz-question-11")
+}
+
+const answerFirstQuestionAndSubmit = async () => {
+  await startGradedAttempt()
+
+  fireEvent.click(screen.getByRole("radio", { name: "Paris" }))
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+}
+
+const submitCompletedAttempt = async () => {
+  await startGradedAttempt()
+
+  fireEvent.click(screen.getByRole("radio", { name: "Paris" }))
+  fireEvent.click(screen.getByRole("radio", { name: "True" }))
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+  await screen.findByText(scoreSummaryText)
+}
+
+const mockQueuedSubmitFailure = () => {
+  const mutateAsync = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Network Error"))
+    .mockResolvedValueOnce({
+      id: 123,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 2,
+      total_possible: 2,
+      answers: []
+    })
+  vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+    mutateAsync,
+    isPending: false
+  } as any)
+  return mutateAsync
+}
+
+const submitQueuedAttempt = async () => {
+  await startGradedAttempt()
+
+  fireEvent.click(screen.getByRole("radio", { name: "Paris" }))
+  fireEvent.click(screen.getByRole("radio", { name: "True" }))
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+  await screen.findByText("Submission failed. Answers queued locally.")
+}
+
 describe("TakeQuizTab design-system product states", () => {
   const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
 
@@ -232,177 +338,128 @@ describe("TakeQuizTab design-system product states", () => {
     } as any)
 
     vi.mocked(useQuizTimer).mockReturnValue(null)
-    vi.mocked(useQuizAutoSave).mockReturnValue({
-      storageUnavailable: false,
-      restoreSavedAnswers: vi.fn(async () => false),
-      clearSavedProgress: vi.fn(async () => {}),
-      hasSavedProgress: vi.fn(async () => false),
-      getSavedProgress: vi.fn(async () => null),
-      forceSave: vi.fn(async () => {})
-    } as any)
+    vi.mocked(useQuizAutoSave).mockReturnValue(createAutoSaveMock() as any)
   })
 
-  it("renders list-level assignment, autosave, and highlight notices through design-system Alerts", () => {
-    vi.mocked(useQuizAutoSave).mockReturnValue({
-      storageUnavailable: true,
-      restoreSavedAnswers: vi.fn(async () => false),
-      clearSavedProgress: vi.fn(async () => {}),
-      hasSavedProgress: vi.fn(async () => false),
-      getSavedProgress: vi.fn(async () => null),
-      forceSave: vi.fn(async () => {})
-    } as any)
-
+  it("renders the assignment notice through a design-system Alert", () => {
     renderTakeQuizTab({
-      startQuizId: 7,
-      highlightQuizId: 7,
       navigationSource: "assignment",
-      assignmentMode: "shared",
-      assignmentDueAt: "2099-03-01T14:30:00.000Z",
-      assignmentNote: "Complete before the lab session.",
-      assignedByRole: "lead"
+      ...assignmentProps
     })
 
     const assignmentAlert = expectInsideDesignSystemAlert(
       "This quiz was opened from a shared assignment link."
     )
     expect(assignmentAlert).toHaveAttribute("data-testid", "quiz-assignment-alert")
+  })
+
+  it("renders the auto-save unavailable notice through a design-system Alert", () => {
+    vi.mocked(useQuizAutoSave).mockReturnValue(createAutoSaveMock(true) as any)
+
+    renderTakeQuizTab()
+
     expectInsideDesignSystemAlert(
       "Auto-save unavailable — your progress won't be preserved if you navigate away."
     )
+  })
+
+  it("renders the shared assignment ready highlight through a design-system Alert", () => {
+    renderTakeQuizTab({
+      startQuizId: 7,
+      highlightQuizId: 7,
+      navigationSource: "assignment",
+      ...assignmentProps
+    })
+
     expectInsideDesignSystemAlert("Shared assignment ready: Biology Basics.")
   })
 
-  it("renders start-confirmation notices through design-system Alerts", () => {
-    renderTakeQuizTab({
-      assignmentMode: "shared",
-      assignmentDueAt: "2099-03-01T14:30:00.000Z",
-      assignmentNote: "Complete before the lab session."
-    })
-
-    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+  it("renders start-confirmation assignment details through a design-system Alert", () => {
+    openStartConfirmation(assignmentProps)
 
     expectInsideDesignSystemAlert("Shared assignment details")
+  })
+
+  it("renders the start-confirmation retake notice through a design-system Alert", () => {
+    openStartConfirmation(assignmentProps)
+
     expectInsideDesignSystemAlert(
       "Retake uses the same questions. Answer options may be reshuffled."
     )
   })
 
-  it("renders review and practice guidance through design-system Alerts", async () => {
-    vi.mocked(listQuestions).mockResolvedValue({
-      items: defaultQuestions,
-      count: defaultQuestions.length
-    } as any)
+  it("renders review guidance through a design-system Alert", async () => {
+    await openStudyMode("review")
 
-    window.sessionStorage.setItem(
-      TAKE_QUIZ_LIST_PREFS_KEY,
-      JSON.stringify({ modePreference: "review" })
-    )
-    const { unmount } = renderTakeQuizTab()
+    expectInsideDesignSystemAlert(reviewModeTitle)
+  }, 15000)
 
-    fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
+  it("renders the review mode label through a design-system Badge", async () => {
+    await openStudyMode("review")
 
-    await expectInsideDesignSystemAlertAsync(
-      "Review mode is read-only. No graded attempt is created and no score is recorded."
-    )
     expect(expectInsideDesignSystemBadge("Review Mode")).toHaveAttribute("data-ds-variant", "info")
+  }, 15000)
 
-    unmount()
-    vi.clearAllMocks()
-    vi.mocked(useAttemptsQuery).mockReturnValue({ data: { items: [], count: 0 } } as any)
-    vi.mocked(useQuizzesQuery).mockReturnValue({
-      data: { items: [defaultQuiz], count: 1 },
-      isLoading: false
-    } as any)
-    vi.mocked(useQuizQuery).mockReturnValue({ data: defaultQuiz } as any)
-    vi.mocked(useStartAttemptMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false
-    } as any)
-    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false
-    } as any)
-    vi.mocked(useQuizAutoSave).mockReturnValue({
-      storageUnavailable: false,
-      restoreSavedAnswers: vi.fn(async () => false),
-      clearSavedProgress: vi.fn(async () => {}),
-      hasSavedProgress: vi.fn(async () => false),
-      getSavedProgress: vi.fn(async () => null),
-      forceSave: vi.fn(async () => {})
-    } as any)
-    vi.mocked(listQuestions).mockResolvedValue({
-      items: defaultQuestions,
-      count: defaultQuestions.length
-    } as any)
+  it("renders practice guidance through a design-system Alert", async () => {
+    await openStudyMode("practice")
 
-    window.sessionStorage.setItem(
-      TAKE_QUIZ_LIST_PREFS_KEY,
-      JSON.stringify({ modePreference: "practice" })
+    expectInsideDesignSystemAlert(practiceModeTitle)
+  }, 15000)
+
+  it("renders the practice mode label through a design-system Badge", async () => {
+    await openStudyMode("practice")
+
+    expect(expectInsideDesignSystemBadge("Practice Mode")).toHaveAttribute(
+      "data-ds-variant",
+      "primary"
     )
-    renderTakeQuizTab()
+  }, 15000)
 
-    fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
-
-    await expectInsideDesignSystemAlertAsync(
-      "Practice mode gives immediate feedback after each answer and does not create a graded attempt."
-    )
-    expect(expectInsideDesignSystemBadge("Practice Mode")).toHaveAttribute("data-ds-variant", "primary")
+  it("renders practice incorrect feedback through a design-system Alert", async () => {
+    await openStudyMode("practice")
 
     fireEvent.click(await screen.findByRole("radio", { name: "Berlin" }))
     await expectInsideDesignSystemAlertAsync("Incorrect")
   }, 15000)
 
-  it("renders graded hint, unanswered, results, and correctness states through design-system primitives", async () => {
-    renderTakeQuizTab()
-
-    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
-    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
-
-    await screen.findByTestId("quiz-question-11")
+  it("renders graded hints through a design-system Alert", async () => {
+    await startGradedAttempt()
     fireEvent.click(screen.getByRole("button", { name: "Show hint for question 11" }))
+
     expectInsideDesignSystemAlert("It is known as the city of lights.")
+  }, 15000)
 
-    fireEvent.click(screen.getByRole("radio", { name: "Paris" }))
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+  it("renders unanswered warnings through a design-system Alert", async () => {
+    await answerFirstQuestionAndSubmit()
+
     expectInsideDesignSystemAlert("Unanswered questions: 2")
+  }, 15000)
 
-    fireEvent.click(screen.getByRole("radio", { name: "True" }))
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+  it("renders graded score summaries through a design-system Alert", async () => {
+    await submitCompletedAttempt()
 
-    await expectInsideDesignSystemAlertAsync("Score: 1 / 2 (50%)")
+    expectInsideDesignSystemAlert(scoreSummaryText)
+  }, 15000)
+
+  it("renders result correctness through a design-system Badge", async () => {
+    await submitCompletedAttempt()
+
     const correctBadge = expectInsideDesignSystemBadge("Correct")
     expect(correctBadge).toHaveAttribute("data-ds-variant", "success")
   }, 15000)
 
   it("renders queued submission recovery through a design-system Alert", async () => {
-    const mutateAsync = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Network Error"))
-      .mockResolvedValueOnce({
-        id: 123,
-        quiz_id: 7,
-        started_at: "2026-02-18T10:00:00Z",
-        completed_at: "2026-02-18T10:03:00Z",
-        score: 2,
-        total_possible: 2,
-        answers: []
-      })
-    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
-      mutateAsync,
-      isPending: false
-    } as any)
+    mockQueuedSubmitFailure()
 
-    renderTakeQuizTab()
+    await submitQueuedAttempt()
 
-    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
-    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+    expectInsideDesignSystemAlert("Submission failed. Answers queued locally.")
+  }, 15000)
 
-    await screen.findByTestId("quiz-question-11")
-    fireEvent.click(screen.getByRole("radio", { name: "Paris" }))
-    fireEvent.click(screen.getByRole("radio", { name: "True" }))
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+  it("retries queued submission from the design-system Alert action", async () => {
+    const mutateAsync = mockQueuedSubmitFailure()
 
-    await expectInsideDesignSystemAlertAsync("Submission failed. Answers queued locally.")
+    await submitQueuedAttempt()
 
     fireEvent.click(screen.getByRole("button", { name: "Retry submission" }))
 
