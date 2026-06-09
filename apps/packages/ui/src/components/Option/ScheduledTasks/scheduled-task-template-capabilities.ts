@@ -58,6 +58,8 @@ export type ScheduledTaskTemplateCapabilityMap = Partial<
   Record<ScheduledTaskTemplateId, ScheduledTaskTemplateCapability>
 >
 
+export const DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES: ScheduledTaskTemplateCapabilityMap = {}
+
 export const REQUIRED_WATCH_AVAILABILITY_GATES = [
   "capability_health",
   "source_preview",

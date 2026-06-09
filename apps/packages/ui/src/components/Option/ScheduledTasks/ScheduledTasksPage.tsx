@@ -19,6 +19,7 @@ import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 import { ScheduledTaskCreatePanel } from "./ScheduledTaskCreatePanel"
+import { DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES } from "./scheduled-task-template-capabilities"
 import {
   SCHEDULED_TASK_TABS,
   buildScheduledTaskSearch,
@@ -391,8 +392,9 @@ export const ScheduledTasksPage: React.FC = () => {
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <Typography.Text strong>No scheduled tasks yet.</Typography.Text>
               <Typography.Text type="secondary">
-                Create a reminder now. Automation templates for GitHub, YouTube, RAG, and
-                agents are planned follow-up phases.
+                Create a reminder now. Watch and Ingest setup continue in their owner
+                workspaces until capability, preview, duplicate, creation, and result
+                contracts are available.
               </Typography.Text>
             </div>
           }
@@ -512,6 +514,7 @@ export const ScheduledTasksPage: React.FC = () => {
                           onSelectTemplate={handleSelectTemplate}
                           onCreateReminder={handleCreateReminderFromPanel}
                           savingReminder={saving}
+                          templateCapabilities={DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES}
                         />
                       )
             }))}

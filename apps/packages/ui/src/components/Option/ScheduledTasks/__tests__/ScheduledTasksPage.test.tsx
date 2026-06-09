@@ -217,6 +217,20 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
   })
 
+  it("keeps Watch template non-creating from the page route", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=watch")
+
+    expect(await screen.findByText("No scheduled task has been created yet.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
+  })
+
   it("opens a task detail deep link after task data loads", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
@@ -767,9 +781,10 @@ describe("ScheduledTasksPage", () => {
     expect(screen.queryByRole("button", { name: "Save reminder" })).not.toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create a reminder now. Automation templates for GitHub, YouTube, RAG, and agents are planned follow-up phases."
+        "Create a reminder now. Watch and Ingest setup continue in their owner workspaces until capability, preview, duplicate, creation, and result contracts are available."
       )
     ).toBeInTheDocument()
+    expect(screen.queryByText(/GitHub, YouTube/i)).not.toBeInTheDocument()
   })
 
   it("opens the created reminder detail after successful creation", async () => {

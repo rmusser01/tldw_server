@@ -24,6 +24,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskCreatePanel.tsx
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskCreatePanel.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
 ---
 
 ## Description
