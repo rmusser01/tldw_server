@@ -19,6 +19,8 @@ parent_task_id: TASK-45
 priority: medium
 documentation:
 - Docs/Design/tldw_web_design_system_baseline_reporting.md
+modified_files:
+- backlog/tasks/task-45.44 - Track-remaining-tldw-design-system-migration-and-governance.md
 ---
 
 ## Description
@@ -38,6 +40,8 @@ Mirror the GitHub epic for the remaining tldw WebUI and extension design-system 
 
 <!-- SECTION:NOTES:BEGIN -->
 Tracker created: GitHub epic https://github.com/rmusser01/tldw_server/issues/1655 plus 13 product-area migration issues and 6 governance issues are linked from the epic. Backlog child tasks TASK-45.44.1 through TASK-45.44.19 mirror the GitHub sub-issues.
+
+2026-06-09 progress: TASK-45.53 routes KnowledgeQA SetupDiagnostics Ready/Blocked labels through the shared design-system state registry. Focused KnowledgeQA diagnostics tests pass, and a direct product-state guard scan over SetupDiagnostics reports zero findings. The full product-state verifier no longer reports KnowledgeQA; remaining blocking canonical-label findings are Onboarding FirstChatStep Retrying and two ACP readiness Setup required labels.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

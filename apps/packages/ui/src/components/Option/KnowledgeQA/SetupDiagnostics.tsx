@@ -8,6 +8,7 @@ import {
   WifiOff,
 } from "lucide-react"
 
+import { BLOCKED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system"
 import type { ConnectionState, ConnectionUxState } from "@/types/connection"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
 import type { ExtensionKnowledgeFailureState } from "./types"
@@ -51,10 +52,10 @@ const BROWSER_ACCESS_BLOCK_PATTERNS = [
 ]
 
 const statusLabel: Record<DiagnosticStatus, string> = {
-  complete: "Ready",
+  complete: READY_STATE_LABEL,
   missing: "Missing",
   waiting: "Waiting",
-  blocked: "Blocked",
+  blocked: BLOCKED_STATE_LABEL,
   review: "Needs review",
 }
 
