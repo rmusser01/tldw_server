@@ -369,6 +369,56 @@ class TestAdapterRegistry:
         assert provider_config["kokoro_voice_dir"] == "models/kokoro/voices"
         assert provider_config["kokoro_device"] == "cpu"
 
+    def test_chatterbox_provider_config_aliases_yaml_fields(self):
+        """Chatterbox YAML settings should be duplicated under adapter-prefixed keys."""
+        registry = TTSAdapterRegistry(
+            {
+                "chatterbox_enabled": True,
+                "chatterbox_config": {
+                    "enabled": True,
+                    "variant": "turbo",
+                    "model_path": "ResembleAI/chatterbox",
+                    "multilingual_model_path": "ResembleAI/chatterbox-multilingual",
+                    "turbo_model_path": "ResembleAI/chatterbox-turbo",
+                    "vc_model_path": "models/chatterbox-vc",
+                    "device": "cpu",
+                    "use_multilingual": True,
+                    "use_bf16": "auto",
+                    "disable_watermark": False,
+                    "target_latency_ms": 250,
+                    "auto_download": False,
+                    "conditionals_cache_size": 4,
+                    "default_exaggeration": 0.7,
+                    "cfg_weight": 0.4,
+                    "temperature": 0.9,
+                    "repetition_penalty": 1.1,
+                    "min_p": 0.02,
+                    "top_p": 0.95,
+                },
+            }
+        )
+
+        provider_config = registry._get_provider_config(TTSProvider.CHATTERBOX)
+
+        assert provider_config["chatterbox_variant"] == "turbo"
+        assert provider_config["chatterbox_model_path"] == "ResembleAI/chatterbox"
+        assert provider_config["chatterbox_multilingual_model_path"] == "ResembleAI/chatterbox-multilingual"
+        assert provider_config["chatterbox_turbo_model_path"] == "ResembleAI/chatterbox-turbo"
+        assert provider_config["chatterbox_vc_model_path"] == "models/chatterbox-vc"
+        assert provider_config["chatterbox_device"] == "cpu"
+        assert provider_config["chatterbox_use_multilingual"] is True
+        assert provider_config["chatterbox_use_bf16"] == "auto"
+        assert provider_config["chatterbox_disable_watermark"] is False
+        assert provider_config["chatterbox_target_latency_ms"] == 250
+        assert provider_config["chatterbox_auto_download"] is False
+        assert provider_config["chatterbox_conditionals_cache_size"] == 4
+        assert provider_config["chatterbox_default_exaggeration"] == 0.7
+        assert provider_config["chatterbox_cfg_weight"] == 0.4
+        assert provider_config["chatterbox_temperature"] == 0.9
+        assert provider_config["chatterbox_repetition_penalty"] == 1.1
+        assert provider_config["chatterbox_min_p"] == 0.02
+        assert provider_config["chatterbox_top_p"] == 0.95
+
     async def test_disabled_provider(self):
         """Test disabled provider"""
         config = {"openai_enabled": False}
@@ -539,6 +589,112 @@ class TestTTSAdapterFactory:
         assert "initialized" in status
         assert "providers" in status
 
+    async def test_unload_provider_closes_cached_adapter(self):
+        """Factory unload should close one initialized provider and clear its cache entry."""
+
+        class ClosingAdapter(TTSAdapter):
+            closed = False
+
+            async def initialize(self) -> bool:
+                self._status = ProviderStatus.AVAILABLE
+                return True
+
+            async def generate(self, request: TTSRequest) -> TTSResponse:
+                return TTSResponse(audio_data=b"ok")
+
+            async def get_capabilities(self) -> TTSCapabilities:
+                return TTSCapabilities(
+                    provider_name="Mock",
+                    supported_languages={"en"},
+                    supported_voices=[],
+                    supported_formats={AudioFormat.WAV},
+                    max_text_length=1000,
+                    supports_streaming=False,
+                )
+
+            async def close(self):
+                self.closed = True
+                await super().close()
+
+        factory = TTSAdapterFactory({"providers": {"mock": {"enabled": True}}})
+        factory.registry._adapter_specs = {TTSProvider.MOCK: ClosingAdapter}
+        factory.registry._base.register_adapter(TTSProvider.MOCK.value, ClosingAdapter)
+
+        adapter = await factory.registry.get_adapter(TTSProvider.MOCK)
+        assert adapter is not None
+        assert adapter.status == ProviderStatus.AVAILABLE
+
+        result = await factory.unload_provider("mock")
+
+        assert result == {"provider": "mock", "unloaded": True}
+        assert adapter.closed is True
+        status_after = factory.get_status()
+        assert status_after["providers"]["mock"]["initialized"] is False
+
+    async def test_unload_provider_clears_cache_when_adapter_close_fails(self):
+        """Factory unload should clear stale state even if adapter shutdown raises."""
+
+        class FailingCloseAdapter(TTSAdapter):
+            async def initialize(self) -> bool:
+                self._status = ProviderStatus.AVAILABLE
+                return True
+
+            async def generate(self, request: TTSRequest) -> TTSResponse:
+                return TTSResponse(audio_data=b"ok")
+
+            async def get_capabilities(self) -> TTSCapabilities:
+                return TTSCapabilities(
+                    provider_name="Mock",
+                    supported_languages={"en"},
+                    supported_voices=[],
+                    supported_formats={AudioFormat.WAV},
+                    max_text_length=1000,
+                    supports_streaming=False,
+                )
+
+            async def close(self):
+                raise RuntimeError("close failed")
+
+        factory = TTSAdapterFactory({"providers": {"mock": {"enabled": True}}})
+        factory.registry._adapter_specs = {TTSProvider.MOCK: FailingCloseAdapter}
+        factory.registry._base.register_adapter(TTSProvider.MOCK.value, FailingCloseAdapter)
+
+        adapter = await factory.registry.get_adapter(TTSProvider.MOCK)
+        assert adapter is not None
+
+        result = await factory.unload_provider("mock")
+
+        assert result == {"provider": "mock", "unloaded": True}
+        status_after = factory.get_status()
+        assert status_after["providers"]["mock"]["initialized"] is False
+
+    async def test_unload_provider_is_idempotent_when_not_loaded(self):
+        """Unloading a registered but uncached provider should be a no-op success."""
+        class UnusedAdapter(TTSAdapter):
+            async def initialize(self) -> bool:
+                self._status = ProviderStatus.AVAILABLE
+                return True
+
+            async def generate(self, request: TTSRequest) -> TTSResponse:
+                return TTSResponse(audio_data=b"ok")
+
+            async def get_capabilities(self) -> TTSCapabilities:
+                return TTSCapabilities(
+                    provider_name="Mock",
+                    supported_languages={"en"},
+                    supported_voices=[],
+                    supported_formats={AudioFormat.WAV},
+                    max_text_length=1000,
+                    supports_streaming=False,
+                )
+
+        factory = TTSAdapterFactory({"providers": {"mock": {"enabled": True}}})
+        factory.registry.register_adapter(TTSProvider.MOCK, UnusedAdapter)
+
+        result = await factory.unload_provider("mock")
+
+        assert result == {"provider": "mock", "unloaded": False}
+
 
 @pytest.mark.asyncio
 class TestTTSServiceV2:
@@ -578,6 +734,17 @@ class TestTTSServiceV2:
         status = service.get_status()
         assert "total_providers" in status
         assert "providers" in status
+
+    async def test_unload_provider_delegates_to_factory(self):
+        """Service unload should delegate to the configured factory."""
+        factory = MagicMock()
+        factory.unload_provider = AsyncMock(return_value={"provider": "chatterbox", "unloaded": True})
+        service = TTSServiceV2(factory)
+
+        result = await service.unload_provider("chatterbox")
+
+        assert result == {"provider": "chatterbox", "unloaded": True}
+        factory.unload_provider.assert_awaited_once_with("chatterbox")
 
     @pytest.mark.asyncio
     async def test_request_conversion(self):

@@ -128,6 +128,154 @@ def test_custom_voice_resolution_populates_reference(client, monkeypatch):
         client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
 
 
+def test_chatterbox_predefined_voice_id_alias_populates_reference(client, monkeypatch):
+    expected_wav = _make_reference_wav(5.0)
+
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            assert str(user_id) == "1"
+            assert voice_id == "voice-1"
+            return expected_wav
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(voice_id=voice_id)
+
+    class _FakeAdapter:
+        provider_name = "chatterbox"
+        provider_key = "chatterbox"
+
+        async def generate(self, request):
+            assert request.voice == "alloy"
+            assert request.voice_reference == expected_wav
+            assert request.extra_params.get("voice_mode") == "predefined"
+            assert request.extra_params.get("predefined_voice_id") == "voice-1"
+            return TTSResponse(audio_data=b"ok", format=request.format, sample_rate=24000)
+
+    def _fake_get_voice_manager():
+        return _FakeVoiceManager()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        _fake_get_voice_manager,
+        raising=True,
+    )
+
+    class _FakeFactory:
+        def get_provider_for_model(self, _model):
+            return "chatterbox"
+
+    service = TTSServiceV2()
+    service._ensure_factory = AsyncMock(return_value=_FakeFactory())
+    service._get_adapter = AsyncMock(return_value=_FakeAdapter())
+
+    async def _fake_get_tts_service_v2():
+        return service
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+        raising=True,
+    )
+
+    client.app.dependency_overrides[audio_endpoints.get_tts_service] = _fake_get_tts_service_v2
+
+    payload = {
+        "model": "chatterbox",
+        "input": "Hello world",
+        "voice": "alloy",
+        "response_format": "pcm",
+        "stream": False,
+        "extra_params": {
+            "voice_mode": "predefined",
+            "predefined_voice_id": "voice-1",
+        },
+    }
+    try:
+        r = client.post(
+            "/api/v1/audio/speech",
+            json=payload,
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.content == b"ok"
+    finally:
+        client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+
+
+def test_chatterbox_reference_audio_filename_is_not_read_from_disk(client, monkeypatch, tmp_path):
+    reference_path = tmp_path / "reference.wav"
+    reference_path.write_bytes(_make_reference_wav(5.0))
+    seen = {"voice_loads": 0}
+
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            seen["voice_loads"] += 1
+            return b"unexpected"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(voice_id=voice_id)
+
+    class _FakeAdapter:
+        provider_name = "chatterbox"
+        provider_key = "chatterbox"
+
+        async def generate(self, request):
+            assert request.voice_reference is None
+            assert request.extra_params.get("reference_audio_filename") == str(reference_path)
+            return TTSResponse(audio_data=b"ok", format=request.format, sample_rate=24000)
+
+    def _fake_get_voice_manager():
+        return _FakeVoiceManager()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        _fake_get_voice_manager,
+        raising=True,
+    )
+
+    class _FakeFactory:
+        def get_provider_for_model(self, _model):
+            return "chatterbox"
+
+    service = TTSServiceV2()
+    service._ensure_factory = AsyncMock(return_value=_FakeFactory())
+    service._get_adapter = AsyncMock(return_value=_FakeAdapter())
+
+    async def _fake_get_tts_service_v2():
+        return service
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+        raising=True,
+    )
+
+    client.app.dependency_overrides[audio_endpoints.get_tts_service] = _fake_get_tts_service_v2
+
+    payload = {
+        "model": "chatterbox",
+        "input": "Hello world",
+        "voice": "alloy",
+        "response_format": "pcm",
+        "stream": False,
+        "extra_params": {
+            "voice_mode": "clone",
+            "reference_audio_filename": str(reference_path),
+        },
+    }
+    try:
+        r = client.post(
+            "/api/v1/audio/speech",
+            json=payload,
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.content == b"ok"
+        assert seen["voice_loads"] == 0
+    finally:
+        client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+
+
 def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_text(
     client, monkeypatch, tmp_path
 ):

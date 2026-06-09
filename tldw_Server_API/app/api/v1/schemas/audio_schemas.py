@@ -52,7 +52,8 @@ class OpenAISpeechRequest(BaseModel):
         description=(
             "The model to use for generation. This must be sent explicitly by the caller or its "
             "user-configured defaults. Supported choices include tts-1, tts-1-hd, kokoro, "
-            "kitten_tts, KittenML/kitten-tts-nano-0.8, higgs, chatterbox, and vibevoice."
+            "kitten_tts, KittenML/kitten-tts-nano-0.8, higgs, chatterbox, chatterbox-emotion, "
+            "chatterbox-multilingual, chatterbox-turbo, and vibevoice."
         ),
     )
     input: str = Field(..., description="The text to generate audio for")
@@ -65,6 +66,13 @@ class OpenAISpeechRequest(BaseModel):
         description=(
             "The format to return audio in. Supported formats: mp3, opus, aac, flac, wav, pcm, ogg, webm, ulaw. "
             "PCM format returns raw 16-bit samples without headers."
+        ),
+    )
+    output_format: Optional[Literal["mp3", "opus", "aac", "flac", "wav", "pcm", "ogg", "webm", "ulaw"]] = Field(
+        default=None,
+        description=(
+            "Chatterbox compatibility alias for response_format. Used only for Chatterbox-family "
+            "models when response_format was not provided."
         ),
     )
     download_format: Optional[Literal["mp3", "opus", "aac", "flac", "wav", "pcm", "ogg", "webm", "ulaw"]] = (
@@ -101,6 +109,13 @@ class OpenAISpeechRequest(BaseModel):
         default=None,
         description="Optional language code to use for text processing. If not provided, will use first letter of voice name.",
     )
+    language: Optional[str] = Field(
+        default=None,
+        description=(
+            "Chatterbox compatibility alias for lang_code. Used only for Chatterbox-family "
+            "models when lang_code was not provided."
+        ),
+    )
     normalization_options: Optional[NormalizationOptions] = Field(
         default=NormalizationOptions(),
         description="Options for the normalization system",
@@ -124,6 +139,10 @@ class OpenAISpeechRequest(BaseModel):
         default=None,
         description=(
             "Provider-specific parameters passed through to adapters (e.g., stability, clarity, cfg_scale). "
+            "For Chatterbox, supported keys include exaggeration, cfg_weight, temperature, top_p, top_k, "
+            "speed_factor, split_text, chunk_size, and the safe stored-voice alias "
+            "`voice_mode='predefined'` plus `predefined_voice_id`; server-side reference_audio_filename "
+            "paths are not dereferenced. "
             "For OmniVoice cloning, include `reference_text` describing the spoken transcript of the "
             "reference audio."
         ),

@@ -167,6 +167,8 @@ const fallbackSpec = {
       "/api/v1/audio/transcriptions",
       "/api/v1/audio/transcriptions/health",
       "/api/v1/audio/speech",
+      "/api/v1/audio/voice-conversion",
+      "/api/v1/audio/tts/providers/{provider}/unload",
       "/api/v1/audio/voices/catalog",
       "/api/v1/audio/health",
       "/api/v1/audio/stream/transcribe",

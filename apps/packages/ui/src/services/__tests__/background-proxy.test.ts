@@ -372,6 +372,118 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
+  it("appends multiple named files for direct-preferred uploads", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+    const source = Uint8Array.from([1, 2, 3])
+    const target = Uint8Array.from([4, 5, 6])
+
+    await bgUpload({
+      path: "/api/v1/audio/voice-conversion",
+      method: "POST",
+      fields: { response_format: "wav", stream: false },
+      files: [
+        {
+          fieldName: "source_audio",
+          name: "source.wav",
+          type: "audio/wav",
+          data: source
+        },
+        {
+          fieldName: "target_voice",
+          name: "target.wav",
+          type: "audio/wav",
+          data: target
+        }
+      ],
+      preferDirect: true,
+      responseType: "arrayBuffer"
+    })
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    const requestPayload = mocks.tldwRequest.mock.calls[0][0] as { body?: FormData; responseType?: string }
+    expect(requestPayload.responseType).toBe("arrayBuffer")
+    const body = requestPayload.body as FormData
+    expect(body.get("response_format")).toBe("wav")
+    expect(body.get("stream")).toBe("false")
+    expect(body.get("source_audio")).toBeInstanceOf(Blob)
+    expect(body.get("target_voice")).toBeInstanceOf(Blob)
+  })
+
+  it("appends single direct-fallback uploads to files and the legacy file alias", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+
+    await bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      file: {
+        name: "clip.wav",
+        type: "audio/wav",
+        data: Uint8Array.from([7, 8, 9])
+      },
+      preferDirect: true
+    })
+
+    const requestPayload = mocks.tldwRequest.mock.calls[0][0] as { body?: FormData }
+    const body = requestPayload.body as FormData
+    expect(body.get("files")).toBeInstanceOf(Blob)
+    expect(body.get("file")).toBeInstanceOf(Blob)
+  })
+
+  it("forwards multiple files through extension upload messaging", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+    await bgUpload({
+      path: "/api/v1/audio/voice-conversion",
+      method: "POST",
+      files: [
+        {
+          fieldName: "source_audio",
+          name: "source.wav",
+          type: "audio/wav",
+          data: Uint8Array.from([1])
+        },
+        {
+          fieldName: "target_voice",
+          name: "target.wav",
+          type: "audio/wav",
+          data: Uint8Array.from([2])
+        }
+      ],
+      responseType: "arrayBuffer"
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tldw:upload",
+        payload: expect.objectContaining({
+          responseType: "arrayBuffer",
+          files: [
+            expect.objectContaining({ fieldName: "source_audio", name: "source.wav" }),
+            expect.objectContaining({ fieldName: "target_voice", name: "target.wav" })
+          ]
+        })
+      })
+    )
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
   it("does not fall back to direct upload on POST extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))

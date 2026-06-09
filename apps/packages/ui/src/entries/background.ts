@@ -1016,6 +1016,7 @@ export default defineBackground({
       method?: string;
       fields?: Record<string, any>;
       file?: {
+        fieldName?: string;
         name?: string;
         type?: string;
         data?:
@@ -1025,8 +1026,20 @@ export default defineBackground({
           | number[]
           | string;
       };
+      files?: Array<{
+        fieldName?: string;
+        name?: string;
+        type?: string;
+        data?:
+          | ArrayBuffer
+          | Uint8Array
+          | { data?: number[] }
+          | number[]
+          | string;
+      }>;
       fileFieldName?: string;
       timeoutMs?: number;
+      responseType?: "json" | "text" | "arrayBuffer";
       quickIngestSessionId?: string;
     }) => {
       const {
@@ -1034,7 +1047,9 @@ export default defineBackground({
         method = "POST",
         fields = {},
         file,
+        files,
         fileFieldName,
+        responseType,
       } = payload || {};
       const cfg = await storage.get<any>("tldwConfig");
       const isAbsolute = typeof path === "string" && /^https?:/i.test(path);
@@ -1071,8 +1086,23 @@ export default defineBackground({
             form.append(k, typeof v === "string" ? v : JSON.stringify(v));
           }
         }
-        if (file?.data !== undefined && file?.data !== null) {
-          const bytes = normalizeFileData(file.data);
+        const appendUploadFile = (
+          item: {
+            fieldName?: string;
+            name?: string;
+            type?: string;
+            data?:
+              | ArrayBuffer
+              | Uint8Array
+              | { data?: number[] }
+              | number[]
+              | string;
+          },
+          fieldName: string,
+          { appendLegacyFileAlias = false }: { appendLegacyFileAlias?: boolean } = {},
+        ): { ok: true } | { ok: false; status: number; error: string } => {
+          if (item?.data === undefined || item?.data === null) return { ok: true };
+          const bytes = normalizeFileData(item.data);
           if (!bytes || bytes.byteLength === 0) {
             return {
               ok: false,
@@ -1082,30 +1112,32 @@ export default defineBackground({
             };
           }
           const blob = new Blob([toArrayBuffer(bytes)], {
-            type: file.type || "application/octet-stream",
+            type: item.type || "application/octet-stream",
           });
-          const filename = file.name || "file";
+          const filename = item.name || "file";
+          form.append(fieldName, blob, filename);
+          if (appendLegacyFileAlias && fieldName !== "file") {
+            form.append("file", blob, filename);
+          }
+          return { ok: true };
+        };
+
+        if (Array.isArray(files) && files.length > 0) {
+          for (const item of files) {
+            const result = appendUploadFile(item, item.fieldName || "files");
+            if (!result.ok) return result;
+          }
+        } else if (file?.data !== undefined && file?.data !== null) {
           const trimmedFieldName =
             typeof fileFieldName === "string" ? fileFieldName.trim() : "";
           if (trimmedFieldName) {
-            form.append(trimmedFieldName, blob, filename);
+            const result = appendUploadFile(file, trimmedFieldName);
+            if (!result.ok) return result;
           } else {
-            try {
-              const fileCtor = typeof File === "function" ? File : null;
-              if (fileCtor) {
-                form.append(
-                  "files",
-                  new fileCtor([blob], filename, { type: blob.type }),
-                );
-              } else {
-                form.append("files", blob, filename);
-              }
-            } catch (error) {
-              logBackgroundError("append upload file", error);
-              form.append("files", blob, filename);
-            }
-            // Backward-compat: also include singular key some servers accept
-            form.append("file", blob, filename);
+            const result = appendUploadFile(file, "files", {
+              appendLegacyFileAlias: true,
+            });
+            if (!result.ok) return result;
           }
         }
         const headers: Record<string, string> = {};
@@ -1167,9 +1199,20 @@ export default defineBackground({
         }
         const contentType = resp.headers.get("content-type") || "";
         let data: any = null;
-        if (contentType.includes("application/json"))
+        const readDefaultBody = async () => {
+          if (contentType.includes("application/json"))
+            return await resp.json().catch(() => null);
+          return await resp.text().catch(() => null);
+        };
+        if (responseType === "arrayBuffer") {
+          data = resp.ok ? await resp.arrayBuffer().catch(() => null) : await readDefaultBody();
+        } else if (responseType === "json") {
           data = await resp.json().catch(() => null);
-        else data = await resp.text().catch(() => null);
+        } else if (responseType === "text") {
+          data = await resp.text().catch(() => null);
+        } else {
+          data = await readDefaultBody();
+        }
         const error = resp.ok
           ? undefined
           : formatErrorMessage(data, `Upload failed: ${resp.status}`);

@@ -115,6 +115,11 @@ class TTSProviderUnavailableError(TTSProviderError):
     pass
 
 
+class TTSProviderBusyError(TTSProviderError):
+    """TTS provider cannot be modified because it has in-flight work."""
+    pass
+
+
 class TTSAuthenticationError(TTSProviderError):
     """Authentication failed with TTS provider"""
     pass
@@ -297,6 +302,8 @@ def categorize_error(error: Exception) -> str:
         return "rate_limit"
     elif isinstance(error, TTSAuthenticationError):
         return "authentication"
+    elif isinstance(error, TTSProviderBusyError):
+        return "provider_busy"
     elif isinstance(error, (TTSProviderUnavailableError, TTSProviderError)):
         return "provider_error"
     elif isinstance(error, (TTSValidationError, TTSInvalidInputError, TTSTextTooLongError)):
@@ -322,6 +329,7 @@ ERROR_STATUS_CODES = {
     TTSInvalidVoiceReferenceError: 422,
     TTSAuthenticationError: 401,
     TTSModelNotFoundError: 404,
+    TTSProviderBusyError: 409,
     TTSRateLimitError: 429,
     TTSQuotaExceededError: 429,
     TTSProviderError: 502,

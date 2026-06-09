@@ -1267,17 +1267,26 @@ export async function* bgStream<
   }
 }
 
+export type BgUploadFile = {
+  fieldName?: string
+  name?: string
+  type?: string
+  data: ArrayBuffer | Uint8Array | number[]
+}
+
 export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
   path: P
   method?: UpperLower<M>
   // key/value fields to include alongside file in FormData
   fields?: Record<string, any>
   // File payload as raw bytes with metadata (structured-cloneable)
-  file?: { name?: string; type?: string; data: ArrayBuffer | Uint8Array | number[] }
+  file?: Omit<BgUploadFile, "fieldName">
+  files?: BgUploadFile[]
   // Optional override for the multipart file field name
   fileFieldName?: string
   // Optional timeout override for upload requests
   timeoutMs?: number
+  responseType?: "json" | "text" | "arrayBuffer"
   preferDirect?: boolean
 }
 
@@ -1287,8 +1296,10 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     method = 'POST' as UpperLower<M>,
     fields = {},
     file,
+    files,
     fileFieldName,
     timeoutMs,
+    responseType,
     preferDirect = false
   }: BgUploadInit<P, M>
 ): Promise<T> {
@@ -1303,7 +1314,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       const uploadTimeout = Math.max(5000, resolvedTimeout)
       const uploadPromise = browser.runtime.sendMessage({
         type: 'tldw:upload',
-        payload: { path, method, fields, file, fileFieldName, timeoutMs: resolvedTimeout }
+        payload: { path, method, fields, file, files, fileFieldName, timeoutMs: resolvedTimeout, responseType }
       })
       const uploadTimeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), uploadTimeout)
@@ -1353,15 +1364,19 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       formData.append(key, String(value))
     }
   })
-  if (file) {
-    const name = file.name || "file"
-    const type = file.type || "application/octet-stream"
+  const appendFile = (
+    item: BgUploadFile,
+    fieldName: string,
+    { appendLegacyFileAlias = false }: { appendLegacyFileAlias?: boolean } = {}
+  ) => {
+    const name = item.name || "file"
+    const type = item.type || "application/octet-stream"
     const toBytes = (data: ArrayBuffer | Uint8Array | number[]) => {
       if (data instanceof Uint8Array) return data
       if (data instanceof ArrayBuffer) return new Uint8Array(data)
       return Uint8Array.from(data)
     }
-    const bytes = toBytes(file.data)
+    const bytes = toBytes(item.data)
     if (typeof Blob === "undefined") {
       throw new Error("File upload is not supported in this environment.")
     }
@@ -1371,12 +1386,30 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
         ? buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
         : new Uint8Array(bytes).buffer
     const blob = new Blob([slice], { type })
-    formData.append(fileFieldName || "file", blob, name)
+    formData.append(fieldName, blob, name)
+    if (appendLegacyFileAlias && fieldName !== "file") {
+      formData.append("file", blob, name)
+    }
+  }
+  if (Array.isArray(files) && files.length > 0) {
+    files.forEach((item) => {
+      appendFile(item, item.fieldName || "files")
+    })
+  } else if (file) {
+    const legacyFieldName = fileFieldName || "files"
+    appendFile(
+      {
+        ...file,
+        fieldName: legacyFieldName
+      },
+      legacyFieldName,
+      { appendLegacyFileAlias: !fileFieldName }
+    )
   }
 
   const storage = createSafeStorage()
   const resp = await tldwRequest(
-    { path, method, body: formData, timeoutMs },
+    { path, method, body: formData, timeoutMs, responseType },
     { getConfig: () => storage.get("tldwConfig").catch(() => null) }
   )
   if (!resp?.ok) {

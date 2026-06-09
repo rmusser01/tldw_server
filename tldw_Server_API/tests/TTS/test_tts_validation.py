@@ -202,6 +202,65 @@ class TestTTSInputValidator:
         assert any("Unexpected validation error" in message for message in logged_messages)
         assert all(raw_error not in message for message in logged_messages)
 
+    def test_chatterbox_standard_rejects_non_english_language(self, validator):
+        """Original Chatterbox remains English-only unless a multilingual model is requested."""
+        request = TTSRequest(
+            text="Bonjour tout le monde.",
+            model="chatterbox",
+            language="fr",
+            format=AudioFormat.MP3,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is False
+        assert error_message is not None
+        assert "Language 'fr' not supported" in error_message
+
+    def test_chatterbox_multilingual_model_accepts_supported_language(self, validator):
+        """The multilingual Chatterbox model should validate known upstream language codes."""
+        request = TTSRequest(
+            text="Bonjour tout le monde.",
+            model="chatterbox-multilingual",
+            language="fr",
+            format=AudioFormat.MP3,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is True
+        assert error_message is None
+
+    def test_chatterbox_turbo_is_english_only(self, validator):
+        """Turbo is a separate Chatterbox family member but remains English-only upstream."""
+        request = TTSRequest(
+            text="Bonjour tout le monde.",
+            model="chatterbox-turbo",
+            language="fr",
+            format=AudioFormat.MP3,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is False
+        assert error_message is not None
+        assert "Language 'fr' not supported" in error_message
+
+    @pytest.mark.parametrize("audio_format", [AudioFormat.FLAC, AudioFormat.PCM])
+    def test_chatterbox_accepts_adapter_advertised_formats(self, validator, audio_format):
+        """Chatterbox validation should allow every format its adapter advertises."""
+        request = TTSRequest(
+            text="Hello from Chatterbox.",
+            model="chatterbox",
+            language="en",
+            format=audio_format,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is True
+        assert error_message is None
+
     def test_validate_voice_reference(self, validator):
         """Test voice reference validation"""
         # Valid WAV header
@@ -264,6 +323,9 @@ class TestProviderLimits:
         assert kitten_limits["max_text_length"] == 5000
         assert "pcm" in kitten_limits["valid_formats"]
         assert kitten_limits["max_speed"] == 4.0
+
+        chatterbox_limits = ProviderLimits.get_limits("chatterbox")
+        assert {"wav", "mp3", "opus", "flac", "pcm"}.issubset(chatterbox_limits["valid_formats"])
 
     def test_provider_specific_validation(self):
         """Test that provider limits are enforced"""

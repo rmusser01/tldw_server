@@ -72,6 +72,7 @@ from .tts_exceptions import (
     TTSFallbackExhaustedError,
     TTSGenerationError,
     TTSInvalidVoiceReferenceError,
+    TTSProviderBusyError,
     TTSProviderError,
     TTSProviderNotConfiguredError,
     TTSResourceError,
@@ -632,8 +633,10 @@ class TTSServiceV2:
             enabled = parse_bool(extras.get("chunking_service"), default=False)
         elif "chunking" in extras:
             enabled = parse_bool(extras.get("chunking"), default=False)
+        elif "split_text" in extras:
+            enabled = parse_bool(extras.get("split_text"), default=False)
         else:
-            for key in ("chunk_target_chars", "chunk_max_chars", "chunk_min_chars", "chunk_crossfade_ms"):
+            for key in ("chunk_size", "chunk_target_chars", "chunk_max_chars", "chunk_min_chars", "chunk_crossfade_ms"):
                 if key in extras:
                     enabled = True
                     break
@@ -641,8 +644,8 @@ class TTSServiceV2:
         if not enabled:
             return False, 0, 0, 0, 0
 
-        target = _pick_int(("chunk_target_chars", "chunk_target", "chunk_chars_target"), 120)
-        max_chars = _pick_int(("chunk_max_chars", "chunk_max", "chunk_chars_max"), 150)
+        target = _pick_int(("chunk_target_chars", "chunk_target", "chunk_chars_target", "chunk_size"), 120)
+        max_chars = _pick_int(("chunk_max_chars", "chunk_max", "chunk_chars_max", "chunk_size"), 150)
         min_chars = _pick_int(("chunk_min_chars", "chunk_min", "chunk_chars_min"), 50)
         crossfade_ms = _pick_int(("chunk_crossfade_ms", "crossfade_ms"), 50)
         if max_chars <= 0:
@@ -945,6 +948,8 @@ class TTSServiceV2:
         for key in (
             "chunking_service",
             "chunking",
+            "split_text",
+            "chunk_size",
             "chunk_target_chars",
             "chunk_target",
             "chunk_chars_target",
@@ -2318,6 +2323,55 @@ class TTSServiceV2:
                 except _TTS_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    async def convert_chatterbox_voice(
+        self,
+        *,
+        source_audio_path: str,
+        target_voice_path: Optional[str],
+        response_format: str | AudioFormat = "wav",
+        stream: bool = False,
+        provider_overrides: Optional[dict[str, Any]] = None,
+    ) -> TTSResponse:
+        """Convert source speech to a target voice using the Chatterbox VC adapter."""
+        if isinstance(response_format, AudioFormat):
+            audio_format = response_format
+        else:
+            try:
+                audio_format = AudioFormat(str(response_format).strip().lower())
+            except _TTS_NONCRITICAL_EXCEPTIONS as exc:
+                raise TTSValidationError(
+                    f"Unsupported response_format for Chatterbox voice conversion: {response_format}",
+                    provider="chatterbox",
+                ) from exc
+
+        adapter = await self._get_adapter("chatterbox", "chatterbox", overrides=provider_overrides)
+        if adapter is None:
+            raise TTSProviderNotConfiguredError(
+                "Chatterbox adapter is not configured",
+                provider="chatterbox",
+            )
+
+        convert_voice = getattr(adapter, "convert_voice", None)
+        if convert_voice is None:
+            raise TTSProviderNotConfiguredError(
+                "Chatterbox adapter does not support voice conversion",
+                provider="chatterbox",
+            )
+
+        provider_key = "chatterbox"
+        await self._increment_active_requests(provider_key)
+        try:
+            async with self._semaphore:
+                async with self._provider_concurrency_guard(provider_key):
+                    return await convert_voice(
+                        source_audio_path=source_audio_path,
+                        target_voice_path=target_voice_path,
+                        format=audio_format,
+                        stream=stream,
+                    )
+        finally:
+            await self._decrement_active_requests(provider_key)
+
     def _convert_request(self, request: OpenAISpeechRequest) -> TTSRequest:
         """Convert OpenAI request to unified TTS request"""
         # Map format
@@ -2333,12 +2387,28 @@ class TTSServiceV2:
             "ulaw": AudioFormat.ULAW
         }
 
+        model_id = str(getattr(request, "model", "") or "").strip().lower()
+        response_format = request.response_format
+        output_format = getattr(request, "output_format", None)
+        if output_format:
+            try:
+                explicit_fields = getattr(request, "model_fields_set", None)
+                if explicit_fields is None:
+                    explicit_fields = getattr(request, "__fields_set__", set())
+                if model_id.startswith("chatterbox") and "response_format" not in explicit_fields:
+                    response_format = output_format
+                    setattr(request, "response_format", response_format)
+            except _TTS_NONCRITICAL_EXCEPTIONS:
+                pass
+
         audio_format = format_mapping.get(
-            request.response_format.lower(),
+            response_format.lower(),
             AudioFormat.MP3
         )
-        # Optional language code mapping (lang_code primary; extra_params.language override)
+        # Optional language code mapping (lang_code primary; Chatterbox language alias next; extra_params.language override)
         language = self._normalize_language_code(getattr(request, 'lang_code', None))
+        if language is None and model_id.startswith("chatterbox"):
+            language = self._normalize_language_code(getattr(request, "language", None))
         # Optional voice reference decoding (base64)
         voice_ref_bytes = None
         if getattr(request, 'voice_reference', None):
@@ -2352,6 +2422,7 @@ class TTSServiceV2:
         # Provider-specific extras passthrough
         extras = getattr(request, 'extra_params', None) or {}
         target_sample_rate: Optional[int] = None
+        seed: Optional[int] = None
         try:
             requested_rate = getattr(request, "target_sample_rate", None)
             if requested_rate is not None:
@@ -2397,6 +2468,16 @@ class TTSServiceV2:
                 extras["target_sample_rate"] = target_sample_rate
                 # Alias for providers that currently look up `sample_rate` in extra params.
                 extras["sample_rate"] = target_sample_rate
+            for seed_key in ("seed", "generation_seed"):
+                maybe_seed = extras.get(seed_key)
+                if maybe_seed is None:
+                    continue
+                try:
+                    seed = int(maybe_seed)
+                    extras["seed"] = seed
+                    break
+                except _TTS_NONCRITICAL_EXCEPTIONS:
+                    seed = None
 
         tts_request = TTSRequest(
             text=request.input,
@@ -2407,6 +2488,7 @@ class TTSServiceV2:
             stream=request.stream if hasattr(request, 'stream') else True,
             language=language,
             voice_reference=voice_ref_bytes,
+            seed=seed,
             # Additional parameters can be added via extra_params
             extra_params=extras
         )
@@ -2433,6 +2515,35 @@ class TTSServiceV2:
                 return data_b64, fmt
         return None, None
 
+    @staticmethod
+    def _coerce_nonempty_string(value: Any) -> str:
+        """Return a stripped string value or an empty string for invalid inputs."""
+        if value is None:
+            return ""
+        try:
+            return str(value).strip()
+        except _TTS_NONCRITICAL_EXCEPTIONS:
+            return ""
+
+    def _resolve_custom_voice_reference_id(
+        self,
+        request: TTSRequest,
+        provider_hint: Optional[str],
+    ) -> str:
+        """Resolve stored custom voice ids from canonical and safe provider aliases."""
+        voice_id = self._coerce_nonempty_string(request.voice)
+        if voice_id.startswith("custom:"):
+            return voice_id.split("custom:", 1)[-1].strip()
+
+        if (provider_hint or "").lower() != "chatterbox":
+            return ""
+
+        extras = request.extra_params if isinstance(request.extra_params, dict) else {}
+        voice_mode = self._coerce_nonempty_string(extras.get("voice_mode")).lower()
+        if voice_mode != "predefined":
+            return ""
+        return self._coerce_nonempty_string(extras.get("predefined_voice_id"))
+
     async def _apply_custom_voice_reference(
         self,
         request: TTSRequest,
@@ -2442,23 +2553,21 @@ class TTSServiceV2:
         """Populate voice_reference and provider artifacts for custom: voices."""
         if not user_id:
             return
-        voice_id = request.voice or ""
-        is_custom_voice = isinstance(voice_id, str) and voice_id.startswith("custom:")
-        raw_id = voice_id.split("custom:", 1)[-1].strip() if is_custom_voice else ""
+        raw_id = self._resolve_custom_voice_reference_id(request, provider_hint)
         provider_key = (provider_hint or "").lower()
         try:
             from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
 
             voice_manager = get_voice_manager()
             metadata = None
-            if is_custom_voice and raw_id and request.voice_reference is None:
+            if raw_id and request.voice_reference is None:
                 request.voice_reference = await voice_manager.load_voice_reference_audio(user_id, raw_id)
 
             extras = request.extra_params or {}
             if not isinstance(extras, dict):
                 extras = {}
 
-            if is_custom_voice and raw_id:
+            if raw_id:
                 metadata = await voice_manager.load_reference_metadata(user_id, raw_id)
                 ref_text_keys = ("reference_text", "ref_text", "voice_reference_text")
                 has_ref_text = any(extras.get(key) for key in ref_text_keys)
@@ -3260,6 +3369,38 @@ class TTSServiceV2:
             status["circuit_breakers"] = self.circuit_manager.get_all_status()
 
         return status
+
+    async def unload_provider(self, provider: str) -> dict[str, Any]:
+        """Release one cached TTS provider runtime without shutting down the whole service."""
+        factory = self.factory or self._factory
+        if factory is None:
+            factory = await get_tts_factory()
+            self.factory = factory
+            self._factory = factory
+
+        unload = getattr(factory, "unload_provider", None)
+        if unload is None:
+            raise TTSProviderNotConfiguredError(
+                "TTS factory does not support provider unload",
+                provider=str(provider),
+            )
+
+        provider_key = str(provider).strip().lower()
+        async with self._active_requests_lock:
+            active_count = self._active_request_counts.get(provider_key, 0)
+        if active_count > 0:
+            raise TTSProviderBusyError(
+                "Cannot unload TTS provider while requests are in flight",
+                provider=provider_key,
+                details={"active_requests": active_count},
+            )
+
+        result = unload(provider)
+        if inspect.isawaitable(result):
+            result = await result
+        if isinstance(result, dict):
+            return result
+        return {"provider": str(provider), "unloaded": bool(result)}
 
 
 # Singleton management

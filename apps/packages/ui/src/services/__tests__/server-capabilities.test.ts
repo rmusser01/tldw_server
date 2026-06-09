@@ -56,6 +56,20 @@ if (!serverCapabilitiesSourcePath) {
   throw new Error("Unable to locate server-capabilities.ts for fallback spec contract test")
 }
 
+const openApiGuardPathCandidates = [
+  "src/services/tldw/openapi-guard.ts",
+  "../packages/ui/src/services/tldw/openapi-guard.ts",
+  "apps/packages/ui/src/services/tldw/openapi-guard.ts"
+]
+
+const openApiGuardSourcePath = openApiGuardPathCandidates.find((candidate) =>
+  existsSync(resolve(process.cwd(), candidate))
+)
+
+if (!openApiGuardSourcePath) {
+  throw new Error("Unable to locate openapi-guard.ts for route contract test")
+}
+
 describe("server capabilities docs-info merge", () => {
   beforeEach(() => {
     vi.resetModules()
@@ -880,7 +894,7 @@ describe("server capabilities docs-info merge", () => {
     expect(diagnostics.inFlightHits).toBe(1)
   })
 
-  it("keeps fallback spec aligned with TTS voice-catalog route checks", () => {
+  it("keeps fallback spec aligned with TTS voice route checks", () => {
     const source = readFileSync(resolve(process.cwd(), serverCapabilitiesSourcePath), "utf8")
 
     const fallbackPathsBlock = source.match(
@@ -888,5 +902,14 @@ describe("server capabilities docs-info merge", () => {
     )?.[1]
 
     expect(fallbackPathsBlock).toContain('"/api/v1/audio/voices/catalog"')
+    expect(fallbackPathsBlock).toContain('"/api/v1/audio/voice-conversion"')
+    expect(fallbackPathsBlock).toContain('"/api/v1/audio/tts/providers/{provider}/unload"')
+  })
+
+  it("keeps strict client path metadata aligned with Chatterbox voice conversion", () => {
+    const source = readFileSync(resolve(process.cwd(), openApiGuardSourcePath), "utf8")
+
+    expect(source).toContain('| "/api/v1/audio/voice-conversion"')
+    expect(source).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
   })
 })

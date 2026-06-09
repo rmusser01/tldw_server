@@ -135,6 +135,8 @@ export type ClientPath =
   | "/api/v1/characters/world-books/import"
   | "/api/v1/audio/providers"
   | "/api/v1/audio/speech"
+  | "/api/v1/audio/voice-conversion"
+  | "/api/v1/audio/tts/providers/{provider}/unload"
   | "/api/v1/audio/speech/jobs"
   | "/api/v1/audio/speech/jobs/{job_id}/artifacts"
   | "/api/v1/audio/jobs/{job_id}/progress/stream"
