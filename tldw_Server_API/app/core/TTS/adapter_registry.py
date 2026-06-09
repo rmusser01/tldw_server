@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 #
 # Local Imports
 from .adapters.base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities
+from .chatterbox_catalog import CHATTERBOX_MODEL_PROVIDER_ALIASES
 from .tts_config import get_tts_config_manager
 from .tts_exceptions import (
     TTSError,
@@ -165,10 +166,24 @@ def _apply_provider_aliases(provider_key: str, cfg: dict[str, Any]) -> dict[str,
         alias("max_speakers", "dia_max_speakers")
         alias("target_latency_ms", "dia_target_latency_ms")
     elif normalized_provider == "chatterbox":
+        alias("variant", "chatterbox_variant")
+        alias("model_path", "chatterbox_model_path")
+        alias("multilingual_model_path", "chatterbox_multilingual_model_path")
+        alias("turbo_model_path", "chatterbox_turbo_model_path")
+        alias("vc_model_path", "chatterbox_vc_model_path")
         alias("device", "chatterbox_device")
         alias("use_multilingual", "chatterbox_use_multilingual")
+        alias("use_bf16", "chatterbox_use_bf16")
         alias("disable_watermark", "chatterbox_disable_watermark")
         alias("target_latency_ms", "chatterbox_target_latency_ms")
+        alias("auto_download", "chatterbox_auto_download")
+        alias("conditionals_cache_size", "chatterbox_conditionals_cache_size")
+        alias("default_exaggeration", "chatterbox_default_exaggeration")
+        alias("cfg_weight", "chatterbox_cfg_weight")
+        alias("temperature", "chatterbox_temperature")
+        alias("repetition_penalty", "chatterbox_repetition_penalty")
+        alias("min_p", "chatterbox_min_p")
+        alias("top_p", "chatterbox_top_p")
     elif normalized_provider == "elevenlabs":
         alias("api_key", "elevenlabs_api_key")
         alias("base_url", "elevenlabs_base_url")
@@ -968,6 +983,49 @@ class TTSAdapterRegistry:
 
         logger.info("All TTS adapters closed")
 
+    async def unload_provider(self, provider: Union[TTSProvider, str]) -> dict[str, Any]:
+        """Close and forget one initialized provider adapter, if currently loaded."""
+        resolved_provider = self.resolve_provider(provider)
+        if resolved_provider is None or resolved_provider not in self._adapter_specs:
+            raise TTSProviderNotConfiguredError(
+                f"Unknown TTS provider '{provider}'",
+                provider=str(provider),
+            )
+
+        provider_key = self._base.resolve_provider_name(resolved_provider.value)
+        cached_by_name = self._base.get_cached_adapters()
+        adapter = self._adapters.pop(resolved_provider, None)
+        if adapter is None:
+            adapter = cached_by_name.get(provider_key) or cached_by_name.get(resolved_provider.value)
+
+        unloaded = adapter is not None
+        if adapter is not None:
+            logger.info(f"Unloading {resolved_provider.value} TTS adapter")
+            await adapter.close()
+
+        with self._base._lock:  # noqa: SLF001 - wrapper needs single-provider cache invalidation.
+            if provider_key:
+                self._base._invalidate_provider_state_locked(provider_key)  # noqa: SLF001
+            self._base._invalidate_provider_state_locked(resolved_provider.value)  # noqa: SLF001
+
+        self._initialized_providers.discard(resolved_provider)
+
+        resource_manager = get_existing_resource_manager()
+        if resource_manager:
+            for resource_key in {resolved_provider.value, provider_key}:
+                if not resource_key:
+                    continue
+                try:
+                    await resource_manager.unregister_model(resource_key)
+                except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(
+                        "Error unregistering {} from resource manager ({})",
+                        resource_key,
+                        e.__class__.__name__,
+                    )
+
+        return {"provider": resolved_provider.value, "unloaded": unloaded}
+
     def get_status_summary(self) -> dict[str, Any]:
         """
         Get status summary of all adapters.
@@ -1058,8 +1116,7 @@ class TTSAdapterFactory:
         "dia-1.6b": TTSProvider.DIA,
 
         # Chatterbox models
-        "chatterbox": TTSProvider.CHATTERBOX,
-        "chatterbox-emotion": TTSProvider.CHATTERBOX,
+        **{alias: TTSProvider.CHATTERBOX for alias in CHATTERBOX_MODEL_PROVIDER_ALIASES},
 
         # VibeVoice models
         "vibevoice": TTSProvider.VIBEVOICE,
@@ -1202,6 +1259,10 @@ class TTSAdapterFactory:
     async def close(self):
         """Close all adapters"""
         await self.registry.close_all()
+
+    async def unload_provider(self, provider: Union[TTSProvider, str]) -> dict[str, Any]:
+        """Close and forget one initialized provider adapter."""
+        return await self.registry.unload_provider(provider)
 
     def get_status(self) -> dict[str, Any]:
         """Get factory status"""

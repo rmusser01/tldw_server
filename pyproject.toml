@@ -428,6 +428,8 @@ TTS_chatterbox = [
   "safetensors>=0.4.2",
   # Audio / DSP
   "librosa>=0.10.0",
+  "pyloudnorm>=0.1.1",
+  "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master",
   # Diffusion / attention utils used in matcha blocks
   "diffusers>=0.29.0",
   "einops>=0.7.0",
@@ -435,6 +437,7 @@ TTS_chatterbox = [
   "conformer>=0.3.2",
   # S3 tokenizer backend
   "s3tokenizer>=0.1.6",
+  "omegaconf>=2.3.0",
 ]
 
 # Optional language preprocessing extras for multilingual text tokenization

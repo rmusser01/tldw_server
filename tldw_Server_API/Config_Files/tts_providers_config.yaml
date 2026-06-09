@@ -147,12 +147,18 @@ providers:
   # Chatterbox TTS Configuration
   chatterbox:
     enabled: false  # Disabled by default (requires installation)
-    model_path: "resemble-ai/chatterbox"   # (unused in upstream >=0.1.4)
-    device: "cuda"  # Recommended: GPU (also supports mps/cpu)
-    use_multilingual: false  # Set true to enable 23-language model
+    variant: "standard"  # Options: standard, multilingual, turbo
+    model_path: "ResembleAI/chatterbox"
+    multilingual_model_path: "ResembleAI/chatterbox-multilingual"
+    turbo_model_path: "ResembleAI/chatterbox-turbo"
+    vc_model_path: null  # Optional local ChatterboxVC directory; null uses upstream pretrained default
+    device: "auto"  # auto selects cuda, mps, then cpu
+    use_multilingual: false  # Legacy compat: non-English requests use multilingual when true
+    use_bf16: false  # Opt-in: false, true/on, or auto via TTS_BF16
     sample_rate: 24000
     disable_watermark: true  # Ensure no watermark is applied
     target_latency_ms: 200  # Progressive chunk size target
+    conditionals_cache_size: 16  # Max prepared voice-reference conditionals cached per adapter; 0 disables retention
 
   # VibeVoice Configuration
   # Expressive multi-speaker TTS with optional background music and singing.

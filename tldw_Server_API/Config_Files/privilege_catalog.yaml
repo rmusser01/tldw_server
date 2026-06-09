@@ -522,6 +522,23 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/audio-speech
+  - id: audio.voice_conversion
+    description: Convert uploaded source speech into a target voice using voice conversion providers.
+    resource_tags:
+      - audio
+      - tts
+      - voices
+      - voice-conversion
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-voice-conversion
   - id: audio.voices.upload
     description: Upload and register custom voice reference assets.
     resource_tags:

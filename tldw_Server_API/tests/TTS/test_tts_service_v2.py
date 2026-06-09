@@ -429,6 +429,171 @@ async def test_generate_speech_propagates_request_and_correlation_ids():
     assert metadata.get("correlation_id") == "corr-123"
 
 
+def test_convert_request_maps_extra_seed_to_tts_request_seed():
+    factory = MagicMock()
+    service = TTSServiceV2(factory)
+    request = OpenAISpeechRequest(
+        input="Hello seeded Chatterbox",
+        model="chatterbox-turbo",
+        voice="default",
+        response_format="wav",
+        extra_params={"seed": "1234"},
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.model == "chatterbox-turbo"
+    assert converted.seed == 1234
+    assert converted.extra_params["seed"] == 1234
+
+
+def test_convert_request_uses_chatterbox_output_format_alias_when_response_format_omitted():
+    service = TTSServiceV2(MagicMock())
+    request = OpenAISpeechRequest(
+        input="Hello Chatterbox",
+        model="chatterbox",
+        voice="default",
+        output_format="wav",
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.format == AudioFormat.WAV
+
+
+def test_convert_request_prefers_response_format_over_chatterbox_output_format_alias():
+    service = TTSServiceV2(MagicMock())
+    request = OpenAISpeechRequest(
+        input="Hello Chatterbox",
+        model="chatterbox-turbo",
+        voice="default",
+        response_format="flac",
+        output_format="wav",
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.format == AudioFormat.FLAC
+
+
+def test_convert_request_ignores_output_format_alias_for_non_chatterbox_models():
+    service = TTSServiceV2(MagicMock())
+    request = OpenAISpeechRequest(
+        input="Hello Kokoro",
+        model="kokoro",
+        voice="default",
+        output_format="wav",
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.format == AudioFormat.MP3
+
+
+def test_convert_request_uses_chatterbox_language_alias_when_lang_code_omitted():
+    service = TTSServiceV2(MagicMock())
+    request = OpenAISpeechRequest(
+        input="Bonjour",
+        model="chatterbox-multilingual",
+        voice="default",
+        language="fr",
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.language == "fr"
+
+
+def test_convert_request_prefers_lang_code_over_chatterbox_language_alias():
+    service = TTSServiceV2(MagicMock())
+    request = OpenAISpeechRequest(
+        input="Hola",
+        model="chatterbox-multilingual",
+        voice="default",
+        lang_code="es",
+        language="fr",
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.language == "es"
+
+
+def test_convert_request_ignores_language_alias_for_non_chatterbox_models():
+    service = TTSServiceV2(MagicMock())
+    request = OpenAISpeechRequest(
+        input="Bonjour",
+        model="kokoro",
+        voice="default",
+        language="fr",
+    )
+
+    converted = service._convert_request(request)
+
+    assert converted.language is None
+
+
+def test_resolve_chunking_params_accepts_chatterbox_split_text_alias():
+    service = TTSServiceV2(MagicMock())
+
+    enabled, target, max_chars, min_chars, crossfade_ms = service._resolve_chunking_params(
+        {"split_text": True}
+    )
+
+    assert enabled is True
+    assert target == 120
+    assert max_chars == 150
+    assert min_chars == 50
+    assert crossfade_ms == 50
+
+
+def test_resolve_chunking_params_maps_chatterbox_chunk_size_alias():
+    service = TTSServiceV2(MagicMock())
+
+    enabled, target, max_chars, min_chars, _crossfade_ms = service._resolve_chunking_params(
+        {"split_text": True, "chunk_size": 320}
+    )
+
+    assert enabled is True
+    assert target == 320
+    assert max_chars == 320
+    assert min_chars == 50
+
+
+def test_resolve_chunking_params_respects_disabled_chatterbox_split_text():
+    service = TTSServiceV2(MagicMock())
+
+    assert service._resolve_chunking_params({"split_text": False, "chunk_size": 320}) == (False, 0, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_convert_chatterbox_voice_delegates_to_adapter_runtime():
+    adapter = MagicMock()
+    adapter.convert_voice = AsyncMock(
+        return_value=TTSResponse(audio_data=b"converted", format=AudioFormat.WAV, sample_rate=24000)
+    )
+    service = TTSServiceV2(MagicMock())
+    service.metrics = MetricsStub()
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    response = await service.convert_chatterbox_voice(
+        source_audio_path="/tmp/source.wav",
+        target_voice_path="/tmp/target.wav",
+        response_format="wav",
+        stream=False,
+    )
+
+    service._get_adapter.assert_awaited_once_with("chatterbox", "chatterbox", overrides=None)
+    adapter.convert_voice.assert_awaited_once_with(
+        source_audio_path="/tmp/source.wav",
+        target_voice_path="/tmp/target.wav",
+        format=AudioFormat.WAV,
+        stream=False,
+    )
+    assert response.audio_data == b"converted"
+    assert response.format is AudioFormat.WAV
+
+
 @pytest.mark.asyncio
 async def test_fallback_outcomes_metric_records_initiated_and_success():
     primary_adapter = MagicMock()

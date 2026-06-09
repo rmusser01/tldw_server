@@ -38,6 +38,7 @@ import type {
   MlxStatus,
   MlxLoadRequest,
   MlxUnloadRequest,
+  TtsProviderUnloadResponse,
 } from "../TldwApiClient"
 import type {
   AudioPresetCreatePayload,
@@ -570,6 +571,18 @@ export const modelsAudioMethods = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {}
+    })
+  },
+
+  async unloadTtsProvider(provider: string): Promise<TtsProviderUnloadResponse> {
+    const normalizedProvider = String(provider || "").trim()
+    if (!normalizedProvider) {
+      throw new Error("provider is required to unload a TTS provider.")
+    }
+
+    return await bgRequest<TtsProviderUnloadResponse>({
+      path: `/api/v1/audio/tts/providers/${encodeURIComponent(normalizedProvider)}/unload`,
+      method: "POST"
     })
   },
 

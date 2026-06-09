@@ -1214,6 +1214,11 @@ export interface MlxUnloadRequest {
   reason?: string
 }
 
+export interface TtsProviderUnloadResponse {
+  provider: string
+  unloaded: boolean
+}
+
 export interface MediaIngestionBudgetDiagnostics {
   status: string
   entity?: string | null
@@ -2504,6 +2509,18 @@ export class TldwApiClientBase {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {}
+    })
+  }
+
+  async unloadTtsProvider(provider: string): Promise<TtsProviderUnloadResponse> {
+    const normalizedProvider = String(provider || "").trim()
+    if (!normalizedProvider) {
+      throw new Error("provider is required to unload a TTS provider.")
+    }
+
+    return await bgRequest<TtsProviderUnloadResponse>({
+      path: `/api/v1/audio/tts/providers/${encodeURIComponent(normalizedProvider)}/unload`,
+      method: "POST"
     })
   }
 

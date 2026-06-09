@@ -3212,6 +3212,82 @@
           "type": "dependency"
         },
         {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Release one cached TTS provider runtime so it can be reloaded on demand.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.unload_tts_provider",
+      "methods": [
+        "POST"
+      ],
+      "name": "unload_tts_provider",
+      "path": "/api/v1/audio/tts/providers/{provider}/unload",
+      "rate_limit_resources": [],
+      "summary": "Unload a cached TTS provider runtime",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Convert uploaded speech into a target Chatterbox voice.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voice_conversion.create_voice_conversion",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_voice_conversion",
+      "path": "/api/v1/audio/voice-conversion",
+      "rate_limit_resources": [],
+      "summary": "Convert source speech into a target voice with Chatterbox VC.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -4818,6 +4894,44 @@
         "Audio",
         "Audio"
       ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Release one cached TTS provider runtime so it can be reloaded on demand.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.unload_tts_provider",
+      "methods": [
+        "POST"
+      ],
+      "name": "unload_tts_provider",
+      "path": "/api/v1/audio/tts/providers/{provider}/unload",
+      "rate_limit_resources": [],
+      "summary": "Unload a cached TTS provider runtime",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
     }
   ],
   "audio.tokenizer": [
@@ -5066,6 +5180,46 @@
       "path": "/api/v1/audio/translations",
       "rate_limit_resources": [],
       "summary": "Translates audio into English (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voice_conversion": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Convert uploaded speech into a target Chatterbox voice.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voice_conversion.create_voice_conversion",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_voice_conversion",
+      "path": "/api/v1/audio/voice-conversion",
+      "rate_limit_resources": [],
+      "summary": "Convert source speech into a target voice with Chatterbox VC.",
       "tags": [
         "audio",
         "Audio",
