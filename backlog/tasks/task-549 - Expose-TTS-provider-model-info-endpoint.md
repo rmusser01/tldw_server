@@ -42,8 +42,6 @@ Verification: RED focused provider_model_info tests failed before implementation
 Added a focused TTS provider model-info endpoint for Chatterbox-style discovery of loaded state, supported model IDs, family metadata, voice-conversion metadata, and unload route. The endpoint returns 404 for unknown providers, sanitizes capability/status values, is documented, and passed focused red/green tests, broader endpoint tests, Bandit, and git diff --check.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

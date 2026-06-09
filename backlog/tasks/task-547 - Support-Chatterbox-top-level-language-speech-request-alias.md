@@ -44,8 +44,6 @@ Verification:
 Added upstream-style top-level language compatibility for Chatterbox speech requests while preserving lang_code precedence. The alias is scoped to Chatterbox-family model IDs, leaves non-Chatterbox conversion unchanged, and is documented in schema/runbook/plan notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

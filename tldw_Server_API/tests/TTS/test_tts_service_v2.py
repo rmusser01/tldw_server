@@ -25,7 +25,7 @@ from tldw_Server_API.app.core.TTS.adapters.base import (
 )
 from tldw_Server_API.app.core.TTS.circuit_breaker import CircuitBreaker, CircuitState
 from tldw_Server_API.app.core.TTS.audio_utils import AudioProcessor, process_voice_reference
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError, TTSProviderError
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError, TTSProviderBusyError, TTSProviderError
 
 #######################################################################################################################
 #
@@ -459,6 +459,7 @@ def test_convert_request_uses_chatterbox_output_format_alias_when_response_forma
     converted = service._convert_request(request)
 
     assert converted.format == AudioFormat.WAV
+    assert request.response_format == "wav"
 
 
 def test_convert_request_prefers_response_format_over_chatterbox_output_format_alias():
@@ -567,6 +568,61 @@ def test_resolve_chunking_params_respects_disabled_chatterbox_split_text():
 
 
 @pytest.mark.asyncio
+async def test_generate_chunked_response_strips_chatterbox_chunking_aliases_from_child_requests():
+    service = TTSServiceV2(MagicMock())
+    seen_extras: list[dict[str, Any]] = []
+
+    class ChunkAdapter:
+        sample_rate = 24000
+
+        async def get_capabilities(self):
+            return TTSCapabilities(
+                provider_name="chunker",
+                supported_languages={"en"},
+                supported_voices=[],
+                supported_formats={AudioFormat.PCM},
+                max_text_length=1000,
+                supports_streaming=False,
+            )
+
+        async def generate(self, request: TTSRequest):
+            seen_extras.append(dict(request.extra_params or {}))
+            return TTSResponse(
+                audio_data=np.zeros(240, dtype=np.int16).tobytes(),
+                format=AudioFormat.PCM,
+                sample_rate=24000,
+            )
+
+    request = TTSRequest(
+        text="One sentence. Two sentence. Three sentence.",
+        voice="default",
+        model="chatterbox",
+        format=AudioFormat.WAV,
+        extra_params={
+            "split_text": True,
+            "chunk_size": 12,
+            "chunk_crossfade_ms": 0,
+            "preserve": "yes",
+        },
+    )
+
+    response = await service._generate_chunked_response(
+        adapter=ChunkAdapter(),
+        request=request,
+        provider_key="chatterbox",
+        target_chars=12,
+        max_chars=12,
+        min_chars=1,
+        crossfade_ms=0,
+    )
+
+    assert response is not None
+    assert seen_extras
+    for extras in seen_extras:
+        assert extras == {"preserve": "yes"}
+
+
+@pytest.mark.asyncio
 async def test_convert_chatterbox_voice_delegates_to_adapter_runtime():
     adapter = MagicMock()
     adapter.convert_voice = AsyncMock(
@@ -592,6 +648,23 @@ async def test_convert_chatterbox_voice_delegates_to_adapter_runtime():
     )
     assert response.audio_data == b"converted"
     assert response.format is AudioFormat.WAV
+    assert service._active_request_counts == {}
+
+
+@pytest.mark.asyncio
+async def test_unload_provider_rejects_active_requests():
+    factory = MagicMock()
+    factory.unload_provider = AsyncMock(return_value={"provider": "chatterbox", "unloaded": True})
+    service = TTSServiceV2(factory)
+    service._active_request_counts["chatterbox"] = 1
+
+    with pytest.raises(TTSProviderBusyError) as exc_info:
+        await service.unload_provider("chatterbox")
+
+    assert exc_info.value.details == {"active_requests": 1}
+    factory.unload_provider.assert_not_called()
+
+
 
 
 @pytest.mark.asyncio

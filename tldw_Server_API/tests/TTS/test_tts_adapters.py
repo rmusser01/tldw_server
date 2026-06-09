@@ -631,6 +631,43 @@ class TestTTSAdapterFactory:
         status_after = factory.get_status()
         assert status_after["providers"]["mock"]["initialized"] is False
 
+    async def test_unload_provider_clears_cache_when_adapter_close_fails(self):
+        """Factory unload should clear stale state even if adapter shutdown raises."""
+
+        class FailingCloseAdapter(TTSAdapter):
+            async def initialize(self) -> bool:
+                self._status = ProviderStatus.AVAILABLE
+                return True
+
+            async def generate(self, request: TTSRequest) -> TTSResponse:
+                return TTSResponse(audio_data=b"ok")
+
+            async def get_capabilities(self) -> TTSCapabilities:
+                return TTSCapabilities(
+                    provider_name="Mock",
+                    supported_languages={"en"},
+                    supported_voices=[],
+                    supported_formats={AudioFormat.WAV},
+                    max_text_length=1000,
+                    supports_streaming=False,
+                )
+
+            async def close(self):
+                raise RuntimeError("close failed")
+
+        factory = TTSAdapterFactory({"providers": {"mock": {"enabled": True}}})
+        factory.registry._adapter_specs = {TTSProvider.MOCK: FailingCloseAdapter}
+        factory.registry._base.register_adapter(TTSProvider.MOCK.value, FailingCloseAdapter)
+
+        adapter = await factory.registry.get_adapter(TTSProvider.MOCK)
+        assert adapter is not None
+
+        result = await factory.unload_provider("mock")
+
+        assert result == {"provider": "mock", "unloaded": True}
+        status_after = factory.get_status()
+        assert status_after["providers"]["mock"]["initialized"] is False
+
     async def test_unload_provider_is_idempotent_when_not_loaded(self):
         """Unloading a registered but uncached provider should be a no-op success."""
         class UnusedAdapter(TTSAdapter):

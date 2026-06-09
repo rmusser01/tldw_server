@@ -208,8 +208,8 @@ def _materialize_audio_bytes(
             prefix=prefix,
             delete=False,
         ) as tmp_file:
-            tmp_file.write(payload)
             tmp_path = tmp_file.name
+            tmp_file.write(payload)
     except _VOICE_CONVERSION_NONCRITICAL_EXCEPTIONS as exc:
         if tmp_path:
             with contextlib.suppress(OSError):

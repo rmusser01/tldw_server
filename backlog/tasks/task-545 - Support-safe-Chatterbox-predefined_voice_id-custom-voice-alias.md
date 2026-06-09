@@ -44,8 +44,6 @@ Verification:
 Added Chatterbox-only compatibility for upstream-style predefined voice selection by resolving extra_params.voice_mode=predefined plus extra_params.predefined_voice_id through the authenticated user custom voice store. Kept arbitrary reference_audio_filename values inert and documented the safe mapping in API schema docs and the Chatterbox setup runbook.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -72,6 +72,7 @@ from .tts_exceptions import (
     TTSFallbackExhaustedError,
     TTSGenerationError,
     TTSInvalidVoiceReferenceError,
+    TTSProviderBusyError,
     TTSProviderError,
     TTSProviderNotConfiguredError,
     TTSResourceError,
@@ -947,6 +948,8 @@ class TTSServiceV2:
         for key in (
             "chunking_service",
             "chunking",
+            "split_text",
+            "chunk_size",
             "chunk_target_chars",
             "chunk_target",
             "chunk_chars_target",
@@ -2355,12 +2358,19 @@ class TTSServiceV2:
                 provider="chatterbox",
             )
 
-        return await convert_voice(
-            source_audio_path=source_audio_path,
-            target_voice_path=target_voice_path,
-            format=audio_format,
-            stream=stream,
-        )
+        provider_key = "chatterbox"
+        await self._increment_active_requests(provider_key)
+        try:
+            async with self._semaphore:
+                async with self._provider_concurrency_guard(provider_key):
+                    return await convert_voice(
+                        source_audio_path=source_audio_path,
+                        target_voice_path=target_voice_path,
+                        format=audio_format,
+                        stream=stream,
+                    )
+        finally:
+            await self._decrement_active_requests(provider_key)
 
     def _convert_request(self, request: OpenAISpeechRequest) -> TTSRequest:
         """Convert OpenAI request to unified TTS request"""
@@ -2387,6 +2397,7 @@ class TTSServiceV2:
                     explicit_fields = getattr(request, "__fields_set__", set())
                 if model_id.startswith("chatterbox") and "response_format" not in explicit_fields:
                     response_format = output_format
+                    setattr(request, "response_format", response_format)
             except _TTS_NONCRITICAL_EXCEPTIONS:
                 pass
 
@@ -3372,6 +3383,16 @@ class TTSServiceV2:
             raise TTSProviderNotConfiguredError(
                 "TTS factory does not support provider unload",
                 provider=str(provider),
+            )
+
+        provider_key = str(provider).strip().lower()
+        async with self._active_requests_lock:
+            active_count = self._active_request_counts.get(provider_key, 0)
+        if active_count > 0:
+            raise TTSProviderBusyError(
+                "Cannot unload TTS provider while requests are in flight",
+                provider=provider_key,
+                details={"active_requests": active_count},
             )
 
         result = unload(provider)

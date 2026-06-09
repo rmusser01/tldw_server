@@ -43,8 +43,6 @@ Verification:
 Added discoverable Chatterbox capability metadata for standard/multilingual generation controls, Turbo controls, speed_factor request fields, upstream-style split_text/chunk_size chunking aliases, and BF16 modes. Kept generic supports_speech_rate false and documented the expanded metadata surface in the Chatterbox setup runbook and implementation plan.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

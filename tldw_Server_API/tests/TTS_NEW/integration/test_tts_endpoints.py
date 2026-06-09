@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSResponse
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, TTSProviderBusyError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.TTS.tts_jobs_worker import _handle_tts_job
 
@@ -135,6 +135,8 @@ class TestTTSGenerateEndpoint:
     async def test_unload_tts_provider_endpoint(self, test_client, auth_headers):
         """Provider unload endpoint should delegate to the TTS service."""
         seen: dict[str, Any] = {}
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
         class FakeTTSService:
             async def unload_provider(self, provider: str):
@@ -144,7 +146,11 @@ class TestTTSGenerateEndpoint:
         async def _override_tts_service():
             return FakeTTSService()
 
+        async def _override_admin_principal():
+            return AuthPrincipal(kind="user", user_id=1, roles=["admin"], is_admin=True)
+
         test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _override_tts_service
+        test_client.app.dependency_overrides[get_auth_principal] = _override_admin_principal
         try:
             response = test_client.post(
                 "/api/v1/audio/tts/providers/chatterbox/unload",
@@ -152,10 +158,71 @@ class TestTTSGenerateEndpoint:
             )
         finally:
             test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+            test_client.app.dependency_overrides.pop(get_auth_principal, None)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {"provider": "chatterbox", "unloaded": True}
         assert seen == {"provider": "chatterbox"}
+
+    async def test_unload_tts_provider_endpoint_requires_admin(self, test_client, auth_headers):
+        """Provider unload should reject normal speech callers because it evicts global runtime state."""
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+        class FakeTTSService:
+            async def unload_provider(self, provider: str):
+                raise AssertionError("unload_provider should not be called for non-admin callers")
+
+        async def _override_tts_service():
+            return FakeTTSService()
+
+        async def _override_user_principal():
+            return AuthPrincipal(kind="user", user_id=1, roles=["user"], is_admin=False)
+
+        test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _override_tts_service
+        test_client.app.dependency_overrides[get_auth_principal] = _override_user_principal
+        try:
+            response = test_client.post(
+                "/api/v1/audio/tts/providers/chatterbox/unload",
+                headers=auth_headers,
+            )
+        finally:
+            test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+            test_client.app.dependency_overrides.pop(get_auth_principal, None)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    async def test_unload_tts_provider_endpoint_returns_conflict_when_active(self, test_client, auth_headers):
+        """Provider unload should return a controlled conflict while requests are in flight."""
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+        class FakeTTSService:
+            async def unload_provider(self, provider: str):
+                raise TTSProviderBusyError(
+                    "Cannot unload TTS provider while requests are in flight",
+                    provider=provider,
+                    details={"active_requests": 1},
+                )
+
+        async def _override_tts_service():
+            return FakeTTSService()
+
+        async def _override_admin_principal():
+            return AuthPrincipal(kind="user", user_id=1, roles=["admin"], is_admin=True)
+
+        test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _override_tts_service
+        test_client.app.dependency_overrides[get_auth_principal] = _override_admin_principal
+        try:
+            response = test_client.post(
+                "/api/v1/audio/tts/providers/chatterbox/unload",
+                headers=auth_headers,
+            )
+        finally:
+            test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+            test_client.app.dependency_overrides.pop(get_auth_principal, None)
+
+        assert response.status_code == status.HTTP_409_CONFLICT
 
     async def test_generate_with_voice_settings(self, test_client, auth_headers):
         """Test generation with voice settings."""

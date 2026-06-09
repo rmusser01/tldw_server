@@ -1,5 +1,5 @@
 version: 1.0.0
-updated_at: 2026-02-07T00:00:00Z
+updated_at: 2026-06-09T00:00:00Z
 scopes:
   - id: media.ingest
     description: Ingest new media assets via upload, URL fetch, or pipeline triggers.
@@ -522,6 +522,21 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/audio-speech
+  - id: audio.tts_provider_unload
+    description: Unload initialized TTS provider runtimes from server memory.
+    resource_tags:
+      - audio
+      - tts
+      - admin
+      - provider-lifecycle
+    sensitivity_tier: restricted
+    rate_limit_class: admin
+    default_roles:
+      - admin
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-tts-provider-unload
   - id: audio.voice_conversion
     description: Convert uploaded source speech into a target voice using voice conversion providers.
     resource_tags:

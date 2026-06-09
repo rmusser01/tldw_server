@@ -169,6 +169,37 @@ class TestChatterboxAdapterMock:
         }
         assert caps.supports_speech_rate is False
 
+    async def test_load_runtime_fails_closed_when_auto_download_disabled_without_local_path(self):
+        """Disabling auto-download should not mutate process-wide offline env state."""
+        adapter = ChatterboxAdapter({"chatterbox_auto_download": False})
+        runtime_cls = MagicMock()
+        runtime_cls.from_pretrained = MagicMock()
+
+        with pytest.raises(TTSModelLoadError):
+            adapter._load_chatterbox_runtime(runtime_cls, model_path=None)
+
+        runtime_cls.from_pretrained.assert_not_called()
+
+    async def test_generation_metadata_reports_watermark_state(self):
+        """Generation metadata should reflect whether watermarking is disabled."""
+        request = TTSRequest(text="hello", voice="default", model="chatterbox")
+
+        watermarked_adapter = ChatterboxAdapter({"chatterbox_disable_watermark": False})
+        unwatermarked_adapter = ChatterboxAdapter({"chatterbox_disable_watermark": True})
+
+        assert watermarked_adapter._build_generation_metadata(
+            request,
+            language_id="en",
+            family=ChatterboxModelFamily.STANDARD,
+            exaggeration=0.5,
+        )["watermarked"] is True
+        assert unwatermarked_adapter._build_generation_metadata(
+            request,
+            language_id="en",
+            family=ChatterboxModelFamily.STANDARD,
+            exaggeration=0.5,
+        )["watermarked"] is False
+
     async def test_character_voice_presets(self):
         """Test character voice presets"""
         adapter = ChatterboxAdapter({})

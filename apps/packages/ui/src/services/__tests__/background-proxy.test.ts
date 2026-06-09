@@ -415,6 +415,32 @@ describe("background proxy fallback safety", () => {
     expect(body.get("target_voice")).toBeInstanceOf(Blob)
   })
 
+  it("appends single direct-fallback uploads to files and the legacy file alias", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+
+    await bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      file: {
+        name: "clip.wav",
+        type: "audio/wav",
+        data: Uint8Array.from([7, 8, 9])
+      },
+      preferDirect: true
+    })
+
+    const requestPayload = mocks.tldwRequest.mock.calls[0][0] as { body?: FormData }
+    const body = requestPayload.body as FormData
+    expect(body.get("files")).toBeInstanceOf(Blob)
+    expect(body.get("file")).toBeInstanceOf(Blob)
+  })
+
   it("forwards multiple files through extension upload messaging", async () => {
     mocks.sendMessage.mockResolvedValue({
       ok: true,

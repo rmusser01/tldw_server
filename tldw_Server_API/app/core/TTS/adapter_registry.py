@@ -999,16 +999,23 @@ class TTSAdapterRegistry:
             adapter = cached_by_name.get(provider_key) or cached_by_name.get(resolved_provider.value)
 
         unloaded = adapter is not None
-        if adapter is not None:
-            logger.info(f"Unloading {resolved_provider.value} TTS adapter")
-            await adapter.close()
+        try:
+            if adapter is not None:
+                logger.info(f"Unloading {resolved_provider.value} TTS adapter")
+                await adapter.close()
+        except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
+            logger.bind(
+                provider=resolved_provider.value,
+                provider_key=provider_key or "<missing>",
+                error_type=type(e).__name__,
+            ).opt(exception=e).warning("Error closing TTS adapter during unload; clearing cached state anyway")
+        finally:
+            with self._base._lock:  # noqa: SLF001 - wrapper needs single-provider cache invalidation.
+                if provider_key:
+                    self._base._invalidate_provider_state_locked(provider_key)  # noqa: SLF001
+                self._base._invalidate_provider_state_locked(resolved_provider.value)  # noqa: SLF001
 
-        with self._base._lock:  # noqa: SLF001 - wrapper needs single-provider cache invalidation.
-            if provider_key:
-                self._base._invalidate_provider_state_locked(provider_key)  # noqa: SLF001
-            self._base._invalidate_provider_state_locked(resolved_provider.value)  # noqa: SLF001
-
-        self._initialized_providers.discard(resolved_provider)
+            self._initialized_providers.discard(resolved_provider)
 
         resource_manager = get_existing_resource_manager()
         if resource_manager:

@@ -1396,7 +1396,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       appendFile(item, item.fieldName || "files")
     })
   } else if (file) {
-    const legacyFieldName = fileFieldName || "file"
+    const legacyFieldName = fileFieldName || "files"
     appendFile(
       {
         ...file,

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from loguru import logger
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_his
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSError,
     TTSAuthenticationError,
+    TTSProviderBusyError,
     TTSProviderNotConfiguredError,
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2, get_tts_service_v2
@@ -1203,7 +1204,8 @@ async def get_tts_provider_model_info(
     summary="Unload a cached TTS provider runtime",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
+        Depends(RequireRole("admin")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.tts_provider_unload", count_as="admin")),
     ],
 )
 async def unload_tts_provider(
@@ -1221,6 +1223,11 @@ async def unload_tts_provider(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=_http_error_detail(f"Unknown TTS provider '{provider}'", request_id, exc=e),
+        ) from e
+    except TTSProviderBusyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_http_error_detail("TTS provider has active requests", request_id, exc=e),
         ) from e
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
         logger.bind(

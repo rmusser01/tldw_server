@@ -643,8 +643,11 @@ class ChatterboxAdapter(TTSAdapter):
             )
 
         if not self.auto_download:
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+            raise TTSModelLoadError(
+                "Chatterbox auto-download is disabled; configure a local model path",
+                provider=self.provider_name,
+                details={"model_path": model_path},
+            )
         return runtime_cls.from_pretrained(device=self.device)
 
     def _resolve_seed(self, request: TTSRequest) -> Optional[int]:
@@ -716,7 +719,7 @@ class ChatterboxAdapter(TTSAdapter):
             "model_family": family.value,
             "model": request.model,
             "seed": self._resolve_seed(request),
-            "watermarked": False,
+            "watermarked": not self.disable_watermark,
         }
         if family is ChatterboxModelFamily.TURBO:
             metadata["ignored_controls"] = self._resolve_turbo_ignored_controls(

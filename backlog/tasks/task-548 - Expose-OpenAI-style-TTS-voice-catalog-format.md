@@ -42,8 +42,6 @@ Verification: RED focused endpoint test failed on missing object wrapper; GREEN 
 Added opt-in OpenAI-style provider voice discovery via /api/v1/audio/voices/catalog?format=openai while preserving the existing provider catalog default and /api/v1/audio/voices custom voice route. Documented the Chatterbox discovery mapping and verified with focused red/green endpoint tests, broader provider/voice endpoint tests, Bandit, and git diff --check.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
