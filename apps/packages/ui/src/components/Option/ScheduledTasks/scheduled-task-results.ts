@@ -11,6 +11,8 @@ import {
   getScheduledTaskTypeLabel
 } from "./scheduled-task-status"
 
+export type { ScheduledTaskResultSignalKind } from "./scheduled-task-result-links"
+
 export type ScheduledTaskResultsCapabilityMode =
   | "projected_signals"
   | "normalized_results_read"

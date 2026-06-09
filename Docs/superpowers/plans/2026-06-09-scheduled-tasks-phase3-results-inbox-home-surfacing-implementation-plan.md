@@ -515,13 +515,13 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Implement `ScheduledTaskResultsPanel.tsx`.
-- [ ] Implement `ScheduledTaskResultDetailDrawer.tsx`.
-- [ ] Implement capability-aware filter/action visibility.
-- [ ] Add list/table responsive behavior for extension width.
-- [ ] Add result action wiring in `ScheduledTasksPage.tsx`.
-- [ ] Add missing-result and partial-dependency alerts.
-- [ ] Run component tests.
+- [x] Implement `ScheduledTaskResultsPanel.tsx`.
+- [x] Implement `ScheduledTaskResultDetailDrawer.tsx`.
+- [x] Implement capability-aware filter/action visibility.
+- [x] Add list/table responsive behavior for extension width.
+- [x] Add result action wiring in `ScheduledTasksPage.tsx`.
+- [x] Add missing-result and partial-dependency alerts.
+- [x] Run component tests.
 
 ## Stage 4: Notification Links And Dedupe
 

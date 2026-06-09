@@ -258,7 +258,7 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
   })
 
-  it("opens the Results tab from the alias path and selects a result signal", async () => {
+  it("opens the Results tab from the alias path and opens the result drawer", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
         {
@@ -293,7 +293,7 @@ describe("ScheduledTasksPage", () => {
     )
 
     expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
-    expect(await screen.findByText("Selected signal: Release monitor")).toBeInTheDocument()
+    expect(await screen.findByRole("dialog", { name: /Release monitor/i })).toBeInTheDocument()
     expect(screen.queryByText("Result signal not found.")).not.toBeInTheDocument()
   })
 

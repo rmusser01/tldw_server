@@ -19,6 +19,8 @@ import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 import { ScheduledTaskCreatePanel } from "./ScheduledTaskCreatePanel"
+import { ScheduledTaskResultsPanel } from "./ScheduledTaskResultsPanel"
+import { ScheduledTaskResultDetailDrawer } from "./ScheduledTaskResultDetailDrawer"
 import { DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES } from "./scheduled-task-template-capabilities"
 import {
   SCHEDULED_TASK_TABS,
@@ -28,7 +30,8 @@ import {
 } from "./scheduled-task-route-state"
 import {
   findScheduledTaskResultByRouteState,
-  projectScheduledTaskResults
+  projectScheduledTaskResults,
+  type ScheduledTaskResultItem
 } from "./scheduled-task-results"
 import {
   getScheduledTaskTemplate,
@@ -263,6 +266,10 @@ export const ScheduledTasksPage: React.FC = () => {
     updateRoute({ tab: "tasks" })
   }
 
+  const closeResultDetail = () => {
+    updateRoute({ tab: "results" })
+  }
+
   const openCreateReminder = () => {
     closeTaskDetail()
     setEditingTask(null)
@@ -417,111 +424,27 @@ export const ScheduledTasksPage: React.FC = () => {
     </Space>
   )
 
-  const openResultSignal = (
-    resultId: string | null,
-    runId: string | null,
-    taskId: string
-  ) => {
-    updateRoute({ tab: "results", resultId, runId, taskId })
+  const openResultSignal = (result: ScheduledTaskResultItem) => {
+    updateRoute({
+      tab: "results",
+      resultId: result.resultId,
+      runId: result.runId,
+      taskId: result.taskId
+    })
   }
 
   const renderResultsTab = () => (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <Typography.Title level={3} style={{ marginBottom: 0 }}>
-          Scheduled task results
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          Review outputs, failures, and run state from recurring automations.
-          Source-specific setup stays in the owning workspace.
-        </Typography.Paragraph>
-      </div>
-
-      <Alert
-        type="info"
-        showIcon
-        title="Latest automation signals"
-        description="Latest signals inferred from task status. Durable review state appears when the results API is available."
-      />
-
       {missingRouteResult ? (
         <Alert type="warning" showIcon title="Result signal not found." />
       ) : null}
-
-      {selectedResult ? (
-        <Alert
-          type={selectedResult.severity === "error" ? "error" : "success"}
-          showIcon
-          title={`Selected signal: ${selectedResult.title}`}
-          description={selectedResult.summary}
-        />
-      ) : null}
-
-      {hasLoadedTasks && tasks.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Typography.Text strong>No scheduled tasks yet</Typography.Text>
-              <Typography.Text type="secondary">
-                Results and failures appear here after an automation runs.
-              </Typography.Text>
-            </div>
-          }
-        >
-          <Button type="primary" onClick={openCreateReminder}>
-            Create scheduled task
-          </Button>
-        </Empty>
-      ) : null}
-
-      {hasLoadedTasks && tasks.length > 0 && projectedResults.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Typography.Text strong>No results to review</Typography.Text>
-              <Typography.Text type="secondary">
-                The latest scheduled runs have not produced new results or failures.
-              </Typography.Text>
-            </div>
-          }
-        />
-      ) : null}
-
-      {projectedResults.length > 0 ? (
-        <section aria-label="Scheduled task results">
-          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-            {projectedResults.map((result) => (
-              <div
-                key={result.id}
-                style={{
-                  border: "1px solid var(--ant-color-border, #d9d9d9)",
-                  borderRadius: 8,
-                  padding: 12
-                }}
-              >
-                <Space orientation="vertical" size={4} style={{ width: "100%" }}>
-                  <Typography.Text strong>{result.title}</Typography.Text>
-                  <Typography.Text type="secondary">{result.summary}</Typography.Text>
-                  <Typography.Text type="secondary">
-                    {result.ownerLabel} - {result.state.replace(/_/g, " ")}
-                  </Typography.Text>
-                  <Button
-                    type="link"
-                    style={{ alignSelf: "flex-start", paddingInline: 0 }}
-                    onClick={() => {
-                      openResultSignal(result.resultId, result.runId, result.taskId)
-                    }}
-                  >
-                    Open signal for {result.title}
-                  </Button>
-                </Space>
-              </div>
-            ))}
-          </Space>
-        </section>
-      ) : null}
+      <ScheduledTaskResultsPanel
+        results={projectedResults}
+        taskCount={tasks.length}
+        capabilityMode="projected_signals"
+        onCreateTask={openCreateReminder}
+        onOpenResult={openResultSignal}
+      />
     </Space>
   )
 
@@ -673,13 +596,24 @@ export const ScheduledTasksPage: React.FC = () => {
             onClose={closeEditor}
             onSubmit={handleSubmit}
           />
-          <ScheduledTaskDetailDrawer
-            open={Boolean(selectedTask)}
-            task={selectedTask}
-            onClose={closeTaskDetail}
-            onEditReminder={openEditReminder}
-            onDeleteReminder={handleDeleteReminder}
-          />
+          {selectedTask ? (
+            <ScheduledTaskDetailDrawer
+              open
+              task={selectedTask}
+              onClose={closeTaskDetail}
+              onEditReminder={openEditReminder}
+              onDeleteReminder={handleDeleteReminder}
+            />
+          ) : null}
+          {routeState.tab === "results" && selectedResult ? (
+            <ScheduledTaskResultDetailDrawer
+              open
+              result={selectedResult}
+              onClose={closeResultDetail}
+              onReviewResult={() => undefined}
+              onRetryRun={() => undefined}
+            />
+          ) : null}
         </>
       ) : null}
     </div>
