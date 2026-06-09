@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,14 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
 
-from .jobs import EXPLAINER_DOMAIN, EXPLAINER_QUEUE, handle_explainer_node_expansion_job
+from .jobs import (
+    EXPLAINER_DOMAIN,
+    EXPLAINER_QUEUE,
+    ExplainerGenerator,
+    handle_explainer_node_expansion_job,
+    make_configured_explainer_generator,
+)
+from .retrieval import ExplainerRetriever
 
 
 async def run_explainer_jobs_worker(
@@ -54,28 +62,54 @@ async def run_explainer_jobs_worker(
 
         stop_task = asyncio.create_task(_watch_stop())
 
-    async def _handler(job: dict[str, Any]) -> dict[str, Any]:
-        owner_user_id = str(job.get("owner_user_id") or "").strip()
-        if not owner_user_id:
-            raise ValueError("Explainer job is missing owner_user_id")
-        db_path = _explainer_db_path_for_owner(owner_user_id)
-        db = ExplainerDatabase(db_path=db_path, client_id=owner_user_id)
-        try:
-            return await handle_explainer_node_expansion_job(
-                job,
-                repo=ExplainerRepository(db),
-            )
-        finally:
-            db.close_connection()
+    handler = build_explainer_job_handler()
 
     logger.info("Explainer Jobs worker starting: queue={} worker_id={}", EXPLAINER_QUEUE, worker_id)
     try:
-        await sdk.run(handler=_handler)
+        await sdk.run(handler=handler)
     finally:
         if stop_task is not None and not stop_task.done():
             stop_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await stop_task
+
+
+def build_explainer_job_handler(
+    *,
+    db_path_resolver: Callable[[str], Path] | None = None,
+    generator_factory: Callable[[], ExplainerGenerator] = make_configured_explainer_generator,
+    retriever_factory: Callable[[], ExplainerRetriever | None] | None = None,
+) -> Callable[[dict[str, Any]], Any]:
+    """Build the concrete job handler used by the worker loop."""
+
+    resolved_db_path = db_path_resolver or _explainer_db_path_for_owner
+
+    async def _handler(job: dict[str, Any]) -> dict[str, Any]:
+        owner_user_id = str(job.get("owner_user_id") or "").strip()
+        if not owner_user_id:
+            raise ValueError("Explainer job is missing owner_user_id")
+        db_path = resolved_db_path(owner_user_id)
+        db = ExplainerDatabase(db_path=db_path, client_id=owner_user_id)
+        configured_generator: ExplainerGenerator | None = None
+
+        def _lazy_generator(prompt):
+            nonlocal configured_generator
+            if configured_generator is None:
+                configured_generator = generator_factory()
+            return configured_generator(prompt)
+
+        try:
+            retriever = retriever_factory() if retriever_factory is not None else None
+            return await handle_explainer_node_expansion_job(
+                job,
+                repo=ExplainerRepository(db),
+                generator=_lazy_generator,
+                retriever=retriever,
+            )
+        finally:
+            db.close_connection()
+
+    return _handler
 
 
 def _explainer_db_path_for_owner(owner_user_id: str) -> Path:

@@ -17,7 +17,9 @@ from tldw_Server_API.app.core.Explainer.models import (
 )
 from tldw_Server_API.app.core.Explainer.jobs import (
     ExplainerJobAccepted,
+    ExplainerTerminalJobError,
     enqueue_explainer_node_expansion_job,
+    is_explainer_generation_configured,
 )
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 
@@ -196,13 +198,18 @@ class ExplainerService:
             raise ExplainerNotFoundError("Explainer node not found")
         effective_intent = intent or node.intent or session.output_intent
         self._validate_intent(effective_intent)
-        accepted = enqueue_explainer_node_expansion_job(
-            jm=self.job_manager,
-            session=session,
-            node=node,
-            owner_user_id=owner_user_id,
-            intent=effective_intent,
-        )
+        if session.grounding != ExplainerGrounding.SOURCE_ONLY.value and not is_explainer_generation_configured():
+            raise ExplainerValidationError("Explainer generation is not configured")
+        try:
+            accepted = enqueue_explainer_node_expansion_job(
+                jm=self.job_manager,
+                session=session,
+                node=node,
+                owner_user_id=owner_user_id,
+                intent=effective_intent,
+            )
+        except ExplainerTerminalJobError as exc:
+            raise ExplainerValidationError(str(exc)) from exc
         queued = self.repo.update_node(
             session_id,
             node_id,

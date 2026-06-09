@@ -51,7 +51,10 @@ class ExplainerSourceContext:
 
 class ExplainerRetriever(Protocol):
     def __call__(self, *, session: ExplainerSession, owner_user_id: str) -> ExplainerSourceContext | dict[str, Any]:
-        """Return selected-source context for an owned Explainer session."""
+        """Return authoritative selected-source context for an owned session."""
+
+
+SourceContextResolver = ExplainerRetriever
 
 
 def retrieve_selected_source_context(
@@ -59,47 +62,25 @@ def retrieve_selected_source_context(
     session: ExplainerSession,
     owner_user_id: str,
 ) -> ExplainerSourceContext:
-    """Return safe source context derived from selected-source snapshots.
+    """Return an explicit no-authoritative-context result.
 
-    The default implementation intentionally does not reach into provider-heavy
-    RAG/media modules at import time. Workers can inject a richer retriever, and
-    this function still validates that all returned excerpts belong to the owned
-    session's selected sources.
+    Selected-source rows are persisted snapshots of user selections, not an
+    authoritative ownership or excerpt resolver. Workers can inject a
+    SourceContextResolver that validates against media/note storage. Until one
+    is configured, source-grounded jobs must treat selected metadata as
+    insufficient context.
     """
 
     _validate_session_owner(session=session, owner_user_id=owner_user_id)
-    excerpts: list[ExplainerSourceExcerpt] = []
-    for source in session.selected_sources:
-        metadata = source.metadata or {}
-        excerpt = str(metadata.get("excerpt") or metadata.get("text") or "").strip()
-        if not excerpt:
-            continue
-        excerpts.append(
-            ExplainerSourceExcerpt(
-                source_id=source.source_id,
-                source_type=source.source_type,
-                title=source.title,
-                excerpt=excerpt,
-                location_label=metadata.get("location_label"),
-                start_offset=_coerce_optional_int(metadata.get("start_offset")),
-                end_offset=_coerce_optional_int(metadata.get("end_offset")),
-                url=metadata.get("url"),
-                snapshot_hash=metadata.get("snapshot_hash"),
-                metadata=metadata,
-            )
-        )
-    context = ExplainerSourceContext(
-        excerpts=excerpts,
-        insufficient=bool(session.selected_sources and not excerpts),
+    return ExplainerSourceContext(
+        excerpts=[],
+        insufficient=bool(session.selected_sources),
         retrieval_metadata={
             "selectedSourceCount": len(session.selected_sources),
-            "excerptCount": len(excerpts),
+            "excerptCount": 0,
+            "authority": "none",
+            "source": "selected_snapshot_metadata_untrusted",
         },
-    )
-    return validate_source_context_ownership(
-        session=session,
-        owner_user_id=owner_user_id,
-        source_context=context,
     )
 
 
@@ -190,6 +171,7 @@ def _get_alias(value: dict[str, Any], snake_key: str, camel_key: str) -> Any:
 
 __all__ = [
     "ExplainerRetriever",
+    "SourceContextResolver",
     "ExplainerSourceAccessError",
     "ExplainerSourceContext",
     "ExplainerSourceExcerpt",
