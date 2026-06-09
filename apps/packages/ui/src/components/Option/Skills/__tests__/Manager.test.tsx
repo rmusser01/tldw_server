@@ -453,6 +453,7 @@ describe("SkillsManager imports", () => {
     const successActions = await screen.findByTestId("skills-success-actions")
     expect(successActions).toHaveAttribute("data-ds-component", "Alert")
     expect(successActions).toHaveTextContent("Skill imported")
+    expect(within(successActions).getByRole("button", { name: "Close" })).toBeInTheDocument()
     fireEvent.click(within(successActions).getByRole("button", { name: "View skill" }))
 
     await waitFor(() => {
@@ -533,7 +534,12 @@ describe("SkillsManager imports", () => {
     expect(successActions).toHaveAttribute("data-ds-component", "Alert")
     expect(successActions).toHaveTextContent("Built-in skills seeded")
 
-    fireEvent.click(within(successActions).getByRole("button", { name: "Test summarize" }))
+    const testRunButton = within(successActions).getByRole("button", { name: "Test summarize" })
+    const successActionRow = testRunButton.closest("div")
+    expect(successActionRow).not.toBeNull()
+    expect(successActionRow as HTMLElement).toHaveClass("mt-2")
+
+    fireEvent.click(testRunButton)
     expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("summarize")
 
     fireEvent.click(within(successActions).getByRole("button", { name: "Copy /skill summarize" }))

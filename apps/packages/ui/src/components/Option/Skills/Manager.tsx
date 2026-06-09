@@ -663,6 +663,7 @@ export const SkillsManager: React.FC = () => {
           variant="success"
           title={successAction.title}
           dismissible
+          dismissLabel={t("common:close", { defaultValue: "Close" })}
           onDismiss={() => setSuccessAction(null)}
         >
           <p className="m-0">{successAction.description}</p>
@@ -671,7 +672,7 @@ export const SkillsManager: React.FC = () => {
             if (!skillName) return null
             const invocation = buildSkillInvocation(skillName)
             return (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Button
                   size="small"
                   icon={<Play size={14} />}

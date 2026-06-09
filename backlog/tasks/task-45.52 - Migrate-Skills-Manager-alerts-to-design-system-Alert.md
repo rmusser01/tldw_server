@@ -37,13 +37,13 @@ Continue the tldw_server WebUI design-system migration by replacing the remainin
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Progress: migrated the Skills Manager load-error and success-action product-state alerts from AntD Alert to the shared design-system Alert primitive. Added focused Manager test assertions for the DS Alert marker, confirmed the test failed before implementation, then passed after migration. Verification so far: focused Skills tests passed (4 files, 33 tests), direct Skills Manager product-state guard scan passed with zero findings, and the full product-state verifier no longer reports Skills Manager. Remaining full-verifier blockers are KnowledgeQA SetupDiagnostics Ready/Blocked labels, Onboarding FirstChatStep Retrying label, and ACP readiness Setup required labels.
+Progress: migrated the Skills Manager load-error and success-action product-state alerts from AntD Alert to the shared design-system Alert primitive. Added focused Manager test assertions for the DS Alert marker, confirmed the test failed before implementation, then passed after migration. Review follow-up localized the success alert dismiss label and added standard spacing above the custom action row, with focused tests verified red before the fix. Verification: focused Skills tests passed (4 files, 33 tests), direct Skills Manager product-state guard scan passed with zero findings, git diff --check passed, and the full product-state verifier no longer reports Skills Manager. Remaining full-verifier blockers are KnowledgeQA SetupDiagnostics Ready/Blocked labels, Onboarding FirstChatStep Retrying label, and ACP readiness Setup required labels. TypeScript still fails only on unrelated Notes/background/voice-cloning diagnostics.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Skills Manager load-error and success-action product-state alerts now render through the shared design-system Alert primitive. Focused Manager coverage asserts the DS Alert marker for both migrated paths, and the test was verified red before implementation. Focused Skills tests pass, direct Skills Manager product-state guard scan reports zero findings, and the full verifier now shows only the remaining KnowledgeQA, Onboarding, and ACP readiness canonical-label blockers. Bandit is not applicable because this task touched TypeScript/TSX and Backlog markdown only.
+Skills Manager load-error and success-action product-state alerts now render through the shared design-system Alert primitive. Focused coverage asserts DS Alert markers, localized dismiss labels, and standard custom-action spacing; the new assertions were verified red before implementation. Focused Skills tests pass, direct Skills Manager product-state guard scan reports zero findings, and the full verifier now shows only the remaining KnowledgeQA, Onboarding, and ACP readiness canonical-label blockers. Bandit is not applicable because this task touched TypeScript/TSX and Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
