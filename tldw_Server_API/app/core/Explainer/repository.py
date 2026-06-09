@@ -25,7 +25,10 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerSelectedSource,
     ExplainerSession,
     ExplainerSessionStatus,
+    ExplainerSessionSummary,
 )
+
+_UNSET = object()
 
 
 class ExplainerRepository:
@@ -153,6 +156,104 @@ class ExplainerRepository:
             if session is not None:
                 sessions.append(session)
         return sessions
+
+    def list_session_summaries(
+        self,
+        *,
+        owner_user_id: str,
+        include_archived: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ExplainerSessionSummary], int]:
+        owner_user_id = _require_text(owner_user_id, "owner_user_id")
+        safe_limit = max(1, min(int(limit), 100))
+        safe_offset = max(0, int(offset))
+        conn = self.db.get_connection()
+        if include_archived:
+            total = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM explainer_sessions
+                WHERE owner_user_id = ?
+                """,
+                (owner_user_id,),
+            ).fetchone()["total"]
+            rows = conn.execute(
+                """
+                SELECT
+                    s.*,
+                    (
+                        SELECT COUNT(*)
+                        FROM explainer_nodes n
+                        WHERE n.session_id = s.id AND n.deleted_at IS NULL
+                    ) AS node_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM explainer_selected_sources src
+                        WHERE src.session_id = s.id
+                          AND src.owner_user_id = s.owner_user_id
+                          AND src.deleted_at IS NULL
+                    ) AS selected_source_count
+                FROM explainer_sessions s
+                WHERE s.owner_user_id = ?
+                ORDER BY s.updated_at DESC, s.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (owner_user_id, safe_limit, safe_offset),
+            ).fetchall()
+        else:
+            total = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM explainer_sessions
+                WHERE owner_user_id = ? AND archived_at IS NULL
+                """,
+                (owner_user_id,),
+            ).fetchone()["total"]
+            rows = conn.execute(
+                """
+                SELECT
+                    s.*,
+                    (
+                        SELECT COUNT(*)
+                        FROM explainer_nodes n
+                        WHERE n.session_id = s.id AND n.deleted_at IS NULL
+                    ) AS node_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM explainer_selected_sources src
+                        WHERE src.session_id = s.id
+                          AND src.owner_user_id = s.owner_user_id
+                          AND src.deleted_at IS NULL
+                    ) AS selected_source_count
+                FROM explainer_sessions s
+                WHERE s.owner_user_id = ? AND s.archived_at IS NULL
+                ORDER BY s.updated_at DESC, s.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (owner_user_id, safe_limit, safe_offset),
+            ).fetchall()
+        return (
+            [
+                ExplainerSessionSummary(
+                    id=row["id"],
+                    owner_user_id=row["owner_user_id"],
+                    title=row["title"],
+                    mode=row["mode"],
+                    status=row["status"],
+                    output_intent=row["output_intent"],
+                    grounding=row["grounding"],
+                    depth_preset=row["depth_preset"],
+                    node_count=int(row["node_count"]),
+                    selected_source_count=int(row["selected_source_count"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    archived_at=row["archived_at"],
+                )
+                for row in rows
+            ],
+            int(total),
+        )
 
     def get_session(
         self,
@@ -391,28 +492,36 @@ class ExplainerRepository:
         node_id: str,
         *,
         owner_user_id: str,
-        title: str | None = None,
-        body: str | None = None,
-        status: str | None = None,
-        evidence_state: str | None = None,
-        outside_knowledge_used: bool | None = None,
-        selected_option_id: str | None = None,
-        selected_custom_answer: str | None = None,
-        question_options: list[dict[str, Any]] | None = None,
-        generation_metadata: dict[str, Any] | None = None,
-        citations: list[ExplainerCitation | dict[str, Any]] | None = None,
+        title: Any = _UNSET,
+        body: Any = _UNSET,
+        status: Any = _UNSET,
+        evidence_state: Any = _UNSET,
+        outside_knowledge_used: Any = _UNSET,
+        selected_option_id: Any = _UNSET,
+        selected_custom_answer: Any = _UNSET,
+        question_options: Any = _UNSET,
+        generation_metadata: Any = _UNSET,
+        citations: Any = _UNSET,
     ) -> ExplainerNode | None:
         session = self.get_session(session_id, owner_user_id=owner_user_id)
         if session is None or node_id not in session.nodes:
             return None
         existing_node = session.nodes[node_id]
 
-        if status is not None:
+        if title is not _UNSET and title is None:
+            raise InputError("title is required")
+        if status is not _UNSET and status is None:
+            raise InputError("status is required")
+        if evidence_state is not _UNSET and evidence_state is None:
+            raise InputError("evidence_state is required")
+        if outside_knowledge_used is not _UNSET and outside_knowledge_used is None:
+            raise InputError("outside_knowledge_used is required")
+        if status is not _UNSET:
             _require_enum(status, ExplainerNodeStatus, "status")
-        if evidence_state is not None:
+        if evidence_state is not _UNSET:
             _require_enum(evidence_state, ExplainerEvidenceState, "evidence_state")
         if not any(
-            value is not None
+            value is not _UNSET
             for value in (
                 title,
                 body,
@@ -431,8 +540,18 @@ class ExplainerRepository:
         now = self.db.utcnow_iso()
         next_outside_knowledge_used = (
             outside_knowledge_used
-            if outside_knowledge_used is not None
+            if outside_knowledge_used is not _UNSET
             else existing_node.outside_knowledge_used
+        )
+        next_question_options = (
+            question_options
+            if question_options is not _UNSET
+            else existing_node.question_options
+        )
+        next_generation_metadata = (
+            generation_metadata
+            if generation_metadata is not _UNSET
+            else existing_node.generation_metadata
         )
         with self.db.transaction() as conn:
             conn.execute(
@@ -445,29 +564,25 @@ class ExplainerRepository:
                 WHERE id = ? AND session_id = ? AND deleted_at IS NULL
                 """,
                 (
-                    _require_text(title, "title") if title is not None else existing_node.title,
-                    body if body is not None else existing_node.body,
-                    status or existing_node.status,
-                    evidence_state or existing_node.evidence_state,
+                    _require_text(title, "title") if title is not _UNSET else existing_node.title,
+                    body if body is not _UNSET else existing_node.body,
+                    status if status is not _UNSET else existing_node.status,
+                    evidence_state if evidence_state is not _UNSET else existing_node.evidence_state,
                     1 if next_outside_knowledge_used else 0,
                     selected_option_id
-                    if selected_option_id is not None
+                    if selected_option_id is not _UNSET
                     else existing_node.selected_option_id,
                     selected_custom_answer
-                    if selected_custom_answer is not None
+                    if selected_custom_answer is not _UNSET
                     else existing_node.selected_custom_answer,
-                    _json_dumps(question_options)
-                    if question_options is not None
-                    else _json_dumps(existing_node.question_options),
-                    _json_dumps(generation_metadata)
-                    if generation_metadata is not None
-                    else _json_dumps(existing_node.generation_metadata),
+                    _json_dumps(next_question_options),
+                    _json_dumps(next_generation_metadata),
                     now,
                     node_id,
                     session_id,
                 ),
             )
-            if citations is not None:
+            if citations is not _UNSET:
                 self._replace_node_citations(
                     conn,
                     session_id=session_id,
@@ -475,7 +590,7 @@ class ExplainerRepository:
                     owner_user_id=owner_user_id,
                     citations=[
                         _normalize_citation(citation)
-                        for citation in citations
+                        for citation in citations or []
                     ],
                     now=now,
                 )
@@ -506,9 +621,42 @@ class ExplainerRepository:
                 """
                 UPDATE explainer_nodes
                 SET deleted_at = ?, updated_at = ?
-                WHERE id = ? AND session_id = ? AND deleted_at IS NULL
+                WHERE session_id = ? AND deleted_at IS NULL AND id IN (
+                    WITH RECURSIVE subtree(id) AS (
+                        SELECT id
+                        FROM explainer_nodes
+                        WHERE id = ? AND session_id = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT child.id
+                        FROM explainer_nodes child
+                        JOIN subtree parent ON child.parent_id = parent.id
+                        WHERE child.session_id = ? AND child.deleted_at IS NULL
+                    )
+                    SELECT id FROM subtree
+                )
                 """,
-                (now, now, node_id, session_id),
+                (now, now, session_id, node_id, session_id, session_id),
+            )
+            conn.execute(
+                """
+                UPDATE explainer_citations
+                SET deleted_at = ?
+                WHERE session_id = ? AND owner_user_id = ? AND deleted_at IS NULL
+                  AND node_id IN (
+                    WITH RECURSIVE subtree(id) AS (
+                        SELECT id
+                        FROM explainer_nodes
+                        WHERE id = ? AND session_id = ?
+                        UNION ALL
+                        SELECT child.id
+                        FROM explainer_nodes child
+                        JOIN subtree parent ON child.parent_id = parent.id
+                        WHERE child.session_id = ?
+                    )
+                    SELECT id FROM subtree
+                  )
+                """,
+                (now, session_id, owner_user_id, node_id, session_id, session_id),
             )
             conn.execute(
                 """

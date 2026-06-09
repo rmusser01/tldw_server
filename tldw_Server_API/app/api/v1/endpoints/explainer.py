@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
 from tldw_Server_API.app.api.v1.schemas.explainer import (
@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerSessionListResponse,
     ExplainerSessionPatchRequest,
     ExplainerSessionResponse,
+    ExplainerSessionSummaryResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
@@ -84,10 +85,16 @@ async def create_explainer_session(
 async def list_explainer_sessions(
     current_user: User = Depends(get_request_user),
     db: ExplainerDatabase = Depends(get_explainer_db),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ) -> ExplainerSessionListResponse:
-    sessions = _service(db).list_sessions(owner_user_id=_owner_user_id(current_user))
-    items = [ExplainerSessionResponse.from_domain(session) for session in sessions]
-    return ExplainerSessionListResponse(items=items, total=len(items))
+    summaries, total = _service(db).list_session_summaries(
+        owner_user_id=_owner_user_id(current_user),
+        limit=limit,
+        offset=offset,
+    )
+    items = [ExplainerSessionSummaryResponse.from_domain(summary) for summary in summaries]
+    return ExplainerSessionListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get(
