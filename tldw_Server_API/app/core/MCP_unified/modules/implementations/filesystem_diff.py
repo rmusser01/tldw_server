@@ -11,6 +11,7 @@ PatchLineKind = Literal["context", "add", "remove"]
 PatchFileAction = Literal["modify", "create"]
 
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$")
+_NO_NEWLINE_MARKER = r"\ No newline at end of file"
 
 
 class FilesystemPatchError(ValueError):
@@ -27,6 +28,7 @@ class PatchHunkLine:
 
     kind: PatchLineKind
     text: str
+    has_trailing_newline: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,12 +132,16 @@ def apply_patch_to_text(original: str, patch_file: PatchFile) -> str:
 
         for hunk_line in hunk.lines:
             if hunk_line.kind == "add":
-                output.append(f"{hunk_line.text}{newline}")
+                output.append(hunk_line.text)
+                if hunk_line.has_trailing_newline:
+                    output.append(newline)
                 continue
 
             if cursor >= len(original_lines):
                 raise FilesystemPatchError("patch_context_mismatch")
             if _line_body(original_lines[cursor]) != hunk_line.text:
+                raise FilesystemPatchError("patch_context_mismatch")
+            if _line_has_trailing_newline(original_lines[cursor]) != hunk_line.has_trailing_newline:
                 raise FilesystemPatchError("patch_context_mismatch")
             if hunk_line.kind == "context":
                 output.append(original_lines[cursor])
@@ -164,7 +170,17 @@ def _parse_hunk(lines: list[str], start_index: int) -> tuple[PatchHunk, int]:
     while index < len(lines) and not lines[index].startswith("@@ ") and not lines[index].startswith("--- "):
         raw_line = lines[index]
         index += 1
-        if raw_line == r"\ No newline at end of file":
+        if raw_line == _NO_NEWLINE_MARKER:
+            if not hunk_lines:
+                raise FilesystemPatchError("invalid_no_newline_marker")
+            previous = hunk_lines[-1]
+            if not previous.has_trailing_newline:
+                raise FilesystemPatchError("invalid_no_newline_marker")
+            hunk_lines[-1] = PatchHunkLine(
+                kind=previous.kind,
+                text=previous.text,
+                has_trailing_newline=False,
+            )
             continue
         if not raw_line:
             raise FilesystemPatchError("invalid_hunk_line")
@@ -199,9 +215,10 @@ def _parse_hunk(lines: list[str], start_index: int) -> tuple[PatchHunk, int]:
 
 
 def _parse_header_path(raw_path: str) -> str | None:
-    candidate = raw_path.strip().split("\t", 1)[0].strip()
-    if " " in candidate:
-        candidate = candidate.split(" ", 1)[0].strip()
+    candidate = raw_path.rstrip()
+    if "\t" in candidate:
+        candidate = candidate.split("\t", 1)[0]
+    candidate = candidate.strip()
     if candidate == "/dev/null":
         return None
     if candidate.startswith("a/") or candidate.startswith("b/"):
@@ -241,3 +258,7 @@ def _line_body(line: str) -> str:
     if line.endswith("\n") or line.endswith("\r"):
         return line[:-1]
     return line
+
+
+def _line_has_trailing_newline(line: str) -> bool:
+    return line.endswith(("\n", "\r"))
