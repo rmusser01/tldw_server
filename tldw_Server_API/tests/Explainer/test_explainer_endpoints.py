@@ -468,7 +468,13 @@ def test_delete_node_removes_descendant_subtree_and_citations(explainer_client) 
     assert "Grandchild citation." not in str(body)
 
 
-def test_expand_endpoint_returns_queued_job_and_marks_node(explainer_client) -> None:
+def test_expand_endpoint_returns_queued_job_and_marks_node(
+    explainer_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "openai")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "test-model")
     client, db, _set_user = explainer_client
     created = client.post("/api/v1/explainer/sessions", json=_create_goal_payload(outputIntent="both"))
     assert created.status_code == 201
@@ -495,6 +501,31 @@ def test_expand_endpoint_returns_queued_job_and_marks_node(explainer_client) -> 
     assert job["queue"] == EXPLAINER_QUEUE
     assert job["job_type"] == EXPLAINER_JOB_TYPE
     assert job["owner_user_id"] == "7"
+
+
+def test_expand_endpoint_rejects_unconfigured_open_generation(
+    explainer_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EXPLAINER_GENERATOR_ENABLED", raising=False)
+    monkeypatch.delenv("EXPLAINER_GENERATOR_PROVIDER", raising=False)
+    monkeypatch.delenv("EXPLAINER_GENERATOR_MODEL", raising=False)
+    client, db, _set_user = explainer_client
+    created = client.post("/api/v1/explainer/sessions", json=_create_goal_payload(outputIntent="both"))
+    assert created.status_code == 201
+    session_body = created.json()
+    node_id = session_body["rootNodeIds"][0]
+
+    response = client.post(
+        f"/api/v1/explainer/sessions/{session_body['id']}/nodes/{node_id}/expand",
+        json={"intent": "both"},
+    )
+
+    assert response.status_code == 422
+    loaded = ExplainerRepository(db).get_session(session_body["id"], owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[node_id].status == "idle"
+    assert client.app.state.fake_job_manager.jobs == {}
 
 
 def test_answer_question_endpoint_persists_selected_answer(explainer_client) -> None:
