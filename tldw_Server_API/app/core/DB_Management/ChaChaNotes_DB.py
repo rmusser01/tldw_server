@@ -15386,6 +15386,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _skill_bool_value(self, value: bool) -> bool | int:
         return value if self.backend_type == BackendType.POSTGRESQL else int(value)
 
+    _SKILL_REGISTRY_CONTEXTS = {"inline", "fork"}
+    _SKILL_REGISTRY_SORT_COLUMNS = {
+        "name": "name",
+        "context": "context",
+        "created_at": "created_at",
+        "last_modified": "last_modified",
+    }
+    _SKILL_REGISTRY_SORT_DIRECTIONS = {
+        "asc": "ASC",
+        "desc": "DESC",
+    }
+
     @staticmethod
     def _skill_search_like_pattern(query: str | None) -> str | None:
         """Return an escaped SQL LIKE pattern for skill search, or None when blank."""
@@ -15400,39 +15412,115 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         return f"%{escaped}%"
 
+    @staticmethod
+    def _normalized_skill_text_filter(value: str | None) -> str | None:
+        """Return normalized filter text, or None when blank."""
+        normalized = (value or "").strip().lower()
+        return normalized or None
+
+    def _skill_registry_sort_clause(self, sort: str, order: str) -> str:
+        """Return a safe ORDER BY clause for whitelisted skill registry fields."""
+        sort_key = (sort or "name").strip().lower()
+        column = self._SKILL_REGISTRY_SORT_COLUMNS.get(sort_key)
+        if column is None:
+            raise ValueError("Unsupported skill registry sort field")
+
+        order_key = (order or "asc").strip().lower()
+        direction = self._SKILL_REGISTRY_SORT_DIRECTIONS.get(order_key)
+        if direction is None:
+            raise ValueError("Unsupported skill registry sort order")
+
+        if column == "name":
+            return f"ORDER BY {column} {direction}"  # nosec B608
+        return f"ORDER BY {column} {direction}, name ASC"  # nosec B608
+
+    def _skill_registry_filter_clauses(
+        self,
+        *,
+        include_hidden: bool,
+        include_deleted: bool,
+        q: str | None,
+        context: str | None,
+        user_invocable: bool | None,
+        has_tools: bool | None,
+        model: str | None,
+    ) -> tuple[list[str], list[Any]]:
+        """Build shared skill registry WHERE clauses for list and count queries."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._skill_bool_value(False))
+
+        if user_invocable is not None:
+            clauses.append("user_invocable = ?")
+            params.append(self._skill_bool_value(user_invocable))
+        elif not include_hidden:
+            clauses.append("user_invocable = ?")
+            params.append(self._skill_bool_value(True))
+
+        search_pattern = self._skill_search_like_pattern(q)
+        if search_pattern is not None:
+            clauses.append(
+                "("
+                "LOWER(name) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(description, '')) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(argument_hint, '')) LIKE ? ESCAPE '\\'"
+                ")"
+            )
+            params.extend([search_pattern, search_pattern, search_pattern])
+
+        context_filter = self._normalized_skill_text_filter(context)
+        if context_filter is not None:
+            if context_filter not in self._SKILL_REGISTRY_CONTEXTS:
+                raise ValueError("Unsupported skill registry context")
+            clauses.append("context = ?")
+            params.append(context_filter)
+
+        if has_tools is True:
+            clauses.append("allowed_tools IS NOT NULL AND TRIM(allowed_tools) NOT IN ('', '[]')")
+        elif has_tools is False:
+            clauses.append("(allowed_tools IS NULL OR TRIM(allowed_tools) IN ('', '[]'))")
+
+        model_filter = self._normalized_skill_text_filter(model)
+        if model_filter is not None:
+            clauses.append("LOWER(COALESCE(model, '')) = ?")
+            params.append(model_filter)
+
+        return clauses, params
+
     def list_skill_registry(
         self,
         *,
         include_hidden: bool = False,
         include_deleted: bool = False,
         q: str | None = None,
+        context: str | None = None,
+        user_invocable: bool | None = None,
+        has_tools: bool | None = None,
+        model: str | None = None,
+        sort: str = "name",
+        order: str = "asc",
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """List skill registry entries with optional filters."""
         self._ensure_skill_registry_table()
-        clauses = []
-        params: list[Any] = []
-        if not include_deleted:
-            clauses.append("deleted = ?")
-            params.append(self._skill_bool_value(False))
-        if not include_hidden:
-            clauses.append("user_invocable = ?")
-            params.append(self._skill_bool_value(True))
-        search_pattern = self._skill_search_like_pattern(q)
-        if search_pattern is not None:
-            clauses.append(
-                "("
-                "LOWER(name) LIKE ? ESCAPE '\\' "
-                "OR LOWER(COALESCE(description, '')) LIKE ? ESCAPE '\\'"
-                ")"
-            )
-            params.extend([search_pattern, search_pattern])
+        clauses, params = self._skill_registry_filter_clauses(
+            include_hidden=include_hidden,
+            include_deleted=include_deleted,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+        )
         where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        order_sql = self._skill_registry_sort_clause(sort, order)
         query = (
             "SELECT * FROM skill_registry "  # nosec B608
             f"{where_sql} "
-            "ORDER BY name ASC LIMIT ? OFFSET ?"
+            f"{order_sql} LIMIT ? OFFSET ?"
         )
         params.extend([limit, offset])
         try:
@@ -15448,26 +15536,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_hidden: bool = False,
         include_deleted: bool = False,
         q: str | None = None,
+        context: str | None = None,
+        user_invocable: bool | None = None,
+        has_tools: bool | None = None,
+        model: str | None = None,
     ) -> int:
         """Return count of skills in registry."""
         self._ensure_skill_registry_table()
-        clauses = []
-        params: list[Any] = []
-        if not include_deleted:
-            clauses.append("deleted = ?")
-            params.append(self._skill_bool_value(False))
-        if not include_hidden:
-            clauses.append("user_invocable = ?")
-            params.append(self._skill_bool_value(True))
-        search_pattern = self._skill_search_like_pattern(q)
-        if search_pattern is not None:
-            clauses.append(
-                "("
-                "LOWER(name) LIKE ? ESCAPE '\\' "
-                "OR LOWER(COALESCE(description, '')) LIKE ? ESCAPE '\\'"
-                ")"
-            )
-            params.extend([search_pattern, search_pattern])
+        clauses, params = self._skill_registry_filter_clauses(
+            include_hidden=include_hidden,
+            include_deleted=include_deleted,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+        )
         where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         query = f"SELECT COUNT(*) AS cnt FROM skill_registry {where_sql}"  # nosec B608
         try:

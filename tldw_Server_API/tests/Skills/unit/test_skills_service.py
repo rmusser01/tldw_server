@@ -258,6 +258,84 @@ Use this for longform synthesis.
         assert await service.get_total_count(q="needle") == 1
 
     @pytest.mark.asyncio
+    async def test_list_skills_filters_and_sorts_before_pagination(self, service):
+        """Power-user filters and sort should apply before pagination."""
+        for i in range(12):
+            await service.create_skill(
+                f"alpha-{i:02d}",
+                """---
+description: General utility skill
+context: inline
+---
+
+Common content
+""",
+            )
+        await service.create_skill(
+            "beta-first",
+            """---
+description: Forked skill with tools
+context: fork
+allowed-tools:
+  - Read
+model: gpt-4o
+---
+
+Use this with tools.
+""",
+        )
+        await service.create_skill(
+            "beta-second",
+            """---
+description: Another forked skill with tools
+context: fork
+allowed-tools:
+  - Grep
+model: gpt-4o
+---
+
+Use this with tools too.
+""",
+        )
+
+        skills = await service.list_skills(
+            context="fork",
+            has_tools=True,
+            model="gpt-4o",
+            sort="name",
+            order="desc",
+            limit=1,
+            offset=0,
+        )
+
+        assert [skill.name for skill in skills] == ["beta-second"]
+        assert await service.get_total_count(
+            context="fork",
+            has_tools=True,
+            model="gpt-4o",
+        ) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_skills_explicit_hidden_filter_overrides_default_visibility(
+        self,
+        service,
+    ):
+        """Filtering for user_invocable=false should find hidden skills."""
+        await service.create_skill("visible", """---
+user-invocable: true
+---
+Content""")
+        await service.create_skill("hidden", """---
+user-invocable: false
+---
+Content""")
+
+        skills = await service.list_skills(user_invocable=False)
+
+        assert [skill.name for skill in skills] == ["hidden"]
+        assert await service.get_total_count(user_invocable=False) == 1
+
+    @pytest.mark.asyncio
     async def test_update_skill_content(self, service):
         """Test updating skill content."""
         await service.create_skill("update-test", "Original content")
