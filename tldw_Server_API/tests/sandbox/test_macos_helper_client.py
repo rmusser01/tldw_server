@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
@@ -8,8 +10,10 @@ from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import 
 )
 
 
-def test_helper_client_uses_fake_transport_in_test_mode(monkeypatch) -> None:
+def test_helper_client_uses_fake_transport_in_test_mode(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
+    template_path = tmp_path / "template.img"
+    workspace_path = tmp_path / "workspace"
 
     client = MacOSVirtualizationHelperClient()
     reply = client.create_vm(
@@ -19,8 +23,8 @@ def test_helper_client_uses_fake_transport_in_test_mode(monkeypatch) -> None:
             "vm_name": "run-123",
             "run_id": "run-123",
             "session_mode": False,
-            "template": "/tmp/template.img",
-            "workspace_path": "/tmp/workspace",
+            "template": str(template_path),
+            "workspace_path": str(workspace_path),
         }
     )
 
@@ -31,8 +35,10 @@ def test_helper_client_uses_fake_transport_in_test_mode(monkeypatch) -> None:
     assert reply.metadata.has_tldw_owner is True
 
 
-def test_helper_client_raises_custom_exception_when_helper_unavailable(monkeypatch) -> None:
+def test_helper_client_raises_custom_exception_when_helper_unavailable(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TEST_MODE", raising=False)
+    template_path = tmp_path / "template.img"
+    workspace_path = tmp_path / "workspace"
 
     client = MacOSVirtualizationHelperClient()
 
@@ -42,8 +48,8 @@ def test_helper_client_raises_custom_exception_when_helper_unavailable(monkeypat
                 "runtime": "vz_linux",
                 "vm_name": "run-123",
                 "run_id": "run-123",
-                "template": "/tmp/template.img",
-                "workspace_path": "/tmp/workspace",
+                "template": str(template_path),
+                "workspace_path": str(workspace_path),
                 "network_policy": "deny_all",
                 "timeout_sec": 30,
             }

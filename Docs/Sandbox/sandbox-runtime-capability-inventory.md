@@ -297,7 +297,7 @@ for `untrusted` workloads.
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
 | Host-gated recovery smoke covers `vz_linux` diagnostics, dry-run repair planning, drill-owned stale VM termination, and one manual smoke-owned helper restart drill; destructive repair, host reboot, launchd restart, and broader helper crash recovery remain manual/operator-verified. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
-| No single CI job proves real execution for every runtime; the portable capability gate covers capability contracts only. | all | Phase 5 |
+| No single CI job proves real execution for every runtime; the portable session-contract gate covers static `session_contract` capability coverage only. | all | Phase 5 |
 
 ## Maintenance Rules
 

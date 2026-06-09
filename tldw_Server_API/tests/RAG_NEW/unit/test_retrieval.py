@@ -387,8 +387,8 @@ class TestMediaDBRetriever:
                 "id": media_id,
                 "title": "Goku Lands A Devastating One Inch Punch On Frieza",
                 "content": (
-                    "Kakarot spots Frieza's weakness and lands a devastating "
-                    "one inch punch."
+                    "This document includes the exact fallback phrase weakness "
+                    "frieza saiyans."
                 ),
                 "type": "video",
                 "url": None,

@@ -10,6 +10,7 @@ priority: high
 modified_files:
 - .github/workflows/ci.yml
 - .github/workflows/sbom.yml
+- Docs/Sandbox/sandbox-runtime-capability-inventory.md
 - Docs/Plans/2026-06-03-ci-full-suite-sharding-implementation-plan.md
 - Docs/Published/User_Guides/index.md
 - Docs/User_Guides/index.md
@@ -23,6 +24,7 @@ modified_files:
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
 - tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
+- tldw_Server_API/app/core/Embeddings/ChromaDB_Library.py
 - tldw_Server_API/app/api/v1/endpoints/media/__init__.py
 - tldw_Server_API/app/api/v1/router_groups/content.py
 - tldw_Server_API/app/api/v1/router_groups/minimal.py
@@ -37,6 +39,7 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py
 - tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py
 - tldw_Server_API/app/core/DB_Management/media_db/runtime/synced_document_update_ops.py
+- tldw_Server_API/app/core/AuthNZ/database.py
 - tldw_Server_API/app/core/AuthNZ/db_config.py
 - tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_webhooks.py
 - tldw_Server_API/app/core/Audit/unified_audit_service.py
@@ -58,6 +61,7 @@ modified_files:
 - tldw_Server_API/app/api/v1/endpoints/media/reprocess.py
 - tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
+- tldw_Server_API/tests/ChromaDB/unit/test_chromadb_dimensions_and_list.py
 - tldw_Server_API/tests/ChromaDB/property/test_chromadb_properties.py
 - tldw_Server_API/tests/ChaChaNotesDB/test_flashcard_deck_sharing.py
 - tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py
@@ -87,6 +91,7 @@ modified_files:
 - tldw_Server_API/tests/AuthNZ_SQLite/test_quota_enforcement_http_sqlite.py
 - tldw_Server_API/tests/AuthNZ/unit/test_session_manager_configured_key.py
 - tldw_Server_API/tests/AuthNZ/unit/test_email_service.py
+- tldw_Server_API/tests/AuthNZ/unit/test_database_pool_fetchone_sqlite_fallback.py
 - tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_api_keys.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_resource_governor_permissions_claims.py
 - tldw_Server_API/tests/ChaChaNotesDB/test_flashcard_templates_db.py
@@ -132,6 +137,7 @@ modified_files:
 - tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py
 - tldw_Server_API/tests/Media_Ingestion_Modification/test_add_media_endpoint.py
 - tldw_Server_API/tests/Media_Ingestion_Modification/test_media_processing.py
+- tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py
 - tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_persona_budget_defaults.py
 - tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
@@ -148,6 +154,8 @@ modified_files:
 - tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
 - tldw_Server_API/tests/RAG/test_analytics_backend.py
 - tldw_Server_API/tests/RAG/test_query_rewriting_loop.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_retrieval.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_workflows_daily_cap.py
 - tldw_Server_API/tests/Resource_Governance/test_e2e_chat_audio_headers.py
@@ -199,12 +207,17 @@ modified_files:
 - tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
 - tldw_Server_API/tests/sandbox/test_admin_details_resource_usage.py
 - tldw_Server_API/tests/sandbox/test_artifact_traversal_integration.py
+- tldw_Server_API/tests/sandbox/test_artifact_content_type_and_path.py
 - tldw_Server_API/tests/sandbox/test_cancel_endpoint_ws_and_status.py
+- tldw_Server_API/tests/sandbox/test_cancel_idempotent.py
 - tldw_Server_API/tests/sandbox/test_docker_runner_fake.py
 - tldw_Server_API/tests/sandbox/test_execution_concurrency_cap.py
 - tldw_Server_API/tests/sandbox/test_feature_discovery_flags.py
 - tldw_Server_API/tests/sandbox/test_lima_feature_discovery_capabilities.py
+- tldw_Server_API/tests/sandbox/test_macos_helper_client.py
+- tldw_Server_API/tests/sandbox/test_macos_runtime_admission.py
 - tldw_Server_API/tests/sandbox/test_session_store_durability.py
+- tldw_Server_API/tests/sandbox/test_queue_full_429.py
 - tldw_Server_API/tests/sandbox/test_worktree_runner.py
 - tldw_Server_API/tests/sandbox/test_ws_stdin_idle_timeout.py
 - tldw_Server_API/tests/sandbox/test_warm_pool.py
@@ -252,6 +265,12 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-08 final PR #2258 run 27162528193 poll found all checks terminal. The last actionable rows were Windows/Python 3.12 `platform-sandbox-runtimes` failing `test_helper_client_uses_fake_transport_in_test_mode` because the test used POSIX `/tmp/...` paths before helper fake transport could respond, Windows/Python 3.12 `platform-sandbox-ws-streams` failing `test_list_snapshots_waits_for_cross_service_snapshot_create` because its 1s post-release join was too short for the cross-service file-lock path, and Windows/Python 3.12 `platform-sandbox-state-store` failing `test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking` because `os.killpg` is absent on Windows. The helper tests now use `tmp_path`, the snapshot list/delete lock tests use the same 5s completion assertions as the neighboring snapshot-info test, and worktree signal assertions are conditional on platform support while still checking active-state/run-dir cleanup. Verification: exact new failures passed locally, full affected files passed locally (`test_macos_helper_client.py` + `test_session_store_durability.py`: 22 passed; `test_worktree_runner.py`: 26 passed). The Windows aggregate failure was a roll-up only.
+
+2026-06-08 later PR #2258 run 27162528193 polling found macOS `platform-sandbox-ws-streams` failing `test_cancel_idempotent` with `/sandbox/runs` returning 503 before the cancel contract, and Ubuntu/Python 3.13 `platform-sandbox-runtimes` failing `test_seatbelt_rejected_for_untrusted_runs` with runtime-unavailable before the trust-policy branch. The cancel-idempotency test now mounts a minimal sandbox app after setting sandbox env and stubs Docker preflight availability for its no-execution fake run; the seatbelt admission test now stubs seatbelt preflight availability so it reaches the intended `trust_level_requires_vm_runtime` policy rejection. Verification: both exact failures passed; both touched files passed; compileall passed on the expanded touched scope; `git diff --check` passed; Bandit reported zero findings/errors on touched production scope and touched test scope with test-only skips B101/B105/B106/B108. The Ubuntu/Python 3.13 `platform-services-core` failure matched the already-local router-count fix.
+
+2026-06-08 PR #2258 run 27162528193 follow-up checked newly completed failures before pushing. The latest actionable rows were macOS `platform-sandbox-state-store` queue-full returning runtime-unavailable before queue admission, macOS `platform-sandbox-admin-artifacts` artifact content-type setup returning 503 on hosts without Docker, Ubuntu `product-workflows` response validation crashing on a transient/malformed run row with `run_id=None`, and macOS `platform-services-core` hard-coding the minimal-router count. The sandbox tests now own Docker preflight availability in their fake/no-execution paths and mount a minimal sandbox app after env setup; the workflow run response falls back to the known request run/workflow/user context when a row-shaped object has nullable fields; the router laziness contract derives its count from `MINIMAL_REQUIRED_ROUTER_NAMES`. Verification: exact four-test failure matrix passed; the two sandbox files passed; full `test_router_groups_contract.py` passed with 175 tests; full `test_new_step_adapters.py` passed with 117 tests; compileall passed on the touched Python scope; `git diff --check` passed; Bandit reported zero findings/errors on touched production scope and touched test scope with test-only skips B101/B105/B106/B108. At this checkpoint old CI run 27162528193 still had related queued/in-progress shards, so the follow-up commit was not pushed yet.
+
 2026-06-07 current-head PR #2258 recheck of run `27112725818` confirmed the corrected Windows/Python 3.12 `db-privileges` shard passed `test_sqlite_migration_adds_task_tables`, then failed later in `test_resolve_media_db_for_user_reuses_shared_sqlite_backend_per_user`. The new log showed a platform-only expectation mismatch: the test monkeypatched `_get_db_path_for_user` to return `Path("/tmp/1.db")`, then expected the POSIX string `"/tmp/1.db"` even though Windows stringifies that `Path` as `"\\tmp\\1.db"`. The request-scope isolation test now derives expected strings from the monkeypatched path resolver for both the shared backend assertion and the later string-user ID assertion. Verification: the focused two-test replay passed, the full `test_media_db_request_scope_isolation.py` file passed with 23 tests, compileall passed, `git diff --check` passed, and Bandit on the touched DB privilege tests with B101/B108 test-scope skips reported zero findings/errors.
 
 2026-06-07 current-head PR #2258 recheck of run `27111995933` found Windows/Python 3.12 `db-privileges` failing in `test_sqlite_migration_adds_task_tables`. The job log and local replay showed the test dropped V48-created task tables, set the DB schema version to 48, then expected the unrelated V48-to-V49 workspace-assistant-defaults migration to recreate those task tables. Root cause: the test targeted the wrong migration boundary; V47-to-V48 owns task table creation, while V48-to-V49 only ensures workspace assistant defaults and bumps the version. The test now starts from schema version 47 before migration, verifies the final schema version, and asserts the task table DDL exists before inspecting constraints. Verification: the exact reproduced test passed, the local CI-shaped `db-privileges` shard passed with `1295 passed, 26 skipped`, compileall passed, `git diff --check` passed, and Bandit on the touched test with B101 skipped reported zero findings/errors.
@@ -410,6 +429,12 @@ The same old-head run later cancelled Ubuntu/Python 3.12 `llm-providers` while t
 2026-06-08 later PR #2258 run 27149892610 polling found macOS Python 3.12 platform-sandbox-state-store failing `test_idempotency_conflict_on_mismatch` for the same fake Docker execution / real Docker preflight mismatch. The idempotency TTL/conflict test helper now stubs `SandboxService._collect_runtime_preflights` to make Docker available inside that test-owned fake execution path. Verification: the exact failed test and full `test_idempotency_ttl_and_conflict.py` passed locally.
 
 2026-06-08 later PR #2258 run 27149892610 polling found macOS Python 3.12 platform-sandbox-ws-streams failing `test_cancel_endpoint_sends_single_end_and_sets_killed` with the same fake/disabled Docker execution path blocked by real Docker preflight. The cancel endpoint WS test helper now stubs Docker preflight availability before constructing the minimal sandbox app. Verification: the exact failed test and full `test_cancel_endpoint_ws_and_status.py` passed locally.
+
+2026-06-08 fresh PR #2258 run 27162528193 on commit `f56f0f5447` found Windows/Python 3.12 `ai-chromadb` failing `TestChromaDBStateMachine::runTest` with the same transient Chroma HNSW segment-reader `Nothing found on disk` race, now surviving the existing three query retries. The Chroma transient segment retry budget now uses five bounded delays for the existing exact HNSW signature, and a unit regression covers five consecutive transient query failures before success. Verification: the new regression failed before the production change and passed after it, the focused Chroma retry/state-machine set passed locally (5 passed), the full ChromaDB test directory passed locally (83 passed, 3 skipped, 15 xfailed, 2 xpassed), compileall passed for touched files, `git diff --check` passed, and Bandit on the touched production/test scope with B101 skipped reported zero findings/errors.
+
+2026-06-08 continued PR #2258 run 27162528193 polling found repeated RAG fallback/core-contract rows, media-audio rollback FTS rows, product-workflows SQLite InterfaceError rows, and a Windows db-privileges AuthNZ setup error. Local reproduction confirmed stale RAG test expectations, a raw-SQL media-version seed missing its FTS row, and workflow TestClient fixtures sharing a single SQLite connection across request/background threads. The fixes align RAG tests with the current no-evidence generation contract, maintain FTS for the media-version seed, enable the existing Workflows SQLite pool plus DB close in the order-sensitive fixtures, and normalize `file:///C:/...` AuthNZ SQLite filesystem paths to avoid Windows `\\C:\\...` paths. `llm-local-backends` rows still show only GitHub cancellation with no pytest failure signature, and the same shard passed locally (91 passed, 3 skipped). Verification: exact current-failure matrix plus AuthNZ path regression passed locally (7 passed), expanded touched test files passed locally (211 passed), compileall passed for touched Python files, `git diff --check` passed, and Bandit on touched production/test scopes reported zero findings/errors.
+
+2026-06-08 continued PR #2258 run 27162528193 later found macOS/Python 3.12 `platform-sandbox-runtimes` failing `test_inventory_documents_portable_session_contract_gate_scope`. The sandbox runtime capability inventory already documented host-gated recovery, but its current-gap row did not explicitly name the portable session-contract gate. The inventory now documents that the portable session-contract gate covers static `session_contract` capability coverage only, while real execution remains outside that portable gate. Verification: the exact failed doc-contract test passed locally, and the full `test_runtime_capability_gate.py` file passed locally (8 passed).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

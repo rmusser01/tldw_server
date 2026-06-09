@@ -11,6 +11,23 @@ from tldw_Server_API.app.core.Sandbox.service import SandboxService
 def test_seatbelt_rejected_for_untrusted_runs(monkeypatch) -> None:
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
 
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=True,
+                reasons=[],
+                supported_trust_levels=["trusted", "standard"],
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
     svc = SandboxService()
     spec = RunSpec(
         session_id=None,

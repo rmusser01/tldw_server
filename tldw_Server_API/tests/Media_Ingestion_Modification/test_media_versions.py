@@ -162,6 +162,13 @@ def seeded_document_media(db_session):
             if media_id is None:
                 raise RuntimeError("Failed to retrieve media_id after insertion.")
 
+            db_session._update_fts_media(
+                db_session.get_connection(),
+                media_id,
+                "Test Document",
+                "Initial content v1",
+            )
+
             # Create an initial version using the imported function
             version_res = MediaDatabase.create_document_version(
                 self=db_session,  # Pass the db_instance

@@ -9,6 +9,16 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
 
+def test_resolve_sqlite_paths_normalizes_file_uri_windows_drive_path():
+    db_path, is_uri, fs_path = DatabasePool._resolve_sqlite_paths(
+        "file:///C:/Users/runneradmin/AppData/Local/Temp/users.db"
+    )
+
+    assert db_path == "file:///C:/Users/runneradmin/AppData/Local/Temp/users.db"
+    assert is_uri is True
+    assert fs_path == "C:/Users/runneradmin/AppData/Local/Temp/users.db"
+
+
 class _FakeCursor:
     def __init__(self, row):
         self._row = row

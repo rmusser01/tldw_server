@@ -4266,7 +4266,10 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify minimal always-included router specs do not import endpoints during construction."""
-    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        MINIMAL_REQUIRED_ROUTER_NAMES,
+        iter_minimal_test_router_specs,
+    )
 
     endpoint_modules = {
         "tldw_Server_API.app.api.v1.endpoints.auth",
@@ -4305,7 +4308,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
     specs = list(iter_minimal_test_router_specs())
 
     assert import_attempts == []
-    assert len(specs) == 15
+    assert len(specs) == len(MINIMAL_REQUIRED_ROUTER_NAMES)
     assert all(not isinstance(spec.router, APIRouter) for spec in specs)
 
 

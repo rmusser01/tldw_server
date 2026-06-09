@@ -21,6 +21,7 @@ pytestmark = pytest.mark.integration
 def client_with_wf(tmp_path, monkeypatch, auth_headers):
      # Force test mode for adapters that check it
     monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_SQLITE_POOL_SIZE", "4")
     monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
     # Provide a temporary USER_DB_BASE_DIR for embedding/chroma
     base = tmp_path / "user_databases"
@@ -62,10 +63,12 @@ def client_with_wf(tmp_path, monkeypatch, auth_headers):
     app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
-    with TestClient(app, headers=auth_headers) as client:
-        yield client
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, headers=auth_headers) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
 
 
 def _run_data_from_overridden_db(client: TestClient, run_id: str) -> dict | None:

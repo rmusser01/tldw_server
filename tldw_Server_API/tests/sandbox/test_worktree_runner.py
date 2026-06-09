@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import signal
-import subprocess
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 from unittest import mock
@@ -26,13 +26,13 @@ def test_repo(tmp_path: Path) -> str:
     """Create a temporary git repository with one commit."""
     repo = tmp_path / "test_repo"
     repo.mkdir()
-    subprocess.check_call(
+    subprocess.check_call(  # nosec B603 B607
         ["git", "init"],
         cwd=str(repo),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    subprocess.check_call(
+    subprocess.check_call(  # nosec B603 B607
         [
             "git",
             "-c",
@@ -415,10 +415,12 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
         "Popen",
         lambda *args, **kwargs: _TimeoutProc(),
     )
+    has_killpg = hasattr(worktree_module.os, "killpg")
     monkeypatch.setattr(
         worktree_module.os,
         "killpg",
         lambda pid, sig: killpg_calls.append((pid, sig)),
+        raising=False,
     )
 
     result = None
@@ -438,7 +440,8 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
         assert result.phase == RunPhase.timed_out
         assert result.message == "execution_timeout"
         assert destroy_calls == [(str(created_worktree), str(repo))]
-        assert killpg_calls == [(9876, signal.SIGTERM)]
+        expected_killpg_calls = [(9876, signal.SIGTERM)] if has_killpg else []
+        assert killpg_calls == expected_killpg_calls
         assert not created_worktree.exists()
         assert not run_dir.exists()
         with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
@@ -692,7 +695,13 @@ def test_cancel_run_kills_active_process_group_and_removes_run_dir(
         WorktreeRunner._active_run_dir[rid] = str(run_dir)  # type: ignore[attr-defined]
 
     killpg_calls: list[tuple[int, int]] = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+    has_killpg = hasattr(worktree_module.os, "killpg")
+    monkeypatch.setattr(
+        worktree_module.os,
+        "killpg",
+        lambda pid, sig: killpg_calls.append((pid, sig)),
+        raising=False,
+    )
     monkeypatch.setattr(WorktreeRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
 
     try:
@@ -704,7 +713,8 @@ def test_cancel_run_kills_active_process_group_and_removes_run_dir(
             WorktreeRunner._cancelled_runs.discard(rid)  # type: ignore[attr-defined]
 
     assert ok is True
-    assert killpg_calls == [(4321, signal.SIGTERM)]
+    expected_killpg_calls = [(4321, signal.SIGTERM)] if has_killpg else []
+    assert killpg_calls == expected_killpg_calls
     assert not run_dir.exists()
     with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
         assert rid not in WorktreeRunner._active_proc  # type: ignore[attr-defined]

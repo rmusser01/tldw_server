@@ -41,7 +41,7 @@ _CHROMA_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     ChromaError,
 )
-_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2)
+_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.5, 1.0)
 
 
 def _is_transient_chroma_segment_error(error: BaseException) -> bool:

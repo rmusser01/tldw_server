@@ -665,9 +665,11 @@ def test_list_snapshots_waits_for_cross_service_snapshot_create(monkeypatch, tmp
     assert "snapshots" not in list_result, "cross-service snapshot listing should wait for in-progress create"
 
     release_snapshot.set()
-    create_thread.join(timeout=1.0)
-    list_thread.join(timeout=1.0)
+    create_thread.join(timeout=5.0)
+    list_thread.join(timeout=5.0)
 
+    assert not create_thread.is_alive(), "snapshot create did not finish after release"
+    assert not list_thread.is_alive(), "snapshot list did not finish after release"
     assert not create_errors
     assert not list_errors
     snapshots = list_result.get("snapshots")
@@ -831,9 +833,11 @@ def test_delete_snapshot_waits_for_cross_service_snapshot_create(monkeypatch, tm
     assert "deleted" not in delete_result, "cross-service snapshot delete should wait for in-progress create"
 
     release_snapshot.set()
-    create_thread.join(timeout=1.0)
-    delete_thread.join(timeout=1.0)
+    create_thread.join(timeout=5.0)
+    delete_thread.join(timeout=5.0)
 
+    assert not create_thread.is_alive(), "snapshot create did not finish after release"
+    assert not delete_thread.is_alive(), "snapshot delete did not finish after release"
     assert not create_errors
     assert not delete_errors
     assert delete_result.get("deleted") is True
