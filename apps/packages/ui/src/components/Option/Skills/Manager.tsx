@@ -39,6 +39,7 @@ import type {
 } from "@/types/skill"
 
 const DEFAULT_PAGE_SIZE = 10
+const SKILLS_SEARCH_DEBOUNCE_MS = 300
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
 
 interface ImportTextFormValues {
@@ -84,6 +85,7 @@ export const SkillsManager: React.FC = () => {
   const [page, setPage] = React.useState(1)
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = React.useState("")
+  const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
   const [editingSkill, setEditingSkill] = React.useState<SkillResponse | null>(null)
@@ -93,6 +95,18 @@ export const SkillsManager: React.FC = () => {
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
 
   const offset = (page - 1) * pageSize
+  const searchQuery = debouncedSearch.trim()
+
+  React.useEffect(() => {
+    if (search === debouncedSearch) return
+
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, SKILLS_SEARCH_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [debouncedSearch, search])
 
   const {
     data,
@@ -101,24 +115,19 @@ export const SkillsManager: React.FC = () => {
     error,
     refetch
   } = useQuery<SkillsListResponse>({
-    queryKey: ["skills", page, pageSize],
-    queryFn: () => tldwClient.listSkills({ limit: pageSize, offset })
+    queryKey: ["skills", page, pageSize, searchQuery],
+    queryFn: ({ signal }) =>
+      tldwClient.listSkills({
+        ...(searchQuery ? { q: searchQuery } : {}),
+        limit: pageSize,
+        offset,
+        abortSignal: signal
+      })
   })
-
-  const filteredSkills = React.useMemo(() => {
-    if (!data?.skills) return []
-    if (!search.trim()) return data.skills
-    const q = search.toLowerCase()
-    return data.skills.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.description && s.description.toLowerCase().includes(q))
-      )
-  }, [data?.skills, search])
 
   const hasLoadedSkills = data != null && !isError
   const totalSkills = data?.total ?? 0
-  const hasSearch = search.trim().length > 0
+  const hasSearch = searchQuery.length > 0
   const isLibraryEmpty =
     hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch
   const skillCountLabel = isError
@@ -697,7 +706,7 @@ export const SkillsManager: React.FC = () => {
       )}
 
       <Table
-        dataSource={filteredSkills}
+        dataSource={data?.skills ?? []}
         columns={columns}
         rowKey="name"
         loading={isLoading}

@@ -15386,11 +15386,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _skill_bool_value(self, value: bool) -> bool | int:
         return value if self.backend_type == BackendType.POSTGRESQL else int(value)
 
+    @staticmethod
+    def _skill_search_like_pattern(query: str | None) -> str | None:
+        """Return an escaped SQL LIKE pattern for skill search, or None when blank."""
+        normalized = (query or "").strip().lower()
+        if not normalized:
+            return None
+        escaped = (
+            normalized
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        return f"%{escaped}%"
+
     def list_skill_registry(
         self,
         *,
         include_hidden: bool = False,
         include_deleted: bool = False,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -15404,6 +15419,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not include_hidden:
             clauses.append("user_invocable = ?")
             params.append(self._skill_bool_value(True))
+        search_pattern = self._skill_search_like_pattern(q)
+        if search_pattern is not None:
+            clauses.append(
+                "("
+                "LOWER(name) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(description, '')) LIKE ? ESCAPE '\\'"
+                ")"
+            )
+            params.extend([search_pattern, search_pattern])
         where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         query = (
             "SELECT * FROM skill_registry "  # nosec B608
@@ -15423,6 +15447,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         include_hidden: bool = False,
         include_deleted: bool = False,
+        q: str | None = None,
     ) -> int:
         """Return count of skills in registry."""
         self._ensure_skill_registry_table()
@@ -15434,6 +15459,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not include_hidden:
             clauses.append("user_invocable = ?")
             params.append(self._skill_bool_value(True))
+        search_pattern = self._skill_search_like_pattern(q)
+        if search_pattern is not None:
+            clauses.append(
+                "("
+                "LOWER(name) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(description, '')) LIKE ? ESCAPE '\\'"
+                ")"
+            )
+            params.extend([search_pattern, search_pattern])
         where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         query = f"SELECT COUNT(*) AS cnt FROM skill_registry {where_sql}"  # nosec B608
         try:

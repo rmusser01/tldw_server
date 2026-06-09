@@ -83,6 +83,67 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
     )
   })
 
+  it("serializes listSkills search queries and omits blank search values", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 0
+    })
+
+    const client = new TldwApiClient()
+    client.resolveApiPath = vi
+      .fn(async () => "/api/v1/skills") as typeof client.resolveApiPath
+
+    await client.listSkills({ q: "long form", limit: 10, offset: 20 })
+    await client.listSkills({ q: "   ", limit: 10 })
+
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: "/api/v1/skills?q=long+form&limit=10&offset=20",
+        method: "GET"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "/api/v1/skills?limit=10",
+        method: "GET"
+      })
+    )
+  })
+
+  it("forwards listSkills abort signals to background requests", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 0
+    })
+
+    const client = new TldwApiClient()
+    client.resolveApiPath = vi
+      .fn(async () => "/api/v1/skills") as typeof client.resolveApiPath
+    const abortController = new AbortController()
+
+    await client.listSkills({
+      q: "research",
+      limit: 10,
+      abortSignal: abortController.signal
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/skills?q=research&limit=10",
+        method: "GET",
+        abortSignal: abortController.signal
+      })
+    )
+  })
+
   it("keeps presentation methods on the mixed presentations domain paths after class cleanup", async () => {
     const client = new TldwApiClient()
     client.ensureConfigForRequest = vi

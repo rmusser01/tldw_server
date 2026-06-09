@@ -275,10 +275,14 @@ describe("SkillsManager imports", () => {
     fireEvent.click(within(secondPageItem).getByText("2"))
 
     await waitFor(() => {
-      expect(tldwClientMock.listSkills).toHaveBeenCalledWith({ limit: 10, offset: 10 })
+      expect(tldwClientMock.listSkills).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 10, offset: 10 })
+      )
     })
     await waitFor(() => {
-      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith({ limit: 10, offset: 0 })
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 10, offset: 0 })
+      )
     })
     expect(await screen.findByText("5 skills")).toBeInTheDocument()
     expect(screen.queryByText("No skills yet.")).not.toBeInTheDocument()
@@ -299,6 +303,120 @@ describe("SkillsManager imports", () => {
     expect(screen.getByText("No skills on this page.")).toBeInTheDocument()
     expect(screen.queryByText("No skills yet.")).not.toBeInTheDocument()
     expect(screen.queryByTestId("skills-empty-state")).not.toBeInTheDocument()
+  })
+
+  it("uses server-backed search instead of filtering only the loaded page", async () => {
+    const firstPage = Array.from({ length: 10 }, (_, index) => makeSkill(index + 1))
+    const searchResult = {
+      name: "omega-research",
+      description: "Needle workflow for longform research synthesis",
+      argument_hint: null,
+      user_invocable: true,
+      disable_model_invocation: false,
+      context: "inline" as const
+    }
+
+    tldwClientMock.listSkills.mockImplementation(
+      (params: { q?: string; limit: number; offset: number }) => {
+        if (params.q === "needle") {
+          return Promise.resolve({
+            skills: [searchResult],
+            count: 1,
+            total: 1,
+            limit: params.limit,
+            offset: 0
+          })
+        }
+
+        return Promise.resolve({
+          skills: firstPage,
+          count: firstPage.length,
+          total: 12,
+          limit: params.limit,
+          offset: params.offset
+        })
+      }
+    )
+
+    renderManager()
+
+    expect(await screen.findByText("12 skills")).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText("Search skills..."), {
+      target: { value: "needle" }
+    })
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          q: "needle",
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+    expect(await screen.findByText("omega-research")).toBeInTheDocument()
+    expect(screen.getByText("1 skill")).toBeInTheDocument()
+  })
+
+  it("debounces server-backed search requests while typing", async () => {
+    const firstPage = Array.from({ length: 10 }, (_, index) => makeSkill(index + 1))
+    const searchResult = {
+      name: "omega-research",
+      description: "Needle workflow for longform research synthesis",
+      argument_hint: null,
+      user_invocable: true,
+      disable_model_invocation: false,
+      context: "inline" as const
+    }
+
+    tldwClientMock.listSkills.mockImplementation(
+      (params: { q?: string; limit: number; offset: number }) => {
+        if (params.q === "needle") {
+          return Promise.resolve({
+            skills: [searchResult],
+            count: 1,
+            total: 1,
+            limit: params.limit,
+            offset: 0
+          })
+        }
+
+        return Promise.resolve({
+          skills: firstPage,
+          count: firstPage.length,
+          total: 12,
+          limit: params.limit,
+          offset: params.offset
+        })
+      }
+    )
+
+    renderManager()
+
+    expect(await screen.findByText("12 skills")).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText("Search skills..."), {
+      target: { value: "needle" }
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(tldwClientMock.listSkills).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        q: "needle",
+        limit: 10,
+        offset: 0
+      })
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          q: "needle",
+          limit: 10,
+          offset: 0
+        })
+      )
+    })
+    expect(await screen.findByText("omega-research")).toBeInTheDocument()
   })
 
   it("imports a skill from text via importSkill", async () => {
