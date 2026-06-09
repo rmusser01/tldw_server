@@ -8,7 +8,7 @@
 
 **Tests**: Add failing filesystem module tests for descriptor presence, argument validation, acquire success, active conflict, renewal, expiry, release, wrong-token conflict, and path escape rejection.
 
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 2: Mutation Validation
 
@@ -18,7 +18,7 @@
 
 **Tests**: Add failing tests for `fs.write replace` and `fs.patch` requiring active matching leases, including multi-file patch paths derived from the diff.
 
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: Documentation, Backlog, And Verification
 
@@ -28,4 +28,4 @@
 
 **Tests**: Run focused filesystem MCP tests, compile touched Python files, Bandit on touched Python implementation scope, and `git diff --check`.
 
-**Status**: Not Started
+**Status**: Complete

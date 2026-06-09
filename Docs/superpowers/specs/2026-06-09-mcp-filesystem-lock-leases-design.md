@@ -51,7 +51,7 @@ Release behavior:
 
 ## Mutation Validation
 
-`fs.patch`, `fs.write`, and `fs.edit` get an optional `lock_lease_id` argument. The default is advisory-only: mutations do not require a lock unless module setting `require_lock_for_mutation` is true.
+`fs.edit` and `fs.write` get an optional `lock_lease_id` argument. `fs.patch` gets `lock_lease_id_by_path` so multi-file diffs can validate each parsed path independently. The default is advisory-only: mutations do not require a lock unless module setting `require_lock_for_mutation` is true.
 
 When a `lock_lease_id` is supplied, the mutation validates that every affected path has an active matching lease before writing. When the setting requires locks, missing `lock_lease_id` fails with `lock_required`.
 

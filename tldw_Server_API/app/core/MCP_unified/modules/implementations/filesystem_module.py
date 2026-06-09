@@ -4,6 +4,8 @@ Workspace-bounded filesystem MCP module.
 Exposes:
 - fs.list
 - fs.edit
+- fs.lock_acquire
+- fs.lock_release
 - fs.read
 - fs.read_text
 - fs.patch
@@ -42,6 +44,7 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
 from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
+from .filesystem_locks import FilesystemLockConflict, FilesystemLockMissing, InMemoryFilesystemLockManager
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 
 
@@ -108,6 +111,7 @@ class FilesystemModule(BaseModule):
             secret=config.settings.get("read_receipt_secret"),
             ttl_seconds=self._setting_positive_int("read_receipt_ttl_seconds", 1_800),
         )
+        self._lock_leases = InMemoryFilesystemLockManager()
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Filesystem module: {self.name}")
@@ -206,6 +210,7 @@ class FilesystemModule(BaseModule):
                     "new_string": {"type": "string", "description": "Replacement literal text"},
                     "expected_sha256": {"type": "string"},
                     "read_receipt": {"type": "string"},
+                    "lock_lease_id": {"type": "string"},
                     "replace_all": {"type": "boolean", "default": False},
                     "dry_run": {"type": "boolean", "default": False},
                 },
@@ -228,6 +233,60 @@ class FilesystemModule(BaseModule):
         )
         edit_tool["inputSchema"]["additionalProperties"] = False
 
+        lock_acquire_tool = create_tool_definition(
+            name="fs.lock_acquire",
+            description="Acquire or renew a process-local advisory lock lease for one workspace path.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "owner": {"type": "string", "description": "Non-secret caller label for diagnostics"},
+                    "ttl_seconds": {"type": "integer", "minimum": 1},
+                    "lease_id": {"type": "string", "description": "Existing lease token to renew"},
+                },
+                "required": ["path", "owner"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": False,
+                "capabilities": ["filesystem.lock"],
+                "path_scope_action": "lock",
+                **_file_policy_metadata("lock"),
+                "eval": {
+                    "task_families": ["filesystem_lock"],
+                    "expected_result_kind": "structured_filesystem_lock",
+                },
+                **shared_path_metadata,
+            },
+        )
+        lock_acquire_tool["inputSchema"]["additionalProperties"] = False
+
+        lock_release_tool = create_tool_definition(
+            name="fs.lock_release",
+            description="Release a process-local advisory lock lease for one workspace path.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "lease_id": {"type": "string", "description": "Active lease token to release"},
+                },
+                "required": ["path", "lease_id"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": False,
+                "capabilities": ["filesystem.lock"],
+                "path_scope_action": "lock",
+                **_file_policy_metadata("lock"),
+                "eval": {
+                    "task_families": ["filesystem_lock"],
+                    "expected_result_kind": "structured_filesystem_lock",
+                },
+                **shared_path_metadata,
+            },
+        )
+        lock_release_tool["inputSchema"]["additionalProperties"] = False
+
         patch_tool = create_tool_definition(
             name="fs.patch",
             description="Apply a bounded unified diff to workspace files after preimage checks.",
@@ -239,6 +298,10 @@ class FilesystemModule(BaseModule):
                         "additionalProperties": {"type": "string"},
                     },
                     "read_receipt_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "lock_lease_id_by_path": {
                         "type": "object",
                         "additionalProperties": {"type": "string"},
                     },
@@ -275,6 +338,7 @@ class FilesystemModule(BaseModule):
                     "mode": {"type": "string", "enum": ["create", "replace"]},
                     "expected_sha256": {"type": "string"},
                     "read_receipt": {"type": "string"},
+                    "lock_lease_id": {"type": "string"},
                     "dry_run": {"type": "boolean", "default": False},
                 },
                 "required": ["path", "content", "mode"],
@@ -437,6 +501,8 @@ class FilesystemModule(BaseModule):
             list_tool,
             read_tool,
             edit_tool,
+            lock_acquire_tool,
+            lock_release_tool,
             read_text_tool,
             patch_tool,
             write_tool,
@@ -528,6 +594,21 @@ class FilesystemModule(BaseModule):
             )
             return result
 
+        if tool_name == "fs.lock_acquire":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return self._acquire_lock(
+                workspace_root,
+                target,
+                str(args.get("owner")),
+                self._bounded_lock_ttl(args.get("ttl_seconds")),
+                args.get("lease_id"),
+                context,
+            )
+
+        if tool_name == "fs.lock_release":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return self._release_lock(workspace_root, target, str(args.get("lease_id")))
+
         if tool_name == "fs.edit":
             target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
             return await asyncio.to_thread(
@@ -538,6 +619,7 @@ class FilesystemModule(BaseModule):
                 str(args.get("new_string")),
                 args.get("expected_sha256"),
                 args.get("read_receipt"),
+                args.get("lock_lease_id"),
                 bool(args.get("replace_all", False)),
                 bool(args.get("dry_run", False)),
                 self._setting_positive_int("edit_preimage_max_bytes", 5_000_000),
@@ -553,6 +635,7 @@ class FilesystemModule(BaseModule):
                 patch_files,
                 self._string_map_argument(args.get("expected_sha256_by_path")),
                 self._string_map_argument(args.get("read_receipt_by_path")),
+                self._string_map_argument(args.get("lock_lease_id_by_path")),
                 bool(args.get("allow_create", False)),
                 bool(args.get("create_parent_directories", False)),
                 bool(args.get("dry_run", False)),
@@ -571,6 +654,7 @@ class FilesystemModule(BaseModule):
                 str(args.get("mode")),
                 args.get("expected_sha256"),
                 args.get("read_receipt"),
+                args.get("lock_lease_id"),
                 bool(args.get("dry_run", False)),
                 self._setting_positive_int("write_max_bytes", 5_000_000),
                 self._setting_positive_int("write_preimage_max_bytes", 5_000_000),
@@ -722,6 +806,13 @@ class FilesystemModule(BaseModule):
             return raw_value.strip().lower() in {"1", "true", "yes", "on", "y"}
         return bool(raw_value)
 
+    def _bounded_lock_ttl(self, value: Any) -> int:
+        return self._bounded_positive_int(
+            value,
+            self._setting_positive_int("lock_default_ttl_seconds", 300),
+            maximum=self._setting_positive_int("lock_max_ttl_seconds", 3_600),
+        )
+
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "fs.list":
             unknown = sorted(set(arguments) - {"path"})
@@ -765,6 +856,36 @@ class FilesystemModule(BaseModule):
             self._validate_bool_argument(arguments, "include_receipt")
             return
 
+        if tool_name == "fs.lock_acquire":
+            unknown = sorted(set(arguments) - {"path", "owner", "ttl_seconds", "lease_id"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            owner = arguments.get("owner")
+            lease_id = arguments.get("lease_id")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(owner, str) or not owner.strip():
+                raise ValueError("owner is required")
+            if len(owner.strip()) > 128:
+                raise ValueError("owner is too long")
+            self._validate_positive_int_argument(arguments, "ttl_seconds")
+            if lease_id is not None and (not isinstance(lease_id, str) or not lease_id.strip()):
+                raise ValueError("lease_id must be a string")
+            return
+
+        if tool_name == "fs.lock_release":
+            unknown = sorted(set(arguments) - {"path", "lease_id"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            lease_id = arguments.get("lease_id")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(lease_id, str) or not lease_id.strip():
+                raise ValueError("lease_id is required")
+            return
+
         if tool_name == "fs.edit":
             unknown = sorted(
                 set(arguments)
@@ -774,6 +895,7 @@ class FilesystemModule(BaseModule):
                     "new_string",
                     "expected_sha256",
                     "read_receipt",
+                    "lock_lease_id",
                     "replace_all",
                     "dry_run",
                 }
@@ -789,7 +911,7 @@ class FilesystemModule(BaseModule):
                 raise ValueError("old_string is required")
             if not isinstance(new_string, str):
                 raise ValueError("new_string must be a string")
-            for key in ("expected_sha256", "read_receipt"):
+            for key in ("expected_sha256", "read_receipt", "lock_lease_id"):
                 value = arguments.get(key)
                 if value is not None and not isinstance(value, str):
                     raise ValueError(f"{key} must be a string")
@@ -804,6 +926,7 @@ class FilesystemModule(BaseModule):
                     "diff",
                     "expected_sha256_by_path",
                     "read_receipt_by_path",
+                    "lock_lease_id_by_path",
                     "create_parent_directories",
                     "allow_create",
                     "dry_run",
@@ -816,6 +939,7 @@ class FilesystemModule(BaseModule):
                 raise ValueError("diff is required")
             self._validate_optional_string_map_argument(arguments, "expected_sha256_by_path")
             self._validate_optional_string_map_argument(arguments, "read_receipt_by_path")
+            self._validate_optional_string_map_argument(arguments, "lock_lease_id_by_path")
             self._validate_bool_argument(arguments, "create_parent_directories")
             self._validate_bool_argument(arguments, "allow_create")
             self._validate_bool_argument(arguments, "dry_run")
@@ -830,6 +954,7 @@ class FilesystemModule(BaseModule):
                     "mode",
                     "expected_sha256",
                     "read_receipt",
+                    "lock_lease_id",
                     "dry_run",
                 }
             )
@@ -844,7 +969,7 @@ class FilesystemModule(BaseModule):
                 raise ValueError("content must be a string")
             if mode not in {"create", "replace"}:
                 raise ValueError("mode must be create or replace")
-            for key in ("expected_sha256", "read_receipt"):
+            for key in ("expected_sha256", "read_receipt", "lock_lease_id"):
                 value = arguments.get(key)
                 if value is not None and not isinstance(value, str):
                     raise ValueError(f"{key} must be a string")
@@ -1777,12 +1902,124 @@ class FilesystemModule(BaseModule):
             return {}
         return {str(key): str(map_value) for key, map_value in dict(value).items()}
 
+    @staticmethod
+    def _workspace_lock_key(workspace_root: Path) -> str:
+        return str(workspace_root)
+
+    @staticmethod
+    def _context_session_id(context: Any | None) -> str | None:
+        return _first_nonempty(
+            getattr(context, "session_id", None),
+            FilesystemModule._context_metadata_value(context, "session_id"),
+        )
+
+    @staticmethod
+    def _assert_lockable_file_target(target: Path) -> None:
+        if target.is_symlink():
+            raise ValueError("file_not_regular")
+        if target.exists() and not target.is_file():
+            raise ValueError("file_not_regular")
+
+    @staticmethod
+    def _lock_eval_metadata(tool_name: str) -> dict[str, Any]:
+        return build_execution_eval_metadata(
+            tool_name=tool_name,
+            tool_prompt_id=f"mcp.{tool_name}.v1",
+            tool_prompt_version="2026.06.09",
+            action_family="filesystem_lock",
+            result_kind="structured_filesystem_lock",
+            path_filter_used=True,
+            truncated=False,
+        )
+
+    def _acquire_lock(
+        self,
+        workspace_root: Path,
+        target: Path,
+        owner: str,
+        ttl_seconds: int,
+        lease_id: Any,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        self._assert_lockable_file_target(target)
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        try:
+            lease, renewed = self._lock_leases.acquire(
+                workspace_key=self._workspace_lock_key(workspace_root),
+                path=rel_path,
+                owner=owner.strip(),
+                ttl_seconds=ttl_seconds,
+                lease_id=str(lease_id).strip() if isinstance(lease_id, str) and lease_id.strip() else None,
+                workspace_id=self._context_metadata_value(context, "workspace_id"),
+                session_id=self._context_session_id(context),
+            )
+        except FilesystemLockConflict as exc:
+            return {
+                "acquired": False,
+                **exc.lease.conflict_payload(),
+                "eval": self._lock_eval_metadata("fs.lock_acquire"),
+            }
+        return {
+            "acquired": True,
+            "renewed": renewed,
+            **lease.safe_payload(),
+            "eval": self._lock_eval_metadata("fs.lock_acquire"),
+        }
+
+    def _release_lock(self, workspace_root: Path, target: Path, lease_id: str) -> dict[str, Any]:
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        try:
+            released = self._lock_leases.release(
+                workspace_key=self._workspace_lock_key(workspace_root),
+                path=rel_path,
+                lease_id=lease_id,
+            )
+        except FilesystemLockConflict as exc:
+            return {
+                "released": False,
+                **exc.lease.conflict_payload(),
+                "eval": self._lock_eval_metadata("fs.lock_release"),
+            }
+        if released is None:
+            return {
+                "released": False,
+                "reason_code": "lock_missing",
+                "path": rel_path,
+                "held": False,
+                "eval": self._lock_eval_metadata("fs.lock_release"),
+            }
+        return {
+            "released": True,
+            "path": rel_path,
+            "owner": released.owner,
+            "eval": self._lock_eval_metadata("fs.lock_release"),
+        }
+
+    def _validate_mutation_lock(self, workspace_root: Path, rel_path: str, lease_id: Any) -> None:
+        has_lease = isinstance(lease_id, str) and bool(lease_id.strip())
+        if not has_lease:
+            if self._setting_bool("require_lock_for_mutation", False):
+                raise ValueError("lock_required")
+            return
+
+        try:
+            self._lock_leases.validate(
+                workspace_key=self._workspace_lock_key(workspace_root),
+                path=rel_path,
+                lease_id=str(lease_id).strip(),
+            )
+        except FilesystemLockMissing as exc:
+            raise ValueError("lock_missing") from exc
+        except FilesystemLockConflict as exc:
+            raise ValueError("lock_conflict") from exc
+
     def _apply_patch_files(
         self,
         workspace_root: Path,
         patch_files: tuple[PatchFile, ...],
         expected_sha256_by_path: dict[str, str],
         read_receipt_by_path: dict[str, str],
+        lock_lease_id_by_path: dict[str, str],
         allow_create: bool,
         create_parent_directories: bool,
         dry_run: bool,
@@ -1796,6 +2033,7 @@ class FilesystemModule(BaseModule):
                 patch_file,
                 expected_sha256_by_path,
                 read_receipt_by_path,
+                lock_lease_id_by_path,
                 allow_create,
                 create_parent_directories,
                 preimage_max_bytes,
@@ -1812,6 +2050,11 @@ class FilesystemModule(BaseModule):
                     target = plan["_target"]
                     if plan["_create_parent_directories"]:
                         target.parent.mkdir(parents=True, exist_ok=True)
+                    self._validate_mutation_lock(
+                        workspace_root,
+                        str(plan["result"]["path"]),
+                        plan["_lock_lease_id"],
+                    )
                     self._assert_preimage_unchanged(
                         target,
                         plan["result"].get("sha256_before"),
@@ -1869,6 +2112,7 @@ class FilesystemModule(BaseModule):
         patch_file: PatchFile,
         expected_sha256_by_path: dict[str, str],
         read_receipt_by_path: dict[str, str],
+        lock_lease_id_by_path: dict[str, str],
         allow_create: bool,
         create_parent_directories: bool,
         preimage_max_bytes: int,
@@ -1880,6 +2124,7 @@ class FilesystemModule(BaseModule):
             raise ValueError("invalid_patch_path")
         target = self._resolve_workspace_path_no_follow(workspace_root, rel_path)
         response_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, response_path, lock_lease_id_by_path.get(response_path))
         additions, deletions = self._patch_line_counts(patch_file)
 
         if patch_file.action == "create":
@@ -1940,6 +2185,7 @@ class FilesystemModule(BaseModule):
             "_text_before": text_before,
             "_existed_before": not created,
             "_create_parent_directories": create_parent_directories,
+            "_lock_lease_id": lock_lease_id_by_path.get(response_path),
             "result": {
                 "path": response_path,
                 "action": action,
@@ -2132,6 +2378,7 @@ class FilesystemModule(BaseModule):
         new_string: str,
         expected_sha256: Any,
         read_receipt: Any,
+        lock_lease_id: Any,
         replace_all: bool,
         dry_run: bool,
         preimage_max_bytes: int,
@@ -2150,6 +2397,7 @@ class FilesystemModule(BaseModule):
             raise ValueError("binary content is not supported by fs.edit")
 
         rel_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
         payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
         if b"\x00" in payload:
             raise ValueError("binary content is not supported by fs.edit")
@@ -2194,6 +2442,7 @@ class FilesystemModule(BaseModule):
 
         sha256_after = hashlib.sha256(data_after).hexdigest()
         if not dry_run:
+            self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
             self._assert_edit_preimage_unchanged_no_follow(target, sha256_before, bytes_before, file_stat)
             FilesystemModule._atomic_write_text_file(target, text_after)
 
@@ -2283,6 +2532,7 @@ class FilesystemModule(BaseModule):
         mode: str,
         expected_sha256: Any,
         read_receipt: Any,
+        lock_lease_id: Any,
         dry_run: bool,
         write_max_bytes: int,
         preimage_max_bytes: int,
@@ -2295,6 +2545,7 @@ class FilesystemModule(BaseModule):
             raise ValueError("write_content_too_large")
 
         rel_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
         created = mode == "create"
         sha256_before = None
         bytes_before = 0
@@ -2333,6 +2584,7 @@ class FilesystemModule(BaseModule):
         sha256_after = hashlib.sha256(data_after).hexdigest()
         if not dry_run:
             target.parent.mkdir(parents=True, exist_ok=True)
+            self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
             self._assert_preimage_unchanged(target, sha256_before, bytes_before)
             self._atomic_write_text_file(target, content)
 
