@@ -4,7 +4,7 @@ title: Close out Scheduled Tasks Phase 3 final verification
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-09 08:01'
+updated_date: '2026-06-09 14:05'
 labels:
   - scheduled-tasks
   - webui
@@ -50,6 +50,9 @@ Verification evidence:
 Final closeout:
 - Final git diff --check after Stage 8 documentation/task updates passed with exit code 0.
 - Remaining uncommitted files before final commit are the implementation plan verification update and this Backlog task file.
+
+PR link:
+- Draft PR: https://github.com/rmusser01/tldw_server/pull/2328
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
