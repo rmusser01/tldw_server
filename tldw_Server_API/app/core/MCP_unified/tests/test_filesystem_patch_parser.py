@@ -38,8 +38,8 @@ def test_parse_unified_diff_modify_headers_and_hunk_ranges() -> None:
 
 def test_parse_unified_diff_preserves_safe_paths_with_spaces() -> None:
     parsed = parse_unified_diff(
-        """--- a/docs/my note.txt
-+++ b/docs/my note.txt
+        """--- a/docs/my note.txt 2026-06-09 12:00:00.000000000 +0000
++++ b/docs/my note.txt 2026-06-09 12:00:01.000000000 +0000
 @@ -1 +1 @@
 -alpha
 +beta
@@ -51,6 +51,23 @@ def test_parse_unified_diff_preserves_safe_paths_with_spaces() -> None:
 
     assert parsed[0].old_path == "docs/my note.txt"  # nosec B101
     assert parsed[0].new_path == "docs/my note.txt"  # nosec B101
+
+
+def test_parse_unified_diff_strips_date_only_header_metadata() -> None:
+    parsed = parse_unified_diff(
+        """--- a/docs/story.txt 2026-06-09
++++ b/docs/story.txt 2026-06-10
+@@ -1 +1 @@
+-alpha
++beta
+""",
+        max_files=10,
+        max_hunks=10,
+        max_bytes=10_000,
+    )
+
+    assert parsed[0].old_path == "docs/story.txt"  # nosec B101
+    assert parsed[0].new_path == "docs/story.txt"  # nosec B101
 
 
 def test_parse_unified_diff_create_and_reject_delete() -> None:

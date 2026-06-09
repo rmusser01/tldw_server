@@ -12,6 +12,11 @@ PatchFileAction = Literal["modify", "create"]
 
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$")
 _NO_NEWLINE_MARKER = r"\ No newline at end of file"
+_HEADER_TIMESTAMP_METADATA = re.compile(
+    r"\s+\d{4}-\d{2}-\d{2}"
+    r"(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?"
+    r"(?:\s*(?:[+-]\d{4}|[+-]\d{2}:?\d{2}|Z))?$"
+)
 
 
 class FilesystemPatchError(ValueError):
@@ -215,15 +220,32 @@ def _parse_hunk(lines: list[str], start_index: int) -> tuple[PatchHunk, int]:
 
 
 def _parse_header_path(raw_path: str) -> str | None:
+    """Normalize a unified-diff file header path while stripping safe metadata.
+
+    Tab-separated metadata is removed first because GNU/Git-style diffs commonly
+    place timestamps after a tab. When no tab exists, only a trailing
+    timestamp-shaped suffix is stripped so paths containing spaces remain intact.
+    Returns None for `/dev/null` create/delete sentinels.
+    """
+
     candidate = raw_path.rstrip()
     if "\t" in candidate:
         candidate = candidate.split("\t", 1)[0]
+    else:
+        candidate = _strip_space_separated_header_metadata(candidate)
     candidate = candidate.strip()
     if candidate == "/dev/null":
         return None
     if candidate.startswith("a/") or candidate.startswith("b/"):
         candidate = candidate[2:]
     return _normalize_patch_path(candidate)
+
+
+def _strip_space_separated_header_metadata(candidate: str) -> str:
+    """Strip common space-separated timestamp metadata from a diff header path."""
+
+    stripped = _HEADER_TIMESTAMP_METADATA.sub("", candidate).rstrip()
+    return stripped or candidate
 
 
 def _normalize_patch_path(raw_path: str) -> str:
@@ -261,4 +283,6 @@ def _line_body(line: str) -> str:
 
 
 def _line_has_trailing_newline(line: str) -> bool:
+    """Return whether a split line retained an LF, CRLF, or CR terminator."""
+
     return line.endswith(("\n", "\r"))

@@ -453,6 +453,11 @@ class FilesystemModule(BaseModule):
                 key: value if key in {"old_string", "new_string"} else self.sanitize_input(value)
                 for key, value in raw_args.items()
             }
+        elif tool_name == "fs.patch":
+            args = {
+                key: self._sanitize_patch_diff(value) if key == "diff" else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
         else:
             args = self.sanitize_input(raw_args)
         self.validate_tool_arguments(tool_name, args)
@@ -1055,6 +1060,14 @@ class FilesystemModule(BaseModule):
         if isinstance(input_data, list):
             return [self.sanitize_input(v, _depth + 1) for v in input_data]
         return input_data
+
+    @staticmethod
+    def _sanitize_patch_diff(input_data: Any) -> Any:
+        """Sanitize diff text while preserving unified-diff tabs and newlines."""
+
+        if not isinstance(input_data, str):
+            return input_data
+        return "".join(ch for ch in input_data if ch >= " " or ch in {"\n", "\r", "\t"})
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
