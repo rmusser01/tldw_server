@@ -373,6 +373,60 @@ describe("ScheduledTasksPage", () => {
     expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
   })
 
+  it("opens the Create tab with the planned Recurring Question shell from the route", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=recurring_question"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+    expect(
+      await screen.findByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("Scheduled RAG query support")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Research" })).toHaveAttribute(
+      "href",
+      "/research"
+    )
+    expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("opens the Create tab with the planned Agent Task shell from the route", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=agent_task"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+    expect(
+      await screen.findByText(
+        "Agent Task scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("Preview and risk classification")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open ACP Playground" })).toHaveAttribute(
+      "href",
+      "/acp-playground"
+    )
+    expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
   it("opens a task detail deep link after task data loads", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
