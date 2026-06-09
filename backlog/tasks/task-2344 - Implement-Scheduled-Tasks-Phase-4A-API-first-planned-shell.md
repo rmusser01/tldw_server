@@ -30,7 +30,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase4a-api-first-planned-shel
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- Task 1 planned-family helper added for `recurring_question` and `agent_task` with `createEnabled: false`, requirements text, planned result destinations, safety copy, and navigation links. Verification: RED `bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-planned-template-copy.test.ts` failed on missing `../scheduled-task-planned-template-copy`; GREEN same command passed with `1 passed`, `4 passed`. Bandit skipped: touched scope is TypeScript/frontend only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
