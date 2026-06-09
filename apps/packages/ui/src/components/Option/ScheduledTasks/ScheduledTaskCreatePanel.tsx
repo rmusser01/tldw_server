@@ -5,6 +5,16 @@ import type { SegmentedValue } from "antd/es/segmented"
 import type { CreateScheduledTaskReminderPayload } from "@/services/scheduled-tasks-control-plane"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import {
+  applyScheduledTaskTemplateCapabilities,
+  buildNotificationPolicyCopy,
+  buildResultDestinationCopy,
+  buildSourceIntentCopy,
+  getMissingAvailabilityGates,
+  type ScheduledTaskTemplateCapability,
+  type ScheduledTaskTemplateCapabilityMap
+} from "./scheduled-task-template-capabilities"
+import {
+  SCHEDULED_TASK_TEMPLATES,
   SCHEDULED_TASK_TEMPLATE_FILTERS,
   filterScheduledTaskTemplates,
   findScheduledTaskTemplates,
@@ -21,6 +31,7 @@ export interface ScheduledTaskCreatePanelProps {
   onSelectTemplate: (templateId: ScheduledTaskTemplateId | null) => void
   onCreateReminder: (payload: CreateScheduledTaskReminderPayload) => Promise<void> | void
   savingReminder?: boolean
+  templateCapabilities?: ScheduledTaskTemplateCapabilityMap
 }
 
 const WATCHLISTS_HREF = "/watchlists"
@@ -36,6 +47,21 @@ const PRIVATE_LOOKING_PROSE_PATTERN =
 
 const containsPrivateLookingProse = (value: string): boolean =>
   PRIVATE_LOOKING_PROSE_PATTERN.test(value)
+
+const formatAvailabilityGateLabel = (gate: string): string => gate.replace(/_/g, " ")
+
+const CapabilityCopyGroup: React.FC<{ title: string; lines: readonly string[] }> = ({
+  title,
+  lines
+}) =>
+  lines.length > 0 ? (
+    <Space orientation="vertical" size={4}>
+      <Typography.Text strong>{title}</Typography.Text>
+      {lines.map((line) => (
+        <Typography.Text key={line}>{line}</Typography.Text>
+      ))}
+    </Space>
+  ) : null
 
 const TemplateCard: React.FC<{
   template: ScheduledTaskTemplate
@@ -67,7 +93,10 @@ const TemplateCard: React.FC<{
   </Card>
 )
 
-const HandoffPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => {
+const HandoffPanel: React.FC<{
+  template: ScheduledTaskTemplate
+  capability?: ScheduledTaskTemplateCapability | null
+}> = ({ template, capability }) => {
   const [sourceNote, setSourceNote] = useState("")
   const safeSourceText = toSafeHandoffSourceText(sourceNote)
   const normalizedSourceNote = sourceNote.trim()
@@ -76,6 +105,22 @@ const HandoffPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template 
     (!safeSourceText || containsPrivateLookingProse(normalizedSourceNote))
   const hasSafeSourceNote = Boolean(normalizedSourceNote) && !hasUnsafeSource
   const watchlistsHandoff = requiresWatchlistsHandoff(template)
+  const missingGateCopy =
+    capability && watchlistsHandoff
+      ? getMissingAvailabilityGates(template.id, capability).map(
+          (gate) => `Missing: ${formatAvailabilityGateLabel(gate)}`
+        )
+      : []
+  const sourceIntentCopy =
+    capability && watchlistsHandoff ? buildSourceIntentCopy(capability.sourceIntent) : []
+  const resultDestinationCopy =
+    capability && watchlistsHandoff
+      ? buildResultDestinationCopy(capability.resultDestinations)
+      : []
+  const notificationCopy =
+    capability && watchlistsHandoff
+      ? [buildNotificationPolicyCopy(capability.resultDestinations)]
+      : []
   const summaryLines = [
     `Template: ${template.title}`,
     `Intent: ${template.intent}`,
@@ -95,6 +140,10 @@ const HandoffPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template 
         {watchlistsHandoff ? (
           <Typography.Text strong>Setup continues in Watchlists.</Typography.Text>
         ) : null}
+        <CapabilityCopyGroup title="Availability" lines={missingGateCopy} />
+        <CapabilityCopyGroup title="Source support" lines={sourceIntentCopy} />
+        <CapabilityCopyGroup title="Result destinations" lines={resultDestinationCopy} />
+        <CapabilityCopyGroup title="Notifications" lines={notificationCopy} />
         <Typography.Text>No scheduled task has been created yet.</Typography.Text>
         <Input.TextArea
           aria-label="Optional source or setup note"
@@ -145,14 +194,25 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
   selectedTemplateId,
   onSelectTemplate,
   onCreateReminder,
-  savingReminder
+  savingReminder,
+  templateCapabilities
 }) => {
   const [finderText, setFinderText] = useState("")
   const [filterId, setFilterId] = useState<ScheduledTaskTemplateFilterId>("all")
-  const selectedTemplate = getScheduledTaskTemplate(selectedTemplateId)
+  const effectiveTemplates = useMemo(
+    () => applyScheduledTaskTemplateCapabilities(SCHEDULED_TASK_TEMPLATES, templateCapabilities),
+    [templateCapabilities]
+  )
+  const selectedTemplate = getScheduledTaskTemplate(selectedTemplateId, effectiveTemplates)
+  const selectedCapability = selectedTemplate
+    ? templateCapabilities?.[selectedTemplate.id] ?? null
+    : null
   const matches = useMemo(() => findScheduledTaskTemplates(finderText), [finderText])
   const bestMatch = matches[0] ?? null
-  const templates = useMemo(() => filterScheduledTaskTemplates(filterId), [filterId])
+  const templates = useMemo(
+    () => filterScheduledTaskTemplates(filterId, effectiveTemplates),
+    [effectiveTemplates, filterId]
+  )
   const templateStateLabels = useMemo(
     () =>
       new Map(
@@ -183,7 +243,7 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
       return <PlannedPanel template={selectedTemplate} />
     }
 
-    return <HandoffPanel template={selectedTemplate} />
+    return <HandoffPanel template={selectedTemplate} capability={selectedCapability} />
   }
 
   return (
