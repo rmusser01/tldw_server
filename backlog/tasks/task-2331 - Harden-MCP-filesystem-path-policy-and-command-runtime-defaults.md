@@ -14,8 +14,10 @@ references:
   use.
 documentation:
 - Docs/superpowers/specs/2026-06-09-mcp-filesystem-policy-hardening-design.md
+- Docs/superpowers/plans/2026-06-09-mcp-filesystem-policy-hardening-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-06-09-mcp-filesystem-policy-hardening-design.md
+- Docs/superpowers/plans/2026-06-09-mcp-filesystem-policy-hardening-implementation-plan.md
 ---
 
 ## Description
@@ -31,7 +33,7 @@ Design and implement the next MCP filesystem slice: verify path/action constrain
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design approved for A then B: first add path/action enforcement regression coverage for filesystem primitives, then update the virtual CLI runtime to prefer structured primitives where semantics are unambiguous. Local spec review added the adapter seam: TldwPathScopeEnforcer must accept and forward module-derived path_scope_candidates so fs.patch works through the real runtime path. Second review tightened command-runtime details: cat should prefer fs.read with a legacy fs.read_text fallback when safe; structured write-create may be added; write-replace must carry expected_sha256/read_receipt or be deferred; RunCommandModule write classification must include structured fs.write-backed commands; path-scope tests should extend the existing MCP protocol path-scope test file.
+Implementation plan written at Docs/superpowers/plans/2026-06-09-mcp-filesystem-policy-hardening-implementation-plan.md. It sequences work as: adapter candidate forwarding; action-aware path-grant regression tests; virtual CLI structured fs.read/write-create routing; focused tests, Bandit, and Backlog closeout. Plan review correction included filtered visible command descriptors so adapters can reliably choose fs.read over fs.read_text only when fs.read is actually visible.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
