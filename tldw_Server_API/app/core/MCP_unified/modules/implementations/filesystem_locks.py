@@ -5,9 +5,10 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,32 @@ class FilesystemLockLease:
             "held_owner": self.owner,
             "expires_at": self.expires_at_iso(),
         }
+
+
+class FilesystemLockManager(Protocol):
+    """Backend contract for advisory filesystem lock leases."""
+
+    def acquire(
+        self,
+        *,
+        workspace_key: str,
+        path: str,
+        owner: str,
+        ttl_seconds: int,
+        lease_id: str | None = None,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
+    ) -> tuple[FilesystemLockLease, bool]:
+        """Acquire or renew a lease for one workspace path."""
+        ...
+
+    def release(self, *, workspace_key: str, path: str, lease_id: str) -> FilesystemLockLease | None:
+        """Release an active lease when the token matches."""
+        ...
+
+    def validate(self, *, workspace_key: str, path: str, lease_id: str) -> FilesystemLockLease:
+        """Validate that the caller holds the active lease."""
+        ...
 
 
 class FilesystemLockConflict(ValueError):
@@ -180,9 +207,26 @@ class InMemoryFilesystemLockManager:
                 self._leases[key] = lease
 
 
+def create_filesystem_lock_manager(settings: Mapping[str, Any] | None = None) -> FilesystemLockManager:
+    """Create the configured filesystem lock manager backend.
+
+    The first shipped backend remains process-local memory. Unsupported
+    backends fail closed so future persistent backends can be added without
+    silently downgrading operator intent.
+    """
+
+    raw_backend = (settings or {}).get("lock_manager_backend") or "memory"
+    backend = str(raw_backend).strip().lower()
+    if backend in {"", "memory", "in_memory"}:
+        return InMemoryFilesystemLockManager()
+    raise ValueError(f"unsupported filesystem lock_manager_backend: {raw_backend!r}")
+
+
 __all__ = [
     "FilesystemLockConflict",
     "FilesystemLockLease",
+    "FilesystemLockManager",
     "FilesystemLockMissing",
     "InMemoryFilesystemLockManager",
+    "create_filesystem_lock_manager",
 ]

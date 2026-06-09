@@ -153,16 +153,19 @@ after the model read it, the expected hash or receipt no longer matches and the
 write is rejected instead of silently overwriting newer content.
 
 For concurrent editing workflows, `fs.lock_acquire` and `fs.lock_release`
-provide process-local advisory leases for workspace-relative file paths. A
-successful acquire returns a `lease_id` that callers can pass to `fs.edit` and
-`fs.write` as `lock_lease_id`, or to `fs.patch` as
-`lock_lease_id_by_path`. Leases do not replace hashes or read receipts; mutation
-tools still run their normal preimage checks. Operators can set
-`require_lock_for_mutation=true` on the filesystem module when they want
-mutations to fail with `lock_required` unless the caller supplies a matching
-active lease. This first implementation is process-local and advisory: use it
-to reduce races within one running gateway process, not as a durable or
-cross-process distributed lock.
+provide advisory leases for workspace-relative file paths. The built-in
+`lock_manager_backend=memory` backend is process-local. A successful acquire
+returns a `lease_id` that callers can pass to `fs.edit` and `fs.write` as
+`lock_lease_id`, or to `fs.patch` as `lock_lease_id_by_path`. Leases do not
+replace hashes or read receipts; mutation tools still run their normal preimage
+checks. Operators can set `require_lock_for_mutation=true` on the filesystem
+module when they want mutations to fail with `lock_required` unless the caller
+supplies a matching active lease. Host integrations may inject a shared lock
+manager behind the same filesystem module seam, but the packaged backend today
+is still advisory and process-local. Use it to reduce races within one running
+gateway process, not as a durable or cross-process distributed lock. Unsupported
+configured lock backends fail at module creation instead of silently falling
+back to memory.
 
 Example action-aware path grants:
 
