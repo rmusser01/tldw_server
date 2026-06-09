@@ -27,7 +27,7 @@ def test_file_policy_action_taxonomy_lists_existing_and_reserved_actions() -> No
             "lock",
         }
     ) == FILE_POLICY_ACTIONS
-    assert frozenset({"read", "edit", "write"}) == FILE_POLICY_EXISTING_TOOL_ACTIONS
+    assert frozenset({"read", "edit", "write", "lock"}) == FILE_POLICY_EXISTING_TOOL_ACTIONS
     assert frozenset({"share", "export"}) == FILE_POLICY_EXFILTRATION_ACTIONS
 
 
@@ -42,6 +42,20 @@ def test_file_policy_action_metadata_describes_reserved_actions_without_implemen
         "description": "Share or publish file content outside the active workspace boundary.",
         "implemented": False,
         "risk": "exfiltration",
+    }
+
+
+def test_file_policy_action_metadata_describes_lock_as_implemented() -> None:
+    from mcp_unified.interfaces.file_policy_actions import get_file_policy_action_metadata
+
+    metadata = get_file_policy_action_metadata("lock")
+
+    assert metadata.as_dict() == {
+        "action": "lock",
+        "family": "lock",
+        "description": "Acquire or release coordination locks for allowed workspace paths.",
+        "implemented": True,
+        "risk": "coordination",
     }
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,8 @@ class _FilesystemRegistry:
         self._tool_names = {
             "fs.list",
             "fs.edit",
+            "fs.lock_acquire",
+            "fs.lock_release",
             "fs.read",
             "fs.read_text",
             "fs.patch",
@@ -209,11 +212,29 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     tools = await mod.get_tools()
     by_name = {tool["name"]: tool for tool in tools}
 
-    assert {"fs.list", "fs.edit", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"} <= set(  # nosec B101
-        by_name
-    )
+    assert {  # nosec B101
+        "fs.list",
+        "fs.edit",
+        "fs.lock_acquire",
+        "fs.lock_release",
+        "fs.read",
+        "fs.read_text",
+        "fs.patch",
+        "fs.write",
+        "fs.write_text",
+    } <= set(by_name)
 
-    for tool_name in ("fs.list", "fs.edit", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"):
+    for tool_name in (
+        "fs.list",
+        "fs.edit",
+        "fs.lock_acquire",
+        "fs.lock_release",
+        "fs.read",
+        "fs.read_text",
+        "fs.patch",
+        "fs.write",
+        "fs.write_text",
+    ):
         metadata = by_name[tool_name]["metadata"]
         assert metadata["uses_filesystem"] is True  # nosec B101
         assert metadata["path_boundable"] is True  # nosec B101
@@ -245,6 +266,15 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert edit_metadata["eval"]["task_families"] == ["filesystem_edit"]  # nosec B101
     assert edit_metadata["eval"]["expected_result_kind"] == "structured_filesystem_edit"  # nosec B101
     assert by_name["fs.edit"]["inputSchema"]["additionalProperties"] is False  # nosec B101
+    lock_metadata = by_name["fs.lock_acquire"]["metadata"]
+    assert lock_metadata["path_argument_hints"] == ["path"]  # nosec B101
+    assert lock_metadata["path_scope_action"] == "lock"  # nosec B101
+    assert lock_metadata["file_policy_action"] == "lock"  # nosec B101
+    assert lock_metadata["file_policy_action_family"] == "lock"  # nosec B101
+    assert lock_metadata["write_capable"] is False  # nosec B101
+    assert lock_metadata["eval"]["task_families"] == ["filesystem_lock"]  # nosec B101
+    assert by_name["fs.lock_acquire"]["inputSchema"]["additionalProperties"] is False  # nosec B101
+    assert by_name["fs.lock_release"]["inputSchema"]["additionalProperties"] is False  # nosec B101
     write_metadata = by_name["fs.write"]["metadata"]
     assert write_metadata["path_argument_hints"] == ["path"]  # nosec B101
     assert write_metadata["path_scope_action"] == "write"  # nosec B101
@@ -263,6 +293,251 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert write_text_metadata["replacement_tools"] == ["fs.patch", "fs.write"]  # nosec B101
     assert write_text_metadata["path_scope_action"] == "write"  # nosec B101
     assert by_name["fs.write_text"]["metadata"]["category"] == "management"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_lock_lifecycle_conflicts_and_expiry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import filesystem_locks
+
+    now = 1_000.0
+    monkeypatch.setattr(filesystem_locks.time, "time", lambda: now)
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "story.txt").write_text("alpha\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={"lock_default_ttl_seconds": 30, "lock_max_ttl_seconds": 120},
+        ),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-locks", user_id="1", metadata={"workspace_id": "ws-1"})
+
+    first = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a", "ttl_seconds": 60},
+        context=context,
+    )
+    assert first["acquired"] is True  # nosec B101
+    assert first["renewed"] is False  # nosec B101
+    assert first["path"] == "docs/story.txt"  # nosec B101
+    assert str(workspace_root) not in str(first)  # nosec B101
+
+    conflict = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-b", "ttl_seconds": 60},
+        context=context,
+    )
+    assert conflict["acquired"] is False  # nosec B101
+    assert conflict["reason_code"] == "lock_conflict"  # nosec B101
+    assert conflict["held_owner"] == "agent-a"  # nosec B101
+    assert str(workspace_root) not in str(conflict)  # nosec B101
+
+    renewed = await mod.execute_tool(
+        "fs.lock_acquire",
+        {
+            "path": "docs/story.txt",
+            "owner": "agent-a",
+            "lease_id": first["lease_id"],
+            "ttl_seconds": 90,
+        },
+        context=context,
+    )
+    assert renewed["acquired"] is True  # nosec B101
+    assert renewed["renewed"] is True  # nosec B101
+    assert renewed["lease_id"] == first["lease_id"]  # nosec B101
+    assert renewed["ttl_seconds"] == 90  # nosec B101
+
+    release_with_padded_token = await mod.execute_tool(
+        "fs.lock_release",
+        {"path": "docs/story.txt", "lease_id": f" {first['lease_id']}\n"},
+        context=context,
+    )
+    assert release_with_padded_token["released"] is True  # nosec B101
+
+    reacquired = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a", "ttl_seconds": 60},
+        context=context,
+    )
+
+    wrong_release = await mod.execute_tool(
+        "fs.lock_release",
+        {"path": "docs/story.txt", "lease_id": "wrong-token"},
+        context=context,
+    )
+    assert wrong_release["released"] is False  # nosec B101
+    assert wrong_release["reason_code"] == "lock_conflict"  # nosec B101
+
+    released = await mod.execute_tool(
+        "fs.lock_release",
+        {"path": "docs/story.txt", "lease_id": reacquired["lease_id"]},
+        context=context,
+    )
+    assert released["released"] is True  # nosec B101
+    assert released["path"] == "docs/story.txt"  # nosec B101
+
+    expiring = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a", "ttl_seconds": 1},
+        context=context,
+    )
+    now = 1_002.0
+    expired_renewal = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a", "lease_id": expiring["lease_id"]},
+        context=context,
+    )
+    assert expired_renewal["acquired"] is False  # nosec B101
+    assert expired_renewal["reason_code"] == "lock_missing"  # nosec B101
+    assert expired_renewal["held"] is False  # nosec B101
+
+    after_expiry = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-b", "ttl_seconds": 60},
+        context=context,
+    )
+    assert after_expiry["acquired"] is True  # nosec B101
+    assert after_expiry["lease_id"] != expiring["lease_id"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_lock_acquire_offloads_lockable_path_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "story.txt").write_text("alpha\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-lock-offload", user_id="1", metadata={"workspace_id": "ws-1"})
+    event_loop_thread_id = threading.get_ident()
+    check_thread_ids: list[int] = []
+    original_assert = FilesystemModule._assert_lockable_file_target
+
+    def _capture_lockable_check(target: Path) -> None:
+        check_thread_ids.append(threading.get_ident())
+        original_assert(target)
+
+    monkeypatch.setattr(
+        FilesystemModule,
+        "_assert_lockable_file_target",
+        staticmethod(_capture_lockable_check),
+    )
+
+    await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a"},
+        context=context,
+    )
+
+    assert check_thread_ids  # nosec B101
+    assert check_thread_ids[0] != event_loop_thread_id  # nosec B101
+
+
+def test_in_memory_filesystem_lock_manager_sweeps_expired_unique_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import filesystem_locks
+
+    now = 1_000.0
+    monkeypatch.setattr(filesystem_locks.time, "time", lambda: now)
+    manager = filesystem_locks.InMemoryFilesystemLockManager(sweep_interval=1, max_sweep_entries=10)
+
+    manager.acquire(workspace_key="ws", path="docs/one.txt", owner="a", ttl_seconds=1)
+    manager.acquire(workspace_key="ws", path="docs/two.txt", owner="a", ttl_seconds=1)
+    now = 1_002.0
+    manager.acquire(workspace_key="ws", path="docs/three.txt", owner="b", ttl_seconds=60)
+
+    assert sorted(path for _workspace_key, path in manager._leases) == ["docs/three.txt"]  # nosec B101
+
+
+def test_in_memory_filesystem_lock_manager_rotates_bounded_sweep_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import filesystem_locks
+
+    now = 1_000.0
+    monkeypatch.setattr(filesystem_locks.time, "time", lambda: now)
+    manager = filesystem_locks.InMemoryFilesystemLockManager(sweep_interval=1, max_sweep_entries=1)
+    manager.acquire(workspace_key="ws", path="docs/active.txt", owner="a", ttl_seconds=60)
+    manager.acquire(workspace_key="ws", path="docs/expired-one.txt", owner="a", ttl_seconds=1)
+    manager.acquire(workspace_key="ws", path="docs/expired-two.txt", owner="a", ttl_seconds=1)
+
+    now = 1_002.0
+    manager.validate(workspace_key="ws", path="docs/active.txt", lease_id=manager._leases[("ws", "docs/active.txt")].lease_id)
+    manager.validate(workspace_key="ws", path="docs/active.txt", lease_id=manager._leases[("ws", "docs/active.txt")].lease_id)
+    manager.validate(workspace_key="ws", path="docs/active.txt", lease_id=manager._leases[("ws", "docs/active.txt")].lease_id)
+
+    assert sorted(path for _workspace_key, path in manager._leases) == ["docs/active.txt"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_lock_rejects_path_escape_and_symlink_target(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    target = docs_dir / "story.txt"
+    target.write_text("alpha\n", encoding="utf-8")
+    symlink = docs_dir / "story-link.txt"
+    try:
+        symlink.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-lock-path-safety", user_id="1", metadata={})
+
+    with pytest.raises(PermissionError, match="outside workspace scope"):
+        await mod.execute_tool("fs.lock_acquire", {"path": "../secret.txt", "owner": "agent-a"}, context=context)
+    with pytest.raises(ValueError, match="file_not_regular"):
+        await mod.execute_tool("fs.lock_acquire", {"path": "docs/story-link.txt", "owner": "agent-a"}, context=context)
+
+
+def test_filesystem_rejects_blank_mutation_lock_ids() -> None:
+    mod = FilesystemModule(ModuleConfig(name="filesystem"))
+
+    with pytest.raises(ValueError, match="lock_lease_id must be a non-empty string"):
+        mod.validate_tool_arguments(
+            "fs.edit",
+            {
+                "path": "docs/story.txt",
+                "old_string": "old",
+                "new_string": "new",
+                "expected_sha256": "0" * 64,
+                "lock_lease_id": " \t",
+            },
+        )
+
+    with pytest.raises(ValueError, match="lock_lease_id_by_path must be an object with non-empty string values"):
+        mod.validate_tool_arguments(
+            "fs.patch",
+            {
+                "diff": _PATCH_MODIFY_STORY,
+                "expected_sha256_by_path": {"docs/story.txt": "0" * 64},
+                "lock_lease_id_by_path": {"docs/story.txt": ""},
+            },
+        )
+
+    with pytest.raises(ValueError, match="lock_lease_id must be a non-empty string"):
+        mod.validate_tool_arguments(
+            "fs.write",
+            {
+                "path": "docs/story.txt",
+                "content": "new\n",
+                "mode": "replace",
+                "expected_sha256": "0" * 64,
+                "lock_lease_id": "\n",
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -1390,6 +1665,101 @@ async def test_filesystem_patch_applies_existing_file_with_read_receipt(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_filesystem_patch_requires_lock_by_path_when_configured(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    target = docs_dir / "story.txt"
+    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-patch-lock-required", user_id="1", metadata={"workspace_id": "ws-1"})
+    expected_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+
+    with pytest.raises(ValueError, match="lock_required"):
+        await mod.execute_tool(
+            "fs.patch",
+            {"diff": _PATCH_MODIFY_STORY, "expected_sha256_by_path": {"docs/story.txt": expected_sha}},
+            context=context,
+        )
+
+    locked = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a"},
+        context=context,
+    )
+    result = await mod.execute_tool(
+        "fs.patch",
+        {
+            "diff": _PATCH_MODIFY_STORY,
+            "expected_sha256_by_path": {"docs/story.txt": expected_sha},
+            "lock_lease_id_by_path": {"docs/story.txt": locked["lease_id"]},
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "alpha\nBETTA\ngamma\n"  # nosec B101
+    assert result["files"][0]["path"] == "docs/story.txt"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_patch_revalidates_lock_before_creating_parent_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import filesystem_locks
+
+    now = 1_000.0
+    monkeypatch.setattr(filesystem_locks.time, "time", lambda: now)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-patch-lock-mkdir", user_id="1", metadata={"workspace_id": "ws-1"})
+    locked = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/notes.txt", "owner": "agent-a", "ttl_seconds": 1},
+        context=context,
+    )
+    original_validate = FilesystemModule._validate_mutation_lock
+    validation_count = 0
+
+    def _expire_after_initial_validation(
+        self: FilesystemModule,
+        validation_workspace_root: Path,
+        rel_path: str,
+        lease_id: Any,
+    ) -> None:
+        nonlocal now, validation_count
+        validation_count += 1
+        original_validate(self, validation_workspace_root, rel_path, lease_id)
+        if validation_count == 1:
+            now = 1_002.0
+
+    monkeypatch.setattr(FilesystemModule, "_validate_mutation_lock", _expire_after_initial_validation)
+
+    with pytest.raises(ValueError, match="lock_missing"):
+        await mod.execute_tool(
+            "fs.patch",
+            {
+                "diff": _PATCH_CREATE_NOTES,
+                "allow_create": True,
+                "create_parent_directories": True,
+                "lock_lease_id_by_path": {"docs/notes.txt": locked["lease_id"]},
+            },
+            context=context,
+        )
+
+    assert not (workspace_root / "docs").exists()  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_patch_rejects_bound_read_receipt_without_matching_context(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"
@@ -1568,6 +1938,170 @@ async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> No
     assert result["created"] is False  # nosec B101
     assert result["sha256_before"] == expected_sha  # nosec B101
     assert result["sha256_after"] == hashlib.sha256(b"new\n").hexdigest()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_requires_lock_when_configured(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-write-lock-required", user_id="1", metadata={"workspace_id": "ws-1"})
+    expected_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+
+    with pytest.raises(ValueError, match="lock_required"):
+        await mod.execute_tool(
+            "fs.write",
+            {"path": "story.txt", "content": "new\n", "mode": "replace", "expected_sha256": expected_sha},
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
+
+    locked = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "story.txt", "owner": "agent-a"},
+        context=context,
+    )
+    result = await mod.execute_tool(
+        "fs.write",
+        {
+            "path": "story.txt",
+            "content": "new\n",
+            "mode": "replace",
+            "expected_sha256": expected_sha,
+            "lock_lease_id": locked["lease_id"],
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "new\n"  # nosec B101
+    assert result["written"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_rejects_lock_that_expires_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import filesystem_locks
+
+    now = 1_000.0
+    monkeypatch.setattr(filesystem_locks.time, "time", lambda: now)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-write-lock-expiry", user_id="1", metadata={"workspace_id": "ws-1"})
+    locked = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "story.txt", "owner": "agent-a", "ttl_seconds": 1},
+        context=context,
+    )
+    expected_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    original_authorize = FilesystemModule._authorize_write_preimage
+
+    def _expire_after_preimage_authorization(
+        self: FilesystemModule,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256: Any,
+        read_receipt: Any,
+        request_context: Any | None,
+    ) -> None:
+        nonlocal now
+        original_authorize(
+            self,
+            rel_path,
+            sha256_before,
+            bytes_before,
+            expected_sha256,
+            read_receipt,
+            request_context,
+        )
+        now = 1_002.0
+
+    monkeypatch.setattr(FilesystemModule, "_authorize_write_preimage", _expire_after_preimage_authorization)
+
+    with pytest.raises(ValueError, match="lock_missing"):
+        await mod.execute_tool(
+            "fs.write",
+            {
+                "path": "story.txt",
+                "content": "new\n",
+                "mode": "replace",
+                "expected_sha256": expected_sha,
+                "lock_lease_id": locked["lease_id"],
+            },
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_revalidates_lock_before_creating_parent_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import filesystem_locks
+
+    now = 1_000.0
+    monkeypatch.setattr(filesystem_locks.time, "time", lambda: now)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-write-lock-mkdir", user_id="1", metadata={"workspace_id": "ws-1"})
+    locked = await mod.execute_tool(
+        "fs.lock_acquire",
+        {"path": "docs/story.txt", "owner": "agent-a", "ttl_seconds": 1},
+        context=context,
+    )
+    original_validate = FilesystemModule._validate_mutation_lock
+    validation_count = 0
+
+    def _expire_after_initial_validation(
+        self: FilesystemModule,
+        validation_workspace_root: Path,
+        rel_path: str,
+        lease_id: Any,
+    ) -> None:
+        nonlocal now, validation_count
+        validation_count += 1
+        original_validate(self, validation_workspace_root, rel_path, lease_id)
+        if validation_count == 1:
+            now = 1_002.0
+
+    monkeypatch.setattr(FilesystemModule, "_validate_mutation_lock", _expire_after_initial_validation)
+
+    with pytest.raises(ValueError, match="lock_missing"):
+        await mod.execute_tool(
+            "fs.write",
+            {
+                "path": "docs/story.txt",
+                "content": "new\n",
+                "mode": "create",
+                "lock_lease_id": locked["lease_id"],
+            },
+            context=context,
+        )
+
+    assert not (workspace_root / "docs").exists()  # nosec B101
 
 
 @pytest.mark.asyncio

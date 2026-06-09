@@ -152,6 +152,18 @@ This read-before-mutate flow protects against stale edits: if a file changes
 after the model read it, the expected hash or receipt no longer matches and the
 write is rejected instead of silently overwriting newer content.
 
+For concurrent editing workflows, `fs.lock_acquire` and `fs.lock_release`
+provide process-local advisory leases for workspace-relative file paths. A
+successful acquire returns a `lease_id` that callers can pass to `fs.edit` and
+`fs.write` as `lock_lease_id`, or to `fs.patch` as
+`lock_lease_id_by_path`. Leases do not replace hashes or read receipts; mutation
+tools still run their normal preimage checks. Operators can set
+`require_lock_for_mutation=true` on the filesystem module when they want
+mutations to fail with `lock_required` unless the caller supplies a matching
+active lease. This first implementation is process-local and advisory: use it
+to reduce races within one running gateway process, not as a durable or
+cross-process distributed lock.
+
 Example action-aware path grants:
 
 ```json
@@ -178,14 +190,15 @@ The executable filesystem actions today are:
   metadata.
 - `edit`: bounded existing-file edits through `fs.patch` or `fs.edit`.
 - `write`: deliberate whole-file create or replace through `fs.write`.
+- `lock`: acquire or release advisory path locks through `fs.lock_acquire` and
+  `fs.lock_release`.
 
 The reserved action names are `delete`, `rename`, `move`, `share`, `export`,
-`chmod`, `admin`, and `lock`. Profiles may author and preview these grants now
-so policy intent is explicit, but they do not become executable until a
-dedicated safe tool for that operation lands. Do not treat these actions as
-aliases for `write`: `share` and `export` are exfiltration-sensitive, `delete`,
-`rename`, and `move` are destructive, `chmod` and `admin` are administrative,
-and `lock` is a concurrency-control action.
+`chmod`, and `admin`. Profiles may author and preview these grants now so policy
+intent is explicit, but they do not become executable until a dedicated safe
+tool for that operation lands. Do not treat these actions as aliases for
+`write`: `share` and `export` are exfiltration-sensitive, `delete`, `rename`,
+and `move` are destructive, and `chmod` and `admin` are administrative.
 
 Operators that prefer inherited policy authoring can keep the executable
 runtime contract flat by compiling `path_grant_authoring` into `path_grants`.
@@ -224,8 +237,8 @@ source, and redaction status. They should not include raw file content, read
 receipts, raw diffs, or absolute host paths.
 
 `fs.read_text` and `fs.write_text` remain compatibility tools for older clients.
-New profiles and front-ends should prefer `fs.read`, `fs.patch`, `fs.edit`, and
-`fs.write`.
+New profiles and front-ends should prefer `fs.read`, `fs.patch`, `fs.edit`,
+`fs.write`, and the lock tools when coordinating edits.
 
 Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass

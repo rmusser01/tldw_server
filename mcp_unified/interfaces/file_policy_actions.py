@@ -34,7 +34,7 @@ FILE_POLICY_ACTIONS = frozenset(
         "lock",
     }
 )
-FILE_POLICY_EXISTING_TOOL_ACTIONS = frozenset({"read", "edit", "write"})
+FILE_POLICY_EXISTING_TOOL_ACTIONS = frozenset({"read", "edit", "write", "lock"})
 FILE_POLICY_DESTRUCTIVE_ACTIONS = frozenset({"delete", "rename", "move"})
 FILE_POLICY_EXFILTRATION_ACTIONS = frozenset({"share", "export"})
 FILE_POLICY_ADMIN_ACTIONS = frozenset({"chmod", "admin"})
@@ -138,7 +138,7 @@ _ACTION_METADATA: dict[str, FilePolicyActionMetadata] = {
         action="lock",
         family="lock",
         description="Acquire or release coordination locks for allowed workspace paths.",
-        implemented=False,
+        implemented=True,
         risk="coordination",
     ),
 }
