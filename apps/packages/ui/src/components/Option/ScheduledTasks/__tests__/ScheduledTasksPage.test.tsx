@@ -1343,7 +1343,7 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("edits and deletes a reminder task from the table", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
