@@ -269,7 +269,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByRole("heading", { level: 3, name: "Scheduled task results" })).toBeInTheDocument()
-    expect(screen.getByText("Latest signals inferred from task status. Result history and item actions appear when the results API is available.")).toBeInTheDocument()
+    expect(screen.getByText("Future scheduled questions and agent outputs appear here only when the results API and each task visibility policy route them here.")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Open signal for Release monitor" })).toBeInTheDocument()
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
   })
