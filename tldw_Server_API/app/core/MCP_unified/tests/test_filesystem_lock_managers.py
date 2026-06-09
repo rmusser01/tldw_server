@@ -129,6 +129,95 @@ def test_sqlite_lock_manager_coordinates_two_instances(tmp_path: Path) -> None:
         second.close()
 
 
+def test_sqlite_lock_manager_renews_matching_active_token(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import SQLiteFilesystemLockManager
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        lease, acquired_renewed = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=60,
+        )
+
+        renewed_lease, renewed = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=120,
+            lease_id=lease.lease_id,
+        )
+
+        assert acquired_renewed is False  # nosec B101
+        assert renewed is True  # nosec B101
+        assert renewed_lease.lease_id == lease.lease_id  # nosec B101
+        assert renewed_lease.ttl_seconds == 120  # nosec B101
+        assert (  # nosec B101
+            manager.validate(workspace_key="ws", path="docs/story.txt", lease_id=lease.lease_id)
+            == renewed_lease
+        )
+    finally:
+        manager.close()
+
+
+def test_sqlite_lock_manager_wrong_active_token_renew_raises_conflict(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import FilesystemLockConflict, SQLiteFilesystemLockManager
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        lease, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=60,
+        )
+
+        with pytest.raises(FilesystemLockConflict) as conflict:
+            manager.acquire(
+                workspace_key="ws",
+                path="docs/story.txt",
+                owner="agent-b",
+                ttl_seconds=120,
+                lease_id="wrong-token",
+            )
+
+        assert conflict.value.lease.lease_id == lease.lease_id  # nosec B101
+    finally:
+        manager.close()
+
+
+def test_sqlite_lock_manager_releases_matching_active_token(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import (
+        FilesystemLockMissing,
+        SQLiteFilesystemLockManager,
+    )
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        lease, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=60,
+        )
+
+        released = manager.release(
+            workspace_key="ws",
+            path="docs/story.txt",
+            lease_id=lease.lease_id,
+        )
+
+        assert released == lease  # nosec B101
+        with pytest.raises(FilesystemLockMissing):
+            manager.validate(workspace_key="ws", path="docs/story.txt", lease_id=lease.lease_id)
+    finally:
+        manager.close()
+
+
 def test_sqlite_lock_manager_expired_row_does_not_block_new_acquire(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
