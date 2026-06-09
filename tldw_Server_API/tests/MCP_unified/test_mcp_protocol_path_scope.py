@@ -862,7 +862,7 @@ async def test_path_grants_keep_read_edit_and_write_distinct(tmp_path) -> None:
     read_write_denied = await _evaluate(read_policy_grants, "fs.write", "write")
 
     assert read_allowed["within_scope"] is True  # nosec B101
-    assert read_allowed["path_decisions"][0]["requested_action"] == "read"  # nosec B101
+    assert read_allowed["scope_payload"]["path_decisions"][0]["requested_action"] == "read"  # nosec B101
     _assert_not_granted(read_edit_denied, "edit")
     _assert_not_granted(read_write_denied, "write")
 
@@ -872,7 +872,7 @@ async def test_path_grants_keep_read_edit_and_write_distinct(tmp_path) -> None:
     edit_write_denied = await _evaluate(edit_policy_grants, "fs.write", "write")
 
     assert edit_allowed["within_scope"] is True  # nosec B101
-    assert edit_allowed["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
+    assert edit_allowed["scope_payload"]["path_decisions"][0]["requested_action"] == "edit"  # nosec B101
     _assert_not_granted(edit_read_denied, "read")
     _assert_not_granted(edit_write_denied, "write")
 
@@ -882,7 +882,7 @@ async def test_path_grants_keep_read_edit_and_write_distinct(tmp_path) -> None:
     write_edit_denied = await _evaluate(write_policy_grants, "fs.edit", "edit")
 
     assert write_allowed["within_scope"] is True  # nosec B101
-    assert write_allowed["path_decisions"][0]["requested_action"] == "write"  # nosec B101
+    assert write_allowed["scope_payload"]["path_decisions"][0]["requested_action"] == "write"  # nosec B101
     _assert_not_granted(write_read_denied, "read")
     _assert_not_granted(write_edit_denied, "edit")
 

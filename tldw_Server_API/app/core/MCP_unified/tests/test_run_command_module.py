@@ -407,6 +407,32 @@ async def test_run_help_shows_legacy_write_only_when_legacy_write_text_is_visibl
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "command_name"),
+    [
+        ("knowledge search vector", "knowledge"),
+        ("media search lecture", "media"),
+        ("mcp tools", "mcp"),
+    ],
+)
+async def test_run_returns_unknown_for_hidden_multi_backend_commands(
+    command: str,
+    command_name: str,
+) -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id=f"run-hidden-{command_name}", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": command}, context=context)
+
+    assert f"Unknown command: {command_name}" in rendered
+    assert "unavailable in this context" not in rendered
+    assert "[exit:127 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.asyncio
 async def test_run_mcp_catalogs_does_not_prepare_hidden_catalogs_subtool() -> None:
     class _McpToolsOnlyProtocolStub(_ProtocolStub):
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:

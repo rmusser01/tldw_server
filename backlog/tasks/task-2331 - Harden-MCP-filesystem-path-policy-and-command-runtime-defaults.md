@@ -65,6 +65,14 @@ Verification completed from worktree `/Users/macbook-dev/Documents/GitHub/tldw_s
 Deferred scope:
 - `write-replace` remains deferred because preimage syntax is not implemented in this slice.
 
+PR #2327 follow-up on 2026-06-09:
+- Rebased against latest `origin/dev`; branch was already up to date.
+- Fixed CodeRabbit comment on `TldwPathScopeEnforcer.evaluate_tool_call` by using `list[PathScopeCandidate] | None` for `path_scope_candidates`.
+- Fixed CodeRabbit comment in `test_path_grants_keep_read_edit_and_write_distinct` by asserting allowed decisions through `scope_payload.path_decisions`, matching the service payload contract.
+- Verified Gemini command-visibility comments against current code. The hidden-command path already returns `Unknown command` with exit 127 through `visible_commands` checks before planning. Added regression coverage for hidden `knowledge`, `media`, and `mcp` commands; no implementation guard was needed.
+- Inspected failing UX Smoke Gate log. The failing assertion is unrelated to this MCP branch: `/setup` has two semantic `h1` elements in `apps/tldw-frontend/e2e/smoke/stage4-responsive-landmarks.spec.ts`, while this branch touches MCP/backend tests and Backlog docs only. CI will rerun after the follow-up push.
+- Follow-up verification: focused MCP pytest suite passed, 60 tests and 6 warnings; Bandit touched implementation scope passed with 0 findings at `/tmp/bandit_mcp_fs_policy_hardening_pr2327_followup.json`.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

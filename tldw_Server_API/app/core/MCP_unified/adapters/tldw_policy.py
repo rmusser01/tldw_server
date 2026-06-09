@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
+
 
 class TldwEffectivePolicyResolver:
     """Resolve the effective MCP Hub policy for a request context."""
@@ -69,7 +71,7 @@ class TldwPathScopeEnforcer:
         tool_name: str,
         tool_args: Any,
         tool_def: dict[str, Any] | None,
-        path_scope_candidates: list[Any] | None = None,
+        path_scope_candidates: list[PathScopeCandidate] | None = None,
     ) -> dict[str, Any]:
         from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
             get_mcp_hub_path_enforcement_service,
