@@ -26,6 +26,7 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_run_command_module.py
+- apps/packages/ui/src/routes/option-setup.tsx
 ---
 
 ## Description
@@ -70,8 +71,9 @@ PR #2327 follow-up on 2026-06-09:
 - Fixed CodeRabbit comment on `TldwPathScopeEnforcer.evaluate_tool_call` by using `list[PathScopeCandidate] | None` for `path_scope_candidates`.
 - Fixed CodeRabbit comment in `test_path_grants_keep_read_edit_and_write_distinct` by asserting allowed decisions through `scope_payload.path_decisions`, matching the service payload contract.
 - Verified Gemini command-visibility comments against current code. The hidden-command path already returns `Unknown command` with exit 127 through `visible_commands` checks before planning. Added regression coverage for hidden `knowledge`, `media`, and `mcp` commands; no implementation guard was needed.
-- Inspected failing UX Smoke Gate log. The failing assertion is unrelated to this MCP branch: `/setup` has two semantic `h1` elements in `apps/tldw-frontend/e2e/smoke/stage4-responsive-landmarks.spec.ts`, while this branch touches MCP/backend tests and Backlog docs only. CI will rerun after the follow-up push.
+- Inspected the refreshed UX Smoke Gate failure. The `/setup` route rendered two semantic `h1` elements in the completed-setup state: the route-level hidden heading plus the recovery panel title. Fixed the route by keeping the hidden route heading as the page `h1` and rendering the recovery panel title as `h2`.
 - Follow-up verification: focused MCP pytest suite passed, 60 tests and 6 warnings; Bandit touched implementation scope passed with 0 findings at `/tmp/bandit_mcp_fs_policy_hardening_pr2327_followup.json`.
+- Frontend lint was attempted for `apps/packages/ui/src/routes/option-setup.tsx`, but this worktree has no frontend `node_modules`; `bun run lint -- apps/packages/ui/src/routes/option-setup.tsx` failed with `eslint: command not found`.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
