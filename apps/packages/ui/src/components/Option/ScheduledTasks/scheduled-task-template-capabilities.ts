@@ -116,14 +116,14 @@ export const resolveTemplateCapabilityState = (
   }
 
   if (getMissingAvailabilityGates(templateId, capability).length > 0) {
-    return "limited_availability" as ScheduledTaskTemplateState
+    return "limited_availability"
   }
 
   // Keep this separate from sourceIntent.can_create. That flag describes source-level
   // support, not whether this /scheduled-tasks shell has a real creation adapter.
   return capability.creationAdapterSupported === true
     ? "available"
-    : ("limited_availability" as ScheduledTaskTemplateState)
+    : "limited_availability"
 }
 
 export const applyScheduledTaskTemplateCapabilities = (

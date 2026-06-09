@@ -20,6 +20,8 @@ references:
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-template-capabilities.ts
 - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-template-capabilities.test.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-templates.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-templates.test.ts
 ---
 
 ## Description
