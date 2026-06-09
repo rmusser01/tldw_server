@@ -1,7 +1,7 @@
 ---
 id: TASK-2344
 title: Design MCP filesystem SQLite lock backend
-status: In Progress
+status: Done
 labels:
 - mcp
 - filesystem
@@ -40,7 +40,7 @@ Docs/superpowers/specs/2026-06-09-mcp-filesystem-sqlite-lock-backend-design.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Draft spec written with package-level extraction, minimal tldw_server host integration, SQLite lock semantics, config validation, packaging/artifact gates, documentation, and validation commands. Awaiting user review before implementation planning.
+Spec approved by user. Draft covers package-level extraction, minimal tldw_server integration, SQLite lock semantics, fail-closed config, standalone packaging/artifact gates, documentation, and validation scope. Verification: git diff --check passed before commit; Bandit skipped because only Markdown and Backlog tracking files changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
