@@ -38,6 +38,7 @@ class _FilesystemRegistry:
         self.module = module
         self._tool_names = {
             "fs.list",
+            "fs.edit",
             "fs.read",
             "fs.read_text",
             "fs.patch",
@@ -208,9 +209,11 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     tools = await mod.get_tools()
     by_name = {tool["name"]: tool for tool in tools}
 
-    assert {"fs.list", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"} <= set(by_name)  # nosec B101
+    assert {"fs.list", "fs.edit", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"} <= set(  # nosec B101
+        by_name
+    )
 
-    for tool_name in ("fs.list", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"):
+    for tool_name in ("fs.list", "fs.edit", "fs.read", "fs.read_text", "fs.patch", "fs.write", "fs.write_text"):
         metadata = by_name[tool_name]["metadata"]
         assert metadata["uses_filesystem"] is True  # nosec B101
         assert metadata["path_boundable"] is True  # nosec B101
@@ -233,6 +236,15 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert patch_metadata["eval"]["task_families"] == ["filesystem_edit"]  # nosec B101
     assert patch_metadata["eval"]["expected_result_kind"] == "structured_filesystem_edit"  # nosec B101
     assert by_name["fs.patch"]["inputSchema"]["additionalProperties"] is False  # nosec B101
+    edit_metadata = by_name["fs.edit"]["metadata"]
+    assert edit_metadata["path_argument_hints"] == ["path"]  # nosec B101
+    assert edit_metadata["path_scope_action"] == "edit"  # nosec B101
+    assert edit_metadata["file_policy_action"] == "edit"  # nosec B101
+    assert edit_metadata["file_policy_action_family"] == "bounded_edit"  # nosec B101
+    assert edit_metadata["write_capable"] is True  # nosec B101
+    assert edit_metadata["eval"]["task_families"] == ["filesystem_edit"]  # nosec B101
+    assert edit_metadata["eval"]["expected_result_kind"] == "structured_filesystem_edit"  # nosec B101
+    assert by_name["fs.edit"]["inputSchema"]["additionalProperties"] is False  # nosec B101
     write_metadata = by_name["fs.write"]["metadata"]
     assert write_metadata["path_argument_hints"] == ["path"]  # nosec B101
     assert write_metadata["path_scope_action"] == "write"  # nosec B101
@@ -637,6 +649,361 @@ async def test_filesystem_read_rejects_binary_payload(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="binary content is not supported"):
         await mod.execute_tool("fs.read", {"path": "blob.bin"}, context=context)
     assert len(resolver.calls) == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_applies_exact_single_replacement_with_expected_hash(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    docs_dir = workspace_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    target = docs_dir / "story.txt"
+    original = "alpha\nbeta\ngamma\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-expected", user_id="1", metadata={"workspace_id": "ws-1"})
+    expected_sha = hashlib.sha256(original.encode("utf-8")).hexdigest()
+
+    result = await mod.execute_tool(
+        "fs.edit",
+        {
+            "path": "docs/story.txt",
+            "old_string": "beta",
+            "new_string": "BETTA",
+            "expected_sha256": expected_sha,
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "alpha\nBETTA\ngamma\n"  # nosec B101
+    assert result["path"] == "docs/story.txt"  # nosec B101
+    assert result["edited"] is True  # nosec B101
+    assert result["dry_run"] is False  # nosec B101
+    assert result["replacements"] == 1  # nosec B101
+    assert result["sha256_before"] == expected_sha  # nosec B101
+    assert result["sha256_after"] == hashlib.sha256(b"alpha\nBETTA\ngamma\n").hexdigest()  # nosec B101
+    assert result["bytes_written"] == len(b"alpha\nBETTA\ngamma\n")  # nosec B101
+    assert result["eval"]["action_family"] == "filesystem_edit"  # nosec B101
+    assert "alpha" not in str(result)  # nosec B101
+    assert "BETTA" not in str(result)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_requires_preimage_for_existing_file(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "story.txt").write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-preimage", user_id="1", metadata={})
+
+    with pytest.raises(ValueError, match="edit_preimage_required"):
+        await mod.execute_tool(
+            "fs.edit",
+            {"path": "story.txt", "old_string": "old", "new_string": "new"},
+            context=context,
+        )
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_rejects_missing_and_non_unique_old_string(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    original = "one\ntwo\ntwo\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-exact", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(original.encode("utf-8")).hexdigest()
+
+    with pytest.raises(ValueError, match="edit_old_string_not_found"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "story.txt",
+                "old_string": "missing",
+                "new_string": "new",
+                "expected_sha256": expected_sha,
+            },
+            context=context,
+        )
+    with pytest.raises(ValueError, match="edit_old_string_not_unique"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "story.txt",
+                "old_string": "two",
+                "new_string": "TWO",
+                "expected_sha256": expected_sha,
+            },
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == original  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_preserves_raw_tab_literals(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    original = "plain old\nprefixed\told\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-raw-tab", user_id="1", metadata={})
+
+    result = await mod.execute_tool(
+        "fs.edit",
+        {
+            "path": "story.txt",
+            "old_string": "\told",
+            "new_string": "\tnew",
+            "expected_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "plain old\nprefixed\tnew\n"  # nosec B101
+    assert result["replacements"] == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_rejects_overlapping_old_string_matches(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    original = "ababa\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-overlap", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(original.encode("utf-8")).hexdigest()
+
+    with pytest.raises(ValueError, match="edit_old_string_not_unique"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "story.txt",
+                "old_string": "aba",
+                "new_string": "ABA",
+                "expected_sha256": expected_sha,
+            },
+            context=context,
+        )
+    with pytest.raises(ValueError, match="edit_old_string_overlaps"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "story.txt",
+                "old_string": "aba",
+                "new_string": "ABA",
+                "replace_all": True,
+                "expected_sha256": expected_sha,
+            },
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == original  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_replace_all_replaces_every_exact_occurrence(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    original = "two\ntwo\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-replace-all", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(original.encode("utf-8")).hexdigest()
+
+    result = await mod.execute_tool(
+        "fs.edit",
+        {
+            "path": "story.txt",
+            "old_string": "two",
+            "new_string": "TWO",
+            "replace_all": True,
+            "expected_sha256": expected_sha,
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "TWO\nTWO\n"  # nosec B101
+    assert result["replacements"] == 2  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_dry_run_reports_without_writing(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    original = "alpha\nbeta\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-dry-run", user_id="1", metadata={})
+    expected_sha = hashlib.sha256(original.encode("utf-8")).hexdigest()
+
+    result = await mod.execute_tool(
+        "fs.edit",
+        {
+            "path": "story.txt",
+            "old_string": "beta",
+            "new_string": "BETTA",
+            "expected_sha256": expected_sha,
+            "dry_run": True,
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == original  # nosec B101
+    assert result["edited"] is False  # nosec B101
+    assert result["dry_run"] is True  # nosec B101
+    assert result["replacements"] == 1  # nosec B101
+    assert "bytes_written" not in result  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_applies_with_read_receipt(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),  # nosec B105
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-edit-receipt", user_id="1", metadata={"workspace_id": "ws-1"})
+    read_result = await mod.execute_tool("fs.read", {"path": "story.txt"}, context=context)
+
+    result = await mod.execute_tool(
+        "fs.edit",
+        {
+            "path": "story.txt",
+            "old_string": "old",
+            "new_string": "new",
+            "read_receipt": read_result["read_receipt"],
+        },
+        context=context,
+    )
+
+    assert target.read_text(encoding="utf-8") == "new\n"  # nosec B101
+    assert result["sha256_before"] == read_result["sha256"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_rejects_expected_sha_mismatch_even_with_read_receipt(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    original = "old\n"
+    target.write_text(original, encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),  # nosec B105
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req-fs-edit-sha-receipt", user_id="1", metadata={"workspace_id": "ws-1"})
+    read_result = await mod.execute_tool("fs.read", {"path": "story.txt"}, context=context)
+
+    with pytest.raises(ValueError, match="edit_preimage_mismatch"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "story.txt",
+                "old_string": "old",
+                "new_string": "new",
+                "expected_sha256": hashlib.sha256(b"different\n").hexdigest(),
+                "read_receipt": read_result["read_receipt"],
+            },
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == original  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_rejects_bound_read_receipt_without_matching_context(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),  # nosec B105
+        workspace_root_resolver=resolver,
+    )
+    bound_context = RequestContext(
+        request_id="req-fs-edit-receipt-bound",
+        user_id="1",
+        session_id="session-1",
+        metadata={"workspace_id": "ws-1"},
+    )
+    unbound_context = RequestContext(request_id="req-fs-edit-receipt-unbound", user_id="1", metadata={})
+    read_result = await mod.execute_tool("fs.read", {"path": "story.txt"}, context=bound_context)
+
+    with pytest.raises(ValueError, match="edit_read_receipt_mismatch"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "story.txt",
+                "old_string": "old",
+                "new_string": "new",
+                "read_receipt": read_result["read_receipt"],
+            },
+            context=unbound_context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_filesystem_edit_rejects_binary_payload(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "blob.bin"
+    target.write_bytes(b"old\x00data")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-edit-binary", user_id="1", metadata={})
+
+    with pytest.raises(ValueError, match="binary content is not supported by fs.edit"):
+        await mod.execute_tool(
+            "fs.edit",
+            {
+                "path": "blob.bin",
+                "old_string": "old",
+                "new_string": "new",
+                "expected_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+            },
+            context=context,
+        )
+
+
+def test_filesystem_edit_no_follow_reader_rejects_oversized_payload(tmp_path: Path) -> None:
+    target = tmp_path / "story.txt"
+    target.write_text("abc", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="edit_preimage_too_large"):
+        FilesystemModule._read_existing_regular_file_no_follow(target, max_bytes=2)
+
+
+def test_filesystem_edit_no_follow_reader_rejects_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "story.txt"
+    target.write_text("abc", encoding="utf-8")
+    link_path = tmp_path / "story-link.txt"
+    try:
+        link_path.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    with pytest.raises(ValueError, match="file_not_regular"):
+        FilesystemModule._read_existing_regular_file_no_follow(link_path, max_bytes=10)
 
 
 @pytest.mark.asyncio
