@@ -106,6 +106,7 @@ export const AUDITED_ROOT_ROUTE_PATHS = [
   "/search",
   "/research",
   "/research-workspace",
+  "/explainer",
   "/document-workspace",
   "/repo2txt",
   "/model-playground",
@@ -381,6 +382,17 @@ export const ROUTE_METADATA = [
     nav: "secondary",
     requiresBackend: true,
     rationale: "Research workspace and source orchestration route."
+  }),
+  defineRoute({
+    path: "/explainer",
+    label: "Explainer",
+    group: "workspace",
+    surface: "labs_beta",
+    availability: webAndExtension,
+    smoke: "manual",
+    nav: "secondary",
+    requiresBackend: true,
+    rationale: "Persisted recursive explanation workspace with source-grounded sessions."
   }),
   defineRoute({
     path: "/document-workspace",

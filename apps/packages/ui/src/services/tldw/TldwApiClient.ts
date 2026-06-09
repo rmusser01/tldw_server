@@ -204,6 +204,84 @@ export interface TldwConfig {
   authMode: 'single-user' | 'multi-user'
 }
 
+export type ExplainerMode = "goal" | "sources"
+export type ExplainerOutputIntent = "explain" | "plan" | "both"
+export type ExplainerGrounding = "source_only" | "source_led" | "open"
+export type ExplainerDepthPreset = "quick" | "standard" | "deep"
+export type ExplainerNodeKind = "question" | "answer" | "explanation" | "step" | "summary"
+export type ExplainerNodeStatus = "idle" | "queued" | "generating" | "error" | "complete"
+export type ExplainerEvidenceState =
+  | "supported"
+  | "partially_supported"
+  | "uncited"
+  | "insufficient"
+
+export interface ExplainerSelectedSourcePayload {
+  sourceId: string
+  sourceType: string
+  title: string
+  snapshotVersion?: string | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface ExplainerSessionCreatePayload {
+  title: string
+  mode: ExplainerMode
+  outputIntent: ExplainerOutputIntent
+  grounding: ExplainerGrounding
+  depthPreset: ExplainerDepthPreset
+  selectedSources: ExplainerSelectedSourcePayload[]
+  rootPrompt: string
+}
+
+export interface ExplainerSessionPatchPayload {
+  title?: string
+  outputIntent?: ExplainerOutputIntent
+  grounding?: ExplainerGrounding
+  depthPreset?: ExplainerDepthPreset
+  selectedSources?: ExplainerSelectedSourcePayload[]
+}
+
+export interface ExplainerNodeCreatePayload {
+  parentId?: string | null
+  title: string
+  body?: string | null
+  kind?: ExplainerNodeKind
+  intent?: ExplainerOutputIntent
+  status?: ExplainerNodeStatus
+  evidenceState?: ExplainerEvidenceState
+  outsideKnowledgeUsed?: boolean
+  citations?: Record<string, unknown>[]
+}
+
+export interface ExplainerNodePatchPayload {
+  title?: string | null
+  body?: string | null
+  status?: ExplainerNodeStatus
+  evidenceState?: ExplainerEvidenceState
+  outsideKnowledgeUsed?: boolean
+  selectedOptionId?: string | null
+  selectedCustomAnswer?: string | null
+  questionOptions?: Record<string, unknown>[] | null
+  generationMetadata?: Record<string, unknown> | null
+  citations?: Record<string, unknown>[] | null
+}
+
+export interface ExplainerNodeExpandPayload {
+  intent?: ExplainerOutputIntent | null
+}
+
+export interface ExplainerQuestionAnswerPayload {
+  selectedOptionId?: string | null
+  selectedCustomAnswer?: string | null
+}
+
+export interface ExplainerChatbookExportPayload {
+  name?: string | null
+  description?: string | null
+  asyncMode?: boolean
+}
+
 export interface CurrentUserStorageQuotaResponse {
   user_id: number
   storage_used_mb: number
@@ -5352,6 +5430,141 @@ export class TldwApiClientBase {
     return await bgRequest<any>({
       path: "/api/v1/chat/documents/statistics",
       method: "GET"
+    })
+  }
+
+  // Explainer Workspace
+  async createExplainerSession(payload: ExplainerSessionCreatePayload): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/explainer/sessions",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async listExplainerSessions(params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = this.buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions${query}`,
+      method: "GET"
+    })
+  }
+
+  async getExplainerSession(sessionId: string): Promise<any> {
+    const id = encodeURIComponent(String(sessionId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${id}`,
+      method: "GET"
+    })
+  }
+
+  async updateExplainerSession(
+    sessionId: string,
+    payload: ExplainerSessionPatchPayload
+  ): Promise<any> {
+    const id = encodeURIComponent(String(sessionId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${id}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteExplainerSession(sessionId: string): Promise<any> {
+    const id = encodeURIComponent(String(sessionId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${id}`,
+      method: "DELETE"
+    })
+  }
+
+  async createExplainerNode(
+    sessionId: string,
+    payload: ExplainerNodeCreatePayload
+  ): Promise<any> {
+    const id = encodeURIComponent(String(sessionId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${id}/nodes`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async updateExplainerNode(
+    sessionId: string,
+    nodeId: string,
+    payload: ExplainerNodePatchPayload
+  ): Promise<any> {
+    const sid = encodeURIComponent(String(sessionId))
+    const nid = encodeURIComponent(String(nodeId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteExplainerNode(sessionId: string, nodeId: string): Promise<any> {
+    const sid = encodeURIComponent(String(sessionId))
+    const nid = encodeURIComponent(String(nodeId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}`,
+      method: "DELETE"
+    })
+  }
+
+  async expandExplainerNode(
+    sessionId: string,
+    nodeId: string,
+    payload?: ExplainerNodeExpandPayload
+  ): Promise<any> {
+    const sid = encodeURIComponent(String(sessionId))
+    const nid = encodeURIComponent(String(nodeId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}/expand`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload ?? {}
+    })
+  }
+
+  async answerExplainerQuestion(
+    sessionId: string,
+    nodeId: string,
+    payload: ExplainerQuestionAnswerPayload
+  ): Promise<any> {
+    const sid = encodeURIComponent(String(sessionId))
+    const nid = encodeURIComponent(String(nodeId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}/answer-question`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getExplainerJob(jobId: string): Promise<any> {
+    const id = encodeURIComponent(String(jobId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/jobs/${id}`,
+      method: "GET"
+    })
+  }
+
+  async exportExplainerChatbook(
+    sessionId: string,
+    payload?: ExplainerChatbookExportPayload
+  ): Promise<any> {
+    const id = encodeURIComponent(String(sessionId))
+    return await bgRequest<any>({
+      path: `/api/v1/explainer/sessions/${id}/export-chatbook`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload ?? {}
     })
   }
 
