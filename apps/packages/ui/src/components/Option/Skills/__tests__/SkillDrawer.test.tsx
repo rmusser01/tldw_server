@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Modal } from "antd"
 import { SkillDrawer } from "../SkillDrawer"
@@ -38,7 +38,9 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-const renderDrawer = () => {
+const renderDrawer = (
+  props: Partial<React.ComponentProps<typeof SkillDrawer>> = {}
+) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -51,8 +53,8 @@ const renderDrawer = () => {
       <SkillDrawer
         open
         skill={null}
-        onClose={vi.fn()}
-        onSaved={vi.fn()}
+        onClose={props.onClose ?? vi.fn()}
+        onSaved={props.onSaved ?? vi.fn()}
       />
     </QueryClientProvider>
   )
@@ -175,5 +177,26 @@ describe("SkillDrawer guided templates", () => {
     })
 
     expect(getContentEditor().value).toContain("Extract structured information")
+  })
+
+  it("falls back to the validated form name when the API returns an invalid created name", async () => {
+    const onSaved = vi.fn()
+    tldwClientMock.createSkill.mockResolvedValueOnce({ name: "Created Skill" })
+
+    renderDrawer({ onSaved })
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "created-skill" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.createSkill).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "created-skill" })
+      )
+    })
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledWith("created-skill")
+    })
   })
 })

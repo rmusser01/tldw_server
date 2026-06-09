@@ -9,10 +9,12 @@ import {
   scheduledTaskStatusToneToTagColor
 } from "./scheduled-task-status"
 import { WatchlistTaskActionLinks } from "./WatchlistTaskActionLinks"
+import type { ScheduledTaskResultItem } from "./scheduled-task-results"
 
 export interface ScheduledTaskDetailDrawerProps {
   open: boolean
   task: ScheduledTask | null
+  latestResult?: ScheduledTaskResultItem | null
   onClose: () => void
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
@@ -108,6 +110,7 @@ const renderTaskActions = ({
 export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps> = ({
   open,
   task,
+  latestResult = null,
   onClose,
   onEditReminder,
   onDeleteReminder
@@ -163,7 +166,16 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
 
           <div>
             <Typography.Title level={5}>Actions</Typography.Title>
-            {renderTaskActions({ task, onEditReminder, onDeleteReminder })}
+            <Space orientation="vertical" size={8}>
+              {latestResult ? (
+                <div>
+                  <Button href={latestResult.primaryHref}>
+                    Open latest result signal
+                  </Button>
+                </div>
+              ) : null}
+              {renderTaskActions({ task, onEditReminder, onDeleteReminder })}
+            </Space>
           </div>
 
           {task.primitive === "watchlist_job" ? (

@@ -109,7 +109,11 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
   ) => {
     const config = variantConfig[variant]
     const DefaultIcon = config.icon
-    const hasContent = React.Children.toArray(children).some((child) => child !== "")
+    const hasContent = React.Children.toArray(children).some((child) => {
+      if (child == null || typeof child === "boolean") return false
+      if (typeof child === "string") return child.trim().length > 0
+      return true
+    })
     const defaultsToStatus = variant === "info" || variant === "success"
     const resolvedRole = role ?? (defaultsToStatus ? "status" : "alert")
     const resolvedAriaLive =

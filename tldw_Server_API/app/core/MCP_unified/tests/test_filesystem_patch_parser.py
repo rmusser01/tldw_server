@@ -36,6 +36,40 @@ def test_parse_unified_diff_modify_headers_and_hunk_ranges() -> None:
     assert [line.text for line in hunk.lines] == ["alpha", "beta", "BETTA", "gamma"]  # nosec B101
 
 
+def test_parse_unified_diff_preserves_safe_paths_with_spaces() -> None:
+    parsed = parse_unified_diff(
+        """--- a/docs/my note.txt 2026-06-09 12:00:00.000000000 +0000
++++ b/docs/my note.txt 2026-06-09 12:00:01.000000000 +0000
+@@ -1 +1 @@
+-alpha
++beta
+""",
+        max_files=10,
+        max_hunks=10,
+        max_bytes=10_000,
+    )
+
+    assert parsed[0].old_path == "docs/my note.txt"  # nosec B101
+    assert parsed[0].new_path == "docs/my note.txt"  # nosec B101
+
+
+def test_parse_unified_diff_strips_date_only_header_metadata() -> None:
+    parsed = parse_unified_diff(
+        """--- a/docs/story.txt 2026-06-09
++++ b/docs/story.txt 2026-06-10
+@@ -1 +1 @@
+-alpha
++beta
+""",
+        max_files=10,
+        max_hunks=10,
+        max_bytes=10_000,
+    )
+
+    assert parsed[0].old_path == "docs/story.txt"  # nosec B101
+    assert parsed[0].new_path == "docs/story.txt"  # nosec B101
+
+
 def test_parse_unified_diff_create_and_reject_delete() -> None:
     created = parse_unified_diff(
         """--- /dev/null
@@ -135,6 +169,45 @@ def test_apply_patch_rejects_add_only_hunk_beyond_end_of_file() -> None:
         apply_patch_to_text("alpha\n", parsed[0])
 
     assert exc_info.value.reason_code == "patch_context_mismatch"  # nosec B101
+
+
+def test_apply_patch_to_text_preserves_missing_final_newline() -> None:
+    parsed = parse_unified_diff(
+        """--- a/docs/story.txt
++++ b/docs/story.txt
+@@ -1,2 +1,2 @@
+ alpha
+-beta
+\\ No newline at end of file
++BETTA
+\\ No newline at end of file
+""",
+        max_files=10,
+        max_hunks=10,
+        max_bytes=10_000,
+    )
+
+    result = apply_patch_to_text("alpha\nbeta", parsed[0])
+
+    assert result == "alpha\nBETTA"  # nosec B101
+
+
+def test_parse_unified_diff_rejects_orphan_no_newline_marker() -> None:
+    with pytest.raises(FilesystemPatchError) as exc_info:
+        parse_unified_diff(
+            """--- a/docs/story.txt
++++ b/docs/story.txt
+@@ -1 +1 @@
+\\ No newline at end of file
+-alpha
++beta
+""",
+            max_files=10,
+            max_hunks=10,
+            max_bytes=10_000,
+        )
+
+    assert exc_info.value.reason_code == "invalid_no_newline_marker"  # nosec B101
 
 
 def test_apply_patch_to_text_modifies_content_in_memory() -> None:

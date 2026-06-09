@@ -41,11 +41,16 @@ def test_registry_exposes_phase_one_mappings():
     registry = build_default_registry()
 
     assert registry.get_command("ls").backend_tools == ("fs.list",)
-    assert registry.get_command("cat").backend_tools == ("fs.read_text",)
+    assert registry.get_command("cat").backend_tools == ("fs.read", "fs.read_text")
     assert registry.get_command("write").backend_tools == ("fs.write_text",)
+    assert registry.get_command("write-create").backend_tools == ("fs.write",)
     assert registry.get_command("knowledge").backend_tools == ("knowledge.search", "knowledge.get")
     assert registry.get_command("media").backend_tools == ("media.search", "media.get")
-    assert registry.get_command("mcp").backend_tools == ("mcp.modules.list", "mcp.tools.list")
+    assert registry.get_command("mcp").backend_tools == (
+        "mcp.modules.list",
+        "mcp.tools.list",
+        "mcp.catalogs.list",
+    )
     assert registry.get_command("sandbox").backend_tools == ("sandbox.run",)
     assert registry.get_command("grep").pure_transform is True
     assert registry.get_command("stat").backend_tools == ("fs.stat",)
@@ -53,3 +58,28 @@ def test_registry_exposes_phase_one_mappings():
     assert registry.get_command("find").backend_tools == ("fs.glob",)
     assert registry.get_command("rg").backend_tools == ("fs.grep",)
     assert registry.get_command("grep-files").backend_tools == ("fs.grep",)
+
+
+def test_registry_filters_visible_backend_tools_for_multi_backend_commands() -> None:
+    registry = build_default_registry()
+
+    visible = registry.visible_commands(allowed_tools={"fs.read"})
+    assert "cat" in visible
+    assert visible["cat"].backend_tools == ("fs.read",)
+
+    visible = registry.visible_commands(allowed_tools={"fs.read_text"})
+    assert "cat" in visible
+    assert visible["cat"].backend_tools == ("fs.read_text",)
+
+    visible = registry.visible_commands(allowed_tools={"fs.write"})
+    assert "write-create" in visible
+    assert "write" not in visible
+
+
+def test_registry_filters_visible_backend_tools_for_mcp_catalogs() -> None:
+    registry = build_default_registry()
+
+    visible = registry.visible_commands(allowed_tools={"mcp.catalogs.list"})
+
+    assert "mcp" in visible
+    assert visible["mcp"].backend_tools == ("mcp.catalogs.list",)

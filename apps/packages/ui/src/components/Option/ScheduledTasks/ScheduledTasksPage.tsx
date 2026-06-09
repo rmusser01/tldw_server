@@ -2,7 +2,7 @@ import React, { useState } from "react"
 import { Alert, Button, Empty, Space, Spin, Tabs, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
@@ -19,6 +19,8 @@ import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 import { ScheduledTaskCreatePanel } from "./ScheduledTaskCreatePanel"
+import { ScheduledTaskResultsPanel } from "./ScheduledTaskResultsPanel"
+import { ScheduledTaskResultDetailDrawer } from "./ScheduledTaskResultDetailDrawer"
 import { DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES } from "./scheduled-task-template-capabilities"
 import {
   SCHEDULED_TASK_TABS,
@@ -26,6 +28,11 @@ import {
   parseScheduledTaskRouteState,
   type ScheduledTaskTabId
 } from "./scheduled-task-route-state"
+import {
+  findScheduledTaskResultByRouteState,
+  projectScheduledTaskResults,
+  type ScheduledTaskResultItem
+} from "./scheduled-task-results"
 import {
   getScheduledTaskTemplate,
   type ScheduledTaskTemplateId
@@ -44,6 +51,7 @@ const LoadingState: React.FC = () => (
 )
 
 export const ScheduledTasksPage: React.FC = () => {
+  const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { t } = useTranslation(["scheduledTasks", "common"])
@@ -58,23 +66,43 @@ export const ScheduledTasksPage: React.FC = () => {
     boolean | null
   >(null)
   const routeState = React.useMemo(
-    () => parseScheduledTaskRouteState(searchParams),
-    [searchParams]
+    () =>
+      parseScheduledTaskRouteState(searchParams, {
+        defaultTab: location.pathname.replace(/\/+$/, "").endsWith("/scheduled-tasks/results")
+          ? "results"
+          : "overview"
+      }),
+    [location.pathname, searchParams]
   )
 
   const updateRoute = React.useCallback(
     ({
       tab,
       templateId,
-      taskId
+      taskId,
+      runId,
+      resultId
     }: {
       tab: ScheduledTaskTabId
       templateId?: string | null
       taskId?: string | null
+      runId?: string | null
+      resultId?: string | null
     }) => {
-      setSearchParams(new URLSearchParams(buildScheduledTaskSearch({ tab, templateId, taskId })))
+      const normalizedPath = location.pathname.replace(/\/+$/, "")
+      const onResultsAlias = normalizedPath.endsWith("/scheduled-tasks/results")
+      if (tab === "overview" && onResultsAlias) {
+        navigate("/scheduled-tasks")
+        return
+      }
+
+      setSearchParams(
+        new URLSearchParams(
+          buildScheduledTaskSearch({ tab, templateId, taskId, runId, resultId })
+        )
+      )
     },
-    [setSearchParams]
+    [location.pathname, navigate, setSearchParams]
   )
 
   React.useEffect(() => {
@@ -138,6 +166,17 @@ export const ScheduledTasksPage: React.FC = () => {
   })
 
   const tasks = tasksQuery.data?.items ?? []
+  const projectedResults = React.useMemo(
+    () => projectScheduledTaskResults(tasks, { includeCompletedNoResults: true }),
+    [tasks]
+  )
+  const selectedResult = React.useMemo(
+    () =>
+      routeState.tab === "results"
+        ? findScheduledTaskResultByRouteState(projectedResults, routeState)
+        : null,
+    [projectedResults, routeState]
+  )
   const selectedTask = React.useMemo(
     () => {
       const refreshedTask = tasks.find((task) => task.id === selectedTaskId)
@@ -145,6 +184,13 @@ export const ScheduledTasksPage: React.FC = () => {
       return createdTaskFallback?.id === selectedTaskId ? createdTaskFallback : null
     },
     [createdTaskFallback, selectedTaskId, tasks]
+  )
+  const selectedTaskLatestResult = React.useMemo(
+    () =>
+      selectedTask
+        ? projectedResults.find((result) => result.taskId === selectedTask.id) ?? null
+        : null,
+    [projectedResults, selectedTask]
   )
   const hasLoadedTasks = Boolean(tasksQuery.data)
   const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
@@ -232,6 +278,10 @@ export const ScheduledTasksPage: React.FC = () => {
     setCreatedTaskFallback(null)
     setSelectedTaskId(null)
     updateRoute({ tab: "tasks" })
+  }
+
+  const closeResultDetail = () => {
+    updateRoute({ tab: "results" })
   }
 
   const openCreateReminder = () => {
@@ -361,6 +411,13 @@ export const ScheduledTasksPage: React.FC = () => {
     Boolean(routeState.taskId) &&
     !tasks.some((task) => task.id === routeState.taskId) &&
     selectedTaskId !== routeState.taskId
+  const hasResultRouteTarget =
+    routeState.tab === "results" &&
+    Boolean(routeState.resultId || routeState.runId || routeState.taskId)
+  const missingRouteResult =
+    hasLoadedTasks &&
+    hasResultRouteTarget &&
+    selectedResult === null
 
   const renderOverviewTab = () => (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -368,6 +425,8 @@ export const ScheduledTasksPage: React.FC = () => {
         <ScheduledTaskOverview
           tasks={tasks}
           partial={Boolean(tasksQuery.data?.partial)}
+          results={projectedResults}
+          onOpenResult={openResultSignal}
         />
       ) : null}
 
@@ -378,6 +437,34 @@ export const ScheduledTasksPage: React.FC = () => {
           title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
         />
       ) : null}
+    </Space>
+  )
+
+  const openResultSignal = (result: ScheduledTaskResultItem) => {
+    updateRoute({
+      tab: "results",
+      resultId: result.resultId,
+      runId: result.runId,
+      taskId: result.taskId
+    })
+  }
+
+  const openTaskResults = (task: ScheduledTask) => {
+    updateRoute({ tab: "results", taskId: task.id })
+  }
+
+  const renderResultsTab = () => (
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      {missingRouteResult ? (
+        <Alert type="warning" showIcon title="Result signal not found." />
+      ) : null}
+      <ScheduledTaskResultsPanel
+        results={projectedResults}
+        taskCount={tasks.length}
+        capabilityMode="projected_signals"
+        onCreateTask={openCreateReminder}
+        onOpenResult={openResultSignal}
+      />
     </Space>
   )
 
@@ -408,8 +495,10 @@ export const ScheduledTasksPage: React.FC = () => {
       {hasLoadedTasks && tasks.length > 0 ? (
         <ScheduledTaskTable
           tasks={tasks}
+          results={projectedResults}
           onCreateReminder={openCreateReminder}
           onInspectTask={openTaskDetail}
+          onOpenTaskResults={openTaskResults}
           onEditReminder={openEditReminder}
           onDeleteReminder={handleDeleteReminder}
         />
@@ -506,6 +595,8 @@ export const ScheduledTasksPage: React.FC = () => {
               children:
                 tab.id === "overview"
                   ? renderOverviewTab()
+                  : tab.id === "results"
+                    ? renderResultsTab()
                   : tab.id === "tasks"
                     ? renderTasksTab()
                     : (
@@ -527,13 +618,25 @@ export const ScheduledTasksPage: React.FC = () => {
             onClose={closeEditor}
             onSubmit={handleSubmit}
           />
-          <ScheduledTaskDetailDrawer
-            open={Boolean(selectedTask)}
-            task={selectedTask}
-            onClose={closeTaskDetail}
-            onEditReminder={openEditReminder}
-            onDeleteReminder={handleDeleteReminder}
-          />
+          {selectedTask ? (
+            <ScheduledTaskDetailDrawer
+              open
+              task={selectedTask}
+              latestResult={selectedTaskLatestResult}
+              onClose={closeTaskDetail}
+              onEditReminder={openEditReminder}
+              onDeleteReminder={handleDeleteReminder}
+            />
+          ) : null}
+          {routeState.tab === "results" && selectedResult ? (
+            <ScheduledTaskResultDetailDrawer
+              open
+              result={selectedResult}
+              onClose={closeResultDetail}
+              onReviewResult={() => undefined}
+              onRetryRun={() => undefined}
+            />
+          ) : null}
         </>
       ) : null}
     </div>

@@ -26,7 +26,7 @@ from ..base import BaseModule, ModuleConfig, create_tool_definition
 
 RUN_PARENT_IDEMPOTENCY_KEY_METADATA_KEY = "run_parent_idempotency_key"
 
-_RUN_WRITE_BACKEND_TOOLS = {"fs.write_text", "sandbox.run"}
+_RUN_WRITE_BACKEND_TOOLS = {"fs.write", "fs.write_text", "sandbox.run"}
 _RUN_TOOL_NAME = "run"
 _RUN_TOOL_ALIASES = ("bash", "shell")
 _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
