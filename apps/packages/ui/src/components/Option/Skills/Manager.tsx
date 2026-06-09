@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Alert,
   Button,
   Form,
   Input,
@@ -61,7 +62,13 @@ export const SkillsManager: React.FC = () => {
 
   const offset = (page - 1) * pageSize
 
-  const { data, isLoading } = useQuery<SkillsListResponse>({
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery<SkillsListResponse>({
     queryKey: ["skills", page, pageSize],
     queryFn: () => tldwClient.listSkills({ limit: pageSize, offset })
   })
@@ -74,8 +81,37 @@ export const SkillsManager: React.FC = () => {
       (s) =>
         s.name.toLowerCase().includes(q) ||
         (s.description && s.description.toLowerCase().includes(q))
-    )
+      )
   }, [data?.skills, search])
+
+  const hasLoadedSkills = data != null && !isError
+  const totalSkills = data?.total ?? 0
+  const hasSearch = search.trim().length > 0
+  const isLibraryEmpty =
+    hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch
+  const skillCountLabel = isError
+    ? t("option:skills.countUnavailable", {
+        defaultValue: "Count unavailable"
+      })
+    : t("option:skills.countSummary", {
+        defaultValue: `${totalSkills} ${totalSkills === 1 ? "skill" : "skills"}`,
+        count: totalSkills
+      })
+  const listErrorDescription =
+    error instanceof Error && error.message
+      ? error.message
+      : t("option:skills.loadListErrorDescription", {
+          defaultValue: "Check your server connection and try again."
+        })
+
+  React.useEffect(() => {
+    if (!hasLoadedSkills) return
+
+    const lastPage = Math.max(1, Math.ceil(totalSkills / pageSize))
+    if (page > lastPage) {
+      setPage(lastPage)
+    }
+  }, [hasLoadedSkills, page, pageSize, totalSkills])
 
   const deleteMutation = useMutation({
     mutationFn: (name: string) => tldwClient.deleteSkill(name),
@@ -358,9 +394,99 @@ export const SkillsManager: React.FC = () => {
     }
   ]
 
+  const beginnerEmptyState = (
+    <div
+      className="mx-auto flex max-w-xl flex-col items-center gap-3 py-8 text-center"
+      data-testid="skills-empty-state"
+    >
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-text">
+          {t("option:skills.emptyTitle", {
+            defaultValue: "Start with a reusable skill"
+          })}
+        </h2>
+        <p className="m-0 text-sm text-text-muted">
+          {t("option:skills.emptyDescription", {
+            defaultValue:
+              "Skills are reusable instructions that can be tested here and used from chat."
+          })}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button
+          type="primary"
+          icon={<Database size={14} />}
+          loading={seedBuiltinsMutation.isPending}
+          onClick={() => seedBuiltinsMutation.mutate(false)}
+        >
+          {t("option:skills.emptySeedBuiltins", {
+            defaultValue: "Seed built-ins"
+          })}
+        </Button>
+        <Button icon={<Plus size={14} />} onClick={handleNew}>
+          {t("option:skills.emptyCreateFromTemplate", {
+            defaultValue: "Create from template"
+          })}
+        </Button>
+        <Button icon={<UploadIcon size={14} />} onClick={openImportTextModal}>
+          {t("option:skills.emptyImportText", {
+            defaultValue: "Import from text"
+          })}
+        </Button>
+      </div>
+    </div>
+  )
+
+  let tableEmptyText: React.ReactNode = beginnerEmptyState
+  if (!isLibraryEmpty) {
+    let emptyText = t("option:skills.emptyTable", {
+      defaultValue: "No skills yet."
+    })
+    if (isError) {
+      emptyText = t("option:skills.emptyTableError", {
+        defaultValue: "Unable to load skills."
+      })
+    } else if (hasSearch) {
+      emptyText = t("option:skills.noMatches", {
+        defaultValue: "No skills match this search."
+      })
+    } else if (totalSkills > 0) {
+      emptyText = t("option:skills.emptyCurrentPage", {
+        defaultValue: "No skills on this page."
+      })
+    }
+
+    tableEmptyText = emptyText
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+      <section
+        aria-labelledby="skills-manager-title"
+        className="flex flex-col gap-1"
+      >
+        <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h1
+              id="skills-manager-title"
+              className="m-0 text-xl font-semibold text-text"
+            >
+              {t("option:skills.title", { defaultValue: "Skills" })}
+            </h1>
+            <p className="m-0 max-w-2xl text-sm text-text-muted">
+              {t("option:skills.description", {
+                defaultValue:
+                  "Discover, test, create, import, and manage reusable instructions."
+              })}
+            </p>
+          </div>
+          <p className="m-0 text-sm font-medium text-text-muted">
+            {skillCountLabel}
+          </p>
+        </div>
+      </section>
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <Input.Search
           placeholder={t("option:skills.searchPlaceholder", {
             defaultValue: "Search skills..."
@@ -368,9 +494,9 @@ export const SkillsManager: React.FC = () => {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           allowClear
-          style={{ maxWidth: 300 }}
+          style={{ maxWidth: 360 }}
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Dropdown menu={{ items: importMenuItems }} trigger={["click"]}>
             <Button icon={<UploadIcon size={14} />}>
               {t("option:skills.import", { defaultValue: "Import" })}
@@ -390,6 +516,22 @@ export const SkillsManager: React.FC = () => {
         </div>
       </div>
 
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={t("option:skills.loadListError", {
+            defaultValue: "Failed to load skills"
+          })}
+          description={listErrorDescription}
+          action={
+            <Button size="small" onClick={() => void refetch()}>
+              {t("common:tryAgain", { defaultValue: "Try again" })}
+            </Button>
+          }
+        />
+      )}
+
       <Table
         dataSource={filteredSkills}
         columns={columns}
@@ -397,14 +539,17 @@ export const SkillsManager: React.FC = () => {
         loading={isLoading}
         pagination={false}
         size="middle"
+        locale={{
+          emptyText: tableEmptyText
+        }}
       />
 
-      {(data?.total ?? 0) > pageSize && (
+      {totalSkills > pageSize && (
         <div className="flex justify-end">
           <Pagination
             current={page}
             pageSize={pageSize}
-            total={data?.total ?? 0}
+            total={totalSkills}
             onChange={(p, ps) => {
               setPage(p)
               setPageSize(ps)
