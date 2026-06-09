@@ -4,14 +4,14 @@ import type { ColumnsType } from "antd/es/table"
 import { EmptyState } from "@/components/ui/feedback"
 import {
   Alert as DesignSystemAlert,
-  Badge as DesignSystemBadge,
-  type BadgeVariant
+  Badge as DesignSystemBadge
 } from "@/components/ui/primitives"
 
 import { formatScheduledTaskTimestamp } from "./scheduled-task-status"
 import {
   filterScheduledTaskResults,
   getScheduledTaskResultStatusLabel,
+  scheduledTaskResultSeverityToBadgeVariant,
   type ScheduledTaskResultItem,
   type ScheduledTaskResultOwner,
   type ScheduledTaskResultSignalKind,
@@ -49,21 +49,6 @@ const reviewStateOptions: Array<{ value: ReviewStateFilter; label: string }> = [
   { value: "unreviewed", label: "Unreviewed" },
   { value: "reviewed", label: "Reviewed" }
 ]
-
-const severityToBadgeVariant = (
-  severity: ScheduledTaskResultItem["severity"]
-): BadgeVariant => {
-  switch (severity) {
-    case "success":
-      return "success"
-    case "warning":
-      return "warning"
-    case "error":
-      return "danger"
-    default:
-      return "info"
-  }
-}
 
 const stateFilterToSignalKinds = (
   stateFilter: ResultStateFilter
@@ -219,7 +204,9 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
       title: "State",
       key: "state",
       render: (_, result) => (
-        <DesignSystemBadge variant={severityToBadgeVariant(result.severity)}>
+        <DesignSystemBadge
+          variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}
+        >
           {getScheduledTaskResultStatusLabel(result)}
         </DesignSystemBadge>
       )

@@ -64,9 +64,11 @@ const templateStateToBadgeVariant = (
       return "secondary"
     case "managed_in_watchlists":
     case "handoff_only":
-    default:
       return "info"
   }
+
+  const _exhaustive: never = state
+  return _exhaustive
 }
 
 const PRIVATE_LOOKING_PROSE_PATTERN =

@@ -2,13 +2,13 @@ import React from "react"
 import { Button, Descriptions, Drawer, Space, Typography } from "antd"
 import {
   Alert as DesignSystemAlert,
-  Badge as DesignSystemBadge,
-  type BadgeVariant
+  Badge as DesignSystemBadge
 } from "@/components/ui/primitives"
 
 import { formatScheduledTaskTimestamp } from "./scheduled-task-status"
 import {
   getScheduledTaskResultStatusLabel,
+  scheduledTaskResultSeverityToBadgeVariant,
   type ScheduledTaskResultItem
 } from "./scheduled-task-results"
 
@@ -22,21 +22,6 @@ export interface ScheduledTaskResultDetailDrawerProps {
 
 const UNSUPPORTED_ACTION_COPY =
   "Review and retry actions appear when this server supports them for the selected result."
-
-const severityToBadgeVariant = (
-  severity: ScheduledTaskResultItem["severity"]
-): BadgeVariant => {
-  switch (severity) {
-    case "success":
-      return "success"
-    case "warning":
-      return "warning"
-    case "error":
-      return "danger"
-    default:
-      return "info"
-  }
-}
 
 const optionalDescriptionItem = (
   label: string,
@@ -103,7 +88,9 @@ export const ScheduledTaskResultDetailDrawer: React.FC<
 
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="State">
-              <DesignSystemBadge variant={severityToBadgeVariant(result.severity)}>
+              <DesignSystemBadge
+                variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}
+              >
                 {getScheduledTaskResultStatusLabel(result)}
               </DesignSystemBadge>
             </Descriptions.Item>
