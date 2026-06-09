@@ -219,6 +219,102 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
   })
 
+  it("opens the Results tab from the URL and renders projected result signals", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "watchlist_job:release",
+          primitive: "watchlist_job",
+          title: "Release monitor",
+          description: "Track releases",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Every morning",
+          timezone: "UTC",
+          next_run_at: "2030-04-06T09:00:00+00:00",
+          last_run_at: "2030-04-05T09:00:00+00:00",
+          edit_mode: "external",
+          manage_url: "/watchlists?tab=jobs",
+          source_ref: {
+            job_id: 42,
+            latest_run_id: 101,
+            latest_output_id: 202,
+            result_count: 3,
+            source_label: "Release feed"
+          }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=results")
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByRole("heading", { level: 3, name: "Scheduled task results" })).toBeInTheDocument()
+    expect(screen.getByText("Latest signals inferred from task status. Durable review state appears when the results API is available.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open signal for Release monitor" })).toBeInTheDocument()
+    expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
+  })
+
+  it("opens the Results tab from the alias path and selects a result signal", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "watchlist_job:release",
+          primitive: "watchlist_job",
+          title: "Release monitor",
+          description: "Track releases",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Every morning",
+          timezone: "UTC",
+          next_run_at: "2030-04-06T09:00:00+00:00",
+          last_run_at: "2030-04-05T09:00:00+00:00",
+          edit_mode: "external",
+          manage_url: "/watchlists?tab=jobs",
+          source_ref: {
+            job_id: 42,
+            latest_run_id: 101,
+            latest_output_id: 202,
+            result_count: 1
+          }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks/results?result_id=202"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("Selected signal: Release monitor")).toBeInTheDocument()
+    expect(screen.queryByText("Result signal not found.")).not.toBeInTheDocument()
+  })
+
+  it("shows a non-blocking missing-result message for stale Results deep links", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=results&result_id=missing"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("Result signal not found.")).toBeInTheDocument()
+    expect(screen.getByText("No scheduled tasks yet")).toBeInTheDocument()
+  })
+
   it("keeps Watch template non-creating from the page route", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [],

@@ -2,7 +2,7 @@ import React, { useState } from "react"
 import { Alert, Button, Empty, Space, Spin, Tabs, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
@@ -27,6 +27,10 @@ import {
   type ScheduledTaskTabId
 } from "./scheduled-task-route-state"
 import {
+  findScheduledTaskResultByRouteState,
+  projectScheduledTaskResults
+} from "./scheduled-task-results"
+import {
   getScheduledTaskTemplate,
   type ScheduledTaskTemplateId
 } from "./scheduled-task-templates"
@@ -44,6 +48,7 @@ const LoadingState: React.FC = () => (
 )
 
 export const ScheduledTasksPage: React.FC = () => {
+  const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { t } = useTranslation(["scheduledTasks", "common"])
@@ -58,21 +63,34 @@ export const ScheduledTasksPage: React.FC = () => {
     boolean | null
   >(null)
   const routeState = React.useMemo(
-    () => parseScheduledTaskRouteState(searchParams),
-    [searchParams]
+    () =>
+      parseScheduledTaskRouteState(searchParams, {
+        defaultTab: location.pathname.replace(/\/+$/, "").endsWith("/scheduled-tasks/results")
+          ? "results"
+          : "overview"
+      }),
+    [location.pathname, searchParams]
   )
 
   const updateRoute = React.useCallback(
     ({
       tab,
       templateId,
-      taskId
+      taskId,
+      runId,
+      resultId
     }: {
       tab: ScheduledTaskTabId
       templateId?: string | null
       taskId?: string | null
+      runId?: string | null
+      resultId?: string | null
     }) => {
-      setSearchParams(new URLSearchParams(buildScheduledTaskSearch({ tab, templateId, taskId })))
+      setSearchParams(
+        new URLSearchParams(
+          buildScheduledTaskSearch({ tab, templateId, taskId, runId, resultId })
+        )
+      )
     },
     [setSearchParams]
   )
@@ -138,6 +156,17 @@ export const ScheduledTasksPage: React.FC = () => {
   })
 
   const tasks = tasksQuery.data?.items ?? []
+  const projectedResults = React.useMemo(
+    () => projectScheduledTaskResults(tasks, { includeCompletedNoResults: true }),
+    [tasks]
+  )
+  const selectedResult = React.useMemo(
+    () =>
+      routeState.tab === "results"
+        ? findScheduledTaskResultByRouteState(projectedResults, routeState)
+        : null,
+    [projectedResults, routeState]
+  )
   const selectedTask = React.useMemo(
     () => {
       const refreshedTask = tasks.find((task) => task.id === selectedTaskId)
@@ -361,6 +390,13 @@ export const ScheduledTasksPage: React.FC = () => {
     Boolean(routeState.taskId) &&
     !tasks.some((task) => task.id === routeState.taskId) &&
     selectedTaskId !== routeState.taskId
+  const hasResultRouteTarget =
+    routeState.tab === "results" &&
+    Boolean(routeState.resultId || routeState.runId || routeState.taskId)
+  const missingRouteResult =
+    hasLoadedTasks &&
+    hasResultRouteTarget &&
+    selectedResult === null
 
   const renderOverviewTab = () => (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -377,6 +413,114 @@ export const ScheduledTasksPage: React.FC = () => {
           showIcon
           title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
         />
+      ) : null}
+    </Space>
+  )
+
+  const openResultSignal = (
+    resultId: string | null,
+    runId: string | null,
+    taskId: string
+  ) => {
+    updateRoute({ tab: "results", resultId, runId, taskId })
+  }
+
+  const renderResultsTab = () => (
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <Typography.Title level={3} style={{ marginBottom: 0 }}>
+          Scheduled task results
+        </Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          Review outputs, failures, and run state from recurring automations.
+          Source-specific setup stays in the owning workspace.
+        </Typography.Paragraph>
+      </div>
+
+      <Alert
+        type="info"
+        showIcon
+        title="Latest automation signals"
+        description="Latest signals inferred from task status. Durable review state appears when the results API is available."
+      />
+
+      {missingRouteResult ? (
+        <Alert type="warning" showIcon title="Result signal not found." />
+      ) : null}
+
+      {selectedResult ? (
+        <Alert
+          type={selectedResult.severity === "error" ? "error" : "success"}
+          showIcon
+          title={`Selected signal: ${selectedResult.title}`}
+          description={selectedResult.summary}
+        />
+      ) : null}
+
+      {hasLoadedTasks && tasks.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <Typography.Text strong>No scheduled tasks yet</Typography.Text>
+              <Typography.Text type="secondary">
+                Results and failures appear here after an automation runs.
+              </Typography.Text>
+            </div>
+          }
+        >
+          <Button type="primary" onClick={openCreateReminder}>
+            Create scheduled task
+          </Button>
+        </Empty>
+      ) : null}
+
+      {hasLoadedTasks && tasks.length > 0 && projectedResults.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <Typography.Text strong>No results to review</Typography.Text>
+              <Typography.Text type="secondary">
+                The latest scheduled runs have not produced new results or failures.
+              </Typography.Text>
+            </div>
+          }
+        />
+      ) : null}
+
+      {projectedResults.length > 0 ? (
+        <section aria-label="Scheduled task results">
+          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+            {projectedResults.map((result) => (
+              <div
+                key={result.id}
+                style={{
+                  border: "1px solid var(--ant-color-border, #d9d9d9)",
+                  borderRadius: 8,
+                  padding: 12
+                }}
+              >
+                <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+                  <Typography.Text strong>{result.title}</Typography.Text>
+                  <Typography.Text type="secondary">{result.summary}</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {result.ownerLabel} - {result.state.replace(/_/g, " ")}
+                  </Typography.Text>
+                  <Button
+                    type="link"
+                    style={{ alignSelf: "flex-start", paddingInline: 0 }}
+                    onClick={() => {
+                      openResultSignal(result.resultId, result.runId, result.taskId)
+                    }}
+                  >
+                    Open signal for {result.title}
+                  </Button>
+                </Space>
+              </div>
+            ))}
+          </Space>
+        </section>
       ) : null}
     </Space>
   )
@@ -506,6 +650,8 @@ export const ScheduledTasksPage: React.FC = () => {
               children:
                 tab.id === "overview"
                   ? renderOverviewTab()
+                  : tab.id === "results"
+                    ? renderResultsTab()
                   : tab.id === "tasks"
                     ? renderTasksTab()
                     : (

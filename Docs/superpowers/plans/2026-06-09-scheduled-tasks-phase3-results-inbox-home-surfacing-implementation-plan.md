@@ -435,15 +435,15 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Add `scheduled-task-results.ts` types and helpers.
-- [ ] Add `scheduled-task-result-links.ts` URL and dedupe helpers.
-- [ ] Add capability-mode detection helpers that can accept OpenAPI path availability.
-- [ ] Add result item sorting by newest `occurredAt`, then severity, then title.
-- [ ] Add `buildScheduledTaskResultHref` for `result_id`, `run_id`, and `task_id`.
-- [ ] Add `findScheduledTaskResultByRouteState`.
-- [ ] Add Home adapter returning automation inbox items with status and owner metadata.
-- [ ] Add mixed-state projection rules before React rendering work starts.
-- [ ] Run `bunx vitest run apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-results.test.ts`.
+- [x] Add `scheduled-task-results.ts` types and helpers.
+- [x] Add `scheduled-task-result-links.ts` URL and dedupe helpers.
+- [x] Add capability-mode detection helpers that can accept OpenAPI path availability.
+- [x] Add result item sorting by newest `occurredAt`, then severity, then title.
+- [x] Add `buildScheduledTaskResultHref` for `result_id`, `run_id`, and `task_id`.
+- [x] Add `findScheduledTaskResultByRouteState`.
+- [x] Add Home adapter returning automation inbox items with status and owner metadata.
+- [x] Add mixed-state projection rules before React rendering work starts.
+- [x] Run `bunx vitest run apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-results.test.ts`.
 
 ## Stage 2: Results Route State And Results Tab
 
@@ -474,14 +474,14 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Update `ScheduledTaskTabId` and `SCHEDULED_TASK_TABS`.
-- [ ] Extend `ScheduledTaskRouteState` with `resultId` and `runId`.
-- [ ] Update `buildScheduledTaskSearch`.
-- [ ] Add extension route alias for `/scheduled-tasks/results`.
-- [ ] Add hosted WebUI alias page for `/scheduled-tasks/results`.
-- [ ] Add Results tab rendering to `ScheduledTasksPage.tsx`.
-- [ ] Keep task-detail state separate from result-detail state.
-- [ ] Run the route-state and page tests.
+- [x] Update `ScheduledTaskTabId` and `SCHEDULED_TASK_TABS`.
+- [x] Extend `ScheduledTaskRouteState` with `resultId` and `runId`.
+- [x] Update `buildScheduledTaskSearch`.
+- [x] Add extension route alias for `/scheduled-tasks/results`.
+- [x] Add hosted WebUI alias page for `/scheduled-tasks/results`.
+- [x] Add Results tab rendering to `ScheduledTasksPage.tsx`.
+- [x] Keep task-detail state separate from result-detail state.
+- [x] Run the route-state and page tests.
 
 ## Stage 3: Results Panel And Detail Drawer
 

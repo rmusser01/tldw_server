@@ -88,6 +88,12 @@ export interface ScheduledTaskAutomationHomeItem {
   dedupeKey: string
 }
 
+export interface ScheduledTaskResultRouteTarget {
+  resultId?: string | null
+  runId?: string | null
+  taskId?: string | null
+}
+
 const RUN_ID_KEYS = [
   "run_id",
   "runId",
@@ -605,6 +611,28 @@ export const filterScheduledTaskResults = (
 
     return true
   })
+}
+
+export const findScheduledTaskResultByRouteState = (
+  results: ScheduledTaskResultItem[],
+  routeState: ScheduledTaskResultRouteTarget
+): ScheduledTaskResultItem | null => {
+  const resultId = normalizeId(routeState.resultId)
+  if (resultId) {
+    return results.find((result) => result.resultId === resultId) ?? null
+  }
+
+  const runId = normalizeId(routeState.runId)
+  if (runId) {
+    return results.find((result) => result.runId === runId) ?? null
+  }
+
+  const taskId = normalizeId(routeState.taskId)
+  if (taskId) {
+    return results.find((result) => result.taskId === taskId) ?? null
+  }
+
+  return null
 }
 
 export const buildScheduledTaskAutomationHomeItems = (

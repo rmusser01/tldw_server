@@ -9,6 +9,7 @@ import {
 } from "../scheduled-task-result-links"
 import {
   buildScheduledTaskAutomationHomeItems,
+  findScheduledTaskResultByRouteState,
   filterScheduledTaskResults,
   projectScheduledTaskResults,
   resolveScheduledTaskResultsCapabilityMode
@@ -204,6 +205,33 @@ describe("scheduled task result helpers", () => {
         occurredAt: "2030-01-01T09:00:00Z"
       })
     ).toBe("task:watchlist_job:42:state:failure:time:2030-01-01T09:00:00Z")
+  })
+
+  it("finds projected results by result, run, then task route state", () => {
+    const results = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:release",
+        title: "Release monitor",
+        source_ref: {
+          job_id: 42,
+          latest_run_id: 101,
+          latest_output_id: 202,
+          result_count: 1
+        }
+      })
+    ])
+
+    expect(findScheduledTaskResultByRouteState(results, { resultId: "202" })?.taskTitle).toBe(
+      "Release monitor"
+    )
+    expect(findScheduledTaskResultByRouteState(results, { runId: "101" })?.taskTitle).toBe(
+      "Release monitor"
+    )
+    expect(
+      findScheduledTaskResultByRouteState(results, { taskId: "watchlist_job:release" })
+        ?.taskTitle
+    ).toBe("Release monitor")
+    expect(findScheduledTaskResultByRouteState(results, { resultId: "missing" })).toBeNull()
   })
 
   it("normalizes notification targets without replacing notification behavior", () => {
