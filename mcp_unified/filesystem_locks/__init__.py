@@ -1,17 +1,14 @@
-"""Compatibility exports for MCP filesystem lock leases."""
+"""Filesystem lock lease managers for MCP Unified."""
 
 from __future__ import annotations
 
-from mcp_unified.filesystem_locks import (
+from .memory import InMemoryFilesystemLockManager, create_filesystem_lock_manager
+from .models import (
     FilesystemLockConflict,
     FilesystemLockLease,
     FilesystemLockManager,
     FilesystemLockMissing,
-    InMemoryFilesystemLockManager,
-    create_filesystem_lock_manager,
 )
-from mcp_unified.filesystem_locks.memory import time as time
-
 
 __all__ = [
     "FilesystemLockConflict",
