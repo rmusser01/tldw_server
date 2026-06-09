@@ -432,6 +432,10 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
     assert "USER_GUIDE.md" in readme  # nosec B101
     assert "internal/experimental" in readme  # nosec B101
     assert "mcp-unified-gateway package-info" in readme  # nosec B101
+    assert "filesystem advisory lock backends" in readme  # nosec B101
+    assert "memory backend" in readme  # nosec B101
+    assert "optional SQLite backend" in readme  # nosec B101
+    assert "same local database file" in readme  # nosec B101
     assert "# MCP Unified User Guide" in user_guide  # nosec B101
     assert "profiles" in user_guide  # nosec B101
     assert "external servers" in user_guide  # nosec B101
@@ -442,6 +446,13 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
     assert "tool-events cleanup --max-age-days 30 --max-events 100000" in user_guide  # nosec B101
     assert "does not capture tool arguments" in user_guide  # nosec B101
     assert "evaluator-labeled task outcomes" in user_guide  # nosec B101
+    assert "lock_manager_backend" in user_guide  # nosec B101
+    assert "lock_manager_sqlite_path" in user_guide  # nosec B101
+    assert "lock_manager_sqlite_timeout_seconds" in user_guide  # nosec B101
+    assert "lock_manager_cleanup_interval" in user_guide  # nosec B101
+    assert "lock_manager_cleanup_limit" in user_guide  # nosec B101
+    assert "not a distributed lock across hosts" in user_guide  # nosec B101
+    assert "not a model or agent filesystem tool path" in user_guide  # nosec B101
     assert "Tool-Use Reporting" in readme  # nosec B101
 
 
@@ -478,6 +489,33 @@ def test_mcp_unified_reporting_imports_do_not_eagerly_load_db_adapters() -> None
     assert result.returncode == 0, result.stdout + result.stderr  # nosec B101
 
 
+def test_filesystem_lock_star_import_does_not_eagerly_load_sqlite_backend() -> None:
+    """Star imports from core lock exports must not require optional SQLAlchemy."""
+
+    result = subprocess.run(  # nosec B603
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json, sys; "
+                "namespace = {}; "
+                "exec('from mcp_unified.filesystem_locks import *', namespace); "
+                "blocked = ["
+                "name for name in ("
+                "'sqlalchemy', 'mcp_unified.filesystem_locks.sqlite'"
+                ") if name in sys.modules"
+                "]; "
+                "print(json.dumps(blocked))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == []  # nosec B101
+
+
 def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     """Standalone package metadata must stay aligned with release gate metadata."""
 
@@ -491,6 +529,11 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert project["readme"] == "README.md"
     assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
     assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
+    setuptools_config = pyproject["tool"]["setuptools"]
+    assert "mcp_unified.filesystem_locks" in setuptools_config["packages"]  # nosec B101
+    assert setuptools_config["package-dir"]["mcp_unified.filesystem_locks"] == (  # nosec B101
+        "filesystem_locks"
+    )
     assert pyproject["tool"]["setuptools"]["package-data"] == {  # nosec B101
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
     }
@@ -578,6 +621,10 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
 
     assert any(member.endswith("/pyproject.toml") for member in members)  # nosec B101
     assert any(member.endswith("/__init__.py") for member in members)  # nosec B101
+    assert any(  # nosec B101
+        member.endswith("/filesystem_locks/__init__.py")
+        for member in members
+    )
     assert any(member.endswith("/gateway/cli.py") for member in members)  # nosec B101
     assert not any("/tldw_Server_API/" in member for member in members)  # nosec B101
     assert not any("/apps/tldw-frontend/" in member for member in members)  # nosec B101
@@ -607,8 +654,13 @@ def test_mcp_unified_standalone_artifacts_include_package_docs(
 
     assert "mcp_unified/README.md" in wheel_members  # nosec B101
     assert "mcp_unified/USER_GUIDE.md" in wheel_members  # nosec B101
+    assert "mcp_unified/filesystem_locks/__init__.py" in wheel_members  # nosec B101
     assert any(member.endswith("/README.md") for member in sdist_members)  # nosec B101
     assert any(member.endswith("/USER_GUIDE.md") for member in sdist_members)  # nosec B101
+    assert any(  # nosec B101
+        member.endswith("/filesystem_locks/__init__.py")
+        for member in sdist_members
+    )
 
 
 def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:

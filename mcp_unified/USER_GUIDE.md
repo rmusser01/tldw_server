@@ -153,19 +153,26 @@ after the model read it, the expected hash or receipt no longer matches and the
 write is rejected instead of silently overwriting newer content.
 
 For concurrent editing workflows, `fs.lock_acquire` and `fs.lock_release`
-provide advisory leases for workspace-relative file paths. The built-in
-`lock_manager_backend=memory` backend is process-local. A successful acquire
+provide advisory leases for workspace-relative file paths. A successful acquire
 returns a `lease_id` that callers can pass to `fs.edit` and `fs.write` as
 `lock_lease_id`, or to `fs.patch` as `lock_lease_id_by_path`. Leases do not
 replace hashes or read receipts; mutation tools still run their normal preimage
 checks. Operators can set `require_lock_for_mutation=true` on the filesystem
 module when they want mutations to fail with `lock_required` unless the caller
-supplies a matching active lease. Host integrations may inject a shared lock
-manager behind the same filesystem module seam, but the packaged backend today
-is still advisory and process-local. Use it to reduce races within one running
-gateway process, not as a durable or cross-process distributed lock. Unsupported
-configured lock backends fail at module creation instead of silently falling
-back to memory.
+supplies a matching active lease.
+
+The packaged lock manager supports `lock_manager_backend` values of `memory`,
+`in_memory`, or `sqlite`. The memory and in-memory backends are process-local
+and remain the default. The SQLite backend requires
+`lock_manager_sqlite_path`, which is operator configuration for the lock store,
+not a model or agent filesystem tool path. SQLite can coordinate cooperating
+processes that share the same local database file.
+It is not a distributed lock across hosts and is not guaranteed on unreliable
+network filesystems.
+`lock_manager_sqlite_timeout_seconds` controls SQLite wait timeouts.
+`lock_manager_cleanup_interval` and `lock_manager_cleanup_limit` bound periodic
+expired-lease cleanup. Unsupported configured lock backends fail at module
+creation instead of silently falling back to memory.
 
 Example action-aware path grants:
 

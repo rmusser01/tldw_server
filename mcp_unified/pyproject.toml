@@ -56,6 +56,7 @@ include-package-data = false
 packages = [
   "mcp_unified",
   "mcp_unified.federation",
+  "mcp_unified.filesystem_locks",
   "mcp_unified.gateway",
   "mcp_unified.interfaces",
   "mcp_unified.profiles",
@@ -65,6 +66,7 @@ packages = [
 [tool.setuptools.package-dir]
 mcp_unified = "."
 "mcp_unified.federation" = "federation"
+"mcp_unified.filesystem_locks" = "filesystem_locks"
 "mcp_unified.gateway" = "gateway"
 "mcp_unified.interfaces" = "interfaces"
 "mcp_unified.profiles" = "profiles"

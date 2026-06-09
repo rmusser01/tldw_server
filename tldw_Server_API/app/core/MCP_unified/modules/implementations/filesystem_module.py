@@ -34,6 +34,12 @@ from typing import Any
 import pathspec
 from pathspec.patterns.gitwildmatch import GitWildMatchPatternError
 from loguru import logger
+from mcp_unified.filesystem_locks import (
+    FilesystemLockConflict,
+    FilesystemLockManager,
+    FilesystemLockMissing,
+    create_filesystem_lock_manager,
+)
 from mcp_unified.interfaces.file_policy_actions import get_file_policy_action_metadata
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 
@@ -44,12 +50,6 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
 from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
-from .filesystem_locks import (
-    FilesystemLockConflict,
-    FilesystemLockManager,
-    FilesystemLockMissing,
-    create_filesystem_lock_manager,
-)
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 
 
@@ -245,7 +245,7 @@ class FilesystemModule(BaseModule):
 
         lock_acquire_tool = create_tool_definition(
             name="fs.lock_acquire",
-            description="Acquire or renew a process-local advisory lock lease for one workspace path.",
+            description="Acquire or renew an advisory lock lease for one workspace path.",
             parameters={
                 "properties": {
                     "path": {"type": "string", "description": "Workspace-relative or absolute path"},
@@ -273,7 +273,7 @@ class FilesystemModule(BaseModule):
 
         lock_release_tool = create_tool_definition(
             name="fs.lock_release",
-            description="Release a process-local advisory lock lease for one workspace path.",
+            description="Release an advisory lock lease for one workspace path.",
             parameters={
                 "properties": {
                     "path": {"type": "string", "description": "Workspace-relative or absolute path"},
