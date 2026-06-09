@@ -69,8 +69,11 @@ class FilesystemLockMissing(ValueError):
 class InMemoryFilesystemLockManager:
     """Thread-safe, process-local advisory lock lease manager."""
 
-    def __init__(self, *, token_bytes: int = 24) -> None:
+    def __init__(self, *, token_bytes: int = 24, sweep_interval: int = 64, max_sweep_entries: int = 512) -> None:
         self._token_bytes = max(16, token_bytes)
+        self._sweep_interval = max(1, sweep_interval)
+        self._max_sweep_entries = max(1, max_sweep_entries)
+        self._operation_count = 0
         self._leases: dict[tuple[str, str], FilesystemLockLease] = {}
         self._lock = threading.RLock()
 
@@ -91,6 +94,7 @@ class InMemoryFilesystemLockManager:
         now = time.time()
         expires_at = now + max(1, ttl_seconds)
         with self._lock:
+            self._maybe_sweep_expired_locked(now=now)
             active = self._active_lease_locked(key, now=now)
             if active is not None:
                 if lease_id != active.lease_id:
@@ -107,6 +111,9 @@ class InMemoryFilesystemLockManager:
                 )
                 self._leases[key] = renewed
                 return renewed, True
+
+            if lease_id is not None:
+                raise FilesystemLockMissing()
 
             acquired = FilesystemLockLease(
                 workspace_key=workspace_key,
@@ -126,10 +133,12 @@ class InMemoryFilesystemLockManager:
 
         key = (workspace_key, path)
         with self._lock:
-            active = self._active_lease_locked(key, now=time.time())
+            now = time.time()
+            self._maybe_sweep_expired_locked(now=now)
+            active = self._active_lease_locked(key, now=now)
             if active is None:
                 return None
-            if active.lease_id != lease_id:
+            if active.lease_id != lease_id.strip():
                 raise FilesystemLockConflict(active)
             del self._leases[key]
             return active
@@ -139,7 +148,9 @@ class InMemoryFilesystemLockManager:
 
         key = (workspace_key, path)
         with self._lock:
-            active = self._active_lease_locked(key, now=time.time())
+            now = time.time()
+            self._maybe_sweep_expired_locked(now=now)
+            active = self._active_lease_locked(key, now=now)
             if active is None:
                 raise FilesystemLockMissing()
             if active.lease_id != lease_id:
@@ -155,11 +166,23 @@ class InMemoryFilesystemLockManager:
             return None
         return lease
 
+    def _maybe_sweep_expired_locked(self, *, now: float) -> None:
+        self._operation_count += 1
+        if self._operation_count % self._sweep_interval != 0 and len(self._leases) <= self._max_sweep_entries:
+            return
+
+        for _ in range(min(self._max_sweep_entries, len(self._leases))):
+            key, lease = next(iter(self._leases.items()))
+            if lease.expires_at <= now:
+                del self._leases[key]
+            else:
+                self._leases.pop(key)
+                self._leases[key] = lease
+
 
 __all__ = [
     "FilesystemLockConflict",
     "FilesystemLockLease",
     "FilesystemLockMissing",
     "InMemoryFilesystemLockManager",
-    "time",
 ]

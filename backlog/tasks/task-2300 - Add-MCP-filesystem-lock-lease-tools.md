@@ -1,7 +1,7 @@
 ---
 id: TASK-2300
 title: Add MCP filesystem lock lease tools
-status: In Progress
+status: Done
 labels:
 - mcp
 - filesystem
@@ -40,7 +40,7 @@ Approved scope:
 - Future filesystem/DB/shared lock stores stay behind a follow-up seam.
 
 Baseline:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
   - Result: 99 passed, 4 warnings.
 
 Implementation:
@@ -55,14 +55,29 @@ Red checks:
 - `test_filesystem_write_rejects_lock_that_expires_before_commit` initially failed because writes still committed after a lease expired between preimage authorization and commit.
 
 Verification:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
   - Result: 109 passed, 4 warnings.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m py_compile tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_locks.py mcp_unified/interfaces/file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
+- `source .venv/bin/activate && python -m py_compile tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_locks.py mcp_unified/interfaces/file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py`
   - Result: passed.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_locks.py mcp_unified/interfaces/file_policy_actions.py -f json -o /tmp/bandit_mcp_fs_lock_leases.json`
+- `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_locks.py mcp_unified/interfaces/file_policy_actions.py -f json -o /tmp/bandit_mcp_fs_lock_leases.json`
   - Result: passed, 0 findings.
 - `git diff --check`
   - Result: passed.
+
+PR review follow-up:
+- Rebased PR #2331 on latest `origin/dev`.
+- Offloaded lock acquire/release path checks through `asyncio.to_thread(...)`.
+- Added explicit `lock_missing` response for failed renewals of expired or missing leases.
+- Added bounded rotating expired-lease sweeps in the process-local lock manager.
+- Normalized release lease tokens consistently with renewal and mutation validation.
+- Rejected blank mutation lease IDs instead of treating them as omitted.
+- Revalidated leases before creating parent directories in patch/write commit paths.
+- Removed `time` from `filesystem_locks.__all__`.
+- Cleaned task status and replaced machine-specific verification paths with repo-relative commands.
+
+Review follow-up verification:
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_file_policy_actions.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py -q`
+  - Result: 115 passed, 4 warnings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

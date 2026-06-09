@@ -595,10 +595,10 @@ class FilesystemModule(BaseModule):
             return result
 
         if tool_name == "fs.lock_acquire":
-            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
-            return self._acquire_lock(
+            return await asyncio.to_thread(
+                self._acquire_lock_for_path,
                 workspace_root,
-                target,
+                str(args.get("path")),
                 str(args.get("owner")),
                 self._bounded_lock_ttl(args.get("ttl_seconds")),
                 args.get("lease_id"),
@@ -606,8 +606,12 @@ class FilesystemModule(BaseModule):
             )
 
         if tool_name == "fs.lock_release":
-            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
-            return self._release_lock(workspace_root, target, str(args.get("lease_id")))
+            return await asyncio.to_thread(
+                self._release_lock_for_path,
+                workspace_root,
+                str(args.get("path")),
+                str(args.get("lease_id")),
+            )
 
         if tool_name == "fs.edit":
             target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
@@ -911,10 +915,11 @@ class FilesystemModule(BaseModule):
                 raise ValueError("old_string is required")
             if not isinstance(new_string, str):
                 raise ValueError("new_string must be a string")
-            for key in ("expected_sha256", "read_receipt", "lock_lease_id"):
+            for key in ("expected_sha256", "read_receipt"):
                 value = arguments.get(key)
                 if value is not None and not isinstance(value, str):
                     raise ValueError(f"{key} must be a string")
+            self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
             self._validate_bool_argument(arguments, "replace_all")
             self._validate_bool_argument(arguments, "dry_run")
             return
@@ -939,7 +944,7 @@ class FilesystemModule(BaseModule):
                 raise ValueError("diff is required")
             self._validate_optional_string_map_argument(arguments, "expected_sha256_by_path")
             self._validate_optional_string_map_argument(arguments, "read_receipt_by_path")
-            self._validate_optional_string_map_argument(arguments, "lock_lease_id_by_path")
+            self._validate_optional_nonempty_string_map_argument(arguments, "lock_lease_id_by_path")
             self._validate_bool_argument(arguments, "create_parent_directories")
             self._validate_bool_argument(arguments, "allow_create")
             self._validate_bool_argument(arguments, "dry_run")
@@ -969,10 +974,11 @@ class FilesystemModule(BaseModule):
                 raise ValueError("content must be a string")
             if mode not in {"create", "replace"}:
                 raise ValueError("mode must be create or replace")
-            for key in ("expected_sha256", "read_receipt", "lock_lease_id"):
+            for key in ("expected_sha256", "read_receipt"):
                 value = arguments.get(key)
                 if value is not None and not isinstance(value, str):
                     raise ValueError(f"{key} must be a string")
+            self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
             self._validate_bool_argument(arguments, "dry_run")
             return
 
@@ -1134,6 +1140,25 @@ class FilesystemModule(BaseModule):
             isinstance(map_key, str) and isinstance(map_value, str) for map_key, map_value in value.items()
         ):
             raise ValueError(f"{key} must be an object with string values")
+
+    @staticmethod
+    def _validate_optional_nonempty_string_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty string")
+
+    @staticmethod
+    def _validate_optional_nonempty_string_map_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, dict) or not all(
+            isinstance(map_key, str) and isinstance(map_value, str) and bool(map_value.strip())
+            for map_key, map_value in value.items()
+        ):
+            raise ValueError(f"{key} must be an object with non-empty string values")
 
     async def extract_path_scope_candidates(
         self,
@@ -1932,6 +1957,18 @@ class FilesystemModule(BaseModule):
             truncated=False,
         )
 
+    def _acquire_lock_for_path(
+        self,
+        workspace_root: Path,
+        raw_path: str,
+        owner: str,
+        ttl_seconds: int,
+        lease_id: Any,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        target = self._resolve_workspace_path_no_follow(workspace_root, raw_path)
+        return self._acquire_lock(workspace_root, target, owner, ttl_seconds, lease_id, context)
+
     def _acquire_lock(
         self,
         workspace_root: Path,
@@ -1959,6 +1996,14 @@ class FilesystemModule(BaseModule):
                 **exc.lease.conflict_payload(),
                 "eval": self._lock_eval_metadata("fs.lock_acquire"),
             }
+        except FilesystemLockMissing:
+            return {
+                "acquired": False,
+                "reason_code": "lock_missing",
+                "path": rel_path,
+                "held": False,
+                "eval": self._lock_eval_metadata("fs.lock_acquire"),
+            }
         return {
             "acquired": True,
             "renewed": renewed,
@@ -1966,13 +2011,17 @@ class FilesystemModule(BaseModule):
             "eval": self._lock_eval_metadata("fs.lock_acquire"),
         }
 
+    def _release_lock_for_path(self, workspace_root: Path, raw_path: str, lease_id: str) -> dict[str, Any]:
+        target = self._resolve_workspace_path_no_follow(workspace_root, raw_path)
+        return self._release_lock(workspace_root, target, lease_id)
+
     def _release_lock(self, workspace_root: Path, target: Path, lease_id: str) -> dict[str, Any]:
         rel_path = self._to_workspace_relative_path(workspace_root, target)
         try:
             released = self._lock_leases.release(
                 workspace_key=self._workspace_lock_key(workspace_root),
                 path=rel_path,
-                lease_id=lease_id,
+                lease_id=lease_id.strip(),
             )
         except FilesystemLockConflict as exc:
             return {
@@ -1996,8 +2045,9 @@ class FilesystemModule(BaseModule):
         }
 
     def _validate_mutation_lock(self, workspace_root: Path, rel_path: str, lease_id: Any) -> None:
-        has_lease = isinstance(lease_id, str) and bool(lease_id.strip())
-        if not has_lease:
+        if lease_id is not None and (not isinstance(lease_id, str) or not lease_id.strip()):
+            raise ValueError("lock_lease_id must be a non-empty string")
+        if lease_id is None:
             if self._setting_bool("require_lock_for_mutation", False):
                 raise ValueError("lock_required")
             return
@@ -2048,8 +2098,6 @@ class FilesystemModule(BaseModule):
             try:
                 for plan in plans:
                     target = plan["_target"]
-                    if plan["_create_parent_directories"]:
-                        target.parent.mkdir(parents=True, exist_ok=True)
                     self._validate_mutation_lock(
                         workspace_root,
                         str(plan["result"]["path"]),
@@ -2060,6 +2108,8 @@ class FilesystemModule(BaseModule):
                         plan["result"].get("sha256_before"),
                         int(plan["result"].get("bytes_before") or 0),
                     )
+                    if plan["_create_parent_directories"]:
+                        target.parent.mkdir(parents=True, exist_ok=True)
                     self._atomic_write_text_file(target, str(plan["_text_after"]))
                     written.append(plan)
             except Exception as exc:
@@ -2583,9 +2633,9 @@ class FilesystemModule(BaseModule):
 
         sha256_after = hashlib.sha256(data_after).hexdigest()
         if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
             self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
             self._assert_preimage_unchanged(target, sha256_before, bytes_before)
+            target.parent.mkdir(parents=True, exist_ok=True)
             self._atomic_write_text_file(target, content)
 
         result: dict[str, Any] = {
