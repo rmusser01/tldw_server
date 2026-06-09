@@ -1,7 +1,7 @@
 ---
 id: TASK-2341
 title: Rebase Scheduled Tasks Phase 3 PR and address review feedback
-status: In Progress
+status: Done
 labels:
 - scheduled-tasks
 - webui
@@ -18,13 +18,13 @@ Rebase PR #2328 onto the latest dev branch and address all actionable review com
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 PR branch is rebased onto latest origin/dev and pushed back to PR #2328.
+- [x] #1 PR branch is rebased onto latest origin/dev and pushed back to PR #2328.
 - [x] #2 Alias route overview navigation trap is fixed with regression coverage.
 - [x] #3 Paused projected signals do not display running copy and have regression coverage.
 - [x] #4 Invalid Ant Design Space orientation props in touched Scheduled Tasks components are corrected.
 - [x] #5 Hosted results alias test verifies the alias module target, not only file existence.
 - [x] #6 Duplicate Backlog final-summary marker in TASK-2338 is repaired.
-- [ ] #7 All still-relevant review threads are resolved or answered with rationale.
+- [x] #7 All still-relevant review threads are resolved or answered with rationale.
 - [x] #8 Focused frontend tests and git diff checks are run and recorded.
 <!-- AC:END -->
 
@@ -45,6 +45,8 @@ Rebase on origin/dev, verify each reviewer finding against current code, impleme
 - Wrapped Automation Inbox visible copy in `useTranslation` defaults using the repo's object-overload style.
 - Removed the duplicate final summary marker from TASK-2338.
 - Verified the Gemini `Space direction` suggestion against the installed AntD runtime. Using `direction` emits `Warning: [antd: Space] direction is deprecated. Please use orientation instead.`, so `orientation` is intentionally retained.
+- Force-pushed the rebased branch to PR #2328 with `--force-with-lease` after commit `3f9fed2cca`.
+- Replied to and resolved all PR review threads. AntD `Space` comments were resolved as false positives with runtime warning evidence; actionable alias, paused-state, route-test, Backlog-marker, optional-chaining, and i18n comments were resolved with fix references.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -55,10 +57,10 @@ Rebased PR #2328 on latest dev and addressed review feedback for Scheduled Tasks
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
