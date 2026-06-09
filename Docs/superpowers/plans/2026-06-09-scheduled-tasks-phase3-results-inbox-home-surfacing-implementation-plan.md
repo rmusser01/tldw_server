@@ -551,7 +551,7 @@ Avoid:
 
 - [x] Add notification target normalization to `scheduled-task-result-links.ts` or `notifications.ts`.
 - [x] Add dedupe-key generation and merge helpers.
-- [ ] Add non-blocking recent notification load for Home automation signals.
+- [x] Add non-blocking recent notification load for Home automation signals.
 - [x] Preserve existing notification service behavior.
 - [x] Run scheduled-task result and notification service tests.
 
@@ -616,14 +616,14 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Add scheduled-task Home signal hook/adapter.
-- [ ] Extend `CompanionHomeSource` and `CompanionHomeEntityType` for scheduled-task result items.
-- [ ] Implement `AutomationInboxCard.tsx`.
-- [ ] Render `AutomationInboxCard` after `WhatsNextCard` and before generic Companion inbox/attention cards.
-- [ ] Merge task-projected and notification-derived automation items for the module.
-- [ ] Keep existing layout and Customize Home behavior unchanged.
-- [ ] Add loading and partial-failure behavior that does not block Home.
-- [ ] Run CompanionHome tests.
+- [x] Add scheduled-task Home signal hook/adapter.
+- [x] Extend `CompanionHomeSource` and `CompanionHomeEntityType` for scheduled-task result items.
+- [x] Implement `AutomationInboxCard.tsx`.
+- [x] Render `AutomationInboxCard` after `WhatsNextCard` and before generic Companion inbox/attention cards.
+- [x] Merge task-projected and notification-derived automation items for the module.
+- [x] Keep existing layout and Customize Home behavior unchanged.
+- [x] Add loading and partial-failure behavior that does not block Home.
+- [x] Run CompanionHome tests.
 
 ## Stage 7: UX Polish, Responsive Checks, And Copy Review
 

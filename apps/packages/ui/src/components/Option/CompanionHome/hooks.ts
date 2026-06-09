@@ -10,12 +10,21 @@ import {
   type CompanionHomeSnapshot,
   type CompanionHomeSurface
 } from "@/services/companion-home"
+import { listNotifications } from "@/services/notifications"
+import { listScheduledTasks } from "@/services/scheduled-tasks-control-plane"
 import {
   DEFAULT_COMPANION_HOME_LAYOUT,
   loadCompanionHomeLayout,
   saveCompanionHomeLayout,
   type CompanionHomeLayoutCard
 } from "@/store/companion-home-layout"
+import {
+  buildScheduledTaskAutomationHomeItems,
+  buildScheduledTaskAutomationHomeItemsFromNotifications,
+  mergeScheduledTaskAutomationHomeItems,
+  projectScheduledTaskResults,
+  type ScheduledTaskAutomationHomeItem
+} from "../ScheduledTasks/scheduled-task-results"
 
 export const createEmptySnapshot = (
   surface: CompanionHomeSurface
@@ -153,6 +162,104 @@ export const useCompanionHomeData = ({
     enablingCompanion,
     refresh,
     enableCompanion
+  }
+}
+
+type UseScheduledTaskHomeSignalsArgs = {
+  enabled: boolean
+}
+
+type UseScheduledTaskHomeSignalsResult = {
+  items: ScheduledTaskAutomationHomeItem[]
+  loading: boolean
+  partial: boolean
+  error: string | null
+  refresh: () => void
+}
+
+export const useScheduledTaskHomeSignals = ({
+  enabled
+}: UseScheduledTaskHomeSignalsArgs): UseScheduledTaskHomeSignalsResult => {
+  const [items, setItems] = React.useState<ScheduledTaskAutomationHomeItem[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [partial, setPartial] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [refreshToken, setRefreshToken] = React.useState(0)
+
+  React.useEffect(() => {
+    if (!enabled) return
+
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    const load = async () => {
+      const [tasksResult, notificationsResult] = await Promise.allSettled([
+        listScheduledTasks(),
+        listNotifications({ limit: 50 })
+      ])
+
+      if (cancelled) {
+        return
+      }
+
+      const projectedItems =
+        tasksResult.status === "fulfilled"
+          ? buildScheduledTaskAutomationHomeItems(
+              projectScheduledTaskResults(tasksResult.value.items)
+            )
+          : []
+      const notificationItems =
+        notificationsResult.status === "fulfilled"
+          ? buildScheduledTaskAutomationHomeItemsFromNotifications(
+              notificationsResult.value.items
+            )
+          : []
+      const nextPartial =
+        tasksResult.status === "rejected" ||
+        notificationsResult.status === "rejected" ||
+        (tasksResult.status === "fulfilled" && tasksResult.value.partial)
+
+      let nextError: string | null = null
+      if (tasksResult.status === "rejected") {
+        nextError =
+          notificationItems.length > 0
+            ? "Some scheduled-task signals could not be loaded."
+            : "Automation signals unavailable"
+      } else if (notificationsResult.status === "rejected") {
+        nextError = "Recent automation notifications could not be loaded."
+      } else if (tasksResult.value.partial) {
+        nextError = "Some scheduled-task sources are temporarily unavailable."
+      }
+
+      setItems(
+        mergeScheduledTaskAutomationHomeItems([
+          projectedItems,
+          notificationItems
+        ])
+      )
+      setPartial(nextPartial)
+      setError(nextError)
+      setLoading(false)
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, refreshToken])
+
+  const refresh = React.useCallback(() => {
+    setRefreshToken((value) => value + 1)
+  }, [])
+
+  return {
+    items,
+    loading,
+    partial,
+    error,
+    refresh
   }
 }
 

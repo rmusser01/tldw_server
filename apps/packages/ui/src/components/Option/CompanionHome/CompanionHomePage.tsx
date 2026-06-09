@@ -14,9 +14,15 @@ import {
   type CompanionHomeLayoutCard
 } from "@/store/companion-home-layout"
 
-import { createEmptySnapshot, useCompanionHomeData, useCompanionHomeLayout } from "./hooks"
+import {
+  createEmptySnapshot,
+  useCompanionHomeData,
+  useCompanionHomeLayout,
+  useScheduledTaskHomeSignals
+} from "./hooks"
 import { CustomizeHomeDrawer } from "./CustomizeHomeDrawer"
 import { GettingStartedSection } from "./GettingStartedSection"
+import { AutomationInboxCard } from "./cards/AutomationInboxCard"
 import { GoalsFocusCard } from "./cards/GoalsFocusCard"
 import { InboxPreviewCard } from "./cards/InboxPreviewCard"
 import { NeedsAttentionCard } from "./cards/NeedsAttentionCard"
@@ -94,6 +100,19 @@ export function CompanionHomePage({
     hasPersonalization,
     onPersonalizationEnabled
   })
+  const {
+    items: scheduledTaskSignalItems,
+    loading: scheduledTaskSignalsLoading,
+    partial: scheduledTaskSignalsPartial,
+    error: scheduledTaskSignalsError,
+    refresh: refreshScheduledTaskSignals
+  } = useScheduledTaskHomeSignals({
+    enabled: !capsLoading
+  })
+  const refreshHome = React.useCallback(() => {
+    refresh()
+    refreshScheduledTaskSignals()
+  }, [refresh, refreshScheduledTaskSignals])
   const hasConversationRoute =
     Boolean(capabilities?.hasPersonalization) &&
     Boolean(capabilities?.hasPersona) &&
@@ -311,7 +330,7 @@ export function CompanionHomePage({
             </button>
             <button
               className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-text transition-colors hover:border-primary/40 hover:bg-primary/5"
-              onClick={refresh}
+              onClick={refreshHome}
               type="button"
             >
               Refresh
@@ -392,6 +411,12 @@ export function CompanionHomePage({
 
       <div className="grid gap-4 xl:grid-cols-2">
         <WhatsNextCard />
+        <AutomationInboxCard
+          items={scheduledTaskSignalItems}
+          loading={scheduledTaskSignalsLoading}
+          partial={scheduledTaskSignalsPartial}
+          error={scheduledTaskSignalsError}
+        />
         <InboxPreviewCard items={resolvedSnapshot.inbox} state={inboxState} />
         <NeedsAttentionCard
           items={resolvedSnapshot.needsAttention}

@@ -1,8 +1,12 @@
+import type { CompanionHomeItem } from "@/services/companion-home"
+import type { NotificationItem } from "@/services/notifications"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 
 import {
   buildScheduledTaskResultDedupeKey,
   buildScheduledTaskResultHref,
+  mergeScheduledTaskNotificationTargets,
+  normalizeScheduledTaskNotificationTarget,
   type ScheduledTaskResultSignalKind
 } from "./scheduled-task-result-links"
 import {
@@ -655,3 +659,151 @@ export const buildScheduledTaskAutomationHomeItems = (
       dedupeKey: result.dedupeKey
     }))
 }
+
+const normalizeNotificationHomeSeverity = (
+  notification: NotificationItem,
+  signalKind: ScheduledTaskResultSignalKind
+): ScheduledTaskResultSeverity => {
+  if (signalKind === "result") {
+    return "success"
+  }
+
+  const severity = String(notification.severity || "").toLowerCase()
+  if (severity.includes("error") || severity.includes("danger")) {
+    return "error"
+  }
+  if (severity.includes("warn") || severity.includes("blocked")) {
+    return "warning"
+  }
+  return signalKind === "failure" ? "error" : "info"
+}
+
+const inferNotificationOwnerLabel = (notification: NotificationItem): string => {
+  const taskId = String(notification.source_task_id || "")
+  const domain = String(notification.source_domain || "").toLowerCase()
+  const jobType = String(notification.source_job_type || "").toLowerCase()
+
+  if (
+    taskId.startsWith("watchlist_job:") ||
+    domain.includes("watchlist") ||
+    jobType.includes("watchlist") ||
+    notification.source_job_id != null
+  ) {
+    return "Watchlists"
+  }
+
+  if (taskId.startsWith("reminder_task:")) {
+    return "Reminders"
+  }
+
+  return "Scheduled Tasks"
+}
+
+const stateForNotificationTarget = (
+  signalKind: ScheduledTaskResultSignalKind,
+  severity: ScheduledTaskResultSeverity
+): ScheduledTaskResultState => {
+  if (signalKind === "result") {
+    return "new"
+  }
+  if (signalKind === "running") {
+    return "running"
+  }
+  if (signalKind === "completed_no_results") {
+    return "completed_no_results"
+  }
+  return severity === "warning" ? "blocked" : "failed"
+}
+
+export const buildScheduledTaskAutomationHomeItemsFromNotifications = (
+  notifications: NotificationItem[]
+): ScheduledTaskAutomationHomeItem[] => {
+  const notificationsById = new Map(
+    notifications.map((notification) => [notification.id, notification])
+  )
+
+  return mergeScheduledTaskNotificationTargets(
+    notifications.map(normalizeScheduledTaskNotificationTarget)
+  )
+    .filter((target) => target.signalKind === "result" || target.signalKind === "failure")
+    .map((target) => {
+      const notification = notificationsById.get(target.notificationId)
+      const severity = notification
+        ? normalizeNotificationHomeSeverity(notification, target.signalKind)
+        : target.signalKind === "result"
+          ? "success"
+          : "error"
+      const state = stateForNotificationTarget(target.signalKind, severity)
+
+      return {
+        id: `notification:${target.notificationId}`,
+        title: notification?.title || "Automation result",
+        summary: notification?.message || "Open Scheduled Tasks to inspect this automation signal.",
+        statusLabel: buildStatusLabel(target.signalKind, state),
+        ownerLabel: notification ? inferNotificationOwnerLabel(notification) : "Scheduled Tasks",
+        href: target.href,
+        updatedAt: target.createdAt || notification?.created_at || null,
+        severity,
+        dedupeKey: target.dedupeKey
+      }
+    })
+}
+
+const parseHomeItemTime = (item: ScheduledTaskAutomationHomeItem): number => {
+  const timestamp = item.updatedAt ? Date.parse(item.updatedAt) : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+const shouldPreferHomeItem = (
+  candidate: ScheduledTaskAutomationHomeItem,
+  current: ScheduledTaskAutomationHomeItem
+): boolean => {
+  const candidateTime = parseHomeItemTime(candidate)
+  const currentTime = parseHomeItemTime(current)
+  if (candidateTime !== currentTime) {
+    return candidateTime > currentTime
+  }
+
+  return SEVERITY_ORDER[candidate.severity] < SEVERITY_ORDER[current.severity]
+}
+
+export const mergeScheduledTaskAutomationHomeItems = (
+  itemGroups: ScheduledTaskAutomationHomeItem[][]
+): ScheduledTaskAutomationHomeItem[] => {
+  const merged = new Map<string, ScheduledTaskAutomationHomeItem>()
+
+  itemGroups.flat().forEach((item) => {
+    const existing = merged.get(item.dedupeKey)
+    if (!existing || shouldPreferHomeItem(item, existing)) {
+      merged.set(item.dedupeKey, item)
+    }
+  })
+
+  return Array.from(merged.values()).sort((a, b) => {
+    const severityDelta = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
+    if (severityDelta !== 0) {
+      return severityDelta
+    }
+
+    const timeDelta = parseHomeItemTime(b) - parseHomeItemTime(a)
+    if (timeDelta !== 0) {
+      return timeDelta
+    }
+
+    return a.title.localeCompare(b.title)
+  })
+}
+
+export const buildScheduledTaskCompanionHomeItems = (
+  items: ScheduledTaskAutomationHomeItem[]
+): CompanionHomeItem[] =>
+  items.map((item) => ({
+    id: `automation:${item.dedupeKey}`,
+    entityId: item.dedupeKey,
+    entityType: "scheduled_task_result",
+    source: "scheduled_task",
+    title: item.title,
+    summary: `${item.statusLabel} - ${item.ownerLabel}. ${item.summary}`,
+    updatedAt: item.updatedAt,
+    href: item.href
+  }))

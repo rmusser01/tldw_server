@@ -10,8 +10,11 @@ import {
 } from "../scheduled-task-result-links"
 import {
   buildScheduledTaskAutomationHomeItems,
+  buildScheduledTaskAutomationHomeItemsFromNotifications,
+  buildScheduledTaskCompanionHomeItems,
   findScheduledTaskResultByRouteState,
   filterScheduledTaskResults,
+  mergeScheduledTaskAutomationHomeItems,
   projectScheduledTaskResults,
   resolveScheduledTaskResultsCapabilityMode
 } from "../scheduled-task-results"
@@ -183,6 +186,27 @@ describe("scheduled task result helpers", () => {
     expect(filterScheduledTaskResults(results, { states: ["completed_no_results"] })).toHaveLength(1)
     expect(buildScheduledTaskAutomationHomeItems(results).map((item) => item.title)).toEqual([
       "Found"
+    ])
+  })
+
+  it("maps scheduled-task automation items to Companion Home item shape", () => {
+    const results = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:result",
+        title: "Found",
+        source_ref: { job_id: 3, latest_output_id: 303, result_count: 1 }
+      })
+    ])
+
+    expect(buildScheduledTaskCompanionHomeItems(buildScheduledTaskAutomationHomeItems(results))).toEqual([
+      expect.objectContaining({
+        id: "automation:result:303",
+        entityId: "result:303",
+        entityType: "scheduled_task_result",
+        source: "scheduled_task",
+        title: "Found",
+        href: "/scheduled-tasks?tab=results&result_id=303"
+      })
     ])
   })
 
@@ -413,5 +437,60 @@ describe("scheduled task result helpers", () => {
       dedupeKey: "run:102:state:failure",
       notificationIds: [16]
     })
+  })
+
+  it("dedupes Home automation items from projected tasks and notifications", () => {
+    const projectedItems = buildScheduledTaskAutomationHomeItems(
+      projectScheduledTaskResults([
+        buildTask({
+          id: "watchlist_job:release",
+          title: "Release monitor",
+          source_ref: {
+            job_id: 42,
+            latest_run_id: 101,
+            latest_output_id: 202,
+            result_count: 1
+          }
+        })
+      ])
+    )
+    const notificationItems = buildScheduledTaskAutomationHomeItemsFromNotifications([
+      {
+        id: 17,
+        kind: "job_completed",
+        title: "Release monitor notification",
+        message: "Output ready",
+        severity: "info",
+        created_at: "2030-01-01T09:05:00Z",
+        link_type: "scheduled_task_result",
+        link_id: "202",
+        source_task_id: "watchlist_job:release",
+        source_task_run_id: "101"
+      },
+      {
+        id: 18,
+        kind: "job_failed",
+        title: "Different run failed",
+        message: "The latest run failed.",
+        severity: "error",
+        created_at: "2030-01-01T09:10:00Z",
+        source_task_id: "watchlist_job:release",
+        source_task_run_id: "102"
+      }
+    ])
+
+    const merged = mergeScheduledTaskAutomationHomeItems([
+      projectedItems,
+      notificationItems
+    ])
+
+    expect(merged.map((item) => item.dedupeKey)).toEqual([
+      "run:102:state:failure",
+      "result:202"
+    ])
+    expect(merged.filter((item) => item.dedupeKey === "result:202")).toHaveLength(1)
+    expect(merged.find((item) => item.dedupeKey === "result:202")?.title).toBe(
+      "Release monitor notification"
+    )
   })
 })
