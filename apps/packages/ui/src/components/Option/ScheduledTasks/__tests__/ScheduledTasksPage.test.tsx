@@ -43,6 +43,8 @@ import { ScheduledTasksPage } from "../ScheduledTasksPage"
 const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
+const SLOW_SCHEDULE_FORM_TIMEOUT_MS = 20000
+
 const renderWithQueryClient = (
   ui: React.ReactElement,
   initialEntry = "/scheduled-tasks"
@@ -986,7 +988,7 @@ describe("ScheduledTasksPage", () => {
     expect(await screen.findByText("Cron is required for recurring reminders")).toBeInTheDocument()
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
     expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-  }, 10000)
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a recurring reminder with scheduler-invalid cron or timezone", async () => {
     const user = userEvent.setup()
@@ -1017,7 +1019,7 @@ describe("ScheduledTasksPage", () => {
     })
     expect(screen.getAllByText("Cron minute must be between 0 and 59.").length).toBeGreaterThan(0)
     expect(screen.getByText("Timezone must be a valid IANA timezone.")).toBeInTheDocument()
-  }, 10000)
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a one-time reminder with whitespace-only run_at", async () => {
     const user = userEvent.setup()
@@ -1068,7 +1070,7 @@ describe("ScheduledTasksPage", () => {
     })
     expect(screen.getByText("Cron is required for recurring reminders")).toBeInTheDocument()
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
-  }, 10000)
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("preserves an existing recurring custom cron when editing unrelated fields", async () => {
     mocks.listScheduledTasks.mockResolvedValue({

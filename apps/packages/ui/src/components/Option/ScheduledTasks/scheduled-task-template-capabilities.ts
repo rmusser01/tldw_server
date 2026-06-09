@@ -54,11 +54,12 @@ export interface ScheduledTaskTemplateCapability {
   reason?: string | null
 }
 
-export type ScheduledTaskTemplateCapabilityMap = Partial<
-  Record<ScheduledTaskTemplateId, ScheduledTaskTemplateCapability>
+export type ScheduledTaskTemplateCapabilityMap = Readonly<
+  Partial<Record<ScheduledTaskTemplateId, ScheduledTaskTemplateCapability>>
 >
 
-export const DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES: ScheduledTaskTemplateCapabilityMap = {}
+export const DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES: ScheduledTaskTemplateCapabilityMap =
+  Object.freeze({})
 
 export const REQUIRED_WATCH_AVAILABILITY_GATES = [
   "capability_health",
@@ -191,8 +192,13 @@ export const buildSourceIntentCopy = (
     return ["Source support: configured in Watchlists."]
   }
 
+  const sourceFamily =
+    typeof intent.sourceFamily === "string" && intent.sourceFamily.trim()
+      ? intent.sourceFamily
+      : "unknown"
+
   return [
-    `Detected source: ${intent.sourceFamily.replace(/_/g, " ")}.`,
+    `Detected source: ${sourceFamily.replace(/_/g, " ")}.`,
     intent.can_watch ? "Watch: supported." : "Watch: not supported for this source yet.",
     intent.can_ingest ? "Ingest: supported." : "Ingest: not supported for this source yet.",
     ...(intent.reason ? [redactCapabilityPreviewText(intent.reason)] : [])
@@ -225,7 +231,12 @@ export const buildNotificationPolicyCopy = (
     | Pick<ScheduledTaskResultDestinationMetadata, "notifications_supported">
     | null
     | undefined
-): string =>
-  metadata?.notifications_supported
+): string => {
+  if (!metadata) {
+    return "Notifications: configured in Watchlists."
+  }
+
+  return metadata.notifications_supported
     ? "Notifications can open exact task, run, or result detail when supported."
     : "Notifications are not available for this source yet."
+}

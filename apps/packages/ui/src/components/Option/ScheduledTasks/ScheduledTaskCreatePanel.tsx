@@ -10,6 +10,7 @@ import {
   buildResultDestinationCopy,
   buildSourceIntentCopy,
   getMissingAvailabilityGates,
+  redactCapabilityPreviewText,
   type ScheduledTaskTemplateCapability,
   type ScheduledTaskTemplateCapabilityMap
 } from "./scheduled-task-template-capabilities"
@@ -49,6 +50,36 @@ const containsPrivateLookingProse = (value: string): boolean =>
   PRIVATE_LOOKING_PROSE_PATTERN.test(value)
 
 const formatAvailabilityGateLabel = (gate: string): string => gate.replace(/_/g, " ")
+
+const WATCHLISTS_ADAPTER_UNAVAILABLE_COPY =
+  "Creation from Scheduled Tasks is not available yet. Continue setup in Watchlists."
+
+const OWNER_WORKSPACE_ADAPTER_UNAVAILABLE_COPY =
+  "Creation from Scheduled Tasks is not available yet. Choose the owner workspace to continue setup."
+
+const buildAvailabilityCopy = (
+  template: ScheduledTaskTemplate,
+  capability: ScheduledTaskTemplateCapability
+): string[] => {
+  const missingGateCopy = getMissingAvailabilityGates(template.id, capability).map(
+    (gate) => `Missing: ${formatAvailabilityGateLabel(gate)}`
+  )
+
+  if (missingGateCopy.length > 0 || capability.creationAdapterSupported === true) {
+    return missingGateCopy
+  }
+
+  const adapterCopy = requiresWatchlistsHandoff(template)
+    ? WATCHLISTS_ADAPTER_UNAVAILABLE_COPY
+    : OWNER_WORKSPACE_ADAPTER_UNAVAILABLE_COPY
+  const redactedReason = capability.reason
+    ? redactCapabilityPreviewText(capability.reason)
+    : null
+
+  return redactedReason && redactedReason !== adapterCopy
+    ? [adapterCopy, redactedReason]
+    : [adapterCopy]
+}
 
 const CapabilityCopyGroup: React.FC<{ title: string; lines: readonly string[] }> = ({
   title,
@@ -105,22 +136,16 @@ const HandoffPanel: React.FC<{
     (!safeSourceText || containsPrivateLookingProse(normalizedSourceNote))
   const hasSafeSourceNote = Boolean(normalizedSourceNote) && !hasUnsafeSource
   const watchlistsHandoff = requiresWatchlistsHandoff(template)
-  const missingGateCopy =
-    capability && watchlistsHandoff
-      ? getMissingAvailabilityGates(template.id, capability).map(
-          (gate) => `Missing: ${formatAvailabilityGateLabel(gate)}`
-        )
-      : []
-  const sourceIntentCopy =
-    capability && watchlistsHandoff ? buildSourceIntentCopy(capability.sourceIntent) : []
-  const resultDestinationCopy =
-    capability && watchlistsHandoff
-      ? buildResultDestinationCopy(capability.resultDestinations)
-      : []
-  const notificationCopy =
-    capability && watchlistsHandoff
-      ? [buildNotificationPolicyCopy(capability.resultDestinations)]
-      : []
+  const availabilityCopy = capability ? buildAvailabilityCopy(template, capability) : []
+  const sourceIntentCopy = capability ? buildSourceIntentCopy(capability.sourceIntent) : []
+  const shouldRenderDestinationFallback =
+    watchlistsHandoff || Boolean(capability?.resultDestinations)
+  const resultDestinationCopy = capability && shouldRenderDestinationFallback
+    ? buildResultDestinationCopy(capability.resultDestinations)
+    : []
+  const notificationCopy = capability && shouldRenderDestinationFallback
+    ? [buildNotificationPolicyCopy(capability.resultDestinations)]
+    : []
   const summaryLines = [
     `Template: ${template.title}`,
     `Intent: ${template.intent}`,
@@ -140,7 +165,7 @@ const HandoffPanel: React.FC<{
         {watchlistsHandoff ? (
           <Typography.Text strong>Setup continues in Watchlists.</Typography.Text>
         ) : null}
-        <CapabilityCopyGroup title="Availability" lines={missingGateCopy} />
+        <CapabilityCopyGroup title="Availability" lines={availabilityCopy} />
         <CapabilityCopyGroup title="Source support" lines={sourceIntentCopy} />
         <CapabilityCopyGroup title="Result destinations" lines={resultDestinationCopy} />
         <CapabilityCopyGroup title="Notifications" lines={notificationCopy} />

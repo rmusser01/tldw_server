@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES,
   REQUIRED_INGEST_AVAILABILITY_GATES,
   REQUIRED_WATCH_AVAILABILITY_GATES,
   buildNotificationPolicyCopy,
@@ -13,6 +14,10 @@ import {
 } from "../scheduled-task-template-capabilities"
 
 describe("scheduled task template capabilities", () => {
+  it("exports an immutable default capability map", () => {
+    expect(Object.isFrozen(DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES)).toBe(true)
+  })
+
   it("requires preview before Watch can be available", () => {
     const capability = buildScheduledTaskTemplateCapability("watch", {
       passedGates: REQUIRED_WATCH_AVAILABILITY_GATES.filter(
@@ -71,6 +76,21 @@ describe("scheduled task template capabilities", () => {
     ])
   })
 
+  it("falls back to unknown source family when source metadata is partial", () => {
+    expect(
+      buildSourceIntentCopy({
+        sourceFamily: undefined as never,
+        can_watch: false,
+        can_ingest: false,
+        can_preview: false,
+        can_notify: false,
+        can_index_search: false,
+        can_index_rag: false,
+        can_create: false
+      })[0]
+    ).toBe("Detected source: unknown.")
+  })
+
   it("generates destination copy from metadata", () => {
     expect(
       buildResultDestinationCopy({
@@ -88,6 +108,7 @@ describe("scheduled task template capabilities", () => {
   })
 
   it("generates notification copy from support state", () => {
+    expect(buildNotificationPolicyCopy(null)).toBe("Notifications: configured in Watchlists.")
     expect(buildNotificationPolicyCopy({ notifications_supported: false })).toBe(
       "Notifications are not available for this source yet."
     )
@@ -112,10 +133,10 @@ describe("scheduled task template capabilities", () => {
     expect(redactCapabilityPreviewText("https://example.com/feed?client_secret=secret")).toBe(
       "[redacted private source]"
     )
-    expect(redactCapabilityPreviewText("Authorization: Bearer abc123")).toBe(
+    expect(redactCapabilityPreviewText("Authorization: Bearer sample-token")).toBe(
       "[redacted private source]"
     )
-    expect(redactCapabilityPreviewText("api key: sk-test-secret")).toBe(
+    expect(redactCapabilityPreviewText("api key: sample credential")).toBe(
       "[redacted private source]"
     )
     expect(redactCapabilityPreviewText("Provider response: token=private-value")).toBe(
