@@ -362,6 +362,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     path: "/scheduled-tasks",
     element: <OptionScheduledTasks />,
   },
+  {
+    kind: "options",
+    path: "/scheduled-tasks/results",
+    element: <OptionScheduledTasks />,
+  },
   { kind: "options", path: "/kanban", element: <OptionKanbanPlayground /> },
   {
     kind: "options",

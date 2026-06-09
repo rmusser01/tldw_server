@@ -10,9 +10,19 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 export type CompanionHomeSurface = "options" | "sidepanel"
 
-export type CompanionHomeSource = "canonical_inbox" | "goal" | "reading" | "note"
+export type CompanionHomeSource =
+  | "canonical_inbox"
+  | "goal"
+  | "reading"
+  | "note"
+  | "scheduled_task"
 
-export type CompanionHomeEntityType = "notification" | "goal" | "reading_item" | "note"
+export type CompanionHomeEntityType =
+  | "notification"
+  | "goal"
+  | "reading_item"
+  | "note"
+  | "scheduled_task_result"
 
 export type CompanionHomeDegradedSource = "workspace" | "reading" | "notes"
 

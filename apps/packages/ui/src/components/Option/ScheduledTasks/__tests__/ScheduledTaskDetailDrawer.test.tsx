@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import { ScheduledTaskDetailDrawer } from "../ScheduledTaskDetailDrawer"
+import { projectScheduledTaskResults } from "../scheduled-task-results"
 
 const reminderTask: ScheduledTask = {
   id: "reminder_task:1",
@@ -96,10 +97,13 @@ describe("ScheduledTaskDetailDrawer", () => {
   })
 
   it("shows Watchlists task links without moving workspace configuration into the drawer", () => {
+    const [latestResult] = projectScheduledTaskResults([watchlistTask])
+
     render(
       <ScheduledTaskDetailDrawer
         open
         task={watchlistTask}
+        latestResult={latestResult}
         onClose={vi.fn()}
         onEditReminder={vi.fn()}
         onDeleteReminder={vi.fn()}
@@ -131,6 +135,10 @@ describe("ScheduledTaskDetailDrawer", () => {
     expect(screen.getByRole("link", { name: "Open latest report" })).toHaveAttribute(
       "href",
       "/watchlists?tab=outputs&output_id=202&open_output=1"
+    )
+    expect(screen.getByRole("link", { name: "Open latest result signal" })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=202"
     )
     expect(screen.getByText(/Watchlists remains the full workspace/i)).toBeInTheDocument()
   })

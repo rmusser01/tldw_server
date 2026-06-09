@@ -1,14 +1,17 @@
 import React from "react"
-import { Card, Col, Row, Tag, Typography } from "antd"
+import { Button, Card, Col, Row, Space, Tag, Typography } from "antd"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import {
   SCHEDULED_TASK_ATTENTION_STATUS_KEYS,
   getScheduledTaskProductStatus
 } from "./scheduled-task-status"
+import type { ScheduledTaskResultItem } from "./scheduled-task-results"
 
 export interface ScheduledTaskOverviewProps {
   tasks: ScheduledTask[]
   partial: boolean
+  results?: ScheduledTaskResultItem[]
+  onOpenResult?: (result: ScheduledTaskResultItem) => void
 }
 
 const countLabel = (count: number, singular: string, plural = `${singular}s`): string =>
@@ -69,7 +72,9 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({
 
 export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
   tasks,
-  partial
+  partial,
+  results = [],
+  onOpenResult
 }) => {
   const statuses = tasks.map(getScheduledTaskProductStatus)
   const needsAttentionCount = statuses.filter(
@@ -79,6 +84,7 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
     (status) => status.key === "running"
   ).length
   const nextRunTimestamp = findNextRunTimestamp(tasks)
+  const latestResult = results[0] ?? null
 
   return (
     <section aria-label="Scheduled task overview">
@@ -116,6 +122,23 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
           </OverviewPanel>
         </Col>
       </Row>
+      {latestResult ? (
+        <Card size="small" style={{ marginTop: 12 }}>
+          <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+            <Typography.Text type="secondary">Latest result signal</Typography.Text>
+            <Typography.Text strong>{latestResult.title}</Typography.Text>
+            <Typography.Text type="secondary">{latestResult.summary}</Typography.Text>
+            {onOpenResult ? (
+              <Button
+                size="small"
+                onClick={() => onOpenResult(latestResult)}
+              >
+                Open latest result signal
+              </Button>
+            ) : null}
+          </Space>
+        </Card>
+      ) : null}
     </section>
   )
 }

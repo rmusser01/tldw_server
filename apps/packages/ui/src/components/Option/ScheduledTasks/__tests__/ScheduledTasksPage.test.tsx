@@ -219,6 +219,129 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
   })
 
+  it("opens the Results tab from the URL and renders projected result signals", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "watchlist_job:release",
+          primitive: "watchlist_job",
+          title: "Release monitor",
+          description: "Track releases",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Every morning",
+          timezone: "UTC",
+          next_run_at: "2030-04-06T09:00:00+00:00",
+          last_run_at: "2030-04-05T09:00:00+00:00",
+          edit_mode: "external",
+          manage_url: "/watchlists?tab=jobs",
+          source_ref: {
+            job_id: 42,
+            latest_run_id: 101,
+            latest_output_id: 202,
+            result_count: 3,
+            source_label: "Release feed"
+          }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=results")
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByRole("heading", { level: 3, name: "Scheduled task results" })).toBeInTheDocument()
+    expect(screen.getByText("Latest signals inferred from task status. Result history and item actions appear when the results API is available.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open signal for Release monitor" })).toBeInTheDocument()
+    expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
+  })
+
+  it("opens the Results tab from the alias path and opens the result drawer", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "watchlist_job:release",
+          primitive: "watchlist_job",
+          title: "Release monitor",
+          description: "Track releases",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Every morning",
+          timezone: "UTC",
+          next_run_at: "2030-04-06T09:00:00+00:00",
+          last_run_at: "2030-04-05T09:00:00+00:00",
+          edit_mode: "external",
+          manage_url: "/watchlists?tab=jobs",
+          source_ref: {
+            job_id: 42,
+            latest_run_id: 101,
+            latest_output_id: 202,
+            result_count: 1
+          }
+        }
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks/results?result_id=202"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByRole("dialog", { name: /Release monitor/i })).toBeInTheDocument()
+    expect(screen.queryByText("Result signal not found.")).not.toBeInTheDocument()
+  })
+
+  it("can navigate from the Results alias path back to Overview", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+    const user = userEvent.setup()
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks/results")
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+
+    await user.click(screen.getByRole("tab", { name: "Overview" }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    })
+    expect(screen.getByText("Total scheduled tasks")).toBeInTheDocument()
+  })
+
+  it("shows a non-blocking missing-result message for stale Results deep links", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=results&result_id=missing"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("Result signal not found.")).toBeInTheDocument()
+    expect(screen.getByText("No scheduled tasks yet")).toBeInTheDocument()
+  })
+
   it("keeps Watch template non-creating from the page route", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [],
@@ -352,9 +475,11 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByText("1 needs attention")).toBeInTheDocument()
     expect(screen.getByText("1 running now")).toBeInTheDocument()
     expect(screen.getByText("Next upcoming run")).toBeInTheDocument()
+    expect(screen.getByText("Latest result signal")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open latest result signal" })).toBeInTheDocument()
     expect(screen.getAllByText(/2030/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
-    expect(screen.queryByText("Review notes")).not.toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "Task" })).not.toBeInTheDocument()
   })
 
   it("renders task rows and Watchlists links inside the Tasks tab", async () => {
@@ -413,9 +538,11 @@ describe("ScheduledTasksPage", () => {
     expect(within(reminderRow as HTMLElement).getByText("No completed runs yet")).toBeInTheDocument()
 
     expect(screen.getByRole("button", { name: "Inspect Review notes" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View results for Review notes" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Edit Review notes" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete Review notes" })).toBeInTheDocument()
     expect(await screen.findByText("Morning digest")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View results for Morning digest" })).toBeInTheDocument()
     expect(
       await screen.findByRole("link", { name: "Open monitor settings for Morning digest" })
     ).toHaveAttribute("href", "/watchlists?tab=jobs")
@@ -556,7 +683,7 @@ describe("ScheduledTasksPage", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("deletes the selected reminder from the detail drawer and does not leave stale drawer state", async () => {
     const user = userEvent.setup()
@@ -672,7 +799,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(screen.getByText("Healthy reminder")).toBeInTheDocument()
     expect(screen.queryByText("Blocked monitor")).not.toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("counts blocked tasks as needing attention in the overview", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
@@ -854,7 +981,7 @@ describe("ScheduledTasksPage", () => {
     const drawer = await screen.findByRole("dialog", { name: /Daily review/i })
     expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
     expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2)
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("keeps the created reminder detail open from the API response until the list catches up", async () => {
     const user = userEvent.setup()
@@ -899,7 +1026,7 @@ describe("ScheduledTasksPage", () => {
     const drawer = await screen.findByRole("dialog", { name: /Pending reminder/i })
     expect(within(drawer).getByText("Reminder")).toBeInTheDocument()
     expect(screen.queryByText("Task not found.")).not.toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a one-time reminder without run_at", async () => {
     const user = userEvent.setup()
@@ -920,7 +1047,7 @@ describe("ScheduledTasksPage", () => {
       expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
     })
     expect(screen.getByText("Run at is required for one-time reminders")).toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("creates a daily recurring reminder with cron and timezone from safer controls", async () => {
     const user = userEvent.setup()
@@ -1193,5 +1320,5 @@ describe("ScheduledTasksPage", () => {
     await waitFor(() => {
       expect(mocks.deleteScheduledTaskReminder).toHaveBeenCalledWith("reminder_task:1")
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 })

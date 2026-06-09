@@ -7,6 +7,8 @@ import { MemoryRouter } from "react-router-dom"
 const mocks = vi.hoisted(() => ({
   fetchCompanionHomeSnapshot: vi.fn(),
   fetchPersonalizationProfile: vi.fn(),
+  listScheduledTasks: vi.fn(),
+  listNotifications: vi.fn(),
   updatePersonalizationOptIn: vi.fn(),
   loadCompanionHomeLayout: vi.fn(),
   saveCompanionHomeLayout: vi.fn(),
@@ -56,6 +58,28 @@ vi.mock("@/services/companion", () => ({
   updatePersonalizationOptIn: (...args: unknown[]) =>
     mocks.updatePersonalizationOptIn(...args)
 }))
+
+vi.mock("@/services/scheduled-tasks-control-plane", async () => {
+  const actual = await vi.importActual<typeof import("@/services/scheduled-tasks-control-plane")>(
+    "@/services/scheduled-tasks-control-plane"
+  )
+
+  return {
+    ...actual,
+    listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args)
+  }
+})
+
+vi.mock("@/services/notifications", async () => {
+  const actual = await vi.importActual<typeof import("@/services/notifications")>(
+    "@/services/notifications"
+  )
+
+  return {
+    ...actual,
+    listNotifications: (...args: unknown[]) => mocks.listNotifications(...args)
+  }
+})
 
 vi.mock("@/store/companion-home-layout", async () => {
   const actual = await vi.importActual<typeof import("@/store/companion-home-layout")>(
@@ -215,6 +239,29 @@ const buildSnapshot = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const buildScheduledTask = (overrides: Record<string, unknown> = {}) => ({
+  id: "watchlist_job:release",
+  primitive: "watchlist_job",
+  title: "Release monitor",
+  description: "Track releases",
+  status: "scheduled",
+  enabled: true,
+  schedule_summary: "Every morning",
+  timezone: "UTC",
+  next_run_at: "2030-01-02T09:00:00Z",
+  last_run_at: "2030-01-01T09:00:00Z",
+  edit_mode: "external",
+  manage_url: "/watchlists?tab=jobs",
+  source_ref: {
+    job_id: 42,
+    latest_run_id: 101,
+    latest_output_id: 202,
+    result_count: 2,
+    source_label: "Release feed"
+  },
+  ...overrides
+})
+
 const renderPage = (
   props: Partial<React.ComponentProps<typeof CompanionHomePage>> = {}
 ) =>
@@ -230,6 +277,16 @@ describe("CompanionHomePage", () => {
     mocks.capabilitiesState.capabilities = { hasPersonalization: true, hasPersona: true }
     mocks.capabilitiesState.loading = false
     mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot())
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+    mocks.listNotifications.mockResolvedValue({
+      items: [],
+      total: 0
+    })
     mocks.fetchPersonalizationProfile.mockResolvedValue({
       enabled: true,
       updated_at: "2026-03-20T10:00:00Z"
@@ -287,10 +344,31 @@ describe("CompanionHomePage", () => {
 
   it("shows a setup band and inbox card instead of a dead-end when personalization is unavailable", async () => {
     mocks.capabilitiesState.capabilities = { hasPersonalization: false, hasPersona: false }
+    mocks.listScheduledTasks.mockResolvedValueOnce({
+      items: [
+        buildScheduledTask({
+          title: "Source monitor",
+          source_ref: {
+            job_id: 55,
+            latest_run_id: 155,
+            latest_output_id: 255,
+            result_count: 1
+          }
+        })
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
 
     renderPage()
 
     expect(await screen.findByText("Companion setup required")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Source monitor/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=255"
+    )
     expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
     expect(screen.getAllByText("Registry setup required").length).toBeGreaterThan(0)
     expect(
@@ -301,6 +379,7 @@ describe("CompanionHomePage", () => {
     ).not.toBeInTheDocument()
     expect(mocks.fetchCompanionHomeSnapshot).not.toHaveBeenCalled()
     expect(mocks.fetchPersonalizationProfile).not.toHaveBeenCalled()
+    expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(1)
   })
 
   it("renders the default core dashboard cards", async () => {
@@ -311,6 +390,7 @@ describe("CompanionHomePage", () => {
     })
 
     expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Needs Attention" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Resume Work" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Goals / Focus" })).toBeInTheDocument()
@@ -322,6 +402,84 @@ describe("CompanionHomePage", () => {
     expect(within(summary).getByText("Goals")).toBeInTheDocument()
     expect(within(summary).getByText("Reading")).toBeInTheDocument()
     expect(within(summary).getByText("Resume")).toBeInTheDocument()
+  })
+
+  it("renders scheduled-task result and failure signals in Automation Inbox", async () => {
+    mocks.listScheduledTasks.mockResolvedValueOnce({
+      items: [
+        buildScheduledTask(),
+        buildScheduledTask({
+          id: "watchlist_job:failed",
+          title: "Broken monitor",
+          status: "failed",
+          source_ref: {
+            job_id: 43,
+            latest_run_id: 103
+          }
+        })
+      ],
+      total: 2,
+      partial: false,
+      errors: []
+    })
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Release monitor/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=202"
+    )
+    expect(screen.getByText("New result")).toBeInTheDocument()
+    expect(screen.getAllByText("Watchlists").length).toBeGreaterThan(0)
+    expect(screen.getByRole("link", { name: /Broken monitor/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&run_id=103"
+    )
+    expect(screen.getByText("Needs attention")).toBeInTheDocument()
+  })
+
+  it("keeps Companion Home usable when scheduled-task loading fails", async () => {
+    mocks.listScheduledTasks.mockRejectedValueOnce(new Error("scheduled tasks unavailable"))
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
+    expect(screen.getByText("Unread reflection")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByText("Automation signals unavailable")).toBeInTheDocument()
+  })
+
+  it("dedupes notification-derived automation signals against projected task results", async () => {
+    mocks.listScheduledTasks.mockResolvedValueOnce({
+      items: [buildScheduledTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.listNotifications.mockResolvedValueOnce({
+      total: 1,
+      items: [
+        {
+          id: 91,
+          kind: "job_completed",
+          title: "Release monitor notification",
+          message: "Output ready",
+          severity: "info",
+          created_at: "2030-01-01T09:05:00Z",
+          link_type: "scheduled_task_result",
+          link_id: "202",
+          source_task_id: "watchlist_job:release",
+          source_task_run_id: "101"
+        }
+      ]
+    })
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getAllByRole("link", { name: /Release monitor/i })).toHaveLength(1)
+    expect(mocks.listNotifications).toHaveBeenCalledWith({ limit: 50 })
   })
 
   it("does not flash the default core layout before the persisted layout resolves", async () => {
