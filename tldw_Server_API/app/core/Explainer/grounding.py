@@ -133,16 +133,13 @@ def _coerce_evidence_state(
     citations: list[dict[str, Any]],
     outside_knowledge_used: bool,
 ) -> str:
-    allowed = {item.value for item in ExplainerEvidenceState}
     explicit = str(explicit_value or "").strip()
-    if explicit in allowed:
-        return explicit
+    if explicit == ExplainerEvidenceState.INSUFFICIENT.value:
+        return ExplainerEvidenceState.INSUFFICIENT.value
     if citations and outside_knowledge_used:
         return ExplainerEvidenceState.PARTIALLY_SUPPORTED.value
     if citations:
         return ExplainerEvidenceState.SUPPORTED.value
-    if outside_knowledge_used:
-        return ExplainerEvidenceState.UNCITED.value
     return ExplainerEvidenceState.UNCITED.value
 
 

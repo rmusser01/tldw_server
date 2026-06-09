@@ -550,6 +550,135 @@ async def test_source_only_forged_selected_source_citation_becomes_insufficient(
 
 
 @pytest.mark.asyncio()
+async def test_source_led_uncited_claim_cannot_be_marked_supported(
+    explainer_repo: ExplainerRepository,
+) -> None:
+    session = _create_session(explainer_repo, grounding="source_led")
+    node_id = session.root_node_ids[0]
+
+    async def unsupported_generator(_prompt):
+        return {
+            "children": [
+                {
+                    "title": "Unsupported claim",
+                    "body": "This claim has no source evidence.",
+                    "kind": "explanation",
+                    "intent": "explain",
+                    "evidence_state": "supported",
+                    "outside_knowledge_used": False,
+                }
+            ],
+            "generation_metadata": {"provider": "fake", "model": "fake"},
+        }
+
+    result = await handle_explainer_node_expansion_job(
+        {
+            "id": 109,
+            "job_type": EXPLAINER_JOB_TYPE,
+            "owner_user_id": "7",
+            "payload": {
+                "session_id": session.id,
+                "node_id": node_id,
+                "intent": "explain",
+                "answer_revision": current_answer_revision(session.nodes[node_id]),
+            },
+        },
+        repo=explainer_repo,
+        generator=unsupported_generator,
+    )
+
+    assert result["children_created"] == 1
+    loaded = explainer_repo.get_session(session.id, owner_user_id="7")
+    assert loaded is not None
+    [child_id] = loaded.nodes[node_id].child_node_ids
+    child = loaded.nodes[child_id]
+    assert child.evidence_state == "uncited"
+    assert child.citations == []
+
+
+@pytest.mark.asyncio()
+async def test_source_led_forged_citation_is_removed_and_downgraded(
+    explainer_repo: ExplainerRepository,
+) -> None:
+    session = _create_session(
+        explainer_repo,
+        grounding="source_led",
+        selected_sources=[
+            {
+                "source_id": "media-42",
+                "source_type": "media",
+                "title": "Attention paper notes",
+            }
+        ],
+    )
+    node_id = session.root_node_ids[0]
+
+    def authoritative_retriever(*, session, owner_user_id):
+        return ExplainerSourceContext(
+            excerpts=[
+                ExplainerSourceExcerpt(
+                    source_id="media-42",
+                    source_type="media",
+                    title="Attention paper notes",
+                    excerpt="Attention weights are computed from query-key similarity.",
+                    location_label="chunk 3",
+                    snapshot_hash="sha256:real",
+                )
+            ],
+            insufficient=False,
+        )
+
+    async def forged_generator(_prompt):
+        return {
+            "children": [
+                {
+                    "title": "Forged source-led citation",
+                    "body": "Unsupported claim.",
+                    "kind": "explanation",
+                    "intent": "explain",
+                    "citations": [
+                        {
+                            "source_id": "media-42",
+                            "source_type": "media",
+                            "title": "Attention paper notes",
+                            "excerpt": "A fabricated excerpt that was not retrieved.",
+                            "location_label": "chunk 3",
+                            "snapshot_hash": "sha256:real",
+                        }
+                    ],
+                    "outside_knowledge_used": False,
+                }
+            ],
+            "generation_metadata": {"provider": "fake", "model": "fake"},
+        }
+
+    result = await handle_explainer_node_expansion_job(
+        {
+            "id": 110,
+            "job_type": EXPLAINER_JOB_TYPE,
+            "owner_user_id": "7",
+            "payload": {
+                "session_id": session.id,
+                "node_id": node_id,
+                "intent": "explain",
+                "answer_revision": current_answer_revision(session.nodes[node_id]),
+            },
+        },
+        repo=explainer_repo,
+        generator=forged_generator,
+        retriever=authoritative_retriever,
+    )
+
+    assert result["children_created"] == 1
+    loaded = explainer_repo.get_session(session.id, owner_user_id="7")
+    assert loaded is not None
+    [child_id] = loaded.nodes[node_id].child_node_ids
+    child = loaded.nodes[child_id]
+    assert child.evidence_state == "uncited"
+    assert child.citations == []
+
+
+@pytest.mark.asyncio()
 async def test_retriever_rejects_unselected_source_context(
     explainer_repo: ExplainerRepository,
 ) -> None:
