@@ -1,7 +1,7 @@
 # Scheduled Tasks Phase 4 Recurring Question And Agent Task API Contract Design
 
 Date: 2026-06-09
-Status: Ready for review
+Status: Approved
 Owner: Codex brainstorming session
 Backlog: TASK-2342
 

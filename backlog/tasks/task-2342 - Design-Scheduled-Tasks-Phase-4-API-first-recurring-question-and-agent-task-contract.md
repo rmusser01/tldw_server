@@ -2,7 +2,7 @@
 id: TASK-2342
 title: Design Scheduled Tasks Phase 4 API-first recurring question and agent task
   contract
-status: In Progress
+status: Done
 labels:
 - scheduled-tasks
 - ux
@@ -37,7 +37,7 @@ Created the API-first Phase 4 Scheduled Tasks product contract for Recurring Que
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a Phase 4 API-first design spec for Recurring Question and Agent Task. The spec defines API resource boundaries, state models, preview/safety/result contracts, WebUI reference-client behavior, delivery slices, acceptance criteria, and backend dependency decisions while preserving Watchlists and avoiding fake frontend-only support.
+Approved Phase 4 API-first design spec is written at Docs/superpowers/specs/2026-06-09-scheduled-tasks-phase4-recurring-question-agent-task-api-contract-design.md. User approved the spec; status was updated to Approved. Verification: git diff --check passed. Bandit skipped because only documentation and Backlog files were changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
