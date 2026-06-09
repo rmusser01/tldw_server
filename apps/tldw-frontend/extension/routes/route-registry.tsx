@@ -32,7 +32,8 @@ import {
   ListTodo,
   PenLine,
   ShieldCheck,
-  SquareTerminal
+  SquareTerminal,
+  Workflow
 } from "lucide-react"
 import { Navigate } from "react-router-dom"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
@@ -211,6 +212,7 @@ const OptionResearchWorkspace = lazy(
   () => import("./option-research-workspace")
 )
 const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
+const OptionExplainer = lazy(() => import("./option-explainer"))
 const OptionAdminSources = lazy(() => import("./option-admin-sources"))
 
 const ERROR_BOUNDARY_TEST_ENABLED = process.env.NODE_ENV !== "production"
@@ -520,6 +522,18 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       labelToken: "option:header.chatWorkspace",
       icon: SquareTerminal,
       order: 1
+    }
+  },
+  {
+    kind: "options",
+    path: "/explainer",
+    element: <OptionExplainer />,
+    nav: {
+      group: "workspace",
+      labelToken: "option:header.explainer",
+      icon: Workflow,
+      order: 0.5,
+      beta: true
     }
   },
   {

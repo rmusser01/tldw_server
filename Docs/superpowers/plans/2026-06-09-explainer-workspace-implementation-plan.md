@@ -658,11 +658,11 @@ git commit -m "feat: export explainer sessions to chatbooks"
 - Test: `apps/packages/ui/src/components/Option/Explainer/__tests__/ExplainerWorkspace.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Explainer/__tests__/explainer-tree.test.ts`
 
-- [ ] **Step 1: Create or update Backlog task**
+- [x] **Step 1: Create or update Backlog task**
 
 Use a frontend implementation task with the above files and reference `TASK-546`/`TASK-547`.
 
-- [ ] **Step 2: Write failing API client tests**
+- [x] **Step 2: Write failing API client tests**
 
 Add tests for each client method:
 
@@ -688,7 +688,7 @@ it("creates an Explainer session through the typed client", async () => {
 })
 ```
 
-- [ ] **Step 3: Run API client tests and verify failure**
+- [x] **Step 3: Run API client tests and verify failure**
 
 Run:
 
@@ -698,7 +698,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/tldw-api-client.explaine
 
 Expected: FAIL because Explainer client methods and guarded paths do not exist.
 
-- [ ] **Step 4: Implement typed client methods and guard paths**
+- [x] **Step 4: Implement typed client methods and guard paths**
 
 Add methods:
 
@@ -717,7 +717,7 @@ getExplainerJob(jobId, options?)
 exportExplainerChatbook(sessionId, payload, options?)
 ```
 
-- [ ] **Step 5: Write failing tree utility tests**
+- [x] **Step 5: Write failing tree utility tests**
 
 Cover stable ordering, selected-node fallback, deletion pruning, and status/evidence labels:
 
@@ -729,11 +729,11 @@ expect(flattenExplainerTree(nodes, rootIds).map((node) => node.id)).toEqual([
 ])
 ```
 
-- [ ] **Step 6: Implement tree utilities**
+- [x] **Step 6: Implement tree utilities**
 
 Keep tree transforms pure in `tree.ts`; do not bury ordering logic inside React render code.
 
-- [ ] **Step 7: Write failing workspace tests**
+- [x] **Step 7: Write failing workspace tests**
 
 Cover:
 
@@ -745,7 +745,7 @@ Cover:
 - Tree and detail panel render persisted node data.
 - Export button calls the Explainer export endpoint and surfaces queued/completed/failed state.
 
-- [ ] **Step 8: Implement route wrapper and nav**
+- [x] **Step 8: Implement route wrapper and nav**
 
 `apps/tldw-frontend/pages/explainer.tsx`:
 
@@ -767,7 +767,7 @@ export default dynamic(() => import("@/routes/option-explainer"), { ssr: false }
 </RouteErrorBoundary>
 ```
 
-- [ ] **Step 9: Implement the workspace UI**
+- [x] **Step 9: Implement the workspace UI**
 
 Use a restrained workbench layout:
 
@@ -779,11 +779,11 @@ Use a restrained workbench layout:
 
 Do not use nested cards. Keep repeated node rows as compact list items, and reserve cards for modals or individual repeated source rows if needed.
 
-- [ ] **Step 10: Implement polling**
+- [x] **Step 10: Implement polling**
 
 Use TanStack Query polling while a node has `queued` or `generating` status. Poll `getExplainerJob(jobId)`, then refresh `getExplainerSession(sessionId)` on terminal status. Stop polling when the document is hidden unless the active job was just created by the current interaction.
 
-- [ ] **Step 11: Run frontend unit tests**
+- [x] **Step 11: Run frontend unit tests**
 
 Run:
 
@@ -793,7 +793,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/tldw-api-client.explaine
 
 Expected: PASS.
 
-- [ ] **Step 12: Commit Task 4**
+- [x] **Step 12: Commit Task 4**
 
 ```bash
 git add apps/tldw-frontend/pages/explainer.tsx \

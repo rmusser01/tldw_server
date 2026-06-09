@@ -1,45 +1,26 @@
 ---
 id: TASK-551
 title: Implement Explainer frontend route and workspace UI
-status: To Do
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-06-09 04:41'
 labels:
-- frontend
-- explainer
-- implementation
-priority: High
+  - frontend
+  - explainer
+  - implementation
+dependencies: []
 references:
-- TASK-546
-- TASK-547
-- Docs/superpowers/specs/2026-06-09-explainer-workspace-design.md
-- Docs/superpowers/plans/2026-06-09-explainer-workspace-implementation-plan.md
-modified_files:
-- apps/tldw-frontend/pages/explainer.tsx
-- apps/tldw-frontend/extension/routes/option-explainer.tsx
-- apps/tldw-frontend/extension/routes/route-registry.tsx
-- apps/packages/ui/src/routes/route-metadata.ts
-- apps/packages/ui/src/services/tldw/openapi-guard.ts
-- apps/packages/ui/src/services/tldw/TldwApiClient.ts
-- apps/packages/ui/src/components/Option/Explainer/types.ts
-- apps/packages/ui/src/components/Option/Explainer/explainerApi.ts
-- apps/packages/ui/src/components/Option/Explainer/tree.ts
-- apps/packages/ui/src/components/Option/Explainer/useExplainerQueries.ts
-- apps/packages/ui/src/components/Option/Explainer/ExplainerWorkspace.tsx
-- apps/packages/ui/src/components/Option/Explainer/ExplainerModeTabs.tsx
-- apps/packages/ui/src/components/Option/Explainer/ExplainerGoalComposer.tsx
-- apps/packages/ui/src/components/Option/Explainer/ExplainerSourcePicker.tsx
-- apps/packages/ui/src/components/Option/Explainer/ExplainerTree.tsx
-- apps/packages/ui/src/components/Option/Explainer/ExplainerDetailPanel.tsx
-- apps/packages/ui/src/components/Option/Explainer/ExplainerChatbookExportButton.tsx
-- apps/packages/ui/src/public/_locales/en/option.json
-- apps/packages/ui/src/services/__tests__/tldw-api-client.explainer.test.ts
-- apps/packages/ui/src/components/Option/Explainer/__tests__/ExplainerWorkspace.test.tsx
-- apps/packages/ui/src/components/Option/Explainer/__tests__/explainer-tree.test.ts
+  - TASK-546
+  - TASK-547
+  - Docs/superpowers/specs/2026-06-09-explainer-workspace-design.md
+  - Docs/superpowers/plans/2026-06-09-explainer-workspace-implementation-plan.md
+priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -54,22 +35,22 @@ Implement Task 4 from Docs/superpowers/plans/2026-06-09-explainer-workspace-impl
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Implemented Task 4 from the Explainer workspace plan: typed frontend client and OpenAPI guard paths, shared and hosted route wrappers, extension navigation, route metadata, explicit Goal/Sources tabs, source picker/search, selected-source management, tree/detail UI, generation job polling, and Chatbook export action. Self-review removed unwired secondary detail actions and made source removal key by source type plus source id.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Explainer frontend route and workspace UI is implemented with backend persistence/API integration from day one. Verification: targeted Vitest suite passed (13 tests across client, workspace, and tree utilities); verify:openapi passed for 274 client paths with existing reviewed exceptions; focused Explainer TypeScript config passed; touched-file git diff --check passed; live browser verification loaded http://localhost:18002/explainer and confirmed Goal/Sources tabs, source setup, tree/detail panels, and disabled export before a session. Package-wide apps/packages/ui TypeScript still fails on unrelated baseline errors outside this task; Bandit skipped because this slice only touches TypeScript/frontend files and Backlog/docs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
