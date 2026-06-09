@@ -549,11 +549,11 @@ Avoid:
 
 **Tasks:**
 
-- [ ] Add notification target normalization to `scheduled-task-result-links.ts` or `notifications.ts`.
-- [ ] Add dedupe-key generation and merge helpers.
+- [x] Add notification target normalization to `scheduled-task-result-links.ts` or `notifications.ts`.
+- [x] Add dedupe-key generation and merge helpers.
 - [ ] Add non-blocking recent notification load for Home automation signals.
-- [ ] Preserve existing notification service behavior.
-- [ ] Run scheduled-task result and notification service tests.
+- [x] Preserve existing notification service behavior.
+- [x] Run scheduled-task result and notification service tests.
 
 ## Stage 5: Overview And Task Cross-Links
 

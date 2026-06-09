@@ -23,11 +23,15 @@ export interface ScheduledTaskResultDedupeKeyInput {
 
 export interface ScheduledTaskNotificationTarget {
   notificationId: number
+  notificationIds: number[]
+  signalKind: ScheduledTaskResultSignalKind
   resultId: string | null
   runId: string | null
   taskId: string | null
   href: string
   dedupeKey: string
+  createdAt: string
+  severity: string
 }
 
 const normalizeRouteId = (value: unknown): string | null => {
@@ -80,15 +84,67 @@ const shouldTreatLinkIdAsResult = (linkType: string | null | undefined): boolean
   return normalized.includes("result") || normalized.includes("output")
 }
 
+const shouldTreatLinkIdAsRun = (linkType: string | null | undefined): boolean => {
+  if (!linkType) {
+    return false
+  }
+
+  return linkType.toLowerCase().includes("run")
+}
+
+const shouldTreatLinkIdAsTask = (linkType: string | null | undefined): boolean => {
+  if (!linkType) {
+    return false
+  }
+
+  if (shouldTreatLinkIdAsResult(linkType) || shouldTreatLinkIdAsRun(linkType)) {
+    return false
+  }
+
+  const normalized = linkType.toLowerCase()
+  return normalized.includes("task") || normalized.includes("job")
+}
+
+const readNotificationField = (
+  notification: NotificationItem,
+  names: readonly string[]
+): string | null => {
+  const record = notification as unknown as Record<string, unknown>
+  for (const name of names) {
+    const value = normalizeRouteId(record[name])
+    if (value) {
+      return value
+    }
+  }
+  return null
+}
+
 const buildTaskIdFromNotification = (notification: NotificationItem): string | null => {
   const sourceTaskId = normalizeRouteId(notification.source_task_id)
   if (sourceTaskId) {
     return sourceTaskId
   }
 
+  const directTaskId = readNotificationField(notification, [
+    "task_id",
+    "taskId",
+    "scheduled_task_id",
+    "scheduledTaskId"
+  ])
+  if (directTaskId) {
+    return directTaskId
+  }
+
   const taskIdFromUrl = readQueryParam(notification.link_url, ["task_id", "taskId"])
   if (taskIdFromUrl) {
     return taskIdFromUrl
+  }
+
+  if (shouldTreatLinkIdAsTask(notification.link_type)) {
+    const linkTaskId = normalizeRouteId(notification.link_id)
+    if (linkTaskId) {
+      return linkTaskId
+    }
   }
 
   const sourceJobId = normalizeRouteId(notification.source_job_id)
@@ -97,6 +153,44 @@ const buildTaskIdFromNotification = (notification: NotificationItem): string | n
   }
 
   return null
+}
+
+const inferNotificationSignalKind = (
+  notification: NotificationItem,
+  resultId: string | null
+): ScheduledTaskResultSignalKind => {
+  if (resultId) {
+    return "result"
+  }
+
+  const normalized = [
+    notification.kind,
+    notification.severity,
+    notification.link_type,
+    notification.title,
+    notification.message
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+
+  if (
+    normalized.includes("fail") ||
+    normalized.includes("error") ||
+    normalized.includes("blocked")
+  ) {
+    return "failure"
+  }
+
+  if (
+    normalized.includes("running") ||
+    normalized.includes("started") ||
+    normalized.includes("processing")
+  ) {
+    return "running"
+  }
+
+  return "completed_no_results"
 }
 
 export const buildScheduledTaskResultHref = ({
@@ -151,6 +245,16 @@ export const normalizeScheduledTaskNotificationTarget = (
   notification: NotificationItem
 ): ScheduledTaskNotificationTarget | null => {
   const resultId =
+    readNotificationField(notification, [
+      "result_id",
+      "resultId",
+      "output_id",
+      "outputId",
+      "source_result_id",
+      "sourceResultId",
+      "source_output_id",
+      "sourceOutputId"
+    ]) ??
     (shouldTreatLinkIdAsResult(notification.link_type)
       ? normalizeRouteId(notification.link_id)
       : null) ??
@@ -162,6 +266,17 @@ export const normalizeScheduledTaskNotificationTarget = (
     ])
   const runId =
     normalizeRouteId(notification.source_task_run_id) ??
+    readNotificationField(notification, [
+      "run_id",
+      "runId",
+      "scheduled_task_run_id",
+      "scheduledTaskRunId",
+      "source_run_id",
+      "sourceRunId"
+    ]) ??
+    (shouldTreatLinkIdAsRun(notification.link_type)
+      ? normalizeRouteId(notification.link_id)
+      : null) ??
     readQueryParam(notification.link_url, ["run_id", "runId"])
   const taskId = buildTaskIdFromNotification(notification)
 
@@ -170,19 +285,68 @@ export const normalizeScheduledTaskNotificationTarget = (
   }
 
   const href = buildScheduledTaskResultHref({ resultId, runId, taskId })
+  const signalKind = inferNotificationSignalKind(notification, resultId)
   return {
     notificationId: notification.id,
+    notificationIds: [notification.id],
+    signalKind,
     resultId,
     runId,
     taskId,
     href,
     dedupeKey: buildScheduledTaskResultDedupeKey({
-      signalKind: resultId ? "result" : "failure",
+      signalKind,
       taskId,
       runId,
       resultId,
       state: notification.severity,
       occurredAt: notification.created_at
-    })
+    }),
+    createdAt: notification.created_at,
+    severity: String(notification.severity)
   }
+}
+
+const targetIsNewer = (
+  candidate: ScheduledTaskNotificationTarget,
+  current: ScheduledTaskNotificationTarget
+): boolean => {
+  const candidateTime = Date.parse(candidate.createdAt)
+  const currentTime = Date.parse(current.createdAt)
+  if (Number.isFinite(candidateTime) && Number.isFinite(currentTime)) {
+    return candidateTime > currentTime
+  }
+  return candidate.notificationId > current.notificationId
+}
+
+const uniqueNotificationIds = (
+  first: readonly number[],
+  second: readonly number[]
+): number[] => Array.from(new Set([...first, ...second])).sort((a, b) => a - b)
+
+export const mergeScheduledTaskNotificationTargets = (
+  targets: Array<ScheduledTaskNotificationTarget | null | undefined>
+): ScheduledTaskNotificationTarget[] => {
+  const merged = new Map<string, ScheduledTaskNotificationTarget>()
+
+  targets.forEach((target) => {
+    if (!target) return
+
+    const existing = merged.get(target.dedupeKey)
+    if (!existing) {
+      merged.set(target.dedupeKey, {
+        ...target,
+        notificationIds: uniqueNotificationIds(target.notificationIds, [])
+      })
+      return
+    }
+
+    const preferred = targetIsNewer(target, existing) ? target : existing
+    merged.set(target.dedupeKey, {
+      ...preferred,
+      notificationIds: uniqueNotificationIds(existing.notificationIds, target.notificationIds)
+    })
+  })
+
+  return Array.from(merged.values())
 }

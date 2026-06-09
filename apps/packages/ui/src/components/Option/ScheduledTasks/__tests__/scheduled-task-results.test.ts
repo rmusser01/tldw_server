@@ -5,6 +5,7 @@ import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import {
   buildScheduledTaskResultDedupeKey,
   buildScheduledTaskResultHref,
+  mergeScheduledTaskNotificationTargets,
   normalizeScheduledTaskNotificationTarget
 } from "../scheduled-task-result-links"
 import {
@@ -254,6 +255,163 @@ describe("scheduled task result helpers", () => {
       runId: "101",
       taskId: "watchlist_job:42",
       href: "/scheduled-tasks?tab=results&result_id=202"
+    })
+  })
+
+  it("normalizes notification targets by exact result, run, then task priority across link shapes", () => {
+    expect(
+      normalizeScheduledTaskNotificationTarget({
+        id: 10,
+        kind: "job_completed",
+        title: "Output ready",
+        message: "Output ready",
+        severity: "info",
+        created_at: "2030-01-01T09:00:00Z",
+        link_type: "scheduled_task_run",
+        link_id: "101",
+        link_url: "/scheduled-tasks?tab=results&result_id=202&run_id=303&task_id=watchlist_job%3A42",
+        source_task_id: "watchlist_job:42",
+        source_task_run_id: "404"
+      })
+    ).toMatchObject({
+      resultId: "202",
+      runId: "404",
+      taskId: "watchlist_job:42",
+      href: "/scheduled-tasks?tab=results&result_id=202",
+      dedupeKey: "result:202"
+    })
+
+    expect(
+      normalizeScheduledTaskNotificationTarget({
+        id: 11,
+        kind: "job_failed",
+        title: "Run failed",
+        message: "Run failed",
+        severity: "error",
+        created_at: "2030-01-01T09:05:00Z",
+        link_type: "scheduled_task_run",
+        link_id: "101",
+        source_job_id: 42
+      })
+    ).toMatchObject({
+      resultId: null,
+      runId: "101",
+      taskId: "watchlist_job:42",
+      href: "/scheduled-tasks?tab=results&run_id=101",
+      dedupeKey: "run:101:state:failure"
+    })
+
+    expect(
+      normalizeScheduledTaskNotificationTarget({
+        id: 12,
+        kind: "job_completed",
+        title: "Task completed",
+        message: "Task completed",
+        severity: "info",
+        created_at: "2030-01-01T09:10:00Z",
+        link_type: "scheduled_task",
+        link_id: "watchlist_job:42"
+      })
+    ).toMatchObject({
+      resultId: null,
+      runId: null,
+      taskId: "watchlist_job:42",
+      href: "/scheduled-tasks?tab=results&task_id=watchlist_job%3A42"
+    })
+  })
+
+  it("shares dedupe keys between projected task signals and notification-derived targets", () => {
+    const [failureResult] = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:failure",
+        title: "Failure monitor",
+        status: "failed",
+        source_ref: {
+          job_id: 42,
+          latest_run_id: 101
+        }
+      })
+    ])
+    const notificationTarget = normalizeScheduledTaskNotificationTarget({
+      id: 13,
+      kind: "job_failed",
+      title: "Run failed",
+      message: "Run failed",
+      severity: "error",
+      created_at: "2030-01-01T09:00:00Z",
+      source_task_id: "watchlist_job:failure",
+      source_task_run_id: "101"
+    })
+
+    expect(notificationTarget?.dedupeKey).toBe(failureResult?.dedupeKey)
+
+    expect(
+      buildScheduledTaskResultDedupeKey({
+        signalKind: "failure",
+        taskId: "watchlist_job:42",
+        runId: "101",
+        resultId: null
+      })
+    ).not.toBe(
+      buildScheduledTaskResultDedupeKey({
+        signalKind: "result",
+        taskId: "watchlist_job:42",
+        runId: "101",
+        resultId: null
+      })
+    )
+  })
+
+  it("merges notification targets by dedupe key while preserving notification ids", () => {
+    const first = normalizeScheduledTaskNotificationTarget({
+      id: 14,
+      kind: "job_completed",
+      title: "Output ready",
+      message: "Output ready",
+      severity: "info",
+      created_at: "2030-01-01T09:00:00Z",
+      link_type: "scheduled_task_result",
+      link_id: "202",
+      source_task_id: "watchlist_job:42",
+      source_task_run_id: "101"
+    })
+    const duplicate = normalizeScheduledTaskNotificationTarget({
+      id: 15,
+      kind: "job_completed",
+      title: "Output ready again",
+      message: "Output ready again",
+      severity: "info",
+      created_at: "2030-01-01T09:05:00Z",
+      link_url: "/scheduled-tasks?tab=results&result_id=202",
+      source_task_id: "watchlist_job:42",
+      source_task_run_id: "101"
+    })
+    const distinctRun = normalizeScheduledTaskNotificationTarget({
+      id: 16,
+      kind: "job_failed",
+      title: "Next run failed",
+      message: "Next run failed",
+      severity: "error",
+      created_at: "2030-01-01T09:10:00Z",
+      source_task_id: "watchlist_job:42",
+      source_task_run_id: "102"
+    })
+
+    const merged = mergeScheduledTaskNotificationTargets([
+      first,
+      duplicate,
+      distinctRun,
+      null
+    ])
+
+    expect(merged).toHaveLength(2)
+    expect(merged[0]).toMatchObject({
+      dedupeKey: "result:202",
+      notificationIds: [14, 15]
+    })
+    expect(merged[1]).toMatchObject({
+      dedupeKey: "run:102:state:failure",
+      notificationIds: [16]
     })
   })
 })
