@@ -819,11 +819,11 @@ git commit -m "feat: add explainer workspace ui"
 - Modify: backend/frontend tests from earlier tasks as needed
 - Update: related Backlog task(s) with verification notes
 
-- [ ] **Step 1: Create or update Backlog task**
+- [x] **Step 1: Create or update Backlog task**
 
 Use a final verification task if Tasks 1-4 were separate slices.
 
-- [ ] **Step 2: Add Playwright page object**
+- [x] **Step 2: Add Playwright page object**
 
 Page object should expose:
 
@@ -839,7 +839,7 @@ expectNodeStatus(status: RegExp)
 expectCitation(text: RegExp)
 ```
 
-- [ ] **Step 3: Add mocked E2E tests**
+- [x] **Step 3: Add mocked E2E tests**
 
 Cover:
 
@@ -849,7 +849,7 @@ Cover:
 - Job polling completion refreshes an expanded node.
 - Chatbook export posts to `/api/v1/explainer/sessions/{session_id}/export-chatbook` and displays the returned Chatbooks job/download state.
 
-- [ ] **Step 4: Run backend tests**
+- [x] **Step 4: Run backend tests**
 
 Run:
 
@@ -859,7 +859,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Explainer tl
 
 Expected: PASS.
 
-- [ ] **Step 5: Run Bandit on touched backend scope**
+- [x] **Step 5: Run Bandit on touched backend scope**
 
 Run:
 
@@ -869,7 +869,7 @@ source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endp
 
 Expected: PASS or no new findings in touched Explainer code. Record the result in Backlog.
 
-- [ ] **Step 6: Run frontend tests**
+- [x] **Step 6: Run frontend tests**
 
 Run:
 
@@ -879,7 +879,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/tldw-api-client.explaine
 
 Expected: PASS.
 
-- [ ] **Step 7: Run E2E tests**
+- [x] **Step 7: Run E2E tests**
 
 Run:
 
@@ -889,7 +889,7 @@ npx playwright test apps/tldw-frontend/e2e/explainer.spec.ts --reporter=line
 
 Expected: PASS.
 
-- [ ] **Step 8: Run browser visual checks**
+- [x] **Step 8: Run browser visual checks**
 
 Start the WebUI dev server with the project-approved command, then use the in-app Browser or Playwright to inspect:
 
@@ -908,7 +908,7 @@ Verify:
 - Mobile drawer traps/restores focus.
 - The UI does not look like a marketing page.
 
-- [ ] **Step 9: Update Backlog final summaries**
+- [x] **Step 9: Update Backlog final summaries**
 
 Each implementation task should record:
 
@@ -918,7 +918,7 @@ Each implementation task should record:
 - Any skipped checks and why.
 - Known follow-ups.
 
-- [ ] **Step 10: Commit Task 5**
+- [x] **Step 10: Commit Task 5**
 
 ```bash
 git add apps/tldw-frontend/e2e/utils/page-objects/ExplainerPage.ts \
