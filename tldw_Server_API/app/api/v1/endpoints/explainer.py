@@ -40,6 +40,10 @@ def _source_payloads(sources) -> list[dict]:
     return [source.model_dump(by_alias=False) for source in sources]
 
 
+def _citation_payloads(citations) -> list[dict]:
+    return [citation.model_dump(by_alias=False) for citation in citations]
+
+
 def _raise_http(exc: Exception) -> None:
     status_code, detail = map_explainer_service_error(exc)
     raise HTTPException(status_code=status_code, detail=detail) from exc
@@ -175,6 +179,7 @@ async def create_explainer_node(
             status=body.status,
             evidence_state=body.evidence_state,
             outside_knowledge_used=body.outside_knowledge_used,
+            citations=_citation_payloads(body.citations),
         )
     except Exception as exc:
         _raise_http(exc)
