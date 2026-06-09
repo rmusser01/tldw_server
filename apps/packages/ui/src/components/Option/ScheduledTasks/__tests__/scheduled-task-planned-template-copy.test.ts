@@ -15,6 +15,9 @@ describe("scheduled task planned template copy", () => {
     expect(model?.jobStatement).toBe(
       "Run this question on a schedule across selected searchable content."
     )
+    expect(model?.availabilityReason).toBe(
+      "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+    )
     expect(model?.requirements).toContainEqual(
       expect.objectContaining({ label: "Scheduled RAG query support" })
     )
@@ -48,6 +51,9 @@ describe("scheduled task planned template copy", () => {
     expect(model?.statusLabel).toBe("Planned automation type")
     expect(model?.jobStatement).toBe(
       "Send this message to the selected agent at the scheduled time."
+    )
+    expect(model?.availabilityReason).toBe(
+      "Agent Task scheduling is planned for the API contract and is not executable in this client yet."
     )
     expect(model?.requirements).toContainEqual(
       expect.objectContaining({ label: "Schedulable ACP/API agents" })
