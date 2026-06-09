@@ -10,7 +10,8 @@ from mcp_unified.filesystem_locks import (
     InMemoryFilesystemLockManager,
     create_filesystem_lock_manager,
 )
-from mcp_unified.filesystem_locks.memory import time as time
+# Compatibility export for older tests/callers that monkeypatch this module.
+from mcp_unified.filesystem_locks.memory import time as time  # noqa: F401
 
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "FilesystemLockMissing",
     "InMemoryFilesystemLockManager",
     "create_filesystem_lock_manager",
+    "time",
 ]

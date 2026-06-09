@@ -19,7 +19,13 @@ from .models import (
 class InMemoryFilesystemLockManager:
     """Thread-safe, process-local advisory lock lease manager."""
 
-    def __init__(self, *, token_bytes: int = 24, sweep_interval: int = 64, max_sweep_entries: int = 512) -> None:
+    def __init__(
+        self,
+        *,
+        token_bytes: int = 24,
+        sweep_interval: int = 64,
+        max_sweep_entries: int = 512,
+    ) -> None:
         self._token_bytes = max(16, token_bytes)
         self._sweep_interval = max(1, sweep_interval)
         self._max_sweep_entries = max(1, max_sweep_entries)
@@ -151,6 +157,7 @@ def create_filesystem_lock_manager(settings: Mapping[str, Any] | None = None) ->
             raise ValueError(
                 "lock_manager_sqlite_path is required for sqlite filesystem lock manager"
             )
+        sqlite_path_text = str(sqlite_path).strip()
         try:
             from .sqlite import SQLiteFilesystemLockManager
         except ModuleNotFoundError as exc:
@@ -162,7 +169,7 @@ def create_filesystem_lock_manager(settings: Mapping[str, Any] | None = None) ->
             raise
 
         return SQLiteFilesystemLockManager(
-            sqlite_path,
+            sqlite_path_text,
             timeout_seconds=float(
                 (settings or {}).get("lock_manager_sqlite_timeout_seconds", 30.0)
             ),

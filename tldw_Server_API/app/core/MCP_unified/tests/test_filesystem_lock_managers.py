@@ -446,6 +446,32 @@ def test_filesystem_lock_manager_factory_sqlite_backend_selection(tmp_path: Path
         manager.close()
 
 
+def test_sqlite_lock_manager_normalizes_configured_path_whitespace(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import (
+        SQLiteFilesystemLockManager,
+        create_filesystem_lock_manager,
+    )
+
+    db_path = tmp_path / "locks.db"
+    direct = SQLiteFilesystemLockManager(f"{db_path} ")
+    try:
+        assert direct.path == str(db_path)  # nosec B101
+    finally:
+        direct.close()
+
+    from_factory = create_filesystem_lock_manager(
+        {
+            "lock_manager_backend": "sqlite",
+            "lock_manager_sqlite_path": f" {db_path} ",
+        }
+    )
+    try:
+        assert isinstance(from_factory, SQLiteFilesystemLockManager)  # nosec B101
+        assert from_factory.path == str(db_path)  # nosec B101
+    finally:
+        from_factory.close()
+
+
 def test_filesystem_lock_manager_factory_sqlite_backend_requires_path() -> None:
     from mcp_unified.filesystem_locks import create_filesystem_lock_manager
 

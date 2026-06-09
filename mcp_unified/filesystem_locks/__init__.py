@@ -21,7 +21,6 @@ __all__ = [
     "FilesystemLockManager",
     "FilesystemLockMissing",
     "InMemoryFilesystemLockManager",
-    "SQLiteFilesystemLockManager",
     "create_filesystem_lock_manager",
 ]
 

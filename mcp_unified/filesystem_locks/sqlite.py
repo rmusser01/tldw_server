@@ -53,7 +53,7 @@ class SQLiteFilesystemLockManager:
                 "SQLite filesystem lock manager requires a file-backed database path"
             )
 
-        db_path = Path(path).expanduser()
+        db_path = Path(raw_path).expanduser()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.path = str(db_path)
         self._token_bytes = max(16, token_bytes)

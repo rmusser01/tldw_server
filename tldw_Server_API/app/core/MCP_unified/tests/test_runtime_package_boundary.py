@@ -489,6 +489,33 @@ def test_mcp_unified_reporting_imports_do_not_eagerly_load_db_adapters() -> None
     assert result.returncode == 0, result.stdout + result.stderr  # nosec B101
 
 
+def test_filesystem_lock_star_import_does_not_eagerly_load_sqlite_backend() -> None:
+    """Star imports from core lock exports must not require optional SQLAlchemy."""
+
+    result = subprocess.run(  # nosec B603
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json, sys; "
+                "namespace = {}; "
+                "exec('from mcp_unified.filesystem_locks import *', namespace); "
+                "blocked = ["
+                "name for name in ("
+                "'sqlalchemy', 'mcp_unified.filesystem_locks.sqlite'"
+                ") if name in sys.modules"
+                "]; "
+                "print(json.dumps(blocked))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == []  # nosec B101
+
+
 def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     """Standalone package metadata must stay aligned with release gate metadata."""
 
