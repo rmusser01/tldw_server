@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -95,3 +97,220 @@ def test_filesystem_lock_manager_factory_backend_selection() -> None:
 
     with pytest.raises(ValueError, match="unsupported filesystem lock_manager_backend"):
         create_filesystem_lock_manager({"lock_manager_backend": ""})
+
+
+def test_sqlite_lock_manager_coordinates_two_instances(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import FilesystemLockConflict, SQLiteFilesystemLockManager
+
+    db_path = tmp_path / "locks.db"
+    first = SQLiteFilesystemLockManager(db_path)
+    second = SQLiteFilesystemLockManager(db_path)
+    try:
+        lease, renewed = first.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=60,
+        )
+
+        assert renewed is False  # nosec B101
+
+        with pytest.raises(FilesystemLockConflict) as conflict:
+            second.acquire(
+                workspace_key="ws",
+                path="docs/story.txt",
+                owner="agent-b",
+                ttl_seconds=60,
+            )
+
+        assert conflict.value.lease.lease_id == lease.lease_id  # nosec B101
+    finally:
+        first.close()
+        second.close()
+
+
+def test_sqlite_lock_manager_expired_row_does_not_block_new_acquire(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.filesystem_locks import SQLiteFilesystemLockManager
+    import mcp_unified.filesystem_locks.sqlite as sqlite_locks
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_000.0)
+        expired, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=1,
+        )
+
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_002.0)
+        lease, renewed = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-b",
+            ttl_seconds=60,
+        )
+
+        assert renewed is False  # nosec B101
+        assert lease.lease_id != expired.lease_id  # nosec B101
+        assert lease.owner == "agent-b"  # nosec B101
+    finally:
+        manager.close()
+
+
+def test_sqlite_lock_manager_expired_token_renew_raises_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.filesystem_locks import FilesystemLockMissing, SQLiteFilesystemLockManager
+    import mcp_unified.filesystem_locks.sqlite as sqlite_locks
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_000.0)
+        lease, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=1,
+        )
+
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_002.0)
+        with pytest.raises(FilesystemLockMissing):
+            manager.acquire(
+                workspace_key="ws",
+                path="docs/story.txt",
+                owner="agent-a",
+                ttl_seconds=60,
+                lease_id=lease.lease_id,
+            )
+    finally:
+        manager.close()
+
+
+def test_sqlite_lock_manager_wrong_token_release_raises_conflict(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import FilesystemLockConflict, SQLiteFilesystemLockManager
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        lease, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=60,
+        )
+
+        with pytest.raises(FilesystemLockConflict) as conflict:
+            manager.release(
+                workspace_key="ws",
+                path="docs/story.txt",
+                lease_id="wrong-token",
+            )
+
+        assert conflict.value.lease.lease_id == lease.lease_id  # nosec B101
+    finally:
+        manager.close()
+
+
+def test_sqlite_lock_manager_missing_and_expired_release_return_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.filesystem_locks import SQLiteFilesystemLockManager
+    import mcp_unified.filesystem_locks.sqlite as sqlite_locks
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        assert (  # nosec B101
+            manager.release(workspace_key="ws", path="missing.txt", lease_id="missing") is None
+        )
+
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_000.0)
+        lease, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=1,
+        )
+
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_002.0)
+        assert (  # nosec B101
+            manager.release(workspace_key="ws", path="docs/story.txt", lease_id=lease.lease_id)
+            is None
+        )
+    finally:
+        manager.close()
+
+
+def test_sqlite_lock_manager_validate_classifies_matching_wrong_and_missing_tokens(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.filesystem_locks import (
+        FilesystemLockConflict,
+        FilesystemLockMissing,
+        SQLiteFilesystemLockManager,
+    )
+    import mcp_unified.filesystem_locks.sqlite as sqlite_locks
+
+    db_path = tmp_path / "locks.db"
+    manager = SQLiteFilesystemLockManager(db_path)
+    try:
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_000.0)
+        lease, _ = manager.acquire(
+            workspace_key="ws",
+            path="docs/story.txt",
+            owner="agent-a",
+            ttl_seconds=1,
+        )
+
+        assert (  # nosec B101
+            manager.validate(workspace_key="ws", path="docs/story.txt", lease_id=lease.lease_id)
+            == lease
+        )
+
+        with pytest.raises(FilesystemLockConflict) as conflict:
+            manager.validate(
+                workspace_key="ws",
+                path="docs/story.txt",
+                lease_id="wrong-token",
+            )
+        assert conflict.value.lease == lease  # nosec B101
+
+        with pytest.raises(FilesystemLockMissing):
+            manager.validate(workspace_key="ws", path="missing.txt", lease_id=lease.lease_id)
+
+        monkeypatch.setattr(sqlite_locks.time, "time", lambda: 1_002.0)
+        with pytest.raises(FilesystemLockMissing):
+            manager.validate(workspace_key="ws", path="docs/story.txt", lease_id=lease.lease_id)
+    finally:
+        manager.close()
+
+
+def test_filesystem_lock_manager_factory_sqlite_backend_selection(tmp_path: Path) -> None:
+    from mcp_unified.filesystem_locks import SQLiteFilesystemLockManager, create_filesystem_lock_manager
+
+    manager = create_filesystem_lock_manager(
+        {
+            "lock_manager_backend": "sqlite",
+            "lock_manager_sqlite_path": str(tmp_path / "locks.db"),
+        }
+    )
+    try:
+        assert isinstance(manager, SQLiteFilesystemLockManager)  # nosec B101
+    finally:
+        manager.close()
+
+
+def test_filesystem_lock_manager_factory_sqlite_backend_requires_path() -> None:
+    from mcp_unified.filesystem_locks import create_filesystem_lock_manager
+
+    with pytest.raises(ValueError, match="lock_manager_sqlite_path"):
+        create_filesystem_lock_manager({"lock_manager_backend": "sqlite"})

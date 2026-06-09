@@ -145,6 +145,30 @@ def create_filesystem_lock_manager(settings: Mapping[str, Any] | None = None) ->
     backend = str(raw_backend).strip().lower()
     if backend in {"memory", "in_memory"}:
         return InMemoryFilesystemLockManager()
+    if backend == "sqlite":
+        sqlite_path = (settings or {}).get("lock_manager_sqlite_path")
+        if sqlite_path is None or not str(sqlite_path).strip():
+            raise ValueError(
+                "lock_manager_sqlite_path is required for sqlite filesystem lock manager"
+            )
+        try:
+            from .sqlite import SQLiteFilesystemLockManager
+        except ModuleNotFoundError as exc:
+            if exc.name == "sqlalchemy":
+                raise ImportError(
+                    "SQLiteFilesystemLockManager requires the mcp-unified sqlite extra. "
+                    "Install mcp-unified[sqlite] or mcp-unified[gateway]."
+                ) from exc
+            raise
+
+        return SQLiteFilesystemLockManager(
+            sqlite_path,
+            timeout_seconds=float(
+                (settings or {}).get("lock_manager_sqlite_timeout_seconds", 30.0)
+            ),
+            cleanup_interval=int((settings or {}).get("lock_manager_cleanup_interval", 64)),
+            cleanup_limit=int((settings or {}).get("lock_manager_cleanup_limit", 512)),
+        )
     raise ValueError(f"unsupported filesystem lock_manager_backend: {raw_backend!r}")
 
 
