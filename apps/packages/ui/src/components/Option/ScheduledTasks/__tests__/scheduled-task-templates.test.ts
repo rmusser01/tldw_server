@@ -78,6 +78,28 @@ describe("scheduled task templates", () => {
     ])
   })
 
+  it("labels Limited availability", () => {
+    expect(getScheduledTaskTemplateStateLabel("limited_availability")).toBe(
+      "Limited availability"
+    )
+  })
+
+  it("does not include Limited availability in Available now", () => {
+    const templates = [
+      { ...getScheduledTaskTemplate("watch")!, state: "limited_availability" as const }
+    ]
+
+    expect(filterScheduledTaskTemplates("available_now", templates)).toEqual([])
+  })
+
+  it("can look up templates from an effective template list", () => {
+    const templates = [
+      { ...getScheduledTaskTemplate("watch")!, state: "limited_availability" as const }
+    ]
+
+    expect(getScheduledTaskTemplate("watch", templates)?.state).toBe("limited_availability")
+  })
+
   it("sanitizes unsafe handoff source text", () => {
     expect(toSafeHandoffSourceText("https://example.com/feed?token=secret")).toBe(null)
     expect(toSafeHandoffSourceText("https://example.com/feed")).toBe("https://example.com/feed")

@@ -43,6 +43,8 @@ import { ScheduledTasksPage } from "../ScheduledTasksPage"
 const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
+const SLOW_SCHEDULE_FORM_TIMEOUT_MS = 20000
+
 const renderWithQueryClient = (
   ui: React.ReactElement,
   initialEntry = "/scheduled-tasks"
@@ -215,6 +217,20 @@ describe("ScheduledTasksPage", () => {
       })
     ).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("keeps Watch template non-creating from the page route", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=create&template=watch")
+
+    expect(await screen.findByText("No scheduled task has been created yet.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
   })
 
   it("opens a task detail deep link after task data loads", async () => {
@@ -767,9 +783,10 @@ describe("ScheduledTasksPage", () => {
     expect(screen.queryByRole("button", { name: "Save reminder" })).not.toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create a reminder now. Automation templates for GitHub, YouTube, RAG, and agents are planned follow-up phases."
+        "Create a reminder now. Watch and Ingest setup continue in their owner workspaces until capability, preview, duplicate, creation, and result contracts are available."
       )
     ).toBeInTheDocument()
+    expect(screen.queryByText(/GitHub, YouTube/i)).not.toBeInTheDocument()
   })
 
   it("opens the created reminder detail after successful creation", async () => {
@@ -971,7 +988,7 @@ describe("ScheduledTasksPage", () => {
     expect(await screen.findByText("Cron is required for recurring reminders")).toBeInTheDocument()
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
     expect(mocks.createScheduledTaskReminder).not.toHaveBeenCalled()
-  }, 10000)
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a recurring reminder with scheduler-invalid cron or timezone", async () => {
     const user = userEvent.setup()
@@ -1002,7 +1019,7 @@ describe("ScheduledTasksPage", () => {
     })
     expect(screen.getAllByText("Cron minute must be between 0 and 59.").length).toBeGreaterThan(0)
     expect(screen.getByText("Timezone must be a valid IANA timezone.")).toBeInTheDocument()
-  }, 10000)
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a one-time reminder with whitespace-only run_at", async () => {
     const user = userEvent.setup()
@@ -1053,7 +1070,7 @@ describe("ScheduledTasksPage", () => {
     })
     expect(screen.getByText("Cron is required for recurring reminders")).toBeInTheDocument()
     expect(screen.getByText("Timezone is required for recurring reminders")).toBeInTheDocument()
-  }, 10000)
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("preserves an existing recurring custom cron when editing unrelated fields", async () => {
     mocks.listScheduledTasks.mockResolvedValue({

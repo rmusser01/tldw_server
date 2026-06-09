@@ -1,7 +1,7 @@
 ---
 id: TASK-496
 title: Plan Scheduled Tasks Automation Workbench Phase 1 implementation
-status: In Progress
+status: Done
 labels:
 - plan
 - ux
@@ -28,11 +28,11 @@ Create an execution-ready implementation plan for Phase 1 of the Scheduled Tasks
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Implementation plan is saved under Docs/superpowers/plans.
-- [ ] #2 Plan is scoped to Phase 1 and leaves later RAG/ACP/template/extension work as follow-up plans.
-- [ ] #3 Plan includes exact files, test paths, commands, expected outcomes, and incremental task steps.
-- [ ] #4 Plan preserves existing Watchlists UX and uses deep links rather than moving Watchlists configuration into /scheduled-tasks.
-- [ ] #5 Plan passes plan-document-reviewer review and is committed with the Backlog task update.
+- [x] #1 Implementation plan is saved under Docs/superpowers/plans.
+- [x] #2 Plan is scoped to Phase 1 and leaves later RAG/ACP/template/extension work as follow-up plans.
+- [x] #3 Plan includes exact files, test paths, commands, expected outcomes, and incremental task steps.
+- [x] #4 Plan preserves existing Watchlists UX and uses deep links rather than moving Watchlists configuration into /scheduled-tasks.
+- [x] #5 Plan passes plan-document-reviewer review and is committed with the Backlog task update.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -55,10 +55,10 @@ Created the Phase 1 implementation plan for the Scheduled Tasks Automation Workb
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

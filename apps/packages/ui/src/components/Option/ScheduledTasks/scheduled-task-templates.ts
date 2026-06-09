@@ -8,6 +8,7 @@ export type ScheduledTaskTemplateId =
 
 export type ScheduledTaskTemplateState =
   | "available"
+  | "limited_availability"
   | "handoff_only"
   | "needs_setup"
   | "managed_in_watchlists"
@@ -66,7 +67,7 @@ export const SCHEDULED_TASK_TEMPLATES: readonly ScheduledTaskTemplate[] = [
     category: "watch",
     title: "Watch for new items",
     intent: "Tell me when something new appears",
-    description: "Get notified when a source has new matching items.",
+    description: "Surface new matching items and notify when supported.",
     state: "handoff_only",
     primaryActionLabel: "Continue in Watchlists",
     secondaryActionLabel: "Copy setup summary",
@@ -83,7 +84,7 @@ export const SCHEDULED_TASK_TEMPLATES: readonly ScheduledTaskTemplate[] = [
     category: "ingest",
     title: "Ingest new content",
     intent: "Add new content to my library/search",
-    description: "Add new source content to your library and search surfaces.",
+    description: "Add new source content to supported library, search, or knowledge destinations.",
     state: "handoff_only",
     primaryActionLabel: "Continue in Watchlists",
     secondaryActionLabel: "Copy setup summary",
@@ -144,22 +145,24 @@ export const SCHEDULED_TASK_TEMPLATE_FILTERS: readonly ScheduledTaskTemplateFilt
 ] as const
 
 export const getScheduledTaskTemplate = (
-  id: ScheduledTaskTemplateId | string | null | undefined
+  id: ScheduledTaskTemplateId | string | null | undefined,
+  templates: readonly ScheduledTaskTemplate[] = SCHEDULED_TASK_TEMPLATES
 ): ScheduledTaskTemplate | null =>
-  SCHEDULED_TASK_TEMPLATES.find((template) => template.id === id) ?? null
+  templates.find((template) => template.id === id) ?? null
 
 export const filterScheduledTaskTemplates = (
-  filterId: ScheduledTaskTemplateFilterId
+  filterId: ScheduledTaskTemplateFilterId,
+  templates: readonly ScheduledTaskTemplate[] = SCHEDULED_TASK_TEMPLATES
 ): readonly ScheduledTaskTemplate[] => {
   if (filterId === "all") {
-    return SCHEDULED_TASK_TEMPLATES
+    return templates
   }
 
   if (filterId === "available_now") {
-    return SCHEDULED_TASK_TEMPLATES.filter((template) => template.state === "available")
+    return templates.filter((template) => template.state === "available")
   }
 
-  return SCHEDULED_TASK_TEMPLATES.filter((template) => template.category === filterId)
+  return templates.filter((template) => template.category === filterId)
 }
 
 const escapeRegExp = (value: string): string =>
@@ -204,6 +207,8 @@ export const getScheduledTaskTemplateStateLabel = (
   switch (state) {
     case "available":
       return "Available"
+    case "limited_availability":
+      return "Limited availability"
     case "handoff_only":
       return "Handoff only"
     case "needs_setup":

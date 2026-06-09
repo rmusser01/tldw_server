@@ -6,6 +6,10 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { ScheduledTaskCreatePanel } from "../ScheduledTaskCreatePanel"
+import {
+  REQUIRED_WATCH_AVAILABILITY_GATES,
+  buildScheduledTaskTemplateCapability
+} from "../scheduled-task-template-capabilities"
 
 describe("ScheduledTaskCreatePanel", () => {
   it("renders intent templates by state without source-vendor IA", () => {
@@ -59,6 +63,190 @@ describe("ScheduledTaskCreatePanel", () => {
     )
   })
 
+  it("shows Limited availability capability copy without Watch create language", () => {
+    const capability = buildScheduledTaskTemplateCapability("watch", {
+      passedGates: REQUIRED_WATCH_AVAILABILITY_GATES.filter(
+        (gate) => gate !== "source_preview"
+      ),
+      sourceIntent: {
+        sourceFamily: "feed",
+        can_watch: true,
+        can_ingest: false,
+        can_preview: false,
+        can_notify: false,
+        can_index_search: false,
+        can_index_rag: false,
+        can_create: false,
+        reason: "Ingest setup continues in Watchlists."
+      },
+      resultDestinations: {
+        home_supported: false,
+        notifications_supported: false,
+        search_indexed: false,
+        rag_scope_included: false
+      }
+    })
+
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="watch"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        templateCapabilities={{ watch: capability }}
+      />
+    )
+
+    expect(screen.getByText("Limited availability")).toBeInTheDocument()
+    expect(screen.getByText(/source preview/i)).toBeInTheDocument()
+    expect(screen.getByText("Detected source: feed.")).toBeInTheDocument()
+    expect(screen.getByText("Watch: supported.")).toBeInTheDocument()
+    expect(screen.getByText("Ingest: not supported for this source yet.")).toBeInTheDocument()
+    expect(screen.getByText("Ingest setup continues in Watchlists.")).toBeInTheDocument()
+    expect(screen.getByText("Home: not yet shown.")).toBeInTheDocument()
+    expect(
+      screen.getByText("Notifications: not available for this source yet.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("No scheduled task has been created yet.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
+  })
+
+  it("explains Limited availability when the creation adapter is the only blocker", () => {
+    const capability = buildScheduledTaskTemplateCapability("watch", {
+      passedGates: REQUIRED_WATCH_AVAILABILITY_GATES,
+      sourceIntent: {
+        sourceFamily: "publication",
+        can_watch: true,
+        can_ingest: false,
+        can_preview: true,
+        can_notify: true,
+        can_index_search: false,
+        can_index_rag: false,
+        can_create: false
+      },
+      resultDestinations: {
+        home_supported: true,
+        notifications_supported: true,
+        search_indexed: false,
+        rag_scope_included: false
+      }
+    })
+
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="watch"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        templateCapabilities={{ watch: capability }}
+      />
+    )
+
+    expect(screen.getByText("Limited availability")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Creation from Scheduled Tasks is not available yet. Continue setup in Watchlists."
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/source preview/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
+  })
+
+  it("renders capability metadata for non-Watchlists handoff templates", () => {
+    const capability = buildScheduledTaskTemplateCapability("advanced", {
+      sourceIntent: {
+        sourceFamily: "website",
+        can_watch: false,
+        can_ingest: false,
+        can_preview: true,
+        can_notify: false,
+        can_index_search: false,
+        can_index_rag: false,
+        can_create: false,
+        reason: "Advanced setup continues in the owner workspace."
+      }
+    })
+
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="advanced"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        templateCapabilities={{ advanced: capability }}
+      />
+    )
+
+    expect(screen.getByText("Choose destination")).toBeInTheDocument()
+    expect(screen.getByText("Detected source: website.")).toBeInTheDocument()
+    expect(
+      screen.getByText("Advanced setup continues in the owner workspace.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Creation from Scheduled Tasks is not available yet. Choose the owner workspace to continue setup."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("Results destination: configured in Watchlists.")
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps Available now from showing Limited availability templates", async () => {
+    const user = userEvent.setup()
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId={null}
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        templateCapabilities={{
+          watch: buildScheduledTaskTemplateCapability("watch", {
+            passedGates: REQUIRED_WATCH_AVAILABILITY_GATES.filter(
+              (gate) => gate !== "source_preview"
+            )
+          })
+        }}
+      />
+    )
+
+    await user.click(screen.getByText("Available now"))
+
+    expect(screen.getByRole("button", { name: /Create reminder/i })).toBeInTheDocument()
+    expect(screen.queryByText("Watch for new items")).not.toBeInTheDocument()
+  })
+
+  it("keeps capability essentials visible in an extension-width container", () => {
+    const capability = buildScheduledTaskTemplateCapability("watch", {
+      passedGates: REQUIRED_WATCH_AVAILABILITY_GATES.filter(
+        (gate) => gate !== "source_preview"
+      ),
+      sourceIntent: {
+        sourceFamily: "feed",
+        can_watch: true,
+        can_ingest: false,
+        can_preview: false,
+        can_notify: false,
+        can_index_search: false,
+        can_index_rag: false,
+        can_create: false,
+        reason: "Preview is not available for this source yet."
+      }
+    })
+
+    render(
+      <div style={{ width: 360 }}>
+        <ScheduledTaskCreatePanel
+          selectedTemplateId="watch"
+          onSelectTemplate={vi.fn()}
+          onCreateReminder={vi.fn()}
+          templateCapabilities={{ watch: capability }}
+        />
+      </div>
+    )
+
+    expect(screen.getByText("Limited availability")).toBeInTheDocument()
+    expect(screen.getByText("Detected source: feed.")).toBeInTheDocument()
+    expect(screen.getByText("Preview is not available for this source yet.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
+  })
+
   it("does not include sensitive URL text in handoff summary", async () => {
     const user = userEvent.setup()
     render(
@@ -92,14 +280,14 @@ describe("ScheduledTaskCreatePanel", () => {
 
     await user.type(
       screen.getByRole("textbox", { name: "Optional source or setup note" }),
-      "api key: sk-test-secret"
+      "api key: sample credential"
     )
 
     expect(screen.getByText(/private-looking values/)).toBeInTheDocument()
     expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent(
-      "api key: sk-test-secret"
+      "api key: sample credential"
     )
-    expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent("sk-test-secret")
+    expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent("sample credential")
   })
 
   it("renders planned Recurring question without create controls", () => {
