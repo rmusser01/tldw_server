@@ -31,7 +31,7 @@ interface SkillDrawerProps {
   open: boolean
   skill: SkillResponse | null
   onClose: () => void
-  onSaved: () => void
+  onSaved: (skillName?: string) => void
 }
 
 export const SkillDrawer: React.FC<SkillDrawerProps> = ({
@@ -153,11 +153,14 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
   const createMutation = useMutation({
     mutationFn: (values: SkillCreate) =>
       tldwClient.createSkill(values),
-    onSuccess: () => {
+    onSuccess: (result, values) => {
       notification.success({
         message: t("option:skills.createSuccess", { defaultValue: "Skill created" })
       })
-      onSaved()
+      const responseName = typeof result?.name === "string" ? result.name.trim() : ""
+      const savedName =
+        SKILL_NAME_REGEX.test(responseName) ? responseName : values.name
+      onSaved(savedName)
     },
     onError: (err: any) => {
       const desc =
