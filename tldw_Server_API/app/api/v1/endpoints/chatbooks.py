@@ -513,7 +513,7 @@ async def import_chatbook(
                 detail="Media/embedding imports are not supported yet. Set import_media=false and import_embeddings=false.",
             )
         if import_request.content_selections:
-            unsupported = {"media", "embedding", "prompt", "evaluation", "generated_document"}
+            unsupported = {"media", "embedding", "prompt", "evaluation"}
             requested = []
             for content_type in import_request.content_selections:
                 ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)

@@ -494,6 +494,8 @@ class ExplainerRepository:
         owner_user_id: str,
         title: Any = _UNSET,
         body: Any = _UNSET,
+        kind: Any = _UNSET,
+        intent: Any = _UNSET,
         status: Any = _UNSET,
         evidence_state: Any = _UNSET,
         outside_knowledge_used: Any = _UNSET,
@@ -510,12 +512,20 @@ class ExplainerRepository:
 
         if title is not _UNSET and title is None:
             raise InputError("title is required")
+        if kind is not _UNSET and kind is None:
+            raise InputError("kind is required")
+        if intent is not _UNSET and intent is None:
+            raise InputError("intent is required")
         if status is not _UNSET and status is None:
             raise InputError("status is required")
         if evidence_state is not _UNSET and evidence_state is None:
             raise InputError("evidence_state is required")
         if outside_knowledge_used is not _UNSET and outside_knowledge_used is None:
             raise InputError("outside_knowledge_used is required")
+        if kind is not _UNSET:
+            _require_enum(kind, ExplainerNodeKind, "kind")
+        if intent is not _UNSET:
+            _require_enum(intent, ExplainerOutputIntent, "intent")
         if status is not _UNSET:
             _require_enum(status, ExplainerNodeStatus, "status")
         if evidence_state is not _UNSET:
@@ -525,6 +535,8 @@ class ExplainerRepository:
             for value in (
                 title,
                 body,
+                kind,
+                intent,
                 status,
                 evidence_state,
                 outside_knowledge_used,
@@ -557,7 +569,8 @@ class ExplainerRepository:
             conn.execute(
                 """
                 UPDATE explainer_nodes
-                SET title = ?, body = ?, status = ?, evidence_state = ?,
+                SET title = ?, body = ?, kind = ?, intent = ?,
+                    status = ?, evidence_state = ?,
                     outside_knowledge_used = ?, selected_option_id = ?,
                     selected_custom_answer = ?, question_options_json = ?,
                     generation_metadata_json = ?, updated_at = ?
@@ -566,6 +579,8 @@ class ExplainerRepository:
                 (
                     _require_text(title, "title") if title is not _UNSET else existing_node.title,
                     body if body is not _UNSET else existing_node.body,
+                    kind if kind is not _UNSET else existing_node.kind,
+                    intent if intent is not _UNSET else existing_node.intent,
                     status if status is not _UNSET else existing_node.status,
                     evidence_state if evidence_state is not _UNSET else existing_node.evidence_state,
                     1 if next_outside_knowledge_used else 0,

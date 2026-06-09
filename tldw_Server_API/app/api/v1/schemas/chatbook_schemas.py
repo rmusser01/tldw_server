@@ -199,6 +199,7 @@ class ChatbookManifestResponse(BaseModel):
     total_world_books: int = 0
     total_dictionaries: int = 0
     total_documents: int = 0
+    total_explainer_sessions: int = 0
     total_size_bytes: int = 0
 
     # Metadata

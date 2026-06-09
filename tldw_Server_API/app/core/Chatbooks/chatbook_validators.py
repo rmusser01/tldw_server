@@ -441,7 +441,7 @@ class ChatbookValidator:
         # Must match ContentType enum values from chatbook_models.py
         valid_types = {'conversation', 'note', 'character', 'world_book',
                       'dictionary', 'generated_document', 'media', 'embedding',
-                      'prompt', 'evaluation'}
+                      'prompt', 'evaluation', 'explainer_session'}
 
         for content_type, ids in content_selections.items():
             if content_type not in valid_types:

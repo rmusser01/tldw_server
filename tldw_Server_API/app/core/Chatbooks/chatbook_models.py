@@ -57,6 +57,7 @@ class ContentType(str, Enum):
     WORLD_BOOK = "world_book"
     DICTIONARY = "dictionary"
     GENERATED_DOCUMENT = "generated_document"
+    EXPLAINER_SESSION = "explainer_session"
 
 
 class ExportStatus(str, Enum):
@@ -221,6 +222,7 @@ class ChatbookManifest:
     total_world_books: int = 0
     total_dictionaries: int = 0
     total_documents: int = 0
+    total_explainer_sessions: int = 0
     total_size_bytes: int = 0
 
     # Metadata
@@ -274,6 +276,7 @@ class ChatbookManifest:
                 "total_world_books": self.total_world_books,
                 "total_dictionaries": self.total_dictionaries,
                 "total_documents": self.total_documents,
+                "total_explainer_sessions": self.total_explainer_sessions,
                 "total_size_bytes": self.total_size_bytes
             },
             "metadata": metadata,
@@ -325,6 +328,7 @@ class ChatbookManifest:
             total_world_books=stats.get("total_world_books", 0),
             total_dictionaries=stats.get("total_dictionaries", 0),
             total_documents=stats.get("total_documents", 0),
+            total_explainer_sessions=stats.get("total_explainer_sessions", 0),
             total_size_bytes=stats.get("total_size_bytes", 0),
             tags=meta.get("tags", []),
             categories=meta.get("categories", []),
@@ -350,6 +354,7 @@ class ChatbookContent:
     world_books: dict[str, Any] = field(default_factory=dict)
     dictionaries: dict[str, Any] = field(default_factory=dict)
     generated_documents: dict[str, Any] = field(default_factory=dict)
+    explainer_sessions: dict[str, Any] = field(default_factory=dict)
 
     def get_all_ids(self) -> set[str]:
         """Get all content IDs."""
@@ -358,7 +363,7 @@ class ChatbookContent:
             self.conversations, self.notes, self.characters,
             self.media, self.embeddings, self.prompts,
             self.evaluations, self.world_books, self.dictionaries,
-            self.generated_documents
+            self.generated_documents, self.explainer_sessions
         ]:
             all_ids.update(content_dict.keys())
         return all_ids

@@ -47,6 +47,13 @@ from ..Templating.template_renderer import (
     options_from_env,
 )
 from ..Templating.template_renderer import render as render_template
+from ..DB_Management.Explainer_DB import ExplainerDatabase
+from ..Explainer.chatbook_adapter import (
+    EXPLAINER_CHATBOOK_FORMAT,
+    restore_explainer_chatbook_payload,
+    build_explainer_chatbook_payload,
+)
+from ..Explainer.repository import ExplainerRepository
 
 # Legacy job queue shim removed; using in-process task registry
 from .chatbook_models import (
@@ -459,6 +466,8 @@ class ChatbookService:
         self._media_db: Any | None = None
         self._evaluations_db: EvaluationsDatabase | None = None
         self._chroma_manager: ChromaDBManager | None = None
+        self._explainer_db: ExplainerDatabase | None = None
+        self._explainer_repo: ExplainerRepository | None = None
 
         # Secure user-specific directory under the configured user DB base.
         user_id_value = self.user_id_int if self.user_id_int is not None else self.user_id
@@ -584,6 +593,23 @@ class ChatbookService:
         )
         return resolved_path.name
 
+    @classmethod
+    def _safe_extracted_content_path(cls, extract_dir: Path, relative_path: str | None) -> Path | None:
+        """Resolve a manifest file path inside an extracted chatbook directory."""
+        if not relative_path:
+            return None
+        rel_text = str(relative_path)
+        if cls._is_unsafe_archive_path(rel_text):
+            return None
+        base = extract_dir.resolve()
+        target = os.path.normpath(os.path.join(str(base), rel_text))
+        try:
+            if os.path.commonpath([str(base), target]) != str(base):
+                return None
+        except ValueError:
+            return None
+        return Path(target)
+
     def _get_prompts_db(self) -> PromptsDatabase | None:
         """Lazily initialize and cache the prompts database."""
         if PromptsDatabase is None:
@@ -659,6 +685,16 @@ class ChatbookService:
             logger.warning(f"ChromaDB init failed for chatbooks: {exc}")
             self._chroma_manager = None
         return self._chroma_manager
+
+    def _get_explainer_repo(self) -> ExplainerRepository:
+        """Lazily initialize the ownership-scoped Explainer repository."""
+        if self._explainer_repo is not None:
+            return self._explainer_repo
+        user_id_value = self.user_id_int if self.user_id_int is not None else self.user_id
+        db_path = DatabasePaths.get_explainer_db_path(user_id_value)
+        self._explainer_db = ExplainerDatabase(db_path=db_path, client_id=self.user_id)
+        self._explainer_repo = ExplainerRepository(self._explainer_db)
+        return self._explainer_repo
 
     @staticmethod
     def _normalize_datetime(value: Any) -> Any:
@@ -1205,6 +1241,10 @@ class ChatbookService:
                                 'world_books': stats.get('total_world_books', manifest_data.get('total_world_books', 0)),
                                 'dictionaries': stats.get('total_dictionaries', manifest_data.get('total_dictionaries', 0)),
                                 'documents': stats.get('total_documents', manifest_data.get('total_documents', 0)),
+                                'explainer_sessions': stats.get(
+                                    'total_explainer_sessions',
+                                    manifest_data.get('total_explainer_sessions', 0),
+                                ),
                             }
                             # Only include non-zero entries to keep it tidy
                             content_summary = {k: v for k, v in totals.items() if isinstance(v, int) and v >= 0}
@@ -1648,6 +1688,12 @@ class ChatbookService:
                     work_dir, manifest, content
                 )
 
+            if ContentType.EXPLAINER_SESSION in content_selections:
+                self._collect_explainer_sessions(
+                    content_selections[ContentType.EXPLAINER_SESSION],
+                    work_dir, manifest, content
+                )
+
             # Update statistics
             manifest.total_conversations = len(content.conversations)
             manifest.total_notes = len(content.notes)
@@ -1659,6 +1705,7 @@ class ChatbookService:
             manifest.total_world_books = len(content.world_books)
             manifest.total_dictionaries = len(content.dictionaries)
             manifest.total_documents = len(content.generated_documents)
+            manifest.total_explainer_sessions = len(content.explainer_sessions)
 
             # Write manifest asynchronously
             manifest_path = work_dir / "manifest.json"
@@ -1864,7 +1911,6 @@ class ChatbookService:
                 ContentType.EMBEDDING,
                 ContentType.PROMPT,
                 ContentType.EVALUATION,
-                ContentType.GENERATED_DOCUMENT,
             }
             requested = [
                 ct.value if hasattr(ct, "value") else str(ct)
@@ -2095,6 +2141,8 @@ class ChatbookService:
                 ContentType.DICTIONARY,
                 ContentType.CONVERSATION,
                 ContentType.NOTE,
+                ContentType.EXPLAINER_SESSION,
+                ContentType.GENERATED_DOCUMENT,
             }
             unsupported_types = [ct for ct in content_selections if ct not in supported_types]
             for ct in unsupported_types:
@@ -2176,6 +2224,29 @@ class ChatbookService:
                     self._import_notes,
                     extract_dir, manifest,
                     content_selections[ContentType.NOTE],
+                    conflict_resolution, prefix_imported,
+                    import_status
+                )
+
+            # Import Explainer sessions from first-class content items.
+            if ContentType.EXPLAINER_SESSION in content_selections:
+                _run_import_for_type(
+                    ContentType.EXPLAINER_SESSION,
+                    self._import_explainer_sessions,
+                    extract_dir, manifest,
+                    content_selections[ContentType.EXPLAINER_SESSION],
+                    conflict_resolution, prefix_imported,
+                    import_status
+                )
+
+            # Backward-compatible fallback: generated_document items with
+            # metadata.subtype == "explainer_session" restore into Explainer.
+            if ContentType.GENERATED_DOCUMENT in content_selections:
+                _run_import_for_type(
+                    ContentType.EXPLAINER_SESSION,
+                    self._import_generated_document_explainer_sessions,
+                    extract_dir, manifest,
+                    content_selections[ContentType.GENERATED_DOCUMENT],
                     conflict_resolution, prefix_imported,
                     import_status
                 )
@@ -3891,6 +3962,43 @@ class ChatbookService:
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Error collecting document {doc_id}: {e}")
 
+    def _collect_explainer_sessions(
+        self,
+        session_ids: list[str],
+        work_dir: Path,
+        manifest: ChatbookManifest,
+        content: ChatbookContent,
+    ) -> None:
+        """Collect complete Explainer sessions as first-class Chatbook content."""
+        sessions_dir = work_dir / "content" / "explainer_sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        repo = self._get_explainer_repo()
+
+        for session_id in session_ids:
+            session_id_text = str(session_id)
+            payload = build_explainer_chatbook_payload(
+                repo=repo,
+                session_id=session_id_text,
+                owner_user_id=self.user_id,
+            )
+            session_data = payload["structured"]["session"]
+            session_file = sessions_dir / f"session_{session_id_text}.json"
+            with open(session_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+
+            content.explainer_sessions[session_id_text] = payload
+            manifest.content_items.append(
+                ContentItem(
+                    id=session_id_text,
+                    type=ContentType.EXPLAINER_SESSION,
+                    title=session_data.get("title") or "Explainer session",
+                    created_at=self._parse_timestamp(session_data.get("createdAt")),
+                    updated_at=self._parse_timestamp(session_data.get("updatedAt")),
+                    file_path=f"content/explainer_sessions/session_{session_id_text}.json",
+                    metadata={"format": EXPLAINER_CHATBOOK_FORMAT},
+                )
+            )
+
     # Helper methods for importing content
 
     def _import_conversations(
@@ -4162,6 +4270,107 @@ class ChatbookService:
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
                 status.failed_items += 1
                 status.warnings.append(f"Error importing note {note_id}: {str(e)}")
+
+    def _import_explainer_sessions(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        session_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+    ) -> None:
+        """Import first-class Explainer session payloads from a chatbook."""
+        item_by_id = {
+            item.id: item
+            for item in manifest.content_items
+            if item.type == ContentType.EXPLAINER_SESSION
+        }
+        sessions_dir = extract_dir / "content" / "explainer_sessions"
+        repo = self._get_explainer_repo()
+
+        for session_id in session_ids:
+            session_id_text = str(session_id)
+            status.processed_items += 1
+            item = item_by_id.get(session_id_text)
+            rel_path = item.file_path if item and item.file_path else f"content/explainer_sessions/session_{session_id_text}.json"
+            payload_path = self._safe_extracted_content_path(extract_dir, rel_path)
+            if payload_path is None and sessions_dir.exists():
+                payload_path = sessions_dir / f"session_{session_id_text}.json"
+            if payload_path is None or not payload_path.exists():
+                status.failed_items += 1
+                status.warnings.append(f"Explainer session file not found: session_{session_id_text}.json")
+                continue
+
+            try:
+                with open(payload_path, encoding="utf-8") as f:
+                    payload = json.load(f)
+                restore_explainer_chatbook_payload(
+                    repo=repo,
+                    payload=payload,
+                    owner_user_id=self.user_id,
+                    prefix_imported=prefix_imported,
+                )
+                status.successful_items += 1
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                status.failed_items += 1
+                status.warnings.append(f"Error importing Explainer session {session_id_text}: {str(exc)}")
+
+    def _import_generated_document_explainer_sessions(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        document_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+    ) -> None:
+        """Restore generated_document fallback items that carry Explainer sessions."""
+        item_by_id = {
+            item.id: item
+            for item in manifest.content_items
+            if item.type == ContentType.GENERATED_DOCUMENT
+        }
+        repo = self._get_explainer_repo()
+
+        for document_id in document_ids:
+            document_id_text = str(document_id)
+            status.processed_items += 1
+            item = item_by_id.get(document_id_text)
+            metadata = item.metadata if item and isinstance(item.metadata, dict) else {}
+            if metadata.get("subtype") != "explainer_session":
+                status.skipped_items += 1
+                status.warnings.append(
+                    f"Skipped generated document {document_id_text}: unsupported generated_document subtype"
+                )
+                continue
+
+            rel_path = item.file_path if item and item.file_path else f"content/generated_documents/document_{document_id_text}.json"
+            payload_path = self._safe_extracted_content_path(extract_dir, rel_path)
+            if payload_path is None or not payload_path.exists():
+                status.failed_items += 1
+                status.warnings.append(f"Generated document file not found: document_{document_id_text}.json")
+                continue
+
+            try:
+                with open(payload_path, encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("generated document payload must be an object")
+                payload.setdefault("type", "generated_document")
+                payload.setdefault("metadata", metadata)
+                restore_explainer_chatbook_payload(
+                    repo=repo,
+                    payload=payload,
+                    owner_user_id=self.user_id,
+                    prefix_imported=prefix_imported,
+                )
+                status.successful_items += 1
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                status.failed_items += 1
+                status.warnings.append(
+                    f"Error importing generated Explainer document {document_id_text}: {str(exc)}"
+                )
 
     def _import_characters(
         self,
@@ -5441,6 +5650,8 @@ class ChatbookService:
             content.append(f"- **Dictionaries:** {manifest.total_dictionaries}\n")
         if manifest.total_documents > 0:
             content.append(f"- **Generated Documents:** {manifest.total_documents}\n")
+        if manifest.total_explainer_sessions > 0:
+            content.append(f"- **Explainer Sessions:** {manifest.total_explainer_sessions}\n")
 
         if manifest.tags:
             content.append(f"\n## Tags\n\n{', '.join(manifest.tags)}\n")
@@ -5478,6 +5689,8 @@ class ChatbookService:
                 f.write(f"- **Dictionaries:** {manifest.total_dictionaries}\n")
             if manifest.total_documents > 0:
                 f.write(f"- **Generated Documents:** {manifest.total_documents}\n")
+            if manifest.total_explainer_sessions > 0:
+                f.write(f"- **Explainer Sessions:** {manifest.total_explainer_sessions}\n")
 
             if manifest.tags:
                 f.write(f"\n## Tags\n\n{', '.join(manifest.tags)}\n")

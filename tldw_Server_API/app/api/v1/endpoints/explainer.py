@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.endpoints.chatbooks import (
+    _persist_completed_sync_export_job,
+    get_chatbook_service,
+)
+from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookResponse
 from tldw_Server_API.app.api.v1.schemas.explainer import (
+    ExplainerChatbookExportRequest,
     ExplainerDeleteNodeResponse,
     ExplainerJobAcceptedResponse,
     ExplainerJobStatusResponse,
@@ -22,6 +28,8 @@ from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerSessionSummaryResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import ContentType
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.Explainer.jobs import EXPLAINER_DOMAIN
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
@@ -133,6 +141,54 @@ async def get_explainer_session(
     except Exception as exc:
         _raise_http(exc)
     return ExplainerSessionResponse.from_domain(session)
+
+
+@router.post(
+    "/sessions/{session_id}/export-chatbook",
+    response_model=CreateChatbookResponse,
+    summary="Export an Explainer session as a Chatbook",
+)
+async def export_explainer_session_chatbook(
+    session_id: str,
+    body: ExplainerChatbookExportRequest | None = None,
+    current_user: User = Depends(get_request_user),
+    db: ExplainerDatabase = Depends(get_explainer_db),
+    chatbook_service: ChatbookService = Depends(get_chatbook_service),
+) -> CreateChatbookResponse:
+    owner_user_id = _owner_user_id(current_user)
+    try:
+        session = _service(db).get_session(session_id, owner_user_id=owner_user_id)
+    except Exception as exc:
+        _raise_http(exc)
+
+    request_body = body or ExplainerChatbookExportRequest()
+    success, message, result = await chatbook_service.create_chatbook(
+        name=request_body.name or f"{session.title} Explainer Session",
+        description=request_body.description or f"Explainer session export for {session.title}",
+        content_selections={ContentType.EXPLAINER_SESSION: [session_id]},
+        include_media=False,
+        include_embeddings=False,
+        include_generated_content=True,
+        async_mode=request_body.async_mode,
+    )
+    if success:
+        if not request_body.async_mode and result:
+            job_id, download_url, _file_path, _file_size = _persist_completed_sync_export_job(
+                service=chatbook_service,
+                user_id=owner_user_id,
+                chatbook_name=request_body.name or f"{session.title} Explainer Session",
+                output_path=result,
+            )
+            return CreateChatbookResponse(
+                success=True,
+                message=message,
+                job_id=job_id,
+                download_url=download_url,
+            )
+        return CreateChatbookResponse(success=True, message=message, job_id=result)
+    if result:
+        return CreateChatbookResponse(success=False, message=message, job_id=result)
+    raise HTTPException(status_code=400, detail=message)
 
 
 @router.patch(
