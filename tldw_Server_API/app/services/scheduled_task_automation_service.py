@@ -211,11 +211,25 @@ class ScheduledTaskAutomationService:
         owner_id: int | None = None,
         limit: int,
         offset: int,
+        family: str | None = None,
+        mode: str | None = None,
+        status: str | None = None,
+        definition_id: str | None = None,
+        expired: bool | None = None,
     ) -> ScheduledTaskPreviewListResponse:
         """Return a page of owner-scoped previews."""
         if owner_id is None:
             return ScheduledTaskPreviewListResponse(limit=limit, offset=offset)
-        rows, total = self._repo(owner_id).list_previews(owner_id=owner_id, limit=limit, offset=offset)
+        rows, total = self._repo(owner_id).list_previews(
+            owner_id=owner_id,
+            limit=limit,
+            offset=offset,
+            family=family,
+            mode=mode,
+            status=status,
+            definition_id=definition_id,
+            expired=expired,
+        )
         return ScheduledTaskPreviewListResponse(
             items=[self._preview_response(row) for row in rows],
             total=total,
@@ -293,11 +307,29 @@ class ScheduledTaskAutomationService:
         owner_id: int | None = None,
         limit: int,
         offset: int,
+        family: str | None = None,
+        lifecycle: str | None = None,
+        health: str | None = None,
+        visibility_policy: str | None = None,
+        query: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
     ) -> ScheduledTaskDefinitionListResponse:
         """Return a page of owner-scoped automation definitions."""
         if owner_id is None:
             return ScheduledTaskDefinitionListResponse(limit=limit, offset=offset)
-        rows, total = self._repo(owner_id).list_definitions(owner_id=owner_id, limit=limit, offset=offset)
+        rows, total = self._repo(owner_id).list_definitions(
+            owner_id=owner_id,
+            limit=limit,
+            offset=offset,
+            family=family,
+            lifecycle=lifecycle,
+            health=health,
+            visibility_policy=visibility_policy,
+            query=query,
+            created_from=created_from,
+            created_to=created_to,
+        )
         return ScheduledTaskDefinitionListResponse(
             items=[self._definition_response(row) for row in rows],
             total=total,
@@ -417,15 +449,28 @@ class ScheduledTaskAutomationService:
         definition_id: str | None = None,
         limit: int,
         offset: int,
+        event_type: str | None = None,
+        actor: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskAuditListResponse:
         """Return a page of owner-scoped definition audit events."""
         if owner_id is None or definition_id is None:
             return ScheduledTaskAuditListResponse(limit=limit, offset=offset)
+        self._get_definition_row(owner_id=owner_id, definition_id=definition_id)
         rows, total = self._repo(owner_id).list_audit_events(
             owner_id=owner_id,
             definition_id=definition_id,
             limit=limit,
             offset=offset,
+            event_type=event_type,
+            actor=actor,
+            created_from=created_from,
+            created_to=created_to,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         return ScheduledTaskAuditListResponse(
             items=[self._audit_response(row) for row in rows],

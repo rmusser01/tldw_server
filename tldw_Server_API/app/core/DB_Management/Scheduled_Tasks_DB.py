@@ -891,10 +891,12 @@ class ScheduledTasksDatabase:
         mode: str | None = None,
         status: str | None = None,
         definition_id: str | None = None,
+        expired: bool | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[PreviewRow], int]:
         _validate_limit_offset(limit, offset)
+        now = _utcnow_iso()
         filter_params: list[Any] = [
             owner_id,
             family,
@@ -905,6 +907,11 @@ class ScheduledTasksDatabase:
             status,
             definition_id,
             definition_id,
+            expired,
+            expired,
+            now,
+            expired,
+            now,
         ]
         with self._connect() as conn:
             total_row = conn.execute(
@@ -916,6 +923,11 @@ class ScheduledTasksDatabase:
                     AND (? IS NULL OR mode = ?)
                     AND (? IS NULL OR status = ?)
                     AND (? IS NULL OR definition_id = ?)
+                    AND (
+                        ? IS NULL
+                        OR (? = 1 AND (status = 'expired' OR expires_at <= ?))
+                        OR (? = 0 AND status != 'expired' AND expires_at > ?)
+                    )
                 """,
                 filter_params,
             ).fetchone()
@@ -928,6 +940,11 @@ class ScheduledTasksDatabase:
                     AND (? IS NULL OR mode = ?)
                     AND (? IS NULL OR status = ?)
                     AND (? IS NULL OR definition_id = ?)
+                    AND (
+                        ? IS NULL
+                        OR (? = 1 AND (status = 'expired' OR expires_at <= ?))
+                        OR (? = 0 AND status != 'expired' AND expires_at > ?)
+                    )
                 ORDER BY created_at DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
@@ -1078,7 +1095,10 @@ class ScheduledTasksDatabase:
         family: str | None = None,
         lifecycle: str | None = None,
         health: str | None = None,
+        visibility_policy: str | None = None,
         query: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[DefinitionRow], int]:
@@ -1092,9 +1112,15 @@ class ScheduledTasksDatabase:
             lifecycle,
             health,
             health,
+            visibility_policy,
+            visibility_policy,
             pattern,
             pattern,
             pattern,
+            created_from,
+            created_from,
+            created_to,
+            created_to,
         ]
         with self._connect() as conn:
             total_row = conn.execute(
@@ -1105,7 +1131,10 @@ class ScheduledTasksDatabase:
                     AND (? IS NULL OR family = ?)
                     AND (? IS NULL OR lifecycle = ?)
                     AND (? IS NULL OR health = ?)
+                    AND (? IS NULL OR visibility_policy = ?)
                     AND (? IS NULL OR name LIKE ? OR description LIKE ?)
+                    AND (? IS NULL OR created_at >= ?)
+                    AND (? IS NULL OR created_at <= ?)
                 """,
                 filter_params,
             ).fetchone()
@@ -1117,7 +1146,10 @@ class ScheduledTasksDatabase:
                     AND (? IS NULL OR family = ?)
                     AND (? IS NULL OR lifecycle = ?)
                     AND (? IS NULL OR health = ?)
+                    AND (? IS NULL OR visibility_policy = ?)
                     AND (? IS NULL OR name LIKE ? OR description LIKE ?)
+                    AND (? IS NULL OR created_at >= ?)
+                    AND (? IS NULL OR created_at <= ?)
                 ORDER BY updated_at DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
@@ -1295,6 +1327,10 @@ class ScheduledTasksDatabase:
         *,
         event_type: str | None = None,
         actor: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[AuditEventRow], int]:
@@ -1306,6 +1342,14 @@ class ScheduledTasksDatabase:
             event_type,
             actor,
             actor,
+            created_from,
+            created_from,
+            created_to,
+            created_to,
+            idempotency_key,
+            idempotency_key,
+            request_id,
+            request_id,
         ]
         with self._connect() as conn:
             total_row = conn.execute(
@@ -1316,6 +1360,10 @@ class ScheduledTasksDatabase:
                     AND definition_id = ?
                     AND (? IS NULL OR event_type = ?)
                     AND (? IS NULL OR actor = ?)
+                    AND (? IS NULL OR created_at >= ?)
+                    AND (? IS NULL OR created_at <= ?)
+                    AND (? IS NULL OR idempotency_key = ?)
+                    AND (? IS NULL OR request_id = ?)
                 """,
                 filter_params,
             ).fetchone()
@@ -1327,6 +1375,10 @@ class ScheduledTasksDatabase:
                     AND definition_id = ?
                     AND (? IS NULL OR event_type = ?)
                     AND (? IS NULL OR actor = ?)
+                    AND (? IS NULL OR created_at >= ?)
+                    AND (? IS NULL OR created_at <= ?)
+                    AND (? IS NULL OR idempotency_key = ?)
+                    AND (? IS NULL OR request_id = ?)
                 ORDER BY created_at DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
