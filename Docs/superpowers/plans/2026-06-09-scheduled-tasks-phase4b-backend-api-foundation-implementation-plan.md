@@ -457,7 +457,7 @@ git commit -m "feat: add scheduled task automation repository"
 - Modify: `tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py`
 - Create: `tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py`
 
-- [ ] **Step 1: Write failing service tests for preview validation**
+- [x] **Step 1: Write failing service tests for preview validation**
 
 Cover valid, invalid, expired, stale, consumed, cross-user, and redacted Agent Task previews.
 
@@ -540,7 +540,7 @@ Add tests for:
 - no-key consumed preview reuse fails.
 - Agent Task raw secret strings are absent from preview response, created definition response, definition list/detail response models, and audit response models.
 
-- [ ] **Step 2: Run service tests to verify they fail**
+- [x] **Step 2: Run service tests to verify they fail**
 
 Run:
 
@@ -551,7 +551,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automat
 
 Expected: FAIL because service methods are not implemented.
 
-- [ ] **Step 3: Implement canonical hashing and validation helpers**
+- [x] **Step 3: Implement canonical hashing and validation helpers**
 
 In `scheduled_task_automation_service.py`, add private helpers:
 
@@ -577,7 +577,7 @@ Keep validation conservative:
 - validate schedule `kind` only against `one_time`, `interval`, `daily`, `weekly`, `cron`;
 - do not call RAG or ACP live execution APIs in 4B.
 
-- [ ] **Step 4: Implement preview creation**
+- [x] **Step 4: Implement preview creation**
 
 `create_preview(owner_id, actor, payload)` should:
 
@@ -596,7 +596,7 @@ For Agent Task tests, use a unique sentinel such as `RAW_AGENT_SECRET_DO_NOT_LEA
 - audit `before`/`after` metadata;
 - repository audit JSON.
 
-- [ ] **Step 5: Implement definition create/update lifecycle**
+- [x] **Step 5: Implement definition create/update lifecycle**
 
 Rules:
 
@@ -610,7 +610,7 @@ Rules:
 - create/update writes deterministic audit events;
 - definitions default health is `execution_unavailable`.
 
-- [ ] **Step 6: Implement lifecycle and duplicate**
+- [x] **Step 6: Implement lifecycle and duplicate**
 
 Implement:
 
@@ -630,7 +630,7 @@ Follow the transition matrix:
 - duplicate always creates `paused` copy;
 - duplicate audit records both `definition_duplicated` and `definition_duplicate_created`.
 
-- [ ] **Step 7: Implement idempotency wrapper**
+- [x] **Step 7: Implement idempotency wrapper**
 
 Add a service-level helper:
 
@@ -656,7 +656,7 @@ Behavior:
 
 Apply the wrapper to all 4B mutating routes that accept `Idempotency-Key`: preview, create, update, duplicate, pause, resume, and archive.
 
-- [ ] **Step 8: Run service tests**
+- [x] **Step 8: Run service tests**
 
 Run:
 
@@ -667,7 +667,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automat
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit service layer**
+- [x] **Step 9: Commit service layer**
 
 ```bash
 git add \
@@ -676,6 +676,8 @@ git add \
   tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
 git commit -m "feat: implement scheduled task definition service"
 ```
+
+Task 3 review hardening also added repository write-transaction support so idempotency lookup, domain mutation, audit writes, preview consumption, and response snapshot persistence commit as one durable command.
 
 ## Task 4: API Endpoints, Errors, Permissions, And OpenAPI Contract
 

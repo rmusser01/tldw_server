@@ -43,6 +43,9 @@ Task 1 review: spec-compliance reviewer approved; code-quality reviewer approved
 Task 2 completed across commits 84a7007f37, d6f528ba1a, and cea06ef558: added the per-user SQLite repository, repository tests, and review-driven hardening for optimistic locking, preview ownership, single-use preview consumption, idempotency expiry/reuse, shared SQLite policy, strict JSON encoding, atomic create-from-preview, owner-checked update preview references, and owner-checked audit writes.
 Task 2 verification: repository pytest passed with 19 tests; formatting, py_compile, Bandit touched-scope scan, and git diff --check passed in the worker verification.
 Task 2 review: spec-compliance reviewer approved. Code-quality review initially found repository lifecycle/ownership issues; worker fixed them in two follow-up commits. Final code-quality re-review approved with no remaining issues.
+Task 3 completed across commits 3a10dd3723, 4ca66f690, and 126f93fb38: implemented preview validation, Agent Task redaction, definition create/update lifecycle, pause/resume/archive, duplicate, service idempotency replay/conflict behavior, and review-driven repository write transactions for atomic command units.
+Task 3 verification: service pytest passed with 26 tests; repository and API pytest passed with 21 tests; git diff --check and Bandit touched-scope scan passed in worker verification.
+Task 3 review: spec-compliance review initially found stale idempotency replay responses; worker fixed this with response snapshots. Code-quality review then found idempotency race and multi-step atomicity risks; worker fixed them with immediate write transactions and rollback/race coverage. Final spec and code-quality re-reviews approved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
