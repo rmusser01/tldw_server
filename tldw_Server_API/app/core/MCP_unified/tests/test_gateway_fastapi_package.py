@@ -269,6 +269,26 @@ def _profile_with_allowed_tools(profile_id: str, allowed_tools: list[str]) -> An
     )
 
 
+def _profile_with_allowed_tools_and_permission_rules(
+    profile_id: str,
+    *,
+    allowed_tools: list[str],
+    permission_rules: list[Any],
+) -> Any:
+    """Build a profile with explicit tools plus Claude-style permission rules."""
+
+    from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
+
+    return MCPProfile(
+        id=profile_id,
+        name=f"Profile {profile_id}",
+        policy_document=ProfilePolicy(
+            allowed_tools=allowed_tools,
+            permission_rules=permission_rules,
+        ),
+    )
+
+
 def _profile_with_capabilities(profile_id: str, capabilities: list[str]) -> Any:
     """Build a profile that allows tools by advertised capability metadata."""
 
@@ -2510,6 +2530,174 @@ def test_gateway_profile_runtime_filters_and_allows_default_profile_tools() -> N
     _assert_jsonrpc_error(denied_body, code=-32001, request_id="call-denied")
     assert denied_body["error"]["data"]["reason_code"] == "tool_not_allowed"
     assert all(call[0] != "admin.delete" for call in backend.call_requests)
+
+
+def test_gateway_profile_runtime_blocks_matching_path_permission_rule() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "fs.read_text",
+                "description": "Read a text file.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                "metadata": {"category": "filesystem", "capability": "filesystem.read"},
+            }
+        ]
+    )
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "reviewer",
+        allowed_tools=["fs.read_text"],
+        permission_rules=[
+            {
+                "pattern": "Read(docs/private/**)",
+                "outcome": "deny",
+                "reason_code": "private_docs_denied",
+            }
+        ],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "fs.read_text",
+                    "arguments": {"path": "docs/private/secret.txt", "query": "secret"},
+                },
+                "id": "path-rule-denied",
+            },
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="path-rule-denied")
+    error_data = body["error"]["data"]
+    assert error_data["reason_code"] == "private_docs_denied"
+    assert error_data["status"] == "denied"
+    assert error_data["provenance"]["tool_name"] == "fs.read_text"
+    assert error_data["provenance"]["subject_type"] == "path"
+    assert error_data["provenance"]["matched_rules"][0]["pattern"] == "docs/private/**"
+    assert "docs/private/secret.txt" not in json.dumps(error_data)
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_blocks_matching_ask_permission_rule() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "web.fetch",
+                "description": "Fetch a URL.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                },
+                "metadata": {"category": "web", "capability": "network.fetch"},
+            }
+        ]
+    )
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "researcher",
+        allowed_tools=["web.fetch"],
+        permission_rules=[{"pattern": "WebFetch(example.com)", "outcome": "ask"}],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "web.fetch",
+                    "arguments": {"url": "https://example.com/private", "query": "private"},
+                },
+                "id": "domain-rule-ask",
+            },
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="domain-rule-ask")
+    error_data = body["error"]["data"]
+    assert error_data["reason_code"] == "approval_required"
+    assert error_data["status"] == "approval_required"
+    assert error_data["provenance"]["subject_type"] == "domain"
+    assert "example.com/private" not in json.dumps(error_data)
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_blocks_matching_mcp_permission_rule() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "mcp__github__delete_repo",
+                "description": "Delete a GitHub repository.",
+                "inputSchema": {"type": "object", "properties": {}},
+                "metadata": {"category": "external", "capability": "repo.delete"},
+            }
+        ]
+    )
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "devops",
+        allowed_tools=["mcp__github__delete_repo"],
+        permission_rules=[
+            {
+                "pattern": "MCP__GitHub__delete_*",
+                "outcome": "deny",
+                "reason_code": "mcp_delete_denied",
+            }
+        ],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="devops",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "mcp__github__delete_repo", "arguments": {"query": "repo"}},
+                "id": "mcp-rule-denied",
+            },
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="mcp-rule-denied")
+    error_data = body["error"]["data"]
+    assert error_data["reason_code"] == "mcp_delete_denied"
+    assert error_data["status"] == "denied"
+    assert error_data["provenance"]["subject_type"] == "mcp"
+    assert backend.call_requests == []
 
 
 def test_gateway_profile_runtime_denies_explicit_tool_before_backend_discovery() -> None:

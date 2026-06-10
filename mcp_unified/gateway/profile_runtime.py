@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any, Protocol
 
 from mcp_unified.interfaces.storage import ProfileStore
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.permission_rules import (
+    PermissionRuleSubject,
+    compile_permission_rules,
+    evaluate_permission_rule_decision,
+)
 from mcp_unified.profiles.resolution import (
     EffectivePolicyResult,
     ProfileResolutionResult,
@@ -52,6 +57,26 @@ _TOOL_CALL_ARGUMENT_KEYS = frozenset({"tool_id", "arguments"})
 _TOOL_SEARCH_ARGUMENT_KEYS = frozenset({"query", "category", "limit"})
 _TOOL_DESCRIBE_ARGUMENT_KEYS = frozenset({"tool_id"})
 _EMPTY_ARGUMENT_KEYS = frozenset()
+_PATH_ARGUMENT_KEYS = frozenset(
+    {
+        "path",
+        "file",
+        "file_path",
+        "filepath",
+        "filename",
+        "base_path",
+        "target_path",
+        "source_path",
+        "destination_path",
+        "new_path",
+        "old_path",
+    }
+)
+_PATH_ARGUMENT_LIST_KEYS = frozenset({"paths", "files", "file_paths"})
+_DOMAIN_ARGUMENT_KEYS = frozenset({"url", "uri", "domain", "host", "base_url"})
+_DOMAIN_ARGUMENT_LIST_KEYS = frozenset({"urls", "uris", "domains", "hosts"})
+_COMMAND_ARGUMENT_KEYS = frozenset({"command", "cmd", "shell_command"})
+_COMMAND_ARGV_KEYS = frozenset({"argv"})
 _BRIDGE_TOOL_DESCRIPTORS: dict[str, dict[str, Any]] = {
     _TOOL_CATEGORIES_LIST: {
         "name": _TOOL_CATEGORIES_LIST,
@@ -481,6 +506,11 @@ class ProfileAwareGatewayRuntime:
                 policy_result,
                 message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
             )
+        _enforce_permission_rules_for_tool_call(
+            profile,
+            name,
+            arguments,
+        )
         return await self._backend.call_tool(
             name,
             arguments,
@@ -932,6 +962,130 @@ def _effective_policy_for_tool(
         tool_name=tool_name,
         capability=capability if capability is not None else _primary_capability(tool),
     )
+
+
+def _enforce_permission_rules_for_tool_call(
+    profile: MCPProfile,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> None:
+    """Apply matching non-grant permission rules to one allowed runtime call."""
+
+    try:
+        rules = compile_permission_rules(profile.policy_document)
+    except ValueError as exc:
+        raise GatewayPolicyDenied(
+            "Gateway profile contains invalid permission rules",
+            reason_code="invalid_permission_rules",
+            provenance={
+                "profile_id": profile.id,
+                "tool_name": tool_name,
+                "error_type": exc.__class__.__name__,
+            },
+        ) from exc
+    if not rules:
+        return
+
+    for subject_type, value, argv in _permission_rule_subjects_for_tool_call(tool_name, arguments):
+        try:
+            decision = evaluate_permission_rule_decision(
+                rules,
+                subject_type=subject_type,
+                value=value,
+                argv=argv,
+            )
+        except ValueError as exc:
+            raise GatewayPolicyDenied(
+                "Gateway profile could not evaluate permission rules",
+                reason_code="invalid_permission_rule_subject",
+                provenance={
+                    "profile_id": profile.id,
+                    "tool_name": tool_name,
+                    "subject_type": subject_type,
+                    "error_type": exc.__class__.__name__,
+                },
+            ) from exc
+        if not decision.matched_rules or decision.outcome == "allow":
+            continue
+        status = "approval_required" if decision.outcome == "ask" else "denied"
+        raise GatewayPolicyDenied(
+            f"Gateway profile denied tool execution: {decision.reason_code}",
+            status=status,
+            reason_code=decision.reason_code,
+            provenance={
+                "profile_id": profile.id,
+                "tool_name": tool_name,
+                "subject_type": subject_type,
+                "matched_rules": [
+                    matched_rule.model_dump(mode="json", exclude_none=True)
+                    for matched_rule in decision.matched_rules
+                ],
+            },
+        )
+
+
+def _permission_rule_subjects_for_tool_call(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> list[tuple[PermissionRuleSubject, str, Sequence[str] | None]]:
+    """Extract permission-rule subjects from one gateway tool call."""
+
+    subjects: list[tuple[PermissionRuleSubject, str, Sequence[str] | None]] = [
+        ("tool", tool_name, None)
+    ]
+    if tool_name.lower().startswith("mcp__"):
+        subjects.append(("mcp", tool_name, None))
+    if not isinstance(arguments, Mapping):
+        return subjects
+
+    for key, value in arguments.items():
+        if not isinstance(key, str):
+            continue
+        normalized_key = key.strip().lower()
+        if normalized_key in _PATH_ARGUMENT_KEYS:
+            subjects.extend(("path", item, None) for item in _string_values(value))
+        elif normalized_key in _PATH_ARGUMENT_LIST_KEYS:
+            subjects.extend(("path", item, None) for item in _nested_string_values(value))
+        elif normalized_key in _DOMAIN_ARGUMENT_KEYS:
+            subjects.extend(("domain", item, None) for item in _string_values(value))
+        elif normalized_key in _DOMAIN_ARGUMENT_LIST_KEYS:
+            subjects.extend(("domain", item, None) for item in _nested_string_values(value))
+        elif normalized_key in _COMMAND_ARGUMENT_KEYS:
+            subjects.extend(("command", item, None) for item in _string_values(value))
+        elif normalized_key in _COMMAND_ARGV_KEYS:
+            argv = _argv_argument(value)
+            if argv is not None:
+                subjects.append(("command", " ".join(argv), argv))
+    return subjects
+
+
+def _string_values(value: Any) -> tuple[str, ...]:
+    """Return one non-empty string value or an empty tuple."""
+
+    if isinstance(value, str) and value.strip():
+        return (value.strip(),)
+    return ()
+
+
+def _nested_string_values(value: Any) -> tuple[str, ...]:
+    """Return non-empty string values from a scalar or shallow sequence."""
+
+    if isinstance(value, (str, bytes, Mapping)):
+        return _string_values(value)
+    if isinstance(value, Sequence):
+        return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
+    return ()
+
+
+def _argv_argument(value: Any) -> tuple[str, ...] | None:
+    """Return argv tokens when a tool call provides an argv-shaped argument."""
+
+    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, Sequence):
+        return None
+    argv = tuple(value)
+    if not argv or not all(isinstance(item, str) for item in argv):
+        return None
+    return argv
 
 
 def _primary_capability(tool: Any) -> str | None:
