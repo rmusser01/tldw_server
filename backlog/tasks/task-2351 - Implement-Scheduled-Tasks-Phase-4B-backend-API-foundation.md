@@ -46,6 +46,9 @@ Task 2 review: spec-compliance reviewer approved. Code-quality review initially 
 Task 3 completed across commits 3a10dd3723, 4ca66f690, and 126f93fb38: implemented preview validation, Agent Task redaction, definition create/update lifecycle, pause/resume/archive, duplicate, service idempotency replay/conflict behavior, and review-driven repository write transactions for atomic command units.
 Task 3 verification: service pytest passed with 26 tests; repository and API pytest passed with 21 tests; git diff --check and Bandit touched-scope scan passed in worker verification.
 Task 3 review: spec-compliance review initially found stale idempotency replay responses; worker fixed this with response snapshots. Code-quality review then found idempotency race and multi-step atomicity risks; worker fixed them with immediate write transactions and rollback/race coverage. Final spec and code-quality re-reviews approved.
+Task 4 completed across commits f3050f3c13, 688ce4c5e5, and b6d8caef1c: exposed preview, definition, lifecycle, duplicate, audit, idempotency, filter, and public error-envelope API endpoints with owner scoping and no execution behavior.
+Task 4 verification: endpoint/control-plane pytest passed with 34 tests; service/db pytest passed with 45 tests; targeted endpoint pytest passed with 30 tests; git diff --check and Bandit touched-scope scan passed in worker/reviewer verification.
+Task 4 review: spec-compliance review found a missing direct public `scheduled_task_definition_not_found` alias and worker fixed it. Code-quality review found audit request-id and datetime filter correctness issues and worker/coordinator fixed them. Final spec and code-quality re-reviews approved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

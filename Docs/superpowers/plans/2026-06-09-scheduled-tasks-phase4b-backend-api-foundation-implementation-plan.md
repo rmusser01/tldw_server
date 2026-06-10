@@ -686,7 +686,7 @@ Task 3 review hardening also added repository write-transaction support so idemp
 - Modify: `tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py`
 - Modify: `tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py`
 
-- [ ] **Step 1: Write failing endpoint integration tests**
+- [x] **Step 1: Write failing endpoint integration tests**
 
 Add endpoint tests for:
 
@@ -751,7 +751,7 @@ def test_create_definition_consumes_preview_and_exposes_audit(scheduled_tasks_cl
     assert audit_response.json()["items"][0]["event_type"] == "definition_created"
 ```
 
-- [ ] **Step 2: Run endpoint tests to verify failures**
+- [x] **Step 2: Run endpoint tests to verify failures**
 
 Run:
 
@@ -762,7 +762,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automat
 
 Expected: FAIL for unimplemented routes/error mapping.
 
-- [ ] **Step 3: Add endpoint error helper**
+- [x] **Step 3: Add endpoint error helper**
 
 Use a local helper in the endpoint module to map service exceptions to consistent error bodies:
 
@@ -809,7 +809,7 @@ Map service exceptions:
 
 Every mapped error body should include `code`, `message`, `details`, `field_errors`, `retryable`, and `correlation_id`. Tests should assert the envelope shape for at least one 409 conflict and one 422 validation error.
 
-- [ ] **Step 4: Implement all endpoint handlers**
+- [x] **Step 4: Implement all endpoint handlers**
 
 Endpoints:
 
@@ -829,7 +829,7 @@ Endpoints:
 
 Read `Idempotency-Key` from the request headers for mutating routes.
 
-- [ ] **Step 5: Add pagination/filter query parameters**
+- [x] **Step 5: Add pagination/filter query parameters**
 
 Use explicit query params:
 
@@ -839,7 +839,7 @@ Use explicit query params:
 - previews: `family`, `mode`, `status`, `definition_id`, `expired`
 - audit: `event_type`, `actor`, `created_from`, `created_to`, `idempotency_key`, `request_id`
 
-- [ ] **Step 6: Run endpoint and existing control-plane tests**
+- [x] **Step 6: Run endpoint and existing control-plane tests**
 
 Run:
 
@@ -853,7 +853,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit endpoint implementation**
+- [x] **Step 7: Commit endpoint implementation**
 
 ```bash
 git add \
@@ -862,6 +862,8 @@ git add \
   tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py
 git commit -m "feat: expose scheduled task automation endpoints"
 ```
+
+Task 4 review hardening also added direct public error-code aliases, audit request-id propagation/filtering, and timezone-aware datetime filter validation/normalization.
 
 ## Task 5: Unified Control-Plane Projection
 
