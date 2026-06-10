@@ -1,6 +1,11 @@
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 import { BLOCKED_STATE_LABEL } from "@/design-system"
 import type { BadgeVariant } from "@/components/ui/primitives"
+import {
+  getAutomationDefinitionFamilyLabel,
+  getAutomationDefinitionProductStatus,
+  isAutomationDefinitionTask
+} from "./scheduled-task-automation-status"
 
 export type ScheduledTaskStatusTone =
   | "success"
@@ -16,6 +21,7 @@ export type ScheduledTaskStatusKey =
   | "waiting"
   | "found_results"
   | "paused"
+  | "archived"
   | "disabled"
   | "draft"
   | "completed"
@@ -45,6 +51,7 @@ type ScheduledTaskStatusInput =
 
 type ScheduledTaskTypeInput = {
   primitive?: unknown
+  source_ref?: Record<string, unknown>
 }
 
 type WatchlistTaskLinkInput =
@@ -194,6 +201,10 @@ const hasPositiveResultSignal = (sourceRef: Record<string, unknown>): boolean =>
 export const getScheduledTaskProductStatus = (
   task: ScheduledTaskStatusInput
 ): ScheduledTaskProductStatus => {
+  if (isAutomationDefinitionTask(task)) {
+    return getAutomationDefinitionProductStatus(task)
+  }
+
   if (!task.enabled) {
     return {
       key: "disabled",
@@ -297,6 +308,10 @@ export const getScheduledTaskProductStatus = (
 }
 
 export const getScheduledTaskTypeLabel = (task: ScheduledTaskTypeInput): string => {
+  if (task.primitive === "automation_definition") {
+    return getAutomationDefinitionFamilyLabel(task)
+  }
+
   switch (task.primitive) {
     case "reminder_task":
       return "Reminder"
