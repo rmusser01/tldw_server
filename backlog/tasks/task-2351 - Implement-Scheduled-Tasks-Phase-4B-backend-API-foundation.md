@@ -1,7 +1,7 @@
 ---
 id: TASK-2351
 title: Implement Scheduled Tasks Phase 4B backend API foundation
-status: In Progress
+status: Done
 labels:
 - scheduled-tasks
 - api
@@ -24,13 +24,13 @@ Execute the reviewed Scheduled Tasks Phase 4B implementation plan: durable autom
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Capability, preview, definition, lifecycle, audit, idempotency, and projection backend APIs are implemented without execution.
-- [ ] #2 Agent Task raw message text is redacted from preview, definition, list/detail, audit, and persisted JSON by default.
-- [ ] #3 `/api/v1/scheduled-tasks` projects `automation_definition` rows without breaking reminder or Watchlists behavior.
-- [ ] #4 WebUI reference client can preview, create, inspect, edit, pause/resume, archive, and duplicate definitions using the API.
-- [ ] #5 Focused backend and frontend tests pass for the touched scope.
-- [ ] #6 Bandit passes for touched backend scope or any findings are fixed.
-- [ ] #7 No Jobs enqueueing, Scheduler integration, RAG execution, ACP dispatch, notifications, fake runs, fake results, or fake Home items are implemented.
+- [x] #1 Capability, preview, definition, lifecycle, audit, idempotency, and projection backend APIs are implemented without execution.
+- [x] #2 Agent Task raw message text is redacted from preview, definition, list/detail, audit, and persisted JSON by default.
+- [x] #3 `/api/v1/scheduled-tasks` projects `automation_definition` rows without breaking reminder or Watchlists behavior.
+- [x] #4 WebUI reference client can preview, create, inspect, edit, pause/resume, archive, and duplicate definitions using the API.
+- [x] #5 Focused backend and frontend tests pass for the touched scope.
+- [x] #6 Bandit passes for touched backend scope or any findings are fixed.
+- [x] #7 No Jobs enqueueing, Scheduler integration, RAG execution, ACP dispatch, notifications, fake runs, fake results, or fake Home items are implemented.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -58,20 +58,30 @@ Task 6 review: spec-compliance reviewer approved. Code-quality review found proj
 Task 7 completed across commits 4f3924e128, 18cd196bb5, and 27afbc9dc2: wired the WebUI reference client for automation definition preview/create/update, lifecycle actions, duplicate, detail/audit display, real-results-only row actions, and API error display without execution behavior.
 Task 7 verification: focused Scheduled Tasks Vitest suite passed with 93 tests; git diff --check and touched-scope Bandit scans passed in worker/reviewer verification.
 Task 7 review: spec-compliance review initially found missing update reachability and row-level fake Results actions; worker fixed both. Code-quality review found schedule/agent_ref contract, stale preview, JSON validation, and API error parsing issues; worker fixed them. Final spec and code-quality re-reviews approved.
+Task 8 verification completed: focused backend pytest passed with 82 tests; focused Scheduled Tasks Vitest suite passed with 102 tests after aligning one slow form test with the existing long timeout; touched-scope Bandit reported 0 errors and 0 findings at `/tmp/bandit_scheduled_tasks_phase4b.json`; OpenAPI import confirmed scheduled task automation paths are present after adding `scheduled-tasks` to the default `[API-Routes].enable` list; no-execution scan found only the unsupported `execute` action capability and existing APScheduler reminder utility tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Scheduled Tasks Phase 4B backend API foundation and reference WebUI client. The work adds durable automation previews and definitions, lifecycle/audit/idempotency APIs, capability discovery, `automation_definition` projection into `/api/v1/scheduled-tasks`, Agent Task redaction safeguards, and WebUI preview/create/edit/lifecycle flows that clearly show execution is unavailable. Default config now enables the scheduled-tasks control-plane route so the main API exposes the new paths without a manual route-policy override.
 
+Verification:
+- Backend: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py tldw_Server_API/tests/Notifications/test_scheduled_tasks_control_plane.py -q` passed with 82 tests.
+- Frontend: `bunx vitest run` on the focused Scheduled Tasks test suite passed with 102 tests.
+- Security: Bandit on touched backend scope reported 0 errors and 0 findings in `/tmp/bandit_scheduled_tasks_phase4b.json`.
+- OpenAPI: app import with `SINGLE_USER_API_KEY` configured confirmed `/api/v1/scheduled-tasks/capabilities`, `/api/v1/scheduled-tasks/previews`, and `/api/v1/scheduled-tasks/definitions` are present.
+- Execution boundary: scan found no Jobs enqueueing, Scheduler registration, run-now/manual-run handling, RAG execution, ACP dispatch, notifications, fake runs, fake results, or fake Home surfacing.
+
+Known skips/blockers: none. Existing unrelated untracked Watchlists template files remain intentionally untouched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

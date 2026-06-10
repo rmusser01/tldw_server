@@ -1265,10 +1265,11 @@ git commit -m "feat: wire scheduled task automation reference client"
 
 **Files:**
 - Modify: `Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-implementation-plan.md`
-- Modify: `backlog/tasks/task-2350 - Plan-Scheduled-Tasks-Phase-4B-backend-API-foundation-implementation.md`
+- Modify: `backlog/tasks/task-2351 - Implement-Scheduled-Tasks-Phase-4B-backend-API-foundation.md`
+- Modify: `tldw_Server_API/Config_Files/config.txt`
 - Optional modify: `Docs/Development/Scheduled_Tasks.md` if an existing scheduled-tasks API doc exists.
 
-- [ ] **Step 1: Run backend focused tests**
+- [x] **Step 1: Run backend focused tests**
 
 Run:
 
@@ -1284,7 +1285,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run frontend focused tests**
+Result: PASS, `82 passed, 13 warnings in 65.27s`.
+
+- [x] **Step 2: Run frontend focused tests**
 
 Run:
 
@@ -1301,7 +1304,9 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched backend scope**
+Result: PASS, `102 passed`.
+
+- [x] **Step 3: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1317,7 +1322,9 @@ python -m bandit -r \
 
 Expected: no new findings in touched code. If Bandit reports findings, inspect `/tmp/bandit_scheduled_tasks_phase4b.json` and fix before continuing.
 
-- [ ] **Step 4: Verify no execution paths were added**
+Result: PASS, `/tmp/bandit_scheduled_tasks_phase4b.json` reported 0 errors and 0 findings.
+
+- [x] **Step 4: Verify no execution paths were added**
 
 Run:
 
@@ -1330,7 +1337,9 @@ rg -n "enqueue|Scheduler|APScheduler|run_now|manual run|execute" \
 
 Expected: only capability/status/copy references such as `execution_unavailable` and `execution_not_implemented`; no Jobs enqueue, Scheduler registration, or run execution code.
 
-- [ ] **Step 5: Verify OpenAPI generation/import health**
+Result: PASS. Matches were limited to the unsupported `execute` action capability and existing APScheduler reminder utility tests; no enqueue, Scheduler registration, `run_now`, manual-run, RAG execution, ACP dispatch, notification, fake run, fake result, or Home surfacing code was added.
+
+- [x] **Step 5: Verify OpenAPI generation/import health**
 
 Run:
 
@@ -1354,9 +1363,11 @@ PY
 
 Expected: prints `scheduled task automation OpenAPI paths present`.
 
-- [ ] **Step 6: Update Backlog task and plan statuses**
+Result: PASS. Verification initially found the full app route policy did not enable the new scheduled-tasks control-plane route from default config, so `scheduled-tasks` was added to `[API-Routes].enable`. Rerunning OpenAPI import with only auth configured printed `scheduled task automation OpenAPI paths present`.
 
-Update `TASK-2350` notes with:
+- [x] **Step 6: Update Backlog task and plan statuses**
+
+Update `TASK-2351` notes with:
 
 - commits completed;
 - backend test command result;
@@ -1366,7 +1377,7 @@ Update `TASK-2350` notes with:
 
 If the implementation required a doc update, add it under `modified_files`.
 
-- [ ] **Step 7: Final self-review**
+- [x] **Step 7: Final self-review**
 
 Review:
 
@@ -1382,33 +1393,37 @@ Expected:
 - no whitespace errors;
 - no unrelated dirty files.
 
-- [ ] **Step 8: Commit verification/docs cleanup**
+Result: PASS. `git status --short` showed only intended final edits plus two unrelated untracked Watchlists template files. `git diff --check origin/dev...HEAD` and `git diff --check` returned no whitespace errors.
+
+- [x] **Step 8: Commit verification/docs cleanup**
 
 ```bash
 git add Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-implementation-plan.md \
-  'backlog/tasks/task-2350 - Plan-Scheduled-Tasks-Phase-4B-backend-API-foundation-implementation.md'
+  'backlog/tasks/task-2351 - Implement-Scheduled-Tasks-Phase-4B-backend-API-foundation.md' \
+  apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx \
+  tldw_Server_API/Config_Files/config.txt
 git commit -m "docs: record scheduled tasks phase 4b verification"
 ```
 
 ## Final Acceptance Checklist
 
-- [ ] `GET /api/v1/scheduled-tasks/capabilities` exposes Recurring Question and Agent Task with execution unavailable.
-- [ ] Preview records persist valid and invalid semantic validations.
-- [ ] Create/update require preview consumption and reject expired, consumed, wrong-user, mismatched, and stale previews.
-- [ ] Agent Task raw prompt text is not returned from preview, definition, list, or audit responses by default.
-- [ ] Agent Task raw prompt sentinel strings are absent from persisted preview, definition, and audit JSON by default.
-- [ ] Definitions can be listed, read, updated, paused, resumed, archived, and duplicated.
-- [ ] Duplicate creates a paused copy and deterministic source/copy audit events.
-- [ ] Duplicate cannot bypass `admin` or `security` disabled locks.
-- [ ] Optional idempotency works for replay and conflict across preview, create, update, duplicate, pause, resume, and archive, scoped by owner and route.
-- [ ] Error responses use the documented envelope including `correlation_id`.
-- [ ] `/api/v1/scheduled-tasks` projects `automation_definition` rows without breaking reminders or Watchlists.
-- [ ] WebUI can preview, create, inspect, edit, pause/resume, archive, and duplicate definitions using the API.
-- [ ] WebUI shows execution-unavailable states and does not create fake results or fake Home items.
-- [ ] Focused backend tests pass.
-- [ ] Focused frontend tests pass.
-- [ ] Bandit passes for touched backend scope.
-- [ ] No Jobs, Scheduler, RAG execution, ACP dispatch, notifications, or approval queue mutations were implemented.
+- [x] `GET /api/v1/scheduled-tasks/capabilities` exposes Recurring Question and Agent Task with execution unavailable.
+- [x] Preview records persist valid and invalid semantic validations.
+- [x] Create/update require preview consumption and reject expired, consumed, wrong-user, mismatched, and stale previews.
+- [x] Agent Task raw prompt text is not returned from preview, definition, list, or audit responses by default.
+- [x] Agent Task raw prompt sentinel strings are absent from persisted preview, definition, and audit JSON by default.
+- [x] Definitions can be listed, read, updated, paused, resumed, archived, and duplicated.
+- [x] Duplicate creates a paused copy and deterministic source/copy audit events.
+- [x] Duplicate cannot bypass `admin` or `security` disabled locks.
+- [x] Optional idempotency works for replay and conflict across preview, create, update, duplicate, pause, resume, and archive, scoped by owner and route.
+- [x] Error responses use the documented envelope including `correlation_id`.
+- [x] `/api/v1/scheduled-tasks` projects `automation_definition` rows without breaking reminders or Watchlists.
+- [x] WebUI can preview, create, inspect, edit, pause/resume, archive, and duplicate definitions using the API.
+- [x] WebUI shows execution-unavailable states and does not create fake results or fake Home items.
+- [x] Focused backend tests pass.
+- [x] Focused frontend tests pass.
+- [x] Bandit passes for touched backend scope.
+- [x] No Jobs, Scheduler, RAG execution, ACP dispatch, notifications, or approval queue mutations were implemented.
 
 ## Plan Review
 

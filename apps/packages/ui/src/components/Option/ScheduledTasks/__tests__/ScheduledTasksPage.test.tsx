@@ -1773,7 +1773,7 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a recurring reminder without cron and timezone", async () => {
     const user = userEvent.setup()
