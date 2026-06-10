@@ -12,6 +12,8 @@ surface for early standalone gateway work.
 
 - JSON-RPC gateway runtime primitives for HTTP, WebSocket, and stdio entrypoints.
 - Profile presets, profile resolution, and policy result models.
+- Claude-style profile permission rule parsing for tool, command, path, domain,
+  external MCP, skill, and agent subjects.
 - Role presets with compact tooling discovery metadata and progressive
   disclosure categories for suggested next-step tools.
 - Gateway-local profile, assignment, external-server, credential-grant, and

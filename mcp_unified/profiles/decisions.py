@@ -12,7 +12,17 @@ from .models import MCPProfile
 PolicyDecisionOutcome = Literal["deny", "ask", "allow"]
 PolicyDecisionVisibility = Literal["hidden", "direct", "deferred", "debug_only"]
 PolicyDecisionCallState = Literal["blocked", "approval_required", "callable"]
-PolicyRuleType = Literal["tool", "command", "mcp", "capability", "risk_class"]
+PolicyRuleType = Literal[
+    "tool",
+    "command",
+    "path",
+    "domain",
+    "mcp",
+    "skill",
+    "agent",
+    "capability",
+    "risk_class",
+]
 
 _DEFAULTS_BY_OUTCOME: dict[PolicyDecisionOutcome, dict[str, Any]] = {
     "deny": {
@@ -85,7 +95,7 @@ class PolicyDecisionRule(BaseModel):
         return _validate_command_rule_argv_input(value)
 
     @model_validator(mode="after")
-    def _validate_command_rule(self) -> "PolicyDecisionRule":
+    def _validate_command_rule(self) -> PolicyDecisionRule:
         if self.rule_type == "command":
             _validate_command_rule_argv(self.argv)
         return self
@@ -107,7 +117,7 @@ class PolicyDecision(BaseModel):
     redacted: bool = True
 
     @model_validator(mode="after")
-    def _derive_defaults(self) -> "PolicyDecision":
+    def _derive_defaults(self) -> PolicyDecision:
         defaults = _DEFAULTS_BY_OUTCOME[self.outcome]
         if self.visibility is None:
             self.visibility = defaults["visibility"]
@@ -173,6 +183,8 @@ def merge_policy_decisions(
 def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRule]:
     """Compile legacy and structured profile policy rules into typed records."""
 
+    from .permission_rules import compile_permission_rules
+
     rules = _compile_legacy_tool_rules(
         policy_document,
         include_legacy_bash=True,
@@ -198,6 +210,7 @@ def compile_profile_policy_rules(policy_document: Any) -> list[PolicyDecisionRul
             rule_type="mcp",
         )
     )
+    rules.extend(compile_permission_rules(policy_document))
     return rules
 
 
