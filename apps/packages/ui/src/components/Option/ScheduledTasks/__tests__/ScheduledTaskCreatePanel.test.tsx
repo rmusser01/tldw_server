@@ -32,6 +32,29 @@ import {
   REQUIRED_WATCH_AVAILABILITY_GATES,
   buildScheduledTaskTemplateCapability
 } from "../scheduled-task-template-capabilities"
+import type { ScheduledTaskAutomationCapabilitiesResponse } from "@/services/scheduled-tasks-control-plane"
+
+const automationCapabilities = (
+  family: "recurring_question" | "agent_task",
+  createStatus: "available" | "planned" | "unavailable" | "disabled" = "available"
+): ScheduledTaskAutomationCapabilitiesResponse => ({
+  items: [
+    {
+      family,
+      family_availability: createStatus === "available" ? "available" : "planned",
+      actions: {
+        create_definition: {
+          status: createStatus,
+          reason: createStatus === "available" ? null : "API creation is not available.",
+          required_permissions: []
+        }
+      },
+      missing_dependencies: [],
+      related_capabilities: {},
+      schema_version: "2026-06-10"
+    }
+  ]
+})
 
 describe("ScheduledTaskCreatePanel", () => {
   it("renders intent templates by state without source-vendor IA", () => {
@@ -343,6 +366,68 @@ describe("ScheduledTaskCreatePanel", () => {
       "/scheduled-tasks/results"
     )
     expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("renders the Recurring Question API editor when definition creation is available", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="recurring_question"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        automationCapabilities={automationCapabilities("recurring_question")}
+        onPreviewAutomationDefinition={vi.fn()}
+        onCreateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Create Recurring question")).toBeInTheDocument()
+    expect(screen.getByLabelText("Question")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the Agent Task API editor when definition creation is available", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="agent_task"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        automationCapabilities={automationCapabilities("agent_task")}
+        onPreviewAutomationDefinition={vi.fn()}
+        onCreateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Create Agent task")).toBeInTheDocument()
+    expect(screen.getByLabelText("Agent ref")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Agent Task scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps planned Recurring Question copy when API creation is unavailable", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="recurring_question"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        automationCapabilities={automationCapabilities("recurring_question", "planned")}
+        onPreviewAutomationDefinition={vi.fn()}
+        onCreateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("Question")).not.toBeInTheDocument()
   })
 
   it("renders rich planned Agent Task guidance without create controls", () => {

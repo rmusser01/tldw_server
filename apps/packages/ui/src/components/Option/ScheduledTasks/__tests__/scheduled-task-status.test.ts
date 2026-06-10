@@ -27,6 +27,50 @@ describe("scheduled task status helpers", () => {
     })
   })
 
+  it("uses automation status before generic disabled mapping", () => {
+    expect(
+      getScheduledTaskProductStatus({
+        id: "automation_definition:def_2",
+        primitive: "automation_definition",
+        title: "Agent task",
+        status: "paused",
+        enabled: false,
+        edit_mode: "native",
+        source_ref: {
+          family: "agent_task",
+          lifecycle: "paused",
+          health: "execution_unavailable"
+        }
+      })
+    ).toMatchObject({
+      key: "paused",
+      label: "Paused",
+      tone: "warning"
+    })
+  })
+
+  it("surfaces unknown automation states before generic waiting copy", () => {
+    expect(
+      getScheduledTaskProductStatus({
+        id: "automation_definition:def_unknown",
+        primitive: "automation_definition",
+        title: "Unknown automation",
+        status: "future_state",
+        enabled: true,
+        edit_mode: "native",
+        source_ref: {
+          family: "recurring_question",
+          lifecycle: "future_state",
+          health: "future_health"
+        }
+      })
+    ).toMatchObject({
+      key: "needs_attention",
+      label: "Needs attention",
+      tone: "error"
+    })
+  })
+
   it("maps failed-like statuses to Needs attention", () => {
     expect(
       getScheduledTaskProductStatus({
@@ -262,6 +306,12 @@ describe("scheduled task status helpers", () => {
     expect(getScheduledTaskTypeLabel({ primitive: "watchlist_job" })).toBe(
       "Watchlist monitor"
     )
+    expect(
+      getScheduledTaskTypeLabel({
+        primitive: "automation_definition",
+        source_ref: { family: "recurring_question" }
+      })
+    ).toBe("Recurring question")
     expect(getScheduledTaskTypeLabel({ primitive: "future_task" })).toBe("Scheduled task")
   })
 })

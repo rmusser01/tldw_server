@@ -562,6 +562,13 @@ export const projectScheduledTaskResults = (
 
     const status = task.status || ""
     const sourceRef = isRecord(task.source_ref) ? task.source_ref : {}
+    if (
+      task.primitive === "automation_definition" &&
+      !hasPositiveResultSignal(sourceRef)
+    ) {
+      return
+    }
+
     const productStatus = getScheduledTaskProductStatus(task)
     const hasFailure =
       productStatus.key === "needs_attention" || statusIncludes(status, FAILURE_STATUS_TOKENS)
