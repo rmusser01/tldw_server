@@ -49,6 +49,28 @@ describe("scheduled task status helpers", () => {
     })
   })
 
+  it("surfaces unknown automation states before generic waiting copy", () => {
+    expect(
+      getScheduledTaskProductStatus({
+        id: "automation_definition:def_unknown",
+        primitive: "automation_definition",
+        title: "Unknown automation",
+        status: "future_state",
+        enabled: true,
+        edit_mode: "native",
+        source_ref: {
+          family: "recurring_question",
+          lifecycle: "future_state",
+          health: "future_health"
+        }
+      })
+    ).toMatchObject({
+      key: "needs_attention",
+      label: "Needs attention",
+      tone: "error"
+    })
+  })
+
   it("maps failed-like statuses to Needs attention", () => {
     expect(
       getScheduledTaskProductStatus({

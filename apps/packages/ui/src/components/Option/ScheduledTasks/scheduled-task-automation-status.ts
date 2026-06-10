@@ -31,6 +31,29 @@ const isKnownAutomationFamily = (
 ): value is ScheduledTaskAutomationFamily =>
   value === "recurring_question" || value === "agent_task"
 
+const KNOWN_AUTOMATION_LIFECYCLES = new Set([
+  "configured",
+  "paused",
+  "archived",
+  "disabled"
+])
+
+const KNOWN_AUTOMATION_HEALTH = new Set([
+  "ready",
+  "execution_unavailable",
+  "capability_unavailable",
+  "needs_attention",
+  "permission_required"
+])
+
+const KNOWN_AUTOMATION_STATUSES = new Set([
+  "configured",
+  "configured_execution_unavailable",
+  "paused",
+  "archived",
+  "disabled"
+])
+
 const makeAutomationStatus = (
   key: ScheduledTaskStatusKey,
   label: string,
@@ -42,6 +65,14 @@ const makeAutomationStatus = (
   tone,
   description
 })
+
+const makeUnknownAutomationStatus = (): ScheduledTaskProductStatus =>
+  makeAutomationStatus(
+    "needs_attention",
+    "Needs attention",
+    "error",
+    "This automation definition has unrecognized status metadata and should be reviewed before it runs."
+  )
 
 export const isAutomationDefinitionTask = (
   task: AutomationDefinitionTaskInput
@@ -91,6 +122,16 @@ export const getAutomationDefinitionProductStatus = (
     )
   }
 
+  const hasUnknownLifecycle =
+    Boolean(lifecycle) && !KNOWN_AUTOMATION_LIFECYCLES.has(lifecycle)
+  const hasUnknownHealth = Boolean(health) && !KNOWN_AUTOMATION_HEALTH.has(health)
+  const hasUnknownStatus =
+    Boolean(status) && !KNOWN_AUTOMATION_STATUSES.has(status)
+
+  if (hasUnknownLifecycle || hasUnknownHealth || hasUnknownStatus) {
+    return makeUnknownAutomationStatus()
+  }
+
   if (
     status === "configured_execution_unavailable" ||
     (lifecycle === "configured" && health === "execution_unavailable")
@@ -121,7 +162,7 @@ export const getAutomationDefinitionProductStatus = (
     )
   }
 
-  if (lifecycle === "configured" || status === "configured" || health === "ready") {
+  if (lifecycle === "configured" && health === "ready") {
     return makeAutomationStatus(
       "waiting",
       "Configured",
@@ -139,10 +180,5 @@ export const getAutomationDefinitionProductStatus = (
     )
   }
 
-  return makeAutomationStatus(
-    "waiting",
-    "Configured",
-    "processing",
-    "This automation definition is configured and ready for execution."
-  )
+  return makeUnknownAutomationStatus()
 }

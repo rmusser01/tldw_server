@@ -47,4 +47,64 @@ describe("scheduled task automation status", () => {
 
     expect(status.label).toBe("Paused")
   })
+
+  it("treats unknown automation lifecycle and status as needing attention", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_3",
+      primitive: "automation_definition",
+      title: "Future task",
+      status: "warming_up",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {
+        family: "agent_task",
+        lifecycle: "warming_up",
+        health: "initializing"
+      }
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "needs_attention",
+      label: "Needs attention"
+    })
+    expect(status.description).toContain("unrecognized")
+  })
+
+  it("does not treat unknown automation status as ready when lifecycle is configured", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_5",
+      primitive: "automation_definition",
+      title: "Future status",
+      status: "awaiting_worker",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {
+        family: "agent_task",
+        lifecycle: "configured",
+        health: "ready"
+      }
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "needs_attention",
+      label: "Needs attention"
+    })
+  })
+
+  it("does not mark automation definitions with missing source metadata as configured", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_4",
+      primitive: "automation_definition",
+      title: "Missing metadata",
+      status: "configured",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {}
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "needs_attention",
+      label: "Needs attention"
+    })
+  })
 })

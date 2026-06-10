@@ -312,6 +312,20 @@ const normalizeReminderTaskMutationId = (taskId: string): string => {
   return normalized
 }
 
+const normalizeAutomationDefinitionMutationId = (definitionId: string): string => {
+  const normalized = String(definitionId || "").trim()
+  if (!normalized) {
+    throw new Error("definitionId is required")
+  }
+  if (normalized.startsWith("automation_definition:")) {
+    return normalized.slice("automation_definition:".length)
+  }
+  if (normalized.includes(":")) {
+    throw new Error("Definition mutations require an automation_definition id")
+  }
+  return normalized
+}
+
 const assertReminderUpdatePayload = (payload: Record<string, unknown>): void => {
   if (payload.title === null) {
     throw new Error("title cannot be null")
@@ -434,9 +448,10 @@ export async function listScheduledTaskDefinitions(
 export async function getScheduledTaskDefinition(
   definitionId: string
 ): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskDefinitionResponse>({
     path: toAllowedPath(
-      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(definitionId)}`
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(normalizedDefinitionId)}`
     ),
     method: "GET"
   })
@@ -447,9 +462,10 @@ export async function updateScheduledTaskDefinition(
   payload: ScheduledTaskDefinitionUpdateRequest,
   options?: ScheduledTaskMutationOptions
 ): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskDefinitionResponse>({
     path: toAllowedPath(
-      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(definitionId)}`
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(normalizedDefinitionId)}`
     ),
     method: "PATCH",
     body: payload,
@@ -461,9 +477,12 @@ export async function pauseScheduledTaskDefinition(
   definitionId: string,
   options?: ScheduledTaskMutationOptions
 ): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskDefinitionResponse>({
     path: toAllowedPath(
-      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(definitionId)}/pause`
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/pause`
     ),
     method: "POST",
     headers: withIdempotency(options?.idempotencyKey)
@@ -474,9 +493,12 @@ export async function resumeScheduledTaskDefinition(
   definitionId: string,
   options?: ScheduledTaskMutationOptions
 ): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskDefinitionResponse>({
     path: toAllowedPath(
-      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(definitionId)}/resume`
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/resume`
     ),
     method: "POST",
     headers: withIdempotency(options?.idempotencyKey)
@@ -487,9 +509,12 @@ export async function archiveScheduledTaskDefinition(
   definitionId: string,
   options?: ScheduledTaskMutationOptions
 ): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskDefinitionResponse>({
     path: toAllowedPath(
-      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(definitionId)}/archive`
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/archive`
     ),
     method: "POST",
     headers: withIdempotency(options?.idempotencyKey)
@@ -501,9 +526,12 @@ export async function duplicateScheduledTaskDefinition(
   payload: ScheduledTaskDuplicateRequest = {},
   options?: ScheduledTaskMutationOptions
 ): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskDefinitionResponse>({
     path: toAllowedPath(
-      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(definitionId)}/duplicate`
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/duplicate`
     ),
     method: "POST",
     body: payload,
@@ -515,10 +543,11 @@ export async function listScheduledTaskDefinitionAudit(
   definitionId: string,
   params?: ScheduledTaskAuditListParams
 ): Promise<ScheduledTaskAuditListResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
   return await bgRequest<ScheduledTaskAuditListResponse>({
     path: toAllowedPath(
       `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
-        definitionId
+        normalizedDefinitionId
       )}/audit${buildQuery(params)}`
     ),
     method: "GET"
