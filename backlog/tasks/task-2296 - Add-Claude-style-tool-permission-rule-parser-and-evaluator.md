@@ -52,6 +52,17 @@ Verification:
 - Import smoke: package-level parser/evaluator import and sample path decision passed.
 - Bandit: `python -m bandit -r mcp_unified/profiles/permission_rules.py mcp_unified/profiles/decisions.py mcp_unified/profiles/__init__.py -f json -o /tmp/bandit_mcp_tool_permission_rules.json` passed with no findings after removing a wildcard-comparison false positive trigger.
 - Whitespace: `git diff --check` passed.
+
+PR review follow-up after rebasing on latest `origin/dev`: verified and fixed all still-valid Qodo/Gemini findings. Domain normalization now uses URL host parsing and normalizes bracketed IPv6 literals without ports/brackets; MCP rule detection and precompiled MCP matching are case-insensitive; command argv validation allows empty string arguments after a fixed executable; and path matching is segment-aware so `*` does not cross `/` while `**` remains the cross-segment wildcard. Added regression tests for each issue and documented the clarified semantics.
+
+Review-fix verification:
+- Rebase: `git rebase origin/dev` reported the branch was up to date.
+- Red regression run: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_profile_permission_rules.py -q` failed on IPv6 normalization, mixed-case MCP detection, empty argv token validation, and segment-aware path matching before the fixes.
+- Focused tests: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_profile_permission_rules.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_policy_decisions.py -q` passed with 70 tests.
+- Ruff: `python -m ruff check mcp_unified/profiles/permission_rules.py mcp_unified/profiles/decisions.py mcp_unified/profiles/__init__.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_permission_rules.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_policy_decisions.py` passed.
+- Compile smoke: `python -m compileall -q mcp_unified/profiles/permission_rules.py mcp_unified/profiles/decisions.py mcp_unified/profiles/__init__.py` passed.
+- Bandit: `python -m bandit -r mcp_unified/profiles/permission_rules.py mcp_unified/profiles/decisions.py mcp_unified/profiles/__init__.py -f json -o /tmp/bandit_mcp_tool_permission_rules_review.json` passed.
+- Whitespace: `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

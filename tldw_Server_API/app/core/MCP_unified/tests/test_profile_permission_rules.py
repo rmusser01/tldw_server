@@ -39,6 +39,33 @@ def test_parse_permission_rule_classifies_claude_style_subjects() -> None:
     assert (mcp_rule.rule_type, mcp_rule.pattern, mcp_rule.outcome) == ("mcp", "mcp__github__*", "deny")
 
 
+def test_parse_permission_rule_normalizes_ipv6_domain_rules() -> None:
+    rule = parse_permission_rule("WebFetch(http://[::1]:8000/docs)", outcome="allow")
+
+    decision = evaluate_permission_rule_decision(
+        [rule],
+        subject_type="domain",
+        value="http://[::1]:9999/anything",
+    )
+
+    assert rule.pattern == "::1"
+    assert decision.outcome == "allow"
+
+
+def test_parse_permission_rule_classifies_mixed_case_mcp_rules() -> None:
+    rule = parse_permission_rule("MCP__GitHub__*", outcome="ask")
+
+    decision = evaluate_permission_rule_decision(
+        [rule],
+        subject_type="mcp",
+        value="mcp__github__delete_repo",
+    )
+
+    assert rule.rule_type == "mcp"
+    assert rule.pattern == "mcp__github__*"
+    assert decision.outcome == "ask"
+
+
 @pytest.mark.parametrize(
     "pattern,match",
     [
@@ -75,6 +102,20 @@ def test_compile_permission_rules_accepts_strings_and_structured_entries() -> No
         ("command", "Bash(git *)", ("git", "*"), "ask", "git_requires_review"),
         ("mcp", "mcp__github__create_issue", None, "allow", None),
     ]
+
+
+def test_command_rules_allow_empty_non_executable_argv_tokens() -> None:
+    rules = compile_permission_rules({"permission_rules": [{"pattern": "Bash(git commit -m '')", "outcome": "allow"}]})
+
+    decision = evaluate_permission_rule_decision(
+        rules,
+        subject_type="command",
+        value="git commit -m ''",
+        argv=["git", "commit", "-m", ""],
+    )
+
+    assert rules[0].argv == ("git", "commit", "-m", "")
+    assert decision.outcome == "allow"
 
 
 def test_compile_profile_policy_rules_includes_permission_rules() -> None:
@@ -168,6 +209,38 @@ def test_evaluate_permission_rule_decision_matches_path_domain_skill_agent_and_m
     assert agent.outcome == "ask"
     assert mcp.outcome == "deny"
     assert [match.outcome for match in mcp.matched_rules] == ["ask", "deny"]
+
+
+def test_path_permission_rules_are_segment_aware() -> None:
+    rules = compile_permission_rules({"permission_rules": [{"pattern": "Edit(src/*.py)", "outcome": "allow"}]})
+
+    direct_child = evaluate_permission_rule_decision(rules, subject_type="path", value="src/app.py")
+    nested_child = evaluate_permission_rule_decision(rules, subject_type="path", value="src/pkg/app.py")
+
+    assert direct_child.outcome == "allow"
+    assert nested_child.outcome == "deny"
+    assert nested_child.reason_code == "permission_rule_not_allowed"
+
+
+def test_precompiled_mcp_rule_patterns_match_case_insensitively() -> None:
+    from mcp_unified.profiles.decisions import PolicyDecisionRule
+
+    rule = PolicyDecisionRule(
+        rule_type="mcp",
+        outcome="deny",
+        source="precompiled",
+        pattern="MCP__GitHub__Delete_Repo",
+    )
+
+    decision = evaluate_permission_rule_decision(
+        [rule],
+        subject_type="mcp",
+        value="mcp__github__delete_repo",
+    )
+
+    assert decision.outcome == "deny"
+    assert decision.reason_code == "permission_rule_denied"
+    assert decision.matched_rules[0].pattern == "MCP__GitHub__Delete_Repo"
 
 
 def test_evaluate_profile_tool_decision_does_not_treat_non_tool_permission_rules_as_tool_grants() -> None:

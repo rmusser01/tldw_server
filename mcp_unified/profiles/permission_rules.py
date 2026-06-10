@@ -51,12 +51,13 @@ def parse_permission_rule(
     """Parse one Claude-style permission rule into a policy decision rule."""
 
     raw_pattern = _required_string(pattern, "permission rule pattern")
-    if raw_pattern.startswith("mcp__"):
+    raw_lower = raw_pattern.lower()
+    if raw_lower.startswith("mcp__"):
         return PolicyDecisionRule(
             rule_type="mcp",
             outcome=outcome,
             source=source,
-            pattern=raw_pattern.lower(),
+            pattern=raw_lower,
             reason_code=reason_code,
         )
 
@@ -249,13 +250,18 @@ def _normalize_domain_pattern(pattern: str) -> str:
     raw_pattern = pattern.strip()
     parsed = urlparse(raw_pattern)
     if parsed.scheme and parsed.netloc:
-        host = parsed.netloc
+        host = parsed.hostname or ""
     else:
         host = raw_pattern.split("/", 1)[0]
     host = host.strip().lower()
     if "@" in host:
         host = host.rsplit("@", 1)[1]
-    if ":" in host and not host.startswith("["):
+    if host.startswith("["):
+        closing_bracket = host.find("]")
+        if closing_bracket == -1:
+            raise ValueError("invalid bracketed IPv6 host")
+        host = host[1:closing_bracket]
+    elif host.count(":") == 1:
         host = host.split(":", 1)[0]
     if not host:
         raise ValueError("permission rule specifier cannot be empty")
@@ -286,8 +292,10 @@ def _normalize_command_argv(argv: Sequence[str] | None, value: str) -> tuple[str
     if isinstance(argv, (str, bytes, Mapping)) or not isinstance(argv, Sequence):
         raise ValueError("command subject argv must be a sequence")
     command_argv = tuple(argv)
-    if not command_argv or not all(isinstance(token, str) and token for token in command_argv):
-        raise ValueError("command subject argv must contain non-empty strings")
+    if not command_argv or not isinstance(command_argv[0], str) or not command_argv[0]:
+        raise ValueError("command subject argv must include a non-empty executable")
+    if not all(isinstance(token, str) for token in command_argv):
+        raise ValueError("command subject argv must contain strings")
     return command_argv
 
 
@@ -303,9 +311,56 @@ def _rule_matches(
         return command_argv is not None and _argv_matches(rule.argv, command_argv)
     if rule.pattern is None:
         return False
+    if subject_type == "path":
+        return _path_pattern_matches(rule.pattern, value)
+    if subject_type == "mcp":
+        return fnmatch.fnmatchcase(value, rule.pattern.lower())
     if subject_type == "tool":
         return rule.pattern == value
     return fnmatch.fnmatchcase(value, rule.pattern)
+
+
+def _path_pattern_matches(pattern: str, value: str) -> bool:
+    """Match path patterns where `*` stays within one path segment."""
+
+    return _path_segments_match(
+        _path_pattern_segments(pattern),
+        _path_pattern_segments(value),
+    )
+
+
+def _path_pattern_segments(path: str) -> tuple[str, ...]:
+    """Return normalized path segments for policy matching."""
+
+    normalized = _normalize_path_pattern(path).strip("/")
+    if not normalized or normalized == ".":
+        return ()
+    return tuple(segment for segment in normalized.split("/") if segment)
+
+
+def _path_segments_match(
+    pattern_segments: tuple[str, ...],
+    value_segments: tuple[str, ...],
+) -> bool:
+    """Recursively match path segments, using `**` for cross-segment matching."""
+
+    if not pattern_segments:
+        return not value_segments
+
+    pattern_head = pattern_segments[0]
+    pattern_tail = pattern_segments[1:]
+    if pattern_head == "**":
+        return _path_segments_match(pattern_tail, value_segments) or (
+            bool(value_segments)
+            and _path_segments_match(pattern_segments, value_segments[1:])
+        )
+
+    if not value_segments:
+        return False
+    return fnmatch.fnmatchcase(value_segments[0], pattern_head) and _path_segments_match(
+        pattern_tail,
+        value_segments[1:],
+    )
 
 
 def _argv_matches(pattern_argv: tuple[str, ...] | None, command_argv: tuple[str, ...]) -> bool:

@@ -429,8 +429,10 @@ def _validate_command_rule_argv(argv: tuple[str, ...] | None) -> None:
 
     if argv is None:
         raise ValueError("command policy rule argv is required")
-    if not argv or not all(isinstance(item, str) and item for item in argv):
-        raise ValueError("command policy rule argv must be non-empty strings")
+    if not argv or not isinstance(argv[0], str) or not argv[0]:
+        raise ValueError("command policy rule argv must include a fixed executable")
+    if not all(isinstance(item, str) for item in argv):
+        raise ValueError("command policy rule argv must be strings")
     _validate_fixed_command_executable(argv)
 
 
