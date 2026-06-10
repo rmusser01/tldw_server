@@ -52,6 +52,9 @@ Task 4 review: spec-compliance review found a missing direct public `scheduled_t
 Task 5 completed in commit 5f7f6cd632: projected automation definitions into the unified `/api/v1/scheduled-tasks` control-plane list/detail responses while preserving reminder and Watchlists behavior.
 Task 5 verification: control-plane pytest passed with 7 tests; automation API pytest passed with 30 tests; git diff --check and Bandit touched-scope scan passed in worker/reviewer verification.
 Task 5 review: spec-compliance reviewer approved. Code-quality reviewer approved with only residual optional coverage suggestions for disabled lifecycle and cross-user/missing detail behavior.
+Task 6 completed across commits e27c3ec169, e269e62004, and a0a2485fec: added frontend automation client types/methods, automation definition status/type helpers, projected-id normalization, idempotency header support, and backend-aligned status handling.
+Task 6 verification: targeted Vitest helper/client suite passed with 34 tests; git diff --check passed in worker/reviewer verification.
+Task 6 review: spec-compliance reviewer approved. Code-quality review found projected-id normalization, unknown-status, and client-method coverage gaps; worker fixed them and aligned helper statuses with backend projection. Final spec and code-quality re-reviews approved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

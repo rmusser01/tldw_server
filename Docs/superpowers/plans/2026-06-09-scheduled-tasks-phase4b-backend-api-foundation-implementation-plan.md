@@ -995,7 +995,7 @@ git commit -m "feat: project automation definitions into scheduled tasks"
 - Create: `apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-automation-status.test.ts`
 - Modify: `apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-status.ts`
 
-- [ ] **Step 1: Write failing frontend helper tests**
+- [x] **Step 1: Write failing frontend helper tests**
 
 ```ts
 import { describe, expect, it } from "vitest"
@@ -1044,7 +1044,7 @@ describe("scheduled task automation status", () => {
 })
 ```
 
-- [ ] **Step 2: Run helper tests to verify failure**
+- [x] **Step 2: Run helper tests to verify failure**
 
 Run:
 
@@ -1055,7 +1055,7 @@ bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-au
 
 Expected: FAIL because helper does not exist and client primitive type does not include `automation_definition`.
 
-- [ ] **Step 3: Extend frontend client types and methods**
+- [x] **Step 3: Extend frontend client types and methods**
 
 In `scheduled-tasks-control-plane.ts`:
 
@@ -1076,7 +1076,7 @@ In `scheduled-tasks-control-plane.ts`:
   - `duplicateScheduledTaskDefinition`
   - `listScheduledTaskDefinitionAudit`
 
-- [ ] **Step 4: Implement status helper**
+- [x] **Step 4: Implement status helper**
 
 `scheduled-task-automation-status.ts` should:
 
@@ -1093,7 +1093,7 @@ Then update `scheduled-task-status.ts`:
 - call automation family helper first in `getScheduledTaskTypeLabel`;
 - keep reminder/watchlist behavior unchanged.
 
-- [ ] **Step 5: Run helper tests**
+- [x] **Step 5: Run helper tests**
 
 Run:
 
@@ -1104,7 +1104,7 @@ bunx vitest run src/components/Option/ScheduledTasks/__tests__/scheduled-task-au
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit client and helpers**
+- [x] **Step 6: Commit client and helpers**
 
 ```bash
 git add \
