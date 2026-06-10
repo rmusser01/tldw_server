@@ -37,6 +37,9 @@ Execute the reviewed Scheduled Tasks Phase 4B implementation plan: durable autom
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation will follow `Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-implementation-plan.md` using subagent-driven development with TDD and review checkpoints per task.
+Task 1 completed in commit 8e2dd7b1fc: added automation schemas, route skeletons, capability service, primitive extension, and route/capability tests.
+Task 1 verification: focused pytest for `test_scheduled_task_automation_api.py` and `test_scheduled_tasks_control_plane.py` passed with 6 tests; touched-scope Bandit reported zero findings; git diff --check was clean.
+Task 1 review: spec-compliance reviewer approved; code-quality reviewer approved with one minor suggestion to add extra 501 skeleton assertions if useful before later endpoint wiring.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

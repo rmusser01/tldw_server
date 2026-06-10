@@ -89,7 +89,7 @@ Out of scope:
 - Modify: `tldw_Server_API/app/api/v1/endpoints/scheduled_tasks_control_plane.py`
 - Create: `tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py`
 
-- [ ] **Step 1: Write failing route and schema tests**
+- [x] **Step 1: Write failing route and schema tests**
 
 Add tests that prove static child routes are not captured by `/{task_id}` and that capabilities return explicit unavailable execution actions.
 
@@ -122,7 +122,7 @@ def test_capabilities_report_definition_actions_but_no_execution(scheduled_tasks
         assert actions["execute"]["reason"] == "execution_not_implemented"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -133,7 +133,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automat
 
 Expected: FAIL because schemas/routes do not exist or static routes are shadowed.
 
-- [ ] **Step 3: Add schema types**
+- [x] **Step 3: Add schema types**
 
 Create `scheduled_tasks_automation_schemas.py` with Pydantic models and literal aliases. Include at minimum:
 
@@ -193,7 +193,7 @@ Also define request/response model placeholders needed by later tasks:
 
 Use typed fields from the spec, but keep nested `config`, `input`, `schedule`, `visibility_policy`, and `notification_policy` as structured `dict[str, Any]` initially. Later tasks tighten validation in the service layer.
 
-- [ ] **Step 4: Extend normalized primitive type**
+- [x] **Step 4: Extend normalized primitive type**
 
 In `scheduled_tasks_control_plane_schemas.py`, change:
 
@@ -207,7 +207,7 @@ to:
 ScheduledTaskPrimitive = Literal["reminder_task", "watchlist_job", "automation_definition"]
 ```
 
-- [ ] **Step 5: Add route skeleton before `/{task_id}`**
+- [x] **Step 5: Add route skeleton before `/{task_id}`**
 
 In `scheduled_tasks_control_plane.py`, register these routes before the existing `@router.get("/{task_id}")`:
 
@@ -224,9 +224,9 @@ async def get_scheduled_task_automation_capabilities(
     return service.get_capabilities()
 ```
 
-Add skeleton `GET /previews`, `GET /definitions`, and `GET /definitions/{definition_id}/audit` routes that return empty paginated responses until later tasks implement storage. Add `POST /previews`, `POST /definitions`, `PATCH /definitions/{definition_id}`, and lifecycle route skeletons that call service methods.
+Add skeleton `GET /previews`, `GET /definitions`, and `GET /definitions/{definition_id}/audit` routes that return empty paginated responses until later tasks implement storage. Add `POST /previews`, `POST /definitions`, `PATCH /definitions/{definition_id}`, and lifecycle route skeletons that call service methods or return explicit `501` not-implemented responses while preserving route shape.
 
-- [ ] **Step 6: Implement minimal capability service**
+- [x] **Step 6: Implement minimal capability service**
 
 Create `tldw_Server_API/app/services/scheduled_task_automation_service.py` with:
 
@@ -267,7 +267,7 @@ class ScheduledTaskAutomationService:
         )
 ```
 
-- [ ] **Step 7: Run route/schema tests**
+- [x] **Step 7: Run route/schema tests**
 
 Run:
 
@@ -279,7 +279,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_tasks_contro
 
 Expected: PASS for capability/static route tests and existing control-plane tests.
 
-- [ ] **Step 8: Commit schema and route skeleton**
+- [x] **Step 8: Commit schema and route skeleton**
 
 ```bash
 git add \
