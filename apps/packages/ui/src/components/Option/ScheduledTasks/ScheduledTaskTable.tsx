@@ -36,6 +36,7 @@ export interface ScheduledTaskTableProps {
   onOpenTaskResults?: (task: ScheduledTask) => void
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
+  onEditAutomationDefinition?: (task: ScheduledTask) => void
   onPauseAutomationDefinition?: (task: ScheduledTask) => void
   onResumeAutomationDefinition?: (task: ScheduledTask) => void
   onArchiveAutomationDefinition?: (task: ScheduledTask) => void
@@ -116,6 +117,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
   onOpenTaskResults,
   onEditReminder,
   onDeleteReminder,
+  onEditAutomationDefinition,
   onPauseAutomationDefinition,
   onResumeAutomationDefinition,
   onArchiveAutomationDefinition,
@@ -142,6 +144,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
   const resultCountByTaskId = useMemo(() => {
     const counts = new Map<string, number>()
     results.forEach((result) => {
+      if (result.signalKind !== "result") return
       counts.set(result.taskId, (counts.get(result.taskId) ?? 0) + 1)
     })
     return counts
@@ -177,6 +180,13 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
           onClick={() => onInspectTask(task)}
         >
           Inspect
+        </Button>
+        <Button
+          size="small"
+          aria-label={rowActionLabel("Edit", task)}
+          onClick={() => onEditAutomationDefinition?.(task)}
+        >
+          Edit
         </Button>
         {renderResultsButton(task)}
         {isPaused ? (

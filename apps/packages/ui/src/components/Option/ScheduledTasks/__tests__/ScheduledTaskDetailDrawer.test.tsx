@@ -220,6 +220,8 @@ describe("ScheduledTaskDetailDrawer", () => {
   })
 
   it("shows automation definition details, preview history, audit, and lifecycle actions", () => {
+    const onEditAutomationDefinition = vi.fn()
+
     render(
       <ScheduledTaskDetailDrawer
         open
@@ -230,6 +232,7 @@ describe("ScheduledTaskDetailDrawer", () => {
         onClose={vi.fn()}
         onEditReminder={vi.fn()}
         onDeleteReminder={vi.fn()}
+        onEditAutomationDefinition={onEditAutomationDefinition}
         onPauseAutomationDefinition={vi.fn()}
         onResumeAutomationDefinition={vi.fn()}
         onArchiveAutomationDefinition={vi.fn()}
@@ -248,6 +251,7 @@ describe("ScheduledTaskDetailDrawer", () => {
     expect(screen.getByText(/preview_1/)).toBeInTheDocument()
     expect(screen.getByText("Audit events")).toBeInTheDocument()
     expect(screen.getByText("Definition created")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Edit definition" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Pause definition" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Archive definition" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Duplicate definition" })).toBeInTheDocument()

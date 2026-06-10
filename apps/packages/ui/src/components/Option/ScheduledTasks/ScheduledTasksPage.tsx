@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Button, Space, Tabs, Typography, message } from "antd"
+import { Drawer, Space, Tabs, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
@@ -34,6 +34,10 @@ import { ReminderTaskEditor } from "./ReminderTaskEditor"
 import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 import { ScheduledTaskCreatePanel } from "./ScheduledTaskCreatePanel"
+import {
+  ScheduledTaskAutomationDefinitionEditor,
+  type ScheduledTaskAutomationDefinitionEditorValues
+} from "./ScheduledTaskAutomationDefinitionEditor"
 import { ScheduledTaskResultsPanel } from "./ScheduledTaskResultsPanel"
 import { ScheduledTaskResultDetailDrawer } from "./ScheduledTaskResultDetailDrawer"
 import { DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES } from "./scheduled-task-template-capabilities"
@@ -56,6 +60,81 @@ import {
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 const SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS = 8000
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const readStringField = (
+  source: Record<string, unknown> | null | undefined,
+  key: string
+): string => {
+  const value = source?.[key]
+  return typeof value === "string" ? value : ""
+}
+
+const readStringListField = (
+  source: Record<string, unknown> | null | undefined,
+  key: string
+): string => {
+  const value = source?.[key]
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
+      .join(", ")
+  }
+  return typeof value === "string" ? value : ""
+}
+
+const stringifyEditorJson = (value: unknown): string => {
+  if (!isRecord(value)) return "{}"
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return "{}"
+  }
+}
+
+const getAutomationDefinitionIdForTask = (task: ScheduledTask): string => {
+  const sourceDefinitionId = task.source_ref?.definition_id
+  if (typeof sourceDefinitionId === "string" && sourceDefinitionId.trim()) {
+    return sourceDefinitionId
+  }
+  return task.id
+}
+
+const buildAutomationEditorInitialValues = (
+  definition: ScheduledTaskDefinitionResponse
+): ScheduledTaskAutomationDefinitionEditorValues => {
+  const schedule = isRecord(definition.schedule) ? definition.schedule : {}
+  const input = isRecord(definition.input) ? definition.input : {}
+  const config = isRecord(definition.config) ? definition.config : {}
+  const visibilityPolicy = isRecord(definition.visibility_policy)
+    ? definition.visibility_policy
+    : {}
+  const approvalPolicy = isRecord(definition.approval_policy)
+    ? definition.approval_policy
+    : {}
+  const visibility = visibilityPolicy.visibility === "shared" ? "shared" : "private"
+  const approvalMode = approvalPolicy.mode === "manual" ? "manual" : "none"
+
+  return {
+    name: definition.name,
+    description: definition.description ?? "",
+    scheduleKind: schedule.kind === "cron" ? "cron" : "manual",
+    cron: readStringField(schedule, "cron"),
+    timezone: readStringField(schedule, "timezone") || "UTC",
+    visibility,
+    question: readStringField(input, "question"),
+    successCriteria: readStringField(input, "success_criteria"),
+    scopeJson: stringifyEditorJson(input.scope),
+    agentRef: stringifyEditorJson(input.agent_ref),
+    message: readStringField(input, "message"),
+    allowedToolClasses: readStringListField(config, "allowed_tool_classes"),
+    deniedToolClasses: readStringListField(config, "denied_tool_classes"),
+    approvalMode
+  }
+}
+
 export const ScheduledTasksPage: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
@@ -65,6 +144,8 @@ export const ScheduledTasksPage: React.FC = () => {
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null)
+  const [editingAutomationTask, setEditingAutomationTask] =
+    useState<ScheduledTask | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [createdTaskFallback, setCreatedTaskFallback] = useState<ScheduledTask | null>(null)
   const [saving, setSaving] = useState(false)
@@ -233,6 +314,18 @@ export const ScheduledTasksPage: React.FC = () => {
       }),
     enabled: Boolean(selectedAutomationDefinitionId)
   })
+  const editingAutomationDefinitionId = React.useMemo(
+    () =>
+      editingAutomationTask
+        ? getAutomationDefinitionIdForTask(editingAutomationTask)
+        : null,
+    [editingAutomationTask]
+  )
+  const editingAutomationDefinitionQuery = useQuery({
+    queryKey: ["scheduled-task-definition-edit", editingAutomationDefinitionId],
+    queryFn: () => getScheduledTaskDefinition(editingAutomationDefinitionId as string),
+    enabled: Boolean(editingAutomationDefinitionId)
+  })
   const hasLoadedTasks = Boolean(tasksQuery.data)
   const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
   const selectedTemplate = React.useMemo(
@@ -337,6 +430,13 @@ export const ScheduledTasksPage: React.FC = () => {
     setEditorOpen(true)
   }
 
+  const openEditAutomationDefinition = (task: ScheduledTask) => {
+    setAutomationErrorMessage(null)
+    setEditorOpen(false)
+    setEditingTask(null)
+    setEditingAutomationTask(task)
+  }
+
   const openTaskDetail = (task: ScheduledTask) => {
     if (createdTaskFallback?.id !== task.id) {
       setCreatedTaskFallback(null)
@@ -348,6 +448,10 @@ export const ScheduledTasksPage: React.FC = () => {
   const closeEditor = () => {
     setEditorOpen(false)
     setEditingTask(null)
+  }
+
+  const closeAutomationDefinitionEditor = () => {
+    setEditingAutomationTask(null)
   }
 
   const refreshTasks = async () => {
@@ -650,6 +754,7 @@ export const ScheduledTasksPage: React.FC = () => {
           onOpenTaskResults={openTaskResults}
           onEditReminder={openEditReminder}
           onDeleteReminder={handleDeleteReminder}
+          onEditAutomationDefinition={openEditAutomationDefinition}
           onPauseAutomationDefinition={(task) => {
             void handleAutomationLifecycleAction(task, "pause")
           }}
@@ -807,6 +912,7 @@ export const ScheduledTasksPage: React.FC = () => {
               onClose={closeTaskDetail}
               onEditReminder={openEditReminder}
               onDeleteReminder={handleDeleteReminder}
+              onEditAutomationDefinition={openEditAutomationDefinition}
               onPauseAutomationDefinition={(task) => {
                 void handleAutomationLifecycleAction(task, "pause")
               }}
@@ -820,6 +926,51 @@ export const ScheduledTasksPage: React.FC = () => {
                 void handleAutomationLifecycleAction(task, "duplicate")
               }}
             />
+          ) : null}
+          {editingAutomationTask ? (
+            <Drawer
+              title="Edit automation definition"
+              open
+              onClose={closeAutomationDefinitionEditor}
+              size={680}
+            >
+              {editingAutomationDefinitionQuery.isLoading ? (
+                <div role="status" aria-live="polite">
+                  <DesignSystemLoadingState
+                    mode="inline"
+                    size="sm"
+                    label="Loading automation definition"
+                    className="w-full"
+                  />
+                </div>
+              ) : editingAutomationDefinitionQuery.data ? (
+                <ScheduledTaskAutomationDefinitionEditor
+                  key={`${editingAutomationDefinitionQuery.data.id}:${editingAutomationDefinitionQuery.data.version}`}
+                  family={editingAutomationDefinitionQuery.data.family}
+                  mode="update"
+                  definitionId={editingAutomationDefinitionQuery.data.id}
+                  definitionVersion={editingAutomationDefinitionQuery.data.version}
+                  initialValues={buildAutomationEditorInitialValues(
+                    editingAutomationDefinitionQuery.data
+                  )}
+                  onPreview={handlePreviewAutomationDefinition}
+                  onUpdate={(payload) =>
+                    handleUpdateAutomationDefinition(
+                      editingAutomationDefinitionQuery.data.id,
+                      payload
+                    )
+                  }
+                  onCancel={closeAutomationDefinitionEditor}
+                  onSaved={() => {
+                    closeAutomationDefinitionEditor()
+                  }}
+                />
+              ) : (
+                <Typography.Text type="secondary">
+                  Automation definition could not be loaded.
+                </Typography.Text>
+              )}
+            </Drawer>
           ) : null}
           {routeState.tab === "results" && selectedResult ? (
             <ScheduledTaskResultDetailDrawer

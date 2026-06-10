@@ -659,6 +659,91 @@ describe("ScheduledTasksPage", () => {
     })
   })
 
+  it("updates an automation definition through preview and update APIs", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [automationTask()],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [
+          automationTask({
+            title: "Track answer updated",
+            description: "Updated definition"
+          })
+        ],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({
+        version: 3,
+        input: {
+          question: "Has the answer appeared?",
+          success_criteria: "Answer found",
+          scope: { collection_id: "research" }
+        },
+        schedule: { kind: "cron", cron: "0 9 * * *", timezone: "UTC" },
+        visibility_policy: { visibility: "private" }
+      })
+    )
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_update",
+      mode: "update",
+      family: "recurring_question",
+      definition_id: "definition_1",
+      definition_version: 3,
+      status: "valid",
+      normalized_config: { name: "Track answer updated" },
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: { visibility: "private" },
+      schedule_preview: { summary: "0 9 * * *" },
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+    mocks.updateScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({
+        name: "Track answer updated",
+        version: 4
+      })
+    )
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Edit Track answer" }))
+    expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Has the answer appeared now?" }
+    })
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    expect(await screen.findByText("Preview ready")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "update",
+          family: "recurring_question",
+          definition_id: "definition_1",
+          definition_version: 3,
+          input: expect.objectContaining({
+            question: "Has the answer appeared now?"
+          })
+        })
+      )
+    })
+    expect(mocks.updateScheduledTaskDefinition).toHaveBeenCalledWith("definition_1", {
+      preview_id: "preview_update"
+    })
+    await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2))
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
   it("runs automation definition lifecycle actions from rows and refreshes the list", async () => {
     const user = userEvent.setup()
     mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
@@ -740,6 +825,70 @@ describe("ScheduledTasksPage", () => {
         screen.getAllByText("definition_locked: Definition is locked by policy.").length
       ).toBeGreaterThan(0)
     })
+  })
+
+  it("shows row Results buttons only for real result signals", async () => {
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:completed",
+          primitive: "reminder_task",
+          title: "Completed review",
+          description: "No output was produced",
+          status: "completed",
+          enabled: true,
+          schedule_summary: "One-time reminder",
+          timezone: "UTC",
+          next_run_at: null,
+          last_run_at: "2030-04-05T12:30:00+00:00",
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "completed" }
+        },
+        automationTask({
+          id: "automation_definition:no_result",
+          title: "Automation no result",
+          source_ref: {
+            definition_id: "no_result",
+            family: "recurring_question",
+            lifecycle: "configured",
+            health: "execution_unavailable"
+          }
+        }),
+        automationTask({
+          id: "automation_definition:with_result",
+          title: "Automation result",
+          status: "configured",
+          source_ref: {
+            definition_id: "with_result",
+            family: "recurring_question",
+            lifecycle: "configured",
+            health: "ready",
+            latest_result_id: "909",
+            result_count: 1
+          }
+        })
+      ],
+      total: 3,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    expect(await screen.findByText("Completed review")).toBeInTheDocument()
+    expect(screen.getByText("Automation no result")).toBeInTheDocument()
+    expect(screen.getByText("Automation result")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View results for Completed review" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View results for Automation no result" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "View results for Automation result" })
+    ).toBeInTheDocument()
   })
 
   it("opens a task detail deep link after task data loads", async () => {

@@ -28,6 +28,7 @@ export interface ScheduledTaskDetailDrawerProps {
   onClose: () => void
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
+  onEditAutomationDefinition?: (task: ScheduledTask) => void
   onPauseAutomationDefinition?: (task: ScheduledTask) => void
   onResumeAutomationDefinition?: (task: ScheduledTask) => void
   onArchiveAutomationDefinition?: (task: ScheduledTask) => void
@@ -112,6 +113,7 @@ const renderTaskActions = ({
   task,
   onEditReminder,
   onDeleteReminder,
+  onEditAutomationDefinition,
   onPauseAutomationDefinition,
   onResumeAutomationDefinition,
   onArchiveAutomationDefinition,
@@ -120,6 +122,7 @@ const renderTaskActions = ({
   task: ScheduledTask
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
+  onEditAutomationDefinition?: (task: ScheduledTask) => void
   onPauseAutomationDefinition?: (task: ScheduledTask) => void
   onResumeAutomationDefinition?: (task: ScheduledTask) => void
   onArchiveAutomationDefinition?: (task: ScheduledTask) => void
@@ -146,6 +149,9 @@ const renderTaskActions = ({
 
     return (
       <Space wrap>
+        <Button type="primary" onClick={() => onEditAutomationDefinition?.(task)}>
+          Edit definition
+        </Button>
         {isPaused ? (
           <Button onClick={() => onResumeAutomationDefinition?.(task)}>
             Resume definition
@@ -191,6 +197,7 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
   onClose,
   onEditReminder,
   onDeleteReminder,
+  onEditAutomationDefinition,
   onPauseAutomationDefinition,
   onResumeAutomationDefinition,
   onArchiveAutomationDefinition,
@@ -283,6 +290,7 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
                 task,
                 onEditReminder,
                 onDeleteReminder,
+                onEditAutomationDefinition,
                 onPauseAutomationDefinition,
                 onResumeAutomationDefinition,
                 onArchiveAutomationDefinition,
