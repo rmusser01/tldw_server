@@ -118,6 +118,7 @@ def test_clone_session_works_after_service_restart(monkeypatch, tmp_path: Path) 
 
 def test_session_execution_defaults_roundtrip_and_clone(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
+    _force_docker_preflight_available(monkeypatch)
 
     source_service = SandboxService()
     spec = SessionSpec(

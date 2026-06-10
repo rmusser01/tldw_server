@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -86,13 +88,14 @@ def _install_fake_helper_socket(monkeypatch, responses: dict[str, object], socke
 
 
 def _valid_create_vm_request(**overrides: object) -> dict[str, object]:
+    temp_dir = Path(tempfile.gettempdir())
     request: dict[str, object] = {
         "owner": "tldw",
         "runtime": "vz_linux",
         "vm_name": "run-1",
         "run_id": "run-1",
-        "template": "/tmp/template.img",
-        "workspace_path": "/tmp/workspace",
+        "template": str(temp_dir / "template.img"),
+        "workspace_path": str(temp_dir / "workspace"),
         "network_policy": "deny_all",
         "timeout_sec": 30,
     }

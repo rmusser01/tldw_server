@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import uuid
 import time
 import tempfile
 from typing import List
@@ -114,7 +115,7 @@ def test_artifact_path_fuzz_strict_vs_non_strict(monkeypatch, client_with_db: Te
     client = client_with_db
     # Ensure env strict by default
     monkeypatch.setenv("WORKFLOWS_ARTIFACT_VALIDATE_STRICT", "true")
-    # Create run
+    db: WorkflowsDatabase = app.dependency_overrides[wf_mod._get_db]()
     # Use suffix to avoid unique constraint collisions across Hypothesis examples
     d = {"name": f"art-fuzz-{suffix}", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     _resp = client.post("/api/v1/workflows", json=d)
@@ -122,10 +123,17 @@ def test_artifact_path_fuzz_strict_vs_non_strict(monkeypatch, client_with_db: Te
         # Skip this example if definition was rejected (e.g., duplicate name/version)
         return
     wid = _resp.json()["id"]
-    run_response = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}})
-    assert run_response.status_code == 200, run_response.text
-    run_id = run_response.json()["run_id"]
-    _wait_for_terminal(client, run_id)
+    run_id = f"artifact-fuzz-{uuid.uuid4()}"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=wid,
+        definition_version=1,
+        definition_snapshot=d,
+    )
+    db.update_run_status(run_id, status="succeeded")
 
     # Temp file (outside CWD workdir scope most of the time)
     fd, path = tempfile.mkstemp(prefix=f"wf_fuzz_{suffix}_")
@@ -134,7 +142,6 @@ def test_artifact_path_fuzz_strict_vs_non_strict(monkeypatch, client_with_db: Te
     uri = f"file://{path}"
 
     # Insert artifact
-    db: WorkflowsDatabase = app.dependency_overrides[wf_mod._get_db]()
     art_id = f"af_{abs(hash(uri)) % 100000}"
     db.add_artifact(
         artifact_id=art_id,

@@ -425,6 +425,8 @@ class TestMediaDBRetriever:
             keywords=["goku", "frieza", "punch"],
         )
         query = "Why was goku able to land a one inch punch on frieza?"
+        expected_strict_query = retr_mod._sanitize_media_fts_query(query)
+        expected_fallback_query = _derive_bounded_media_term_query(query)
 
         retriever = MediaDBRetriever(
             db_path=str(db.db_path),
@@ -438,7 +440,7 @@ class TestMediaDBRetriever:
 
         def _spy_search_media(*args, **kwargs):
             calls.append({"args": args, "kwargs": kwargs})
-            if len(calls) == 1 and kwargs.get("search_query") == query:
+            if len(calls) == 1 and kwargs.get("search_query") == expected_strict_query:
                 return [], 0
             return real_search_media(*args, **kwargs)
 
@@ -448,13 +450,10 @@ class TestMediaDBRetriever:
 
         assert docs
         assert {doc.id for doc in docs} == {str(media_id)}
-        first_query = calls[0]["kwargs"]["search_query"]
-        if first_query == query:
-            assert len(calls) == 2
-            search_query = calls[1]["kwargs"]["search_query"]
-        else:
-            assert len(calls) == 1
-            search_query = first_query
+        assert len(calls) == 2
+        assert calls[0]["kwargs"]["search_query"] == expected_strict_query
+        assert calls[1]["kwargs"]["search_query"] == expected_fallback_query
+        search_query = calls[1]["kwargs"]["search_query"]
         assert isinstance(search_query, str)
         assert "goku" in search_query.lower()
         assert "frieza" in search_query.lower()
@@ -503,11 +502,14 @@ class TestMediaDBRetriever:
             lambda self, results, *, backend_type: [],
         )
 
-        docs = await retriever.retrieve("What weakness does Frieza mention about the Saiyans during the fight?")
+        query = "What weakness does Frieza mention about the Saiyans during the fight?"
+        expected_strict_query = retr_mod._sanitize_media_fts_query(query)
+
+        docs = await retriever.retrieve(query)
 
         assert docs == []
         assert len(calls) == 1
-        assert calls[0]["kwargs"]["search_query"] == "What weakness does Frieza mention about the Saiyans during the fight?"
+        assert calls[0]["kwargs"]["search_query"] == expected_strict_query
 
     @pytest.mark.asyncio
     async def test_media_fallback_respects_allowed_media_ids(self, tmp_path: Path, monkeypatch):
@@ -530,6 +532,7 @@ class TestMediaDBRetriever:
             keywords=["frieza", "weakness", "saiyans"],
         )
         query = "What weakness does Frieza mention about the Saiyans during the fight?"
+        expected_strict_query = retr_mod._sanitize_media_fts_query(query)
         expected_fallback_query = _derive_bounded_media_term_query(query)
         assert expected_fallback_query == "weakness OR frieza OR saiyans"
 
@@ -559,7 +562,7 @@ class TestMediaDBRetriever:
         assert {doc.id for doc in docs} == {str(allowed_media_id)}
         assert str(blocked_media_id) not in {doc.id for doc in docs}
         assert len(calls) == 2
-        assert calls[0]["kwargs"]["search_query"] == query
+        assert calls[0]["kwargs"]["search_query"] == expected_strict_query
         assert calls[1]["kwargs"]["search_query"] == expected_fallback_query
         assert calls[0]["kwargs"]["media_ids_filter"] == [allowed_uuid]
         assert calls[1]["kwargs"]["media_ids_filter"] == [allowed_uuid]

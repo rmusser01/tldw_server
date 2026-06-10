@@ -22,6 +22,23 @@ def _client(monkeypatch) -> TestClient:
     if "sandbox" not in parts:
         parts.append("sandbox")
     monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
+    from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    monkeypatch.setattr(
+        SandboxService,
+        "_collect_runtime_preflights",
+        lambda self, network_policy=None: {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        },
+    )
     # Build a minimal app with only the sandbox router
     from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
     app = FastAPI()

@@ -694,12 +694,12 @@ def test_cancel_run_kills_active_process_group_and_removes_run_dir(
 
     killpg_calls: list[tuple[int, int]] = []
     has_killpg = hasattr(worktree_module.os, "killpg")
-    monkeypatch.setattr(
-        worktree_module.os,
-        "killpg",
-        lambda pid, sig: killpg_calls.append((pid, sig)),
-        raising=False,
-    )
+    if has_killpg:
+        monkeypatch.setattr(
+            worktree_module.os,
+            "killpg",
+            lambda pid, sig: killpg_calls.append((pid, sig)),
+        )
     monkeypatch.setattr(WorktreeRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
 
     try:

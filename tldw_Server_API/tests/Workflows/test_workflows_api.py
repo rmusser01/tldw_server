@@ -94,6 +94,32 @@ def _wait_for_run_row(db: WorkflowsDatabase, run_id: str, timeout: float = 5.0):
     pytest.fail(f"workflow run row was not created for {run_id}")
 
 
+def _wait_for_run_terminal_data(client: TestClient, run_id: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    last_status = None
+    last_response_text = None
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        if response.status_code == 404:
+            last_response_text = response.text
+            time.sleep(0.02)
+            continue
+        assert response.status_code == 200, response.text
+        data = response.json()
+        last_status = data.get("status")
+        if last_status in ("succeeded", "failed", "cancelled"):
+            return data
+        time.sleep(0.02)
+    pytest.fail(
+        f"workflow run {run_id} did not reach terminal status; "
+        f"last_status={last_status}; last_response={last_response_text}"
+    )
+
+
+def _wait_for_run_terminal(client: TestClient, run_id: str, timeout: float = 5.0) -> str:
+    return str(_wait_for_run_terminal_data(client, run_id, timeout=timeout).get("status"))
+
+
 def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     client = client_with_workflows_db
 
@@ -449,6 +475,7 @@ def test_artifact_download_scope_non_strict(monkeypatch, client_with_workflows_d
     d = {"name": "artifacts", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, run_id) == "succeeded"
 
     # Prepare a temp file outside of the recorded workdir
     import os, tempfile, pathlib
@@ -491,6 +518,7 @@ def test_artifact_download_per_run_non_block(monkeypatch, client_with_workflows_
     d = {"name": "artifacts2", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, run_id) == "succeeded"
 
     # Prepare a temp file outside of the recorded workdir
     import os, tempfile, pathlib
@@ -877,13 +905,7 @@ def test_run_workflow_launches_deep_research_session(monkeypatch, client_with_wo
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_terminal_data(client, run_id)
 
     assert data["status"] == "succeeded"
     assert (data.get("outputs") or {}) == {
@@ -978,13 +1000,7 @@ def test_run_workflow_waits_for_deep_research_completion(monkeypatch, client_wit
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_terminal_data(client, run_id)
 
     assert data["status"] == "succeeded"
     assert (data.get("outputs") or {}) == {
