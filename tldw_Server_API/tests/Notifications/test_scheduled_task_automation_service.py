@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +114,33 @@ def _audit_count(repo: ScheduledTasksDatabase, definition_id: str) -> int:
     )[1]
 
 
+def _install_idempotency_miss_barrier(
+    monkeypatch: pytest.MonkeyPatch,
+    repo: ScheduledTasksDatabase,
+    *,
+    parties: int = 2,
+) -> None:
+    original_get_idempotency_record = repo.get_idempotency_record
+    barrier = threading.Barrier(parties)
+    lock = threading.Lock()
+    waits_remaining = parties
+
+    def _raced_get_idempotency_record(owner_id: int, route: str, key: str):
+        nonlocal waits_remaining
+        row = original_get_idempotency_record(owner_id, route, key)
+        should_wait = False
+        if row is None:
+            with lock:
+                if waits_remaining > 0:
+                    waits_remaining -= 1
+                    should_wait = True
+        if should_wait:
+            barrier.wait(timeout=5)
+        return row
+
+    monkeypatch.setattr(repo, "get_idempotency_record", _raced_get_idempotency_record)
+
+
 def test_invalid_semantic_preview_is_persisted_with_errors_and_id(tmp_path):
     service, repo = _service(tmp_path)
 
@@ -145,6 +174,8 @@ def test_agent_task_preview_redacts_raw_message_in_responses_and_storage(tmp_pat
     stored = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
     assert preview.status == "valid"  # nosec B101
     assert preview.normalized_config["input"]["message_redacted"] is True  # nosec B101
+    assert "message_length" not in preview.normalized_config["input"]  # nosec B101
+    assert not preview.normalized_config["input"]["message_ref"].startswith("sha256:")  # nosec B101
     assert RAW_SENTINEL not in _as_json_text(preview)  # nosec B101
     assert stored is not None  # nosec B101
     assert RAW_SENTINEL not in json.dumps(stored.normalized_config, sort_keys=True)  # nosec B101
@@ -406,6 +437,29 @@ def test_preview_idempotency_replay_and_same_key_different_payload_conflict(tmp_
     assert previews[0].id == first.id  # nosec B101
 
 
+def test_preview_idempotency_race_executes_side_effects_once(tmp_path, monkeypatch):
+    service, repo = _service(tmp_path)
+    _install_idempotency_miss_barrier(monkeypatch, repo)
+    payload = _payload(name="Raced preview")
+
+    def _create_preview():
+        return service.create_preview(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=payload,
+            idempotency_key="preview-race-key",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_create_preview) for _ in range(2)]
+        responses = [future.result(timeout=10) for future in futures]
+
+    previews, total = repo.list_previews(owner_id=OWNER_ID, limit=10, offset=0)
+    assert responses[0].id == responses[1].id  # nosec B101
+    assert total == 1  # nosec B101
+    assert previews[0].id == responses[0].id  # nosec B101
+
+
 def test_create_idempotency_replay_before_preview_consumption(tmp_path):
     service, repo = _service(tmp_path)
     preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
@@ -427,6 +481,34 @@ def test_create_idempotency_replay_before_preview_consumption(tmp_path):
     assert replay.id == first.id  # nosec B101
     assert repo.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)[1] == 1  # nosec B101
     assert _audit_count(repo, first.id) == 1  # nosec B101
+
+
+def test_duplicate_idempotency_race_does_not_create_extra_definitions_or_audits(tmp_path, monkeypatch):
+    service, repo = _service(tmp_path)
+    source = _create_definition(service, name="Duplicate race source")
+    _install_idempotency_miss_barrier(monkeypatch, repo)
+    payload = ScheduledTaskDuplicateRequest(name="Raced duplicate")
+
+    def _duplicate_definition():
+        return service.duplicate_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=source.id,
+            payload=payload,
+            idempotency_key="duplicate-race-key",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_duplicate_definition) for _ in range(2)]
+        responses = [future.result(timeout=10) for future in futures]
+
+    definitions, total = repo.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)
+    copy_ids = {definition.id for definition in definitions if definition.id != source.id}
+    assert responses[0].id == responses[1].id  # nosec B101
+    assert total == 2  # nosec B101
+    assert copy_ids == {responses[0].id}  # nosec B101
+    assert _audit_count(repo, source.id) == 2  # created + duplicated  # nosec B101
+    assert _audit_count(repo, responses[0].id) == 1  # duplicate created  # nosec B101
 
 
 def test_update_idempotency_replay_after_preview_consumption(tmp_path):
@@ -536,6 +618,73 @@ def test_pause_resume_archive_idempotency_replay_without_extra_audit_events(tmp_
     assert resume_replay.version == resumed.version  # nosec B101
     assert archive_replay.version == archived.version  # nosec B101
     assert _audit_count(repo, definition.id) == 4  # created, paused, resumed, archived  # nosec B101
+
+
+def test_update_rolls_back_definition_and_preview_consumption_when_audit_fails(tmp_path, monkeypatch):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version,
+            name="Should roll back",
+        ),
+    )
+
+    def _fail_audit(**_kwargs):
+        raise RuntimeError("injected_audit_failure")
+
+    monkeypatch.setattr(service, "_create_audit", _fail_audit)
+
+    with pytest.raises(RuntimeError, match="injected_audit_failure"):
+        service.update_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDefinitionUpdateRequest(preview_id=preview.id),
+        )
+
+    loaded_definition = repo.get_definition(owner_id=OWNER_ID, definition_id=definition.id)
+    loaded_preview = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    assert loaded_definition.version == definition.version  # nosec B101
+    assert loaded_definition.name == definition.name  # nosec B101
+    assert loaded_preview.status == "valid"  # nosec B101
+    assert loaded_preview.consumed_at is None  # nosec B101
+    assert _audit_count(repo, definition.id) == 1  # created only  # nosec B101
+
+
+def test_lifecycle_rolls_back_mutation_and_audit_when_idempotency_snapshot_fails(tmp_path, monkeypatch):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+
+    def _fail_response_ref(_response):
+        raise RuntimeError("injected_snapshot_failure")
+
+    monkeypatch.setattr(service, "_response_ref", _fail_response_ref)
+
+    with pytest.raises(RuntimeError, match="injected_snapshot_failure"):
+        service.pause_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            idempotency_key="snapshot-failure-key",
+        )
+
+    loaded_definition = repo.get_definition(owner_id=OWNER_ID, definition_id=definition.id)
+    assert loaded_definition.lifecycle == "configured"  # nosec B101
+    assert loaded_definition.version == definition.version  # nosec B101
+    assert _audit_count(repo, definition.id) == 1  # created only  # nosec B101
+    assert (  # nosec B101
+        repo.get_idempotency_record(
+            owner_id=OWNER_ID,
+            route="scheduled_task_automation.definition.pause",
+            key="snapshot-failure-key",
+        )
+        is None
+    )
 
 
 def test_lifecycle_idempotency_replay_returns_original_snapshot_after_later_mutation(tmp_path):

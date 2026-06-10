@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -98,6 +98,441 @@ class IdempotencyRecordRow:
     response_ref: dict[str, Any]
     created_at: str
     expires_at: str
+
+
+class ScheduledTasksTransaction:
+    """Repository write transaction for Scheduled Tasks automation commands."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def create_preview(
+        self,
+        *,
+        owner_id: int,
+        mode: str,
+        family: str,
+        definition_id: str | None,
+        definition_version: int | None,
+        status: str,
+        payload_hash: str,
+        normalized_config: dict[str, Any],
+        validation_errors: list[Any],
+        warnings: list[Any],
+        risk_class: str | None,
+        visibility_policy: str,
+        schedule_preview: dict[str, Any],
+        redaction_policy: dict[str, Any],
+        expires_at: str,
+        created_by: str,
+    ) -> PreviewRow:
+        preview_id = _new_id()
+        created_at = _utcnow_iso()
+        self._conn.execute(
+            """
+            INSERT INTO scheduled_task_previews (
+                id, owner_id, mode, family, definition_id, definition_version,
+                status, payload_hash, normalized_config_json,
+                validation_errors_json, warnings_json, risk_class,
+                visibility_policy, schedule_preview_json, redaction_policy_json,
+                expires_at, created_by, created_at, consumed_at,
+                created_definition_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+            """,
+            [
+                preview_id,
+                owner_id,
+                mode,
+                family,
+                definition_id,
+                definition_version,
+                status,
+                payload_hash,
+                _json_dumps(normalized_config),
+                _json_dumps(validation_errors),
+                _json_dumps(warnings),
+                risk_class,
+                visibility_policy,
+                _json_dumps(schedule_preview),
+                _json_dumps(redaction_policy),
+                expires_at,
+                created_by,
+                created_at,
+            ],
+        )
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_previews WHERE owner_id = ? AND id = ?",
+            [owner_id, preview_id],
+        ).fetchone()
+        created = _preview_from_row(row)
+        if created is None:
+            raise RuntimeError("created preview could not be loaded")
+        return created
+
+    def get_preview(self, owner_id: int, preview_id: str) -> PreviewRow | None:
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_previews WHERE owner_id = ? AND id = ?",
+            [owner_id, preview_id],
+        ).fetchone()
+        return _preview_from_row(row)
+
+    def mark_preview_consumed(
+        self,
+        owner_id: int,
+        preview_id: str,
+        created_definition_id: str | None,
+    ) -> PreviewRow:
+        consumed_at = _utcnow_iso()
+        cursor = self._conn.execute(
+            """
+            UPDATE scheduled_task_previews
+            SET status = 'consumed',
+                consumed_at = ?,
+                created_definition_id = ?
+            WHERE owner_id = ?
+                AND id = ?
+                AND consumed_at IS NULL
+                AND status != 'consumed'
+            """,
+            [consumed_at, created_definition_id, owner_id, preview_id],
+        )
+        updated_count = cursor.rowcount
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_previews WHERE owner_id = ? AND id = ?",
+            [owner_id, preview_id],
+        ).fetchone()
+        consumed = _preview_from_row(row)
+        if consumed is None:
+            raise KeyError(f"preview not found: {preview_id}")
+        if updated_count == 0:
+            raise ValueError("preview already consumed")
+        return consumed
+
+    def create_definition(
+        self,
+        *,
+        owner_id: int,
+        family: str,
+        name: str,
+        description: str | None,
+        lifecycle: str,
+        health: str,
+        schedule: dict[str, Any],
+        input: dict[str, Any],
+        visibility_policy: str,
+        notification_policy: dict[str, Any],
+        approval_policy: dict[str, Any],
+        preview_id: str,
+        created_by: str,
+        updated_by: str,
+        disabled_lock_kind: str = "none",
+        disabled_reason: str | None = None,
+        version: int = 1,
+    ) -> DefinitionRow:
+        _validate_disabled_lock_kind(disabled_lock_kind)
+        definition_id = _new_id()
+        created_at = _utcnow_iso()
+        preview_exists = self._conn.execute(
+            """
+            SELECT 1
+            FROM scheduled_task_previews
+            WHERE owner_id = ? AND id = ?
+            """,
+            [owner_id, preview_id],
+        ).fetchone()
+        if preview_exists is None:
+            raise KeyError(f"preview not found: {preview_id}")
+        preview_cursor = self._conn.execute(
+            """
+            UPDATE scheduled_task_previews
+            SET status = 'consumed',
+                consumed_at = ?,
+                created_definition_id = ?
+            WHERE owner_id = ?
+                AND id = ?
+                AND consumed_at IS NULL
+                AND status != 'consumed'
+            """,
+            [created_at, definition_id, owner_id, preview_id],
+        )
+        if preview_cursor.rowcount == 0:
+            raise ValueError("preview already consumed")
+        self._conn.execute(
+            """
+            INSERT INTO scheduled_task_definitions (
+                id, owner_id, version, family, name, description, lifecycle,
+                health, disabled_lock_kind, disabled_reason, schedule_json,
+                input_json, visibility_policy, notification_policy_json,
+                approval_policy_json, preview_id, created_by, updated_by,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                definition_id,
+                owner_id,
+                version,
+                family,
+                name,
+                description,
+                lifecycle,
+                health,
+                disabled_lock_kind,
+                disabled_reason,
+                _json_dumps(schedule),
+                _json_dumps(input),
+                visibility_policy,
+                _json_dumps(notification_policy),
+                _json_dumps(approval_policy),
+                preview_id,
+                created_by,
+                updated_by,
+                created_at,
+                created_at,
+            ],
+        )
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_definitions WHERE owner_id = ? AND id = ?",
+            [owner_id, definition_id],
+        ).fetchone()
+        created = _definition_from_row(row)
+        if created is None:
+            raise RuntimeError("created definition could not be loaded")
+        return created
+
+    def get_definition(self, owner_id: int, definition_id: str) -> DefinitionRow | None:
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_definitions WHERE owner_id = ? AND id = ?",
+            [owner_id, definition_id],
+        ).fetchone()
+        return _definition_from_row(row)
+
+    def update_definition(
+        self,
+        owner_id: int,
+        definition_id: str,
+        patch: dict[str, Any],
+        expected_version: int | None = None,
+    ) -> DefinitionRow:
+        current = self.get_definition(owner_id=owner_id, definition_id=definition_id)
+        if current is None:
+            raise KeyError(f"definition not found: {definition_id}")
+        if "disabled_lock_kind" in patch:
+            _validate_disabled_lock_kind(str(patch["disabled_lock_kind"]))
+
+        next_values = {
+            "version": current.version + 1,
+            "family": patch.get("family", current.family),
+            "name": patch.get("name", current.name),
+            "description": patch.get("description", current.description),
+            "lifecycle": patch.get("lifecycle", current.lifecycle),
+            "health": patch.get("health", current.health),
+            "disabled_lock_kind": patch.get("disabled_lock_kind", current.disabled_lock_kind),
+            "disabled_reason": patch.get("disabled_reason", current.disabled_reason),
+            "schedule": patch.get("schedule", current.schedule),
+            "input": patch.get("input", current.input),
+            "visibility_policy": patch.get("visibility_policy", current.visibility_policy),
+            "notification_policy": patch.get("notification_policy", current.notification_policy),
+            "approval_policy": patch.get("approval_policy", current.approval_policy),
+            "preview_id": patch.get("preview_id", current.preview_id),
+            "updated_by": patch.get("updated_by", current.updated_by),
+            "updated_at": _utcnow_iso(),
+        }
+        if "preview_id" in patch:
+            preview_exists = self._conn.execute(
+                """
+                SELECT 1
+                FROM scheduled_task_previews
+                WHERE owner_id = ? AND id = ?
+                """,
+                [owner_id, patch["preview_id"]],
+            ).fetchone()
+            if preview_exists is None:
+                raise KeyError(f"preview not found: {patch['preview_id']}")
+        cursor = self._conn.execute(
+            """
+            UPDATE scheduled_task_definitions
+            SET version = ?,
+                family = ?,
+                name = ?,
+                description = ?,
+                lifecycle = ?,
+                health = ?,
+                disabled_lock_kind = ?,
+                disabled_reason = ?,
+                schedule_json = ?,
+                input_json = ?,
+                visibility_policy = ?,
+                notification_policy_json = ?,
+                approval_policy_json = ?,
+                preview_id = ?,
+                updated_by = ?,
+                updated_at = ?
+            WHERE owner_id = ? AND id = ?
+                AND (? IS NULL OR version = ?)
+            """,
+            [
+                next_values["version"],
+                next_values["family"],
+                next_values["name"],
+                next_values["description"],
+                next_values["lifecycle"],
+                next_values["health"],
+                next_values["disabled_lock_kind"],
+                next_values["disabled_reason"],
+                _json_dumps(next_values["schedule"]),
+                _json_dumps(next_values["input"]),
+                next_values["visibility_policy"],
+                _json_dumps(next_values["notification_policy"]),
+                _json_dumps(next_values["approval_policy"]),
+                next_values["preview_id"],
+                next_values["updated_by"],
+                next_values["updated_at"],
+                owner_id,
+                definition_id,
+                expected_version,
+                expected_version,
+            ],
+        )
+        updated_count = cursor.rowcount
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_definitions WHERE owner_id = ? AND id = ?",
+            [owner_id, definition_id],
+        ).fetchone()
+        updated = _definition_from_row(row)
+        if updated is None:
+            raise KeyError(f"definition not found after update: {definition_id}")
+        if updated_count == 0:
+            if expected_version is not None:
+                raise ValueError("definition version conflict")
+            raise KeyError(f"definition not found after update: {definition_id}")
+        return updated
+
+    def create_audit_event(
+        self,
+        *,
+        owner_id: int,
+        definition_id: str,
+        event_type: str,
+        actor: str,
+        summary: str,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
+        request_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AuditEventRow:
+        event_id = _new_id()
+        created_at = _utcnow_iso()
+        definition_exists = self._conn.execute(
+            """
+            SELECT 1
+            FROM scheduled_task_definitions
+            WHERE owner_id = ? AND id = ?
+            """,
+            [owner_id, definition_id],
+        ).fetchone()
+        if definition_exists is None:
+            raise KeyError(f"definition not found: {definition_id}")
+        self._conn.execute(
+            """
+            INSERT INTO scheduled_task_audit_events (
+                id, owner_id, definition_id, event_type, actor, summary,
+                before_json, after_json, created_at, request_id,
+                idempotency_key
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                event_id,
+                owner_id,
+                definition_id,
+                event_type,
+                actor,
+                summary,
+                _optional_json_dumps(before),
+                _optional_json_dumps(after),
+                created_at,
+                request_id,
+                idempotency_key,
+            ],
+        )
+        row = self._conn.execute(
+            "SELECT * FROM scheduled_task_audit_events WHERE owner_id = ? AND id = ?",
+            [owner_id, event_id],
+        ).fetchone()
+        created = _audit_event_from_row(row)
+        if created is None:
+            raise RuntimeError("created audit event could not be loaded")
+        return created
+
+    def get_idempotency_record(
+        self,
+        owner_id: int,
+        route: str,
+        key: str,
+    ) -> IdempotencyRecordRow | None:
+        _prune_expired_idempotency_record(
+            self._conn,
+            owner_id=owner_id,
+            route=route,
+            key=key,
+        )
+        row = self._conn.execute(
+            """
+            SELECT * FROM scheduled_task_idempotency
+            WHERE owner_id = ? AND route = ? AND key = ?
+            """,
+            [owner_id, route, key],
+        ).fetchone()
+        return _idempotency_record_from_row(row)
+
+    def create_idempotency_record(
+        self,
+        *,
+        owner_id: int,
+        route: str,
+        key: str,
+        payload_hash: str,
+        response_ref: dict[str, Any],
+        expires_at: str,
+    ) -> IdempotencyRecordRow:
+        created_at = _utcnow_iso()
+        _prune_expired_idempotency_record(
+            self._conn,
+            owner_id=owner_id,
+            route=route,
+            key=key,
+        )
+        self._conn.execute(
+            """
+            INSERT INTO scheduled_task_idempotency (
+                owner_id, route, key, payload_hash, response_ref_json,
+                created_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                owner_id,
+                route,
+                key,
+                payload_hash,
+                _json_dumps(response_ref),
+                created_at,
+                expires_at,
+            ],
+        )
+        row = self._conn.execute(
+            """
+            SELECT * FROM scheduled_task_idempotency
+            WHERE owner_id = ? AND route = ? AND key = ?
+            """,
+            [owner_id, route, key],
+        ).fetchone()
+        created = _idempotency_record_from_row(row)
+        if created is None:
+            raise RuntimeError("created idempotency record could not be loaded")
+        return created
 
 
 def _utcnow_iso() -> str:
@@ -368,6 +803,12 @@ class ScheduledTasksDatabase:
                     ON scheduled_task_idempotency(owner_id, route, key);
                 """
             )
+
+    def write_transaction(self, operation: Callable[[ScheduledTasksTransaction], Any]) -> Any:
+        """Run ``operation`` inside one immediate write transaction."""
+        with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            return operation(ScheduledTasksTransaction(conn))
 
     def create_preview(
         self,
