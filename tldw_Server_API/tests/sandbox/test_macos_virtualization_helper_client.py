@@ -703,8 +703,11 @@ def test_parse_helper_vm_list_normalizes_status_entries() -> None:
     assert result.vms[1].state == "stopped"
 
 
-def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(monkeypatch) -> None:
+def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TEST_MODE", raising=False)
+    template_path = str(tmp_path / "template.img")
+    workspace_path = str(tmp_path / "workspace")
+    run_manifest_path = str(tmp_path / "image-store" / "runs" / "run-1" / "manifest.json")
     requests = _install_fake_helper_socket(
         monkeypatch,
         responses={
@@ -735,10 +738,10 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
                     "session_id": "",
                     "session_mode": False,
                     "template_id": "vz_linux:debian-bookworm-arm64",
-                    "template_path": "/tmp/template.img",
-                    "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+                    "template_path": template_path,
+                    "run_manifest_path": run_manifest_path,
                     "planning_source": "image_store",
-                    "workspace_path": "/tmp/workspace",
+                    "workspace_path": workspace_path,
                     "created_at": "2026-04-30T18:00:00Z",
                 },
                 "details": {"runtime": "vz_linux", "transport": "vsock"},
@@ -776,10 +779,10 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
             "runtime": "vz_linux",
             "vm_name": "run-1",
             "template_id": "vz_linux:debian-bookworm-arm64",
-            "template": "/tmp/template.img",
-            "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+            "template": template_path,
+            "run_manifest_path": run_manifest_path,
             "planning_source": "image_store",
-            "workspace_path": "/tmp/workspace",
+            "workspace_path": workspace_path,
         }
     )
     exec_reply = client.exec_guest(vm_id=vm.vm_id, request={"argv": ["/bin/echo", "ok"]})
@@ -792,7 +795,7 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
     assert vm.metadata.owner == "tldw"
     assert vm.metadata.run_id == "run-1"
     assert vm.metadata.template_id == "vz_linux:debian-bookworm-arm64"
-    assert vm.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
+    assert vm.metadata.run_manifest_path == run_manifest_path
     assert vm.metadata.planning_source == "image_store"
     assert exec_reply.stdout == b"ok\n"
     assert status.vm_id == "vm-transport-1"
@@ -806,7 +809,7 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
         "terminate_vm",
     ]
     assert requests[2]["request"]["template_id"] == "vz_linux:debian-bookworm-arm64"
-    assert requests[2]["request"]["run_manifest_path"] == "/tmp/image-store/runs/run-1/manifest.json"
+    assert requests[2]["request"]["run_manifest_path"] == run_manifest_path
     assert requests[2]["request"]["planning_source"] == "image_store"
     assert requests[3]["_socket_timeout"] == 35.0
 

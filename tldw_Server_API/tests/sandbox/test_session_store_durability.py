@@ -32,6 +32,7 @@ def _configure_sqlite_store(monkeypatch, tmp_path: Path) -> None:
     if hasattr(app_settings, "SANDBOX_SNAPSHOT_PATH"):
         monkeypatch.setattr(app_settings, "SANDBOX_SNAPSHOT_PATH", snapshot_dir)
     clear_config_cache()
+    _force_docker_preflight_available(monkeypatch)
 
 
 def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,7 +256,6 @@ def test_destroy_session_cancels_and_drains_when_active_runs_exist(monkeypatch, 
 
 def test_destroy_session_cleans_snapshots_artifacts_and_usage(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
-
     svc = SandboxService()
     session = svc.create_session(
         user_id="user-77",
