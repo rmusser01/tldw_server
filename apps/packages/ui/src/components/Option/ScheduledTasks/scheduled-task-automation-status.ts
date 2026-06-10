@@ -85,7 +85,7 @@ export const isAutomationDefinitionTask = (
 export const getAutomationDefinitionFamilyLabel = (
   task: Pick<AutomationDefinitionTaskInput, "source_ref">
 ): string => {
-  const family = task.source_ref?.family
+  const family = task.source_ref?.["family"]
   return isKnownAutomationFamily(family)
     ? AUTOMATION_FAMILY_LABELS[family]
     : "Automation"
@@ -96,8 +96,8 @@ export const getAutomationDefinitionProductStatus = (
 ): ScheduledTaskProductStatus => {
   const status = task.status || ""
   const sourceRef = task.source_ref || {}
-  const lifecycle = typeof sourceRef.lifecycle === "string" ? sourceRef.lifecycle : ""
-  const health = typeof sourceRef.health === "string" ? sourceRef.health : ""
+  const lifecycle = typeof sourceRef["lifecycle"] === "string" ? sourceRef["lifecycle"] : ""
+  const health = typeof sourceRef["health"] === "string" ? sourceRef["health"] : ""
 
   if (lifecycle === "paused" || status === "paused") {
     return makeAutomationStatus(

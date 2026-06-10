@@ -40,6 +40,14 @@ DEFAULT_DEFINITION_HEALTH = "execution_unavailable"
 _SUPPORTED_SCHEDULE_KINDS = {"one_time", "interval", "daily", "weekly", "cron"}
 
 
+class ScheduledTaskAutomationError(Exception):
+    """Expected, user-actionable scheduled task automation failure."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -79,10 +87,13 @@ def _redact_agent_message(message: str) -> dict[str, Any]:
     }
 
 
-def _validate_schedule(schedule: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
+def _validate_schedule(schedule: Any) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
     errors: list[dict[str, Any]] = []
     warnings: list[str] = []
-    normalized = dict(schedule or {})
+    if not isinstance(schedule, dict):
+        return {}, [_field_error("schedule", "invalid_type", "Schedule must be an object.")], warnings
+
+    normalized = dict(schedule)
     kind = normalized.get("kind")
     if not isinstance(kind, str) or not kind.strip():
         errors.append(_field_error("schedule.kind", "required", "Schedule kind is required."))
@@ -155,6 +166,7 @@ class ScheduledTaskAutomationService:
 
     def __init__(self, repository: ScheduledTasksDatabase | None = None):
         self._repository = repository
+        self._schema_ready_keys: set[tuple[int, str]] = set()
 
     def get_capabilities(self) -> ScheduledTaskAutomationCapabilitiesResponse:
         """Return Phase 4B capabilities without exposing execution support."""
@@ -202,7 +214,7 @@ class ScheduledTaskAutomationService:
     def get_preview(self, *, owner_id: int, preview_id: str) -> ScheduledTaskPreviewResponse:
         preview = self._repo(owner_id).get_preview(owner_id=owner_id, preview_id=preview_id)
         if preview is None:
-            raise KeyError("preview_not_found")
+            raise ScheduledTaskAutomationError("preview_resource_not_found")
         return self._preview_response(preview)
 
     def list_previews(
@@ -322,7 +334,8 @@ class ScheduledTaskAutomationService:
         """Return a page of owner-scoped automation definitions."""
         if owner_id is None:
             return ScheduledTaskDefinitionListResponse(limit=limit, offset=offset)
-        rows, total = self._repo(owner_id).list_definitions(
+        repo = self._repo(owner_id)
+        rows, total = repo.list_definitions(
             owner_id=owner_id,
             limit=limit,
             offset=offset,
@@ -334,8 +347,16 @@ class ScheduledTaskAutomationService:
             created_from=created_from,
             created_to=created_to,
         )
+        previews_by_id = repo.get_previews_by_ids(owner_id=owner_id, preview_ids=[row.preview_id for row in rows])
         return ScheduledTaskDefinitionListResponse(
-            items=[self._definition_response(row) for row in rows],
+            items=[
+                self._definition_response(
+                    row,
+                    preview=previews_by_id.get(row.preview_id),
+                    lookup_preview=False,
+                )
+                for row in rows
+            ],
             total=total,
             limit=limit,
             offset=offset,
@@ -495,7 +516,10 @@ class ScheduledTaskAutomationService:
 
     def _repo(self, owner_id: int) -> ScheduledTasksDatabase:
         repo = self._repository or ScheduledTasksDatabase.for_user(owner_id)
-        repo.ensure_schema()
+        schema_key = (owner_id, str(repo.db_path))
+        if schema_key not in self._schema_ready_keys:
+            repo.ensure_schema()
+            self._schema_ready_keys.add(schema_key)
         return repo
 
     def _create_preview(
@@ -541,7 +565,7 @@ class ScheduledTaskAutomationService:
     ) -> ScheduledTaskDefinitionResponse:
         preview = self._require_valid_preview(tx=tx, owner_id=owner_id, preview_id=request.preview_id)
         if preview.mode != "create" or preview.definition_id is not None:
-            raise ValueError("preview_mode_mismatch")
+            raise ScheduledTaskAutomationError("preview_mode_mismatch")
         normalized = preview.normalized_config
         definition = tx.create_definition(
             owner_id=owner_id,
@@ -587,12 +611,12 @@ class ScheduledTaskAutomationService:
     ) -> ScheduledTaskDefinitionResponse:
         current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if current.lifecycle == "archived":
-            raise ValueError("definition_archived")
+            raise ScheduledTaskAutomationError("definition_archived")
         preview = self._require_valid_preview(tx=tx, owner_id=owner_id, preview_id=request.preview_id)
         if preview.mode != "update" or preview.definition_id != definition_id:
-            raise ValueError("preview_definition_mismatch")
+            raise ScheduledTaskAutomationError("preview_definition_mismatch")
         if preview.definition_version != current.version:
-            raise ValueError("definition_version_mismatch")
+            raise ScheduledTaskAutomationError("definition_version_mismatch")
         normalized = preview.normalized_config
         updated = tx.update_definition(
             owner_id=owner_id,
@@ -647,11 +671,11 @@ class ScheduledTaskAutomationService:
     ) -> ScheduledTaskDefinitionResponse:
         current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if current.lifecycle == "archived":
-            raise ValueError("definition_archived")
+            raise ScheduledTaskAutomationError("definition_archived")
         if current.lifecycle == idempotent_lifecycle:
             return self._definition_response(current)
         if current.lifecycle == "disabled":
-            raise ValueError("definition_disabled")
+            raise ScheduledTaskAutomationError("definition_disabled")
         updated = tx.update_definition(
             owner_id=owner_id,
             definition_id=definition_id,
@@ -720,9 +744,9 @@ class ScheduledTaskAutomationService:
     ) -> ScheduledTaskDefinitionResponse:
         source = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if source.lifecycle == "archived":
-            raise ValueError("definition_archived")
+            raise ScheduledTaskAutomationError("definition_archived")
         if source.lifecycle == "disabled" and source.disabled_lock_kind in {"admin", "security"}:
-            raise ValueError("definition_disabled_locked")
+            raise ScheduledTaskAutomationError("definition_disabled_locked")
         copy_name = request.name or f"{source.name} copy"
         copy_description = request.description if request.description is not None else source.description
         normalized = {
@@ -820,7 +844,7 @@ class ScheduledTaskAutomationService:
             existing = tx.get_idempotency_record(owner_id=owner_id, route=route, key=key)
             if existing is not None:
                 if existing.payload_hash != payload_hash:
-                    raise ValueError("scheduled_task_idempotency_conflict")
+                    raise ScheduledTaskAutomationError("scheduled_task_idempotency_conflict")
                 return self._load_response_ref(owner_id=owner_id, response_ref=existing.response_ref)
             response = operation(tx)
             tx.create_idempotency_record(
@@ -843,6 +867,41 @@ class ScheduledTaskAutomationService:
         schedule, schedule_errors, schedule_warnings = _validate_schedule(base["schedule"])
         base["schedule"] = schedule
         base["visibility_policy"] = _normalize_visibility_policy(request.family, base["visibility_policy"])
+        mode_errors: list[dict[str, Any]] = []
+        if request.mode == "update":
+            if not request.definition_id:
+                mode_errors.append(
+                    _field_error(
+                        "definition_id",
+                        "required_for_update",
+                        "Definition id is required for update previews.",
+                    )
+                )
+            if request.definition_version is None:
+                mode_errors.append(
+                    _field_error(
+                        "definition_version",
+                        "required_for_update",
+                        "Definition version is required for update previews.",
+                    )
+                )
+        else:
+            if request.definition_id is not None:
+                mode_errors.append(
+                    _field_error(
+                        "definition_id",
+                        "not_allowed_for_create",
+                        "Definition id is not allowed for create previews.",
+                    )
+                )
+            if request.definition_version is not None:
+                mode_errors.append(
+                    _field_error(
+                        "definition_version",
+                        "not_allowed_for_create",
+                        "Definition version is not allowed for create previews.",
+                    )
+                )
         if request.family == "recurring_question":
             normalized, errors, warnings = _validate_recurring_question_config(base)
         else:
@@ -850,7 +909,7 @@ class ScheduledTaskAutomationService:
         normalized["family"] = request.family
         normalized["schedule"] = schedule
         normalized["visibility_policy"] = base["visibility_policy"]
-        return normalized, [*errors, *schedule_errors], [*warnings, *schedule_warnings]
+        return normalized, [*mode_errors, *errors, *schedule_errors], [*warnings, *schedule_warnings]
 
     def _preview_hash_payload(self, request: ScheduledTaskPreviewCreateRequest) -> dict[str, Any]:
         payload = request.model_dump(mode="json")
@@ -885,13 +944,13 @@ class ScheduledTaskAutomationService:
             else self._repo(owner_id).get_preview(owner_id=owner_id, preview_id=preview_id)
         )
         if preview is None:
-            raise KeyError("preview_not_found")
+            raise ScheduledTaskAutomationError("preview_not_found")
         if preview.status == "consumed":
-            raise ValueError("preview_consumed")
+            raise ScheduledTaskAutomationError("preview_consumed")
         if preview.status == "expired" or _parse_iso(preview.expires_at) <= _utcnow():
-            raise ValueError("preview_expired")
+            raise ScheduledTaskAutomationError("preview_expired")
         if preview.status != "valid":
-            raise ValueError("preview_invalid")
+            raise ScheduledTaskAutomationError("preview_invalid")
         return preview
 
     def _get_definition_row(
@@ -907,7 +966,7 @@ class ScheduledTaskAutomationService:
             else self._repo(owner_id).get_definition(owner_id=owner_id, definition_id=definition_id)
         )
         if definition is None:
-            raise KeyError("definition_not_found")
+            raise ScheduledTaskAutomationError("definition_not_found")
         return definition
 
     def _create_audit(
@@ -948,7 +1007,7 @@ class ScheduledTaskAutomationService:
             return self.get_preview(owner_id=owner_id, preview_id=str(response_ref["id"]))
         if response_ref.get("type") == "definition":
             return self.get_definition(owner_id=owner_id, definition_id=str(response_ref["id"]))
-        raise ValueError("scheduled_task_idempotency_response_unavailable")
+        raise ScheduledTaskAutomationError("scheduled_task_idempotency_response_unavailable")
 
     @staticmethod
     def _response_ref(response: BaseModel) -> dict[str, Any]:
@@ -990,8 +1049,15 @@ class ScheduledTaskAutomationService:
             created_definition_id=row.created_definition_id,
         )
 
-    def _definition_response(self, row: DefinitionRow) -> ScheduledTaskDefinitionResponse:
-        preview = self._repo(row.owner_id).get_preview(owner_id=row.owner_id, preview_id=row.preview_id)
+    def _definition_response(
+        self,
+        row: DefinitionRow,
+        *,
+        preview: PreviewRow | None = None,
+        lookup_preview: bool = True,
+    ) -> ScheduledTaskDefinitionResponse:
+        if lookup_preview:
+            preview = self._repo(row.owner_id).get_preview(owner_id=row.owner_id, preview_id=row.preview_id)
         config = preview.normalized_config.get("config", {}) if preview is not None else {}
         return ScheduledTaskDefinitionResponse(
             id=row.id,

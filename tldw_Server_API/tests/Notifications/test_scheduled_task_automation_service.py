@@ -16,7 +16,10 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskPreviewCreateRequest,
 )
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
-from tldw_Server_API.app.services.scheduled_task_automation_service import ScheduledTaskAutomationService
+from tldw_Server_API.app.services.scheduled_task_automation_service import (
+    ScheduledTaskAutomationError,
+    ScheduledTaskAutomationService,
+)
 
 OWNER_ID = 4101
 OTHER_OWNER_ID = 4102
@@ -37,6 +40,7 @@ def _payload(
     definition_id: str | None = None,
     definition_version: int | None = None,
     name: str = "Daily research check",
+    config_payload: dict[str, Any] | None = None,
     input_payload: dict[str, Any] | None = None,
     schedule: dict[str, Any] | None = None,
 ) -> ScheduledTaskPreviewCreateRequest:
@@ -53,6 +57,7 @@ def _payload(
         definition_version=definition_version,
         name=name,
         description="Service lifecycle test",
+        config=config_payload or {},
         input=input_payload,
         schedule=schedule or {"kind": "daily", "time": "09:00", "timezone": "UTC"},
         visibility_policy={"mode": "findings_only"},
@@ -159,6 +164,58 @@ def test_invalid_semantic_preview_is_persisted_with_errors_and_id(tmp_path):
     assert stored.validation_errors == preview.validation_errors  # nosec B101
 
 
+def test_non_object_schedule_preview_is_persisted_as_invalid(tmp_path):
+    service, repo = _service(tmp_path)
+    payload = _payload()
+    raw_payload = payload.model_dump(mode="json")
+    raw_payload["schedule"] = ["not", "an", "object"]
+    constructed_payload = ScheduledTaskPreviewCreateRequest.model_construct(**raw_payload)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=constructed_payload,
+    )
+
+    stored = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    assert preview.status == "invalid"  # nosec B101
+    assert preview.validation_errors == [
+        {"field": "schedule", "code": "invalid_type", "message": "Schedule must be an object."}
+    ]  # nosec B101
+    assert stored is not None  # nosec B101
+    assert stored.validation_errors == preview.validation_errors  # nosec B101
+
+
+def test_preview_mode_linkage_invariants_are_persisted_as_invalid(tmp_path):
+    service, _repo = _service(tmp_path)
+
+    update_without_definition = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(mode="update", definition_id=None, definition_version=None),
+    )
+    create_with_definition_linkage = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(mode="create", definition_id="definition_1", definition_version=1),
+    )
+
+    assert update_without_definition.status == "invalid"  # nosec B101
+    assert {
+        (error["field"], error["code"]) for error in update_without_definition.validation_errors
+    } >= {
+        ("definition_id", "required_for_update"),
+        ("definition_version", "required_for_update"),
+    }  # nosec B101
+    assert create_with_definition_linkage.status == "invalid"  # nosec B101
+    assert {
+        (error["field"], error["code"]) for error in create_with_definition_linkage.validation_errors
+    } >= {
+        ("definition_id", "not_allowed_for_create"),
+        ("definition_version", "not_allowed_for_create"),
+    }  # nosec B101
+
+
 def test_agent_task_preview_redacts_raw_message_in_responses_and_storage(tmp_path):
     service, repo = _service(tmp_path)
 
@@ -196,7 +253,7 @@ def test_create_consumes_valid_preview_and_rejects_consumed_reuse_without_idempo
     assert definition.preview_id == preview.id  # nosec B101
     assert definition.health == "execution_unavailable"  # nosec B101
     assert consumed.status == "consumed"  # nosec B101
-    with pytest.raises(ValueError, match="preview_consumed"):
+    with pytest.raises(ScheduledTaskAutomationError, match="preview_consumed"):
         service.create_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -209,7 +266,7 @@ def test_preview_validation_rejects_expired_stale_consumed_and_cross_user_previe
     expired = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
     _set_preview_expires_at(repo, preview_id=expired.id, expires_at="2020-01-01T00:00:00+00:00")
 
-    with pytest.raises(ValueError, match="preview_expired"):
+    with pytest.raises(ScheduledTaskAutomationError, match="preview_expired"):
         service.create_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -229,7 +286,7 @@ def test_preview_validation_rejects_expired_stale_consumed_and_cross_user_previe
     )
     service.pause_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
 
-    with pytest.raises(ValueError, match="definition_version_mismatch"):
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_version_mismatch"):
         service.update_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -243,7 +300,7 @@ def test_preview_validation_rejects_expired_stale_consumed_and_cross_user_previe
         actor=ACTOR,
         payload=ScheduledTaskDefinitionCreateRequest(preview_id=consumed_preview.id),
     )
-    with pytest.raises(ValueError, match="preview_consumed"):
+    with pytest.raises(ScheduledTaskAutomationError, match="preview_consumed"):
         service.create_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -251,7 +308,7 @@ def test_preview_validation_rejects_expired_stale_consumed_and_cross_user_previe
         )
 
     other_preview = service.create_preview(owner_id=OTHER_OWNER_ID, actor=ACTOR, payload=_payload())
-    with pytest.raises(KeyError, match="preview_not_found"):
+    with pytest.raises(ScheduledTaskAutomationError, match="preview_not_found"):
         service.create_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -364,7 +421,7 @@ def test_duplicate_disabled_definition_with_admin_or_security_lock_fails_without
         expected_version=definition.version,
     )
 
-    with pytest.raises(ValueError, match="definition_disabled_locked"):
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_disabled_locked"):
         service.duplicate_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -412,7 +469,7 @@ def test_pause_resume_archive_transition_matrix(tmp_path):
             payload=ScheduledTaskDuplicateRequest(name="Archived copy"),
         ),
     ):
-        with pytest.raises(ValueError, match="definition_archived"):
+        with pytest.raises(ScheduledTaskAutomationError, match="definition_archived"):
             operation()
 
 
@@ -423,7 +480,7 @@ def test_preview_idempotency_replay_and_same_key_different_payload_conflict(tmp_
     first = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=payload, idempotency_key="preview-key")
     replay = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=payload, idempotency_key="preview-key")
 
-    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+    with pytest.raises(ScheduledTaskAutomationError, match="scheduled_task_idempotency_conflict"):
         service.create_preview(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -435,6 +492,34 @@ def test_preview_idempotency_replay_and_same_key_different_payload_conflict(tmp_
     assert replay.id == first.id  # nosec B101
     assert total == 1  # nosec B101
     assert previews[0].id == first.id  # nosec B101
+
+
+def test_list_definitions_uses_bulk_preview_lookup_for_config(tmp_path, monkeypatch):
+    service, repo = _service(tmp_path)
+    for index in range(3):
+        preview = service.create_preview(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=_payload(
+                name=f"Bulk config {index}",
+                config_payload={"rank": index},
+            ),
+        )
+        service.create_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=ScheduledTaskDefinitionCreateRequest(preview_id=preview.id),
+        )
+
+    def _unexpected_get_preview(*_args, **_kwargs):
+        raise AssertionError("list_definitions should use bulk preview lookup")
+
+    monkeypatch.setattr(repo, "get_preview", _unexpected_get_preview)
+
+    definitions = service.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)
+
+    assert definitions.total == 3  # nosec B101
+    assert {item.config["rank"] for item in definitions.items} == {0, 1, 2}  # nosec B101
 
 
 def test_preview_idempotency_race_executes_side_effects_once(tmp_path, monkeypatch):
@@ -824,7 +909,7 @@ def test_same_key_different_payload_conflict_for_create_update_duplicate_and_lif
         idempotency_key="create-conflict",
     )
     other_preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload(name="Create two"))
-    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+    with pytest.raises(ScheduledTaskAutomationError, match="scheduled_task_idempotency_conflict"):
         service.create_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -860,7 +945,7 @@ def test_same_key_different_payload_conflict_for_create_update_duplicate_and_lif
             name="Update two",
         ),
     )
-    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+    with pytest.raises(ScheduledTaskAutomationError, match="scheduled_task_idempotency_conflict"):
         service.update_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -877,7 +962,7 @@ def test_same_key_different_payload_conflict_for_create_update_duplicate_and_lif
         payload=ScheduledTaskDuplicateRequest(name="Duplicate one"),
         idempotency_key="duplicate-conflict",
     )
-    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+    with pytest.raises(ScheduledTaskAutomationError, match="scheduled_task_idempotency_conflict"):
         service.duplicate_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,
@@ -894,7 +979,7 @@ def test_same_key_different_payload_conflict_for_create_update_duplicate_and_lif
         definition_id=lifecycle_definition.id,
         idempotency_key="lifecycle-conflict",
     )
-    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+    with pytest.raises(ScheduledTaskAutomationError, match="scheduled_task_idempotency_conflict"):
         service.pause_definition(
             owner_id=OWNER_ID,
             actor=ACTOR,

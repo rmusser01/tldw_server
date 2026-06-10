@@ -121,7 +121,7 @@ const normalizeAutomationScheduleKind = (
     : "daily"
 
 const getAutomationDefinitionIdForTask = (task: ScheduledTask): string => {
-  const sourceDefinitionId = task.source_ref?.definition_id
+  const sourceDefinitionId = task.source_ref?.["definition_id"]
   if (typeof sourceDefinitionId === "string" && sourceDefinitionId.trim()) {
     return sourceDefinitionId
   }
@@ -140,8 +140,8 @@ const buildAutomationEditorInitialValues = (
   const approvalPolicy = isRecord(definition.approval_policy)
     ? definition.approval_policy
     : {}
-  const visibility = visibilityPolicy.visibility === "shared" ? "shared" : "private"
-  const approvalMode = approvalPolicy.mode === "manual" ? "manual" : "none"
+  const visibility = visibilityPolicy["visibility"] === "shared" ? "shared" : "private"
+  const approvalMode = approvalPolicy["mode"] === "manual" ? "manual" : "none"
 
   return {
     name: definition.name,
@@ -314,7 +314,7 @@ export const ScheduledTasksPage: React.FC = () => {
   )
   const selectedAutomationDefinitionId = React.useMemo(() => {
     if (selectedTask?.primitive !== "automation_definition") return null
-    const sourceDefinitionId = selectedTask.source_ref?.definition_id
+    const sourceDefinitionId = selectedTask.source_ref?.["definition_id"]
     return typeof sourceDefinitionId === "string" && sourceDefinitionId.trim()
       ? sourceDefinitionId
       : selectedTask.id
@@ -459,6 +459,7 @@ export const ScheduledTasksPage: React.FC = () => {
 
   const openEditAutomationDefinition = (task: ScheduledTask) => {
     setAutomationErrorMessage(null)
+    closeTaskDetail()
     setEditorOpen(false)
     setEditingTask(null)
     setEditingAutomationTask(task)
@@ -489,27 +490,27 @@ export const ScheduledTasksPage: React.FC = () => {
     error: unknown,
     fallback: string
   ): string => {
-    if (error && typeof error === "object") {
-      const details = "details" in error ? (error as { details?: unknown }).details : null
+    if (isRecord(error)) {
+      const details = error["details"]
       const detail =
-        details && typeof details === "object" && "detail" in details
-          ? (details as { detail?: unknown }).detail
+        isRecord(details) && "detail" in details
+          ? details["detail"]
           : "detail" in error
-            ? (error as { detail?: unknown }).detail
+            ? error["detail"]
             : null
-      if (detail && typeof detail === "object") {
+      if (isRecord(detail)) {
         const code =
-          "code" in detail ? String((detail as { code?: unknown }).code || "") : ""
+          "code" in detail ? String(detail["code"] || "") : ""
         const detailMessage =
           "message" in detail
-            ? String((detail as { message?: unknown }).message || "")
+            ? String(detail["message"] || "")
             : ""
         if (code && detailMessage) return `${code}: ${detailMessage}`
         if (detailMessage) return detailMessage
         if (code) return code
       }
-      if ("message" in error && typeof (error as { message?: unknown }).message === "string") {
-        return (error as { message: string }).message
+      if ("message" in error && typeof error["message"] === "string") {
+        return error["message"]
       }
     }
     return fallback
@@ -623,14 +624,15 @@ export const ScheduledTasksPage: React.FC = () => {
   ) => {
     setAutomationErrorMessage(null)
     try {
+      const definitionId = getAutomationDefinitionIdForTask(task)
       if (action === "pause") {
-        await pauseScheduledTaskDefinition(task.id)
+        await pauseScheduledTaskDefinition(definitionId)
       } else if (action === "resume") {
-        await resumeScheduledTaskDefinition(task.id)
+        await resumeScheduledTaskDefinition(definitionId)
       } else if (action === "archive") {
-        await archiveScheduledTaskDefinition(task.id)
+        await archiveScheduledTaskDefinition(definitionId)
       } else {
-        await duplicateScheduledTaskDefinition(task.id, {
+        await duplicateScheduledTaskDefinition(definitionId, {
           name: `${task.title} copy`
         })
       }

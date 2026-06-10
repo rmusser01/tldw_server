@@ -95,6 +95,7 @@ const statusFilterOptions: Array<{
   { value: "blocked", label: BLOCKED_STATE_LABEL },
   { value: "paused", label: "Paused" },
   { value: "disabled", label: "Disabled" },
+  { value: "archived", label: "Archived" },
   { value: "draft", label: "Draft" },
   { value: "completed", label: "Completed" }
 ]
@@ -168,7 +169,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
 
   const renderAutomationActions = (task: ScheduledTask) => {
     const lifecycle =
-      typeof task.source_ref?.lifecycle === "string" ? task.source_ref.lifecycle : task.status
+      typeof task.source_ref?.["lifecycle"] === "string" ? task.source_ref["lifecycle"] : task.status
     const isPaused = lifecycle === "paused"
     const isArchived = lifecycle === "archived"
 
@@ -185,6 +186,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
           size="small"
           aria-label={rowActionLabel("Edit", task)}
           onClick={() => onEditAutomationDefinition?.(task)}
+          disabled={!onEditAutomationDefinition}
         >
           Edit
         </Button>
@@ -194,6 +196,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
             size="small"
             aria-label={rowActionLabel("Resume", task)}
             onClick={() => onResumeAutomationDefinition?.(task)}
+            disabled={!onResumeAutomationDefinition}
           >
             Resume
           </Button>
@@ -202,6 +205,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
             size="small"
             aria-label={rowActionLabel("Pause", task)}
             onClick={() => onPauseAutomationDefinition?.(task)}
+            disabled={!onPauseAutomationDefinition}
           >
             Pause
           </Button>
@@ -211,6 +215,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
             size="small"
             aria-label={rowActionLabel("Archive", task)}
             onClick={() => onArchiveAutomationDefinition?.(task)}
+            disabled={!onArchiveAutomationDefinition}
           >
             Archive
           </Button>
@@ -219,6 +224,7 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
           size="small"
           aria-label={rowActionLabel("Duplicate", task)}
           onClick={() => onDuplicateAutomationDefinition?.(task)}
+          disabled={!onDuplicateAutomationDefinition}
         >
           Duplicate
         </Button>

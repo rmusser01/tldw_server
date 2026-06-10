@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -13,7 +14,10 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
-from tldw_Server_API.app.services.scheduled_task_automation_service import ScheduledTaskAutomationService
+from tldw_Server_API.app.services.scheduled_task_automation_service import (
+    ScheduledTaskAutomationError,
+    ScheduledTaskAutomationService,
+)
 
 RAW_SENTINEL = "RAW_AGENT_SECRET_DO_NOT_LEAK_ENDPOINT_4B"
 
@@ -302,6 +306,23 @@ def test_definition_filters_preview_filters_audit_filters_and_pagination(schedul
     assert audit.json()["items"][0]["event_type"] == "definition.paused"  # nosec B101
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/scheduled-tasks/previews?family=unknown",
+        "/api/v1/scheduled-tasks/previews?mode=delete",
+        "/api/v1/scheduled-tasks/previews?status=ready",
+        "/api/v1/scheduled-tasks/definitions?family=unknown",
+        "/api/v1/scheduled-tasks/definitions?lifecycle=running",
+        "/api/v1/scheduled-tasks/definitions?health=healthy",
+    ],
+)
+def test_invalid_automation_filter_values_return_422(scheduled_tasks_client, auth_headers, path):
+    response = scheduled_tasks_client.get(path, headers=auth_headers)
+
+    assert response.status_code == 422, response.text  # nosec B101
+
+
 def test_api_created_audit_events_store_and_filter_by_request_id(scheduled_tasks_client, auth_headers):
     definition = _create_definition(scheduled_tasks_client, auth_headers, name="Request id audit")
 
@@ -401,7 +422,7 @@ def test_cross_user_preview_and_definition_access_is_denied(scheduled_tasks_clie
         json={"preview_id": preview["id"]},
     )
 
-    _assert_error_envelope(preview_detail, code="scheduled_task_preview_required", status_code=400)
+    _assert_error_envelope(preview_detail, code="scheduled_task_preview_not_found", status_code=404)
     _assert_error_envelope(definition_detail, code="scheduled_task_definition_not_found", status_code=404)
     _assert_error_envelope(audit_list, code="scheduled_task_definition_not_found", status_code=404)
     _assert_error_envelope(cross_create, code="scheduled_task_preview_required", status_code=400)
@@ -582,6 +603,7 @@ def test_same_idempotency_key_with_different_payload_conflicts_on_mutating_route
     [
         ("scheduled_task_family_unavailable", "scheduled_task_family_unavailable", 409),
         ("scheduled_task_preview_required", "scheduled_task_preview_required", 400),
+        ("preview_resource_not_found", "scheduled_task_preview_not_found", 404),
         ("scheduled_task_definition_not_found", "scheduled_task_definition_not_found", 404),
         ("scheduled_task_preview_mismatch", "scheduled_task_preview_mismatch", 409),
         ("scheduled_task_preview_expired", "scheduled_task_preview_expired", 409),
@@ -606,7 +628,7 @@ def test_required_public_error_code_aliases_use_public_error_envelopes(
 ):
     class _FailingService:
         def create_preview(self, **_kwargs):
-            raise ValueError(service_error)
+            raise ScheduledTaskAutomationError(service_error)
 
     scheduled_tasks_client.app.dependency_overrides[
         scheduled_tasks_control_plane.get_scheduled_task_automation_service
@@ -619,3 +641,45 @@ def test_required_public_error_code_aliases_use_public_error_envelopes(
     )
 
     _assert_error_envelope(response, code=public_code, status_code=status_code)
+
+
+def test_plain_service_value_error_is_not_mapped_as_public_automation_error(
+    scheduled_tasks_client,
+    auth_headers,
+):
+    class _FailingService:
+        def create_preview(self, **_kwargs):
+            raise ValueError("unexpected_bug")
+
+    scheduled_tasks_client.app.dependency_overrides[
+        scheduled_tasks_control_plane.get_scheduled_task_automation_service
+    ] = lambda: _FailingService()
+
+    with pytest.raises(ValueError, match="unexpected_bug"):
+        scheduled_tasks_client.post(
+            "/api/v1/scheduled-tasks/previews",
+            headers=auth_headers,
+            json=_payload(),
+        )
+
+
+def test_sync_automation_handlers_do_not_run_sqlite_work_on_event_loop():
+    automation_handlers = [
+        scheduled_tasks_control_plane.get_scheduled_task_automation_capabilities,
+        scheduled_tasks_control_plane.list_scheduled_task_automation_previews,
+        scheduled_tasks_control_plane.create_scheduled_task_automation_preview,
+        scheduled_tasks_control_plane.get_scheduled_task_automation_preview,
+        scheduled_tasks_control_plane.list_scheduled_task_automation_definitions,
+        scheduled_tasks_control_plane.create_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.list_scheduled_task_automation_definition_audit,
+        scheduled_tasks_control_plane.get_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.update_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.pause_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.resume_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.archive_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.duplicate_scheduled_task_automation_definition,
+    ]
+
+    assert all(not inspect.iscoroutinefunction(handler) for handler in automation_handlers)  # nosec B101
+    assert inspect.iscoroutinefunction(scheduled_tasks_control_plane.list_scheduled_tasks)  # nosec B101
+    assert inspect.iscoroutinefunction(scheduled_tasks_control_plane.create_scheduled_task_reminder)  # nosec B101

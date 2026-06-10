@@ -109,12 +109,13 @@ const parseJsonObject = (
 const readErrorDetail = (error: unknown): unknown => {
   if (!isRecord(error)) return null
 
-  const details = error.details
-  if (isRecord(details) && isRecord(details.detail)) {
-    return details.detail
+  const details = error["details"]
+  if (isRecord(details) && isRecord(details["detail"])) {
+    return details["detail"]
   }
 
-  return isRecord(error.detail) ? error.detail : null
+  const detail = error["detail"]
+  return isRecord(detail) ? detail : null
 }
 
 const readErrorMessage = (error: unknown, fallback: string): string => {
@@ -139,10 +140,10 @@ const readErrorMessage = (error: unknown, fallback: string): string => {
 
 const getValidationMessage = (entry: Record<string, unknown>): string => {
   const message =
-    typeof entry.message === "string"
-      ? entry.message
-      : typeof entry.detail === "string"
-        ? entry.detail
+    typeof entry["message"] === "string"
+      ? entry["message"]
+      : typeof entry["detail"] === "string"
+        ? entry["detail"]
         : JSON.stringify(entry)
 
   return message
@@ -162,7 +163,7 @@ const buildSchedule = (
   const scheduleKind = normalizeScheduleKind(values.scheduleKind)
   const existingSchedule = isRecord(values.schedule) ? values.schedule : {}
   const baseSchedule =
-    existingSchedule.kind === scheduleKind ? { ...existingSchedule } : {}
+    existingSchedule["kind"] === scheduleKind ? { ...existingSchedule } : {}
 
   if (scheduleKind === "cron") {
     return {
@@ -344,13 +345,21 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
     setSaving(true)
     setErrorMessage(null)
     try {
-      const result =
-        mode === "create"
-          ? await onCreate?.({
-              preview_id: preview.id,
-              initial_lifecycle: values.initialLifecycle
-            })
-          : await onUpdate?.({ preview_id: preview.id })
+      let result: ScheduledTaskDefinitionResponse
+      if (mode === "create") {
+        if (!onCreate) {
+          throw new Error("Create handler is not configured")
+        }
+        result = await onCreate({
+          preview_id: preview.id,
+          initial_lifecycle: values.initialLifecycle
+        })
+      } else {
+        if (!onUpdate) {
+          throw new Error("Update handler is not configured")
+        }
+        result = await onUpdate({ preview_id: preview.id })
+      }
       setSaved(true)
       onSaved?.(result)
     } catch (error) {
@@ -363,8 +372,10 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
   const validationErrors = preview?.validation_errors ?? []
   const previewNeedsRefresh =
     preview && ["expired", "invalid", "consumed"].includes(preview.status)
-  const redactedFields = Array.isArray(preview?.redaction_policy?.redacted_fields)
-    ? (preview?.redaction_policy?.redacted_fields as unknown[]).filter(
+  const redactionPolicy = isRecord(preview?.redaction_policy) ? preview.redaction_policy : {}
+  const redactedFieldValues = redactionPolicy["redacted_fields"]
+  const redactedFields = Array.isArray(redactedFieldValues)
+    ? redactedFieldValues.filter(
         (field): field is string => typeof field === "string" && Boolean(field.trim())
       )
     : []

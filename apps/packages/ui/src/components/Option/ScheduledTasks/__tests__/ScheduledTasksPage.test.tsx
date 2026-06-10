@@ -883,7 +883,7 @@ describe("ScheduledTasksPage", () => {
     mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
-        automationTask(),
+        automationTask({ id: "automation_definition:projected_definition_1" }),
         automationTask({
           id: "automation_definition:paused",
           title: "Paused agent",
@@ -905,29 +905,23 @@ describe("ScheduledTasksPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Pause Track answer" }))
     await waitFor(() => {
-      expect(mocks.pauseScheduledTaskDefinition).toHaveBeenCalledWith(
-        "automation_definition:definition_1"
-      )
+      expect(mocks.pauseScheduledTaskDefinition).toHaveBeenCalledWith("definition_1")
     })
 
     await user.click(await screen.findByRole("button", { name: "Resume Paused agent" }))
     await waitFor(() => {
-      expect(mocks.resumeScheduledTaskDefinition).toHaveBeenCalledWith(
-        "automation_definition:paused"
-      )
+      expect(mocks.resumeScheduledTaskDefinition).toHaveBeenCalledWith("paused")
     })
 
     await user.click(await screen.findByRole("button", { name: "Archive Track answer" }))
     await waitFor(() => {
-      expect(mocks.archiveScheduledTaskDefinition).toHaveBeenCalledWith(
-        "automation_definition:definition_1"
-      )
+      expect(mocks.archiveScheduledTaskDefinition).toHaveBeenCalledWith("definition_1")
     })
 
     await user.click(await screen.findByRole("button", { name: "Duplicate Track answer" }))
     await waitFor(() => {
       expect(mocks.duplicateScheduledTaskDefinition).toHaveBeenCalledWith(
-        "automation_definition:definition_1",
+        "definition_1",
         expect.objectContaining({ name: expect.stringContaining("Track answer") })
       )
     })
@@ -1366,6 +1360,31 @@ describe("ScheduledTasksPage", () => {
     })
   }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
+  it("opens the automation editor from the detail drawer without leaving the drawer open", async () => {
+    const user = userEvent.setup()
+
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Track answer" }))
+    expect(await screen.findByRole("dialog", { name: /Track answer/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Edit definition" }))
+
+    expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Track answer/i })).not.toBeInTheDocument()
+    })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
   it("deletes the selected reminder from the detail drawer and does not leave stale drawer state", async () => {
     const user = userEvent.setup()
 
@@ -1450,9 +1469,20 @@ describe("ScheduledTasksPage", () => {
           edit_mode: "external",
           manage_url: "/watchlists?tab=jobs",
           source_ref: { job_id: 42 }
-        }
+        },
+        automationTask({
+          id: "automation_definition:archived",
+          title: "Archived automation",
+          status: "archived",
+          source_ref: {
+            definition_id: "archived",
+            family: "recurring_question",
+            lifecycle: "archived",
+            health: "execution_unavailable"
+          }
+        })
       ],
-      total: 2,
+      total: 3,
       partial: false,
       errors: []
     })
@@ -1461,6 +1491,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByText("Healthy reminder")).toBeInTheDocument()
     expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
+    expect(screen.getByText("Archived automation")).toBeInTheDocument()
     const healthyRow = screen.getByText("Healthy reminder").closest("tr")
     expect(healthyRow).not.toBeNull()
     expect(within(healthyRow as HTMLElement).getByText("Waiting for next run")).toBeInTheDocument()
@@ -1471,6 +1502,14 @@ describe("ScheduledTasksPage", () => {
 
     expect(screen.queryByText("Healthy reminder")).not.toBeInTheDocument()
     expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
+    expect(screen.queryByText("Archived automation")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("combobox", { name: "Status filter" }))
+    await user.click(await screen.findByTitle("Archived"))
+
+    expect(screen.queryByText("Healthy reminder")).not.toBeInTheDocument()
+    expect(screen.queryByText("Blocked monitor")).not.toBeInTheDocument()
+    expect(screen.getByText("Archived automation")).toBeInTheDocument()
 
     await user.click(screen.getByRole("combobox", { name: "Status filter" }))
     await user.click(await screen.findByTitle("All statuses"))

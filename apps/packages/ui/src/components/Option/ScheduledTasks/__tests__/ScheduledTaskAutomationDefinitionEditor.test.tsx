@@ -167,6 +167,30 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
     expect(onCreate).not.toHaveBeenCalled()
   })
 
+  it("does not report saved when the create mutation handler is missing", async () => {
+    const user = userEvent.setup()
+    const onPreview = vi.fn().mockResolvedValue(validPreview())
+    const onSaved = vi.fn()
+
+    render(
+      <ScheduledTaskAutomationDefinitionEditor
+        family="recurring_question"
+        mode="create"
+        onPreview={onPreview}
+        onCancel={vi.fn()}
+        onSaved={onSaved}
+      />
+    )
+
+    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    await screen.findByText("Preview ready")
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+
+    expect(await screen.findByText("Create handler is not configured")).toBeInTheDocument()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
   it("blocks preview and save when scope JSON is malformed", async () => {
     const user = userEvent.setup()
     const onPreview = vi.fn().mockResolvedValue(validPreview())

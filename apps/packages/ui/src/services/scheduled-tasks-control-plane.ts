@@ -318,7 +318,11 @@ const normalizeAutomationDefinitionMutationId = (definitionId: string): string =
     throw new Error("definitionId is required")
   }
   if (normalized.startsWith("automation_definition:")) {
-    return normalized.slice("automation_definition:".length)
+    const stripped = normalized.slice("automation_definition:".length).trim()
+    if (!stripped) {
+      throw new Error("definitionId is required")
+    }
+    return stripped
   }
   if (normalized.includes(":")) {
     throw new Error("Definition mutations require an automation_definition id")

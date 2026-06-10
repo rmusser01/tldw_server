@@ -283,4 +283,12 @@ describe("scheduled-tasks control-plane contract", () => {
 
     expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
+
+  it("rejects empty projected automation ids before definition mutations", async () => {
+    await expect(
+      pauseScheduledTaskDefinition("automation_definition:")
+    ).rejects.toThrow("definitionId is required")
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
 })

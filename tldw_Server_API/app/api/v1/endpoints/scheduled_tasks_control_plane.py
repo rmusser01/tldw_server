@@ -13,14 +13,19 @@ from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas import (
     ScheduledTaskAuditListResponse,
     ScheduledTaskAutomationCapabilitiesResponse,
+    ScheduledTaskAutomationFamily,
     ScheduledTaskDefinitionCreateRequest,
+    ScheduledTaskDefinitionHealth,
+    ScheduledTaskDefinitionLifecycle,
     ScheduledTaskDefinitionListResponse,
     ScheduledTaskDefinitionResponse,
     ScheduledTaskDefinitionUpdateRequest,
     ScheduledTaskDuplicateRequest,
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
+    ScheduledTaskPreviewMode,
     ScheduledTaskPreviewResponse,
+    ScheduledTaskPreviewStatus,
 )
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import (
     ScheduledTask,
@@ -28,7 +33,10 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas im
     ScheduledTaskListResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
-from tldw_Server_API.app.services.scheduled_task_automation_service import ScheduledTaskAutomationService
+from tldw_Server_API.app.services.scheduled_task_automation_service import (
+    ScheduledTaskAutomationError,
+    ScheduledTaskAutomationService,
+)
 from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import ScheduledTasksControlPlaneService
 
 router = APIRouter(prefix="/scheduled-tasks", tags=["scheduled-tasks"])
@@ -65,7 +73,7 @@ def _scheduled_task_error(
     )
 
 
-_VALUE_ERROR_MAP: dict[str, tuple[int, str, str]] = {
+_AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
     "scheduled_task_family_unavailable": (
         status.HTTP_409_CONFLICT,
         "scheduled_task_family_unavailable",
@@ -136,10 +144,20 @@ _VALUE_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         "scheduled_task_idempotency_conflict",
         "Idempotency key was already used with a different payload.",
     ),
+    "scheduled_task_idempotency_response_unavailable": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_execution_unavailable",
+        "Scheduled task idempotency response is unavailable.",
+    ),
     "preview_not_found": (
         status.HTTP_400_BAD_REQUEST,
         "scheduled_task_preview_required",
         "A valid scheduled task preview is required.",
+    ),
+    "preview_resource_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "scheduled_task_preview_not_found",
+        "Scheduled task preview was not found.",
     ),
     "preview_invalid": (
         status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -194,23 +212,16 @@ _VALUE_ERROR_MAP: dict[str, tuple[int, str, str]] = {
 }
 
 
-def _raise_automation_error(request: Request, exc: Exception) -> NoReturn:
-    raw_code = str(exc)
-    if isinstance(exc, KeyError):
-        raw_code = raw_code.strip("'")
-        if "definition" in raw_code:
-            status_code, code, message = _VALUE_ERROR_MAP["definition_not_found"]
-        else:
-            status_code, code, message = _VALUE_ERROR_MAP["preview_not_found"]
-    else:
-        status_code, code, message = _VALUE_ERROR_MAP.get(
-            raw_code,
-            (
-                status.HTTP_409_CONFLICT,
-                "scheduled_task_lifecycle_transition_invalid",
-                "Scheduled task automation request could not be completed.",
-            ),
-        )
+def _raise_automation_error(request: Request, exc: ScheduledTaskAutomationError) -> NoReturn:
+    raw_code = exc.code
+    status_code, code, message = _AUTOMATION_ERROR_MAP.get(
+        raw_code,
+        (
+            status.HTTP_409_CONFLICT,
+            "scheduled_task_lifecycle_transition_invalid",
+            "Scheduled task automation request could not be completed.",
+        ),
+    )
     raise _scheduled_task_error(
         request=request,
         status_code=status_code,
@@ -282,7 +293,7 @@ async def list_scheduled_tasks(
     response_model=ScheduledTaskAutomationCapabilitiesResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
-async def get_scheduled_task_automation_capabilities(
+def get_scheduled_task_automation_capabilities(
     _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
     service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
 ) -> ScheduledTaskAutomationCapabilitiesResponse:
@@ -294,12 +305,12 @@ async def get_scheduled_task_automation_capabilities(
     response_model=ScheduledTaskPreviewListResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
-async def list_scheduled_task_automation_previews(
+def list_scheduled_task_automation_previews(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    family: str | None = Query(default=None),
-    mode: str | None = Query(default=None),
-    status: str | None = Query(default=None),
+    family: ScheduledTaskAutomationFamily | None = Query(default=None),
+    mode: ScheduledTaskPreviewMode | None = Query(default=None),
+    status: ScheduledTaskPreviewStatus | None = Query(default=None),
     definition_id: str | None = Query(default=None),
     expired: bool | None = Query(default=None),
     current_user: User = Depends(get_request_user),
@@ -324,7 +335,7 @@ async def list_scheduled_task_automation_previews(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def create_scheduled_task_automation_preview(
+def create_scheduled_task_automation_preview(
     payload: ScheduledTaskPreviewCreateRequest,
     request: Request,
     current_user: User = Depends(get_request_user),
@@ -338,7 +349,7 @@ async def create_scheduled_task_automation_preview(
             payload=payload,
             idempotency_key=_idempotency_key(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -347,7 +358,7 @@ async def create_scheduled_task_automation_preview(
     response_model=ScheduledTaskPreviewResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
-async def get_scheduled_task_automation_preview(
+def get_scheduled_task_automation_preview(
     request: Request,
     preview_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
@@ -356,7 +367,7 @@ async def get_scheduled_task_automation_preview(
 ) -> ScheduledTaskPreviewResponse:
     try:
         return service.get_preview(owner_id=int(current_user.id), preview_id=preview_id)
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -365,13 +376,13 @@ async def get_scheduled_task_automation_preview(
     response_model=ScheduledTaskDefinitionListResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
-async def list_scheduled_task_automation_definitions(
+def list_scheduled_task_automation_definitions(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    family: str | None = Query(default=None),
-    lifecycle: str | None = Query(default=None),
-    health: str | None = Query(default=None),
+    family: ScheduledTaskAutomationFamily | None = Query(default=None),
+    lifecycle: ScheduledTaskDefinitionLifecycle | None = Query(default=None),
+    health: ScheduledTaskDefinitionHealth | None = Query(default=None),
     visibility_policy: str | None = Query(default=None),
     q: str | None = Query(default=None),
     created_from: str | None = Query(default=None),
@@ -410,7 +421,7 @@ async def list_scheduled_task_automation_definitions(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def create_scheduled_task_automation_definition(
+def create_scheduled_task_automation_definition(
     payload: ScheduledTaskDefinitionCreateRequest,
     request: Request,
     current_user: User = Depends(get_request_user),
@@ -425,7 +436,7 @@ async def create_scheduled_task_automation_definition(
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -434,7 +445,7 @@ async def create_scheduled_task_automation_definition(
     response_model=ScheduledTaskAuditListResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
-async def list_scheduled_task_automation_definition_audit(
+def list_scheduled_task_automation_definition_audit(
     request: Request,
     definition_id: str = Path(..., min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
@@ -472,7 +483,7 @@ async def list_scheduled_task_automation_definition_audit(
             idempotency_key=idempotency_key,
             request_id=request_id,
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -481,7 +492,7 @@ async def list_scheduled_task_automation_definition_audit(
     response_model=ScheduledTaskDefinitionResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
-async def get_scheduled_task_automation_definition(
+def get_scheduled_task_automation_definition(
     request: Request,
     definition_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
@@ -490,7 +501,7 @@ async def get_scheduled_task_automation_definition(
 ) -> ScheduledTaskDefinitionResponse:
     try:
         return service.get_definition(owner_id=int(current_user.id), definition_id=definition_id)
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -499,7 +510,7 @@ async def get_scheduled_task_automation_definition(
     response_model=ScheduledTaskDefinitionResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def update_scheduled_task_automation_definition(
+def update_scheduled_task_automation_definition(
     payload: ScheduledTaskDefinitionUpdateRequest,
     request: Request,
     definition_id: str = Path(..., min_length=1),
@@ -516,7 +527,7 @@ async def update_scheduled_task_automation_definition(
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -525,7 +536,7 @@ async def update_scheduled_task_automation_definition(
     response_model=ScheduledTaskDefinitionResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def pause_scheduled_task_automation_definition(
+def pause_scheduled_task_automation_definition(
     request: Request,
     definition_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
@@ -540,7 +551,7 @@ async def pause_scheduled_task_automation_definition(
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -549,7 +560,7 @@ async def pause_scheduled_task_automation_definition(
     response_model=ScheduledTaskDefinitionResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def resume_scheduled_task_automation_definition(
+def resume_scheduled_task_automation_definition(
     request: Request,
     definition_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
@@ -564,7 +575,7 @@ async def resume_scheduled_task_automation_definition(
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -573,7 +584,7 @@ async def resume_scheduled_task_automation_definition(
     response_model=ScheduledTaskDefinitionResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def archive_scheduled_task_automation_definition(
+def archive_scheduled_task_automation_definition(
     request: Request,
     definition_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
@@ -588,7 +599,7 @@ async def archive_scheduled_task_automation_definition(
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 
@@ -597,7 +608,7 @@ async def archive_scheduled_task_automation_definition(
     response_model=ScheduledTaskDefinitionResponse,
     dependencies=[Depends(rbac_rate_limit("tasks.control"))],
 )
-async def duplicate_scheduled_task_automation_definition(
+def duplicate_scheduled_task_automation_definition(
     payload: ScheduledTaskDuplicateRequest,
     request: Request,
     definition_id: str = Path(..., min_length=1),
@@ -614,7 +625,7 @@ async def duplicate_scheduled_task_automation_definition(
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
-    except (KeyError, ValueError) as exc:
+    except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)
 
 

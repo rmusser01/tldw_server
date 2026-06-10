@@ -8,8 +8,10 @@ validation and lifecycle rules; this layer provides owner-scoped persistence.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -583,6 +585,12 @@ def _is_expired(expires_at: str) -> bool:
     return _parse_iso_datetime(expires_at) <= datetime.now(timezone.utc)
 
 
+def _effective_preview_status(status: str, expires_at: str) -> str:
+    if status == "valid" and _is_expired(expires_at):
+        return "expired"
+    return status
+
+
 def _prune_expired_idempotency_record(
     conn: sqlite3.Connection,
     *,
@@ -618,7 +626,7 @@ def _preview_from_row(row: sqlite3.Row | None) -> PreviewRow | None:
         family=row["family"],
         definition_id=row["definition_id"],
         definition_version=row["definition_version"],
-        status=row["status"],
+        status=_effective_preview_status(row["status"], row["expires_at"]),
         payload_hash=row["payload_hash"],
         normalized_config=_json_loads(row["normalized_config_json"]),
         validation_errors=_json_loads(row["validation_errors_json"]),
@@ -883,6 +891,22 @@ class ScheduledTasksDatabase:
             ).fetchone()
         return _preview_from_row(row)
 
+    def get_previews_by_ids(self, owner_id: int, preview_ids: Iterable[str]) -> dict[str, PreviewRow]:
+        unique_ids = list(dict.fromkeys(preview_id for preview_id in preview_ids if preview_id))
+        if not unique_ids:
+            return {}
+
+        placeholders = ",".join("?" for _ in unique_ids)
+        with self._connect() as conn:
+            # The IN placeholder list is generated; preview IDs remain bound parameters.
+            query = f"SELECT * FROM scheduled_task_previews WHERE owner_id = ? AND id IN ({placeholders})"  # nosec
+            rows = conn.execute(
+                query,
+                [owner_id, *unique_ids],
+            ).fetchall()
+        previews = [_preview_from_row(row) for row in rows]
+        return {preview.id: preview for preview in previews if preview is not None}
+
     def list_previews(
         self,
         owner_id: int,
@@ -904,6 +928,7 @@ class ScheduledTasksDatabase:
             mode,
             mode,
             status,
+            now,
             status,
             definition_id,
             definition_id,
@@ -921,12 +946,18 @@ class ScheduledTasksDatabase:
                 WHERE owner_id = ?
                     AND (? IS NULL OR family = ?)
                     AND (? IS NULL OR mode = ?)
-                    AND (? IS NULL OR status = ?)
+                    AND (? IS NULL OR (
+                        CASE WHEN status = 'valid' AND expires_at <= ? THEN 'expired' ELSE status END
+                    ) = ?)
                     AND (? IS NULL OR definition_id = ?)
                     AND (
                         ? IS NULL
-                        OR (? = 1 AND (status = 'expired' OR expires_at <= ?))
-                        OR (? = 0 AND status != 'expired' AND expires_at > ?)
+                        OR (? = 1 AND (
+                            CASE WHEN status = 'valid' AND expires_at <= ? THEN 'expired' ELSE status END
+                        ) = 'expired')
+                        OR (? = 0 AND (
+                            CASE WHEN status = 'valid' AND expires_at <= ? THEN 'expired' ELSE status END
+                        ) != 'expired')
                     )
                 """,
                 filter_params,
@@ -938,12 +969,18 @@ class ScheduledTasksDatabase:
                 WHERE owner_id = ?
                     AND (? IS NULL OR family = ?)
                     AND (? IS NULL OR mode = ?)
-                    AND (? IS NULL OR status = ?)
+                    AND (? IS NULL OR (
+                        CASE WHEN status = 'valid' AND expires_at <= ? THEN 'expired' ELSE status END
+                    ) = ?)
                     AND (? IS NULL OR definition_id = ?)
                     AND (
                         ? IS NULL
-                        OR (? = 1 AND (status = 'expired' OR expires_at <= ?))
-                        OR (? = 0 AND status != 'expired' AND expires_at > ?)
+                        OR (? = 1 AND (
+                            CASE WHEN status = 'valid' AND expires_at <= ? THEN 'expired' ELSE status END
+                        ) = 'expired')
+                        OR (? = 0 AND (
+                            CASE WHEN status = 'valid' AND expires_at <= ? THEN 'expired' ELSE status END
+                        ) != 'expired')
                     )
                 ORDER BY created_at DESC, id DESC
                 LIMIT ? OFFSET ?
@@ -1457,9 +1494,14 @@ class ScheduledTasksDatabase:
             raise RuntimeError("created idempotency record could not be loaded")
         return created
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         configure_sqlite_connection(conn)
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()

@@ -81,11 +81,11 @@ const renderSourceReferenceItems = (task: ScheduledTask): React.ReactNode => {
   if (task.primitive === "automation_definition") {
     return (
       <>
-        {renderOptionalDescriptionItem("Definition id", sourceRef.definition_id)}
-        {renderOptionalDescriptionItem("Lifecycle", sourceRef.lifecycle)}
-        {renderOptionalDescriptionItem("Health", sourceRef.health)}
-        {renderOptionalDescriptionItem("Visibility", sourceRef.visibility)}
-        {renderOptionalDescriptionItem("Notification policy", sourceRef.notification_policy)}
+        {renderOptionalDescriptionItem("Definition id", sourceRef["definition_id"])}
+        {renderOptionalDescriptionItem("Lifecycle", sourceRef["lifecycle"])}
+        {renderOptionalDescriptionItem("Health", sourceRef["health"])}
+        {renderOptionalDescriptionItem("Visibility", sourceRef["visibility"])}
+        {renderOptionalDescriptionItem("Notification policy", sourceRef["notification_policy"])}
       </>
     )
   }
@@ -93,18 +93,18 @@ const renderSourceReferenceItems = (task: ScheduledTask): React.ReactNode => {
   if (task.primitive === "watchlist_job") {
     return (
       <>
-        {renderOptionalDescriptionItem("Watchlists job id", sourceRef.job_id)}
-        {renderOptionalDescriptionItem("Watchlists scope", sourceRef.scope)}
+        {renderOptionalDescriptionItem("Watchlists job id", sourceRef["job_id"])}
+        {renderOptionalDescriptionItem("Watchlists scope", sourceRef["scope"])}
       </>
     )
   }
 
   return (
     <>
-      {renderOptionalDescriptionItem("Reminder task id", sourceRef.task_id)}
-      {renderOptionalDescriptionItem("Link type", sourceRef.link_type)}
-      {renderOptionalDescriptionItem("Link id", sourceRef.link_id)}
-      {renderOptionalDescriptionItem("Link URL", sourceRef.link_url)}
+      {renderOptionalDescriptionItem("Reminder task id", sourceRef["task_id"])}
+      {renderOptionalDescriptionItem("Link type", sourceRef["link_type"])}
+      {renderOptionalDescriptionItem("Link id", sourceRef["link_id"])}
+      {renderOptionalDescriptionItem("Link URL", sourceRef["link_url"])}
     </>
   )
 }
@@ -143,30 +143,46 @@ const renderTaskActions = ({
 
   if (isAutomationDefinitionTask(task)) {
     const lifecycle =
-      typeof task.source_ref?.lifecycle === "string" ? task.source_ref.lifecycle : task.status
+      typeof task.source_ref?.["lifecycle"] === "string" ? task.source_ref["lifecycle"] : task.status
     const isPaused = lifecycle === "paused"
     const isArchived = lifecycle === "archived"
 
     return (
       <Space wrap>
-        <Button type="primary" onClick={() => onEditAutomationDefinition?.(task)}>
+        <Button
+          type="primary"
+          onClick={() => onEditAutomationDefinition?.(task)}
+          disabled={!onEditAutomationDefinition}
+        >
           Edit definition
         </Button>
         {isPaused ? (
-          <Button onClick={() => onResumeAutomationDefinition?.(task)}>
+          <Button
+            onClick={() => onResumeAutomationDefinition?.(task)}
+            disabled={!onResumeAutomationDefinition}
+          >
             Resume definition
           </Button>
         ) : !isArchived ? (
-          <Button onClick={() => onPauseAutomationDefinition?.(task)}>
+          <Button
+            onClick={() => onPauseAutomationDefinition?.(task)}
+            disabled={!onPauseAutomationDefinition}
+          >
             Pause definition
           </Button>
         ) : null}
         {!isArchived ? (
-          <Button onClick={() => onArchiveAutomationDefinition?.(task)}>
+          <Button
+            onClick={() => onArchiveAutomationDefinition?.(task)}
+            disabled={!onArchiveAutomationDefinition}
+          >
             Archive definition
           </Button>
         ) : null}
-        <Button onClick={() => onDuplicateAutomationDefinition?.(task)}>
+        <Button
+          onClick={() => onDuplicateAutomationDefinition?.(task)}
+          disabled={!onDuplicateAutomationDefinition}
+        >
           Duplicate definition
         </Button>
       </Space>
@@ -267,7 +283,7 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
                   {stringifyCompact(automationDefinition.schedule)}
                 </Descriptions.Item>
                 <Descriptions.Item label="Definition visibility">
-                  {stringifyCompact(automationDefinition.visibility_policy?.visibility)}
+                  {stringifyCompact(automationDefinition.visibility_policy?.["visibility"])}
                 </Descriptions.Item>
                 <Descriptions.Item label="Definition notifications">
                   {stringifyCompact(automationDefinition.notification_policy)}

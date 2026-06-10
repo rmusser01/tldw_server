@@ -4,6 +4,7 @@ import json
 import math
 import sqlite3
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,10 @@ def _database_bytes(repo: ScheduledTasksDatabase) -> bytes:
     return payload
 
 
+def _future_expires_at() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+
+
 def _create_preview(
     repo: ScheduledTasksDatabase,
     *,
@@ -35,6 +40,8 @@ def _create_preview(
     mode: str = "create",
     definition_id: str | None = None,
     definition_version: int | None = None,
+    status: str = "valid",
+    expires_at: str | None = None,
     normalized_config: dict[str, Any] | None = None,
 ):
     return repo.create_preview(
@@ -43,7 +50,7 @@ def _create_preview(
         family=family,
         definition_id=definition_id,
         definition_version=definition_version,
-        status="valid",
+        status=status,
         payload_hash=f"hash-{owner_id}-{family}-{mode}",
         normalized_config=normalized_config
         or {
@@ -57,7 +64,7 @@ def _create_preview(
         visibility_policy="findings_only",
         schedule_preview={"summary": "daily"},
         redaction_policy={"mode": "none"},
-        expires_at="2026-06-10T00:00:00+00:00",
+        expires_at=expires_at or _future_expires_at(),
         created_by=str(owner_id),
     )
 
@@ -95,6 +102,19 @@ def _create_definition(
     )
 
 
+def test_connect_context_manager_closes_connection(tmp_path):
+    repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks.db")
+
+    with repo._connect() as conn:
+        conn.execute("SELECT 1")
+
+    try:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            conn.execute("SELECT 1")
+    finally:
+        conn.close()
+
+
 def test_scheduled_tasks_repository_isolates_users(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     repo_a = ScheduledTasksDatabase.for_user(user_id=101)
@@ -117,12 +137,48 @@ def test_scheduled_tasks_repository_isolates_users(tmp_path, monkeypatch):
         visibility_policy="findings_only",
         schedule_preview={"summary": "daily"},
         redaction_policy={"mode": "none"},
-        expires_at="2026-06-10T00:00:00+00:00",
+        expires_at=_future_expires_at(),
         created_by="101",
     )
 
     assert repo_a.get_preview(owner_id=101, preview_id=preview.id).id == preview.id  # nosec B101
     assert repo_b.get_preview(owner_id=202, preview_id=preview.id) is None  # nosec B101
+
+
+def test_bulk_preview_lookup_returns_owner_scoped_preview_map(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    preview_a = _create_preview(repo, owner_id=101, normalized_config={"config": {"rank": 1}})
+    preview_b = _create_preview(repo, owner_id=101, normalized_config={"config": {"rank": 2}})
+    other_owner_preview = _create_preview(repo, owner_id=202, normalized_config={"config": {"rank": 3}})
+
+    previews = repo.get_previews_by_ids(
+        owner_id=101,
+        preview_ids=[preview_a.id, preview_b.id, preview_a.id, other_owner_preview.id, "missing"],
+    )
+
+    assert set(previews) == {preview_a.id, preview_b.id}  # nosec B101
+    assert previews[preview_a.id].normalized_config["config"] == {"rank": 1}  # nosec B101
+    assert previews[preview_b.id].normalized_config["config"] == {"rank": 2}  # nosec B101
+
+
+def test_time_expired_valid_previews_read_and_filter_as_expired(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    expired = _create_preview(
+        repo,
+        expires_at=(datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+    )
+    active = _create_preview(repo)
+
+    detail = repo.get_preview(owner_id=101, preview_id=expired.id)
+    expired_rows, expired_total = repo.list_previews(owner_id=101, status="expired")
+    valid_rows, valid_total = repo.list_previews(owner_id=101, status="valid")
+
+    assert detail is not None  # nosec B101
+    assert detail.status == "expired"  # nosec B101
+    assert expired_total == 1  # nosec B101
+    assert [row.id for row in expired_rows] == [expired.id]  # nosec B101
+    assert valid_total == 1  # nosec B101
+    assert [row.id for row in valid_rows] == [active.id]  # nosec B101
 
 
 def test_create_definition_and_audit_roundtrip(tmp_path, monkeypatch):
