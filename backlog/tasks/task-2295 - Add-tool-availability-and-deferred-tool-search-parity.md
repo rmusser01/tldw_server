@@ -47,6 +47,19 @@ Verification:
 - `source ../../.venv/bin/activate && python -m py_compile mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py` -> passed.
 - `source ../../.venv/bin/activate && python -m bandit -r mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py -f json -o /tmp/bandit_mcp_tool_availability_search.json` -> 0 findings.
 - `git diff --check` -> passed.
+Review fixes after PR feedback:
+- Added a one-pass profile tool availability helper so `ProfileAwareGatewayRuntime.list_tools()` no longer scans backend tools twice and `tool_call` is advertised only for explicit deferred categories or installed deferred tools.
+- Added a direct backend tool lookup helper to preserve bridge-name collision behavior without deep-copying the full direct tool catalog.
+- Updated `tool_call` runtime gating to match `tools/list` availability; recommendation-only entries remain discoverable but do not make `tool_call` callable by themselves.
+- Cached normalized direct categories and tolerated malformed progressive-disclosure category metadata.
+- Replaced `Counter` payload construction for category and availability counts with explicit integer dictionaries.
+
+Review validation:
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -q` -> 186 passed, 6 warnings.
+- `source ../../.venv/bin/activate && python -m ruff check mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py` -> passed.
+- `source ../../.venv/bin/activate && python -m py_compile mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py` -> passed.
+- `source ../../.venv/bin/activate && python -m bandit -r mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py -f json -o /tmp/bandit_mcp_tool_availability_search_review.json` -> 0 findings.
+- `git diff --check` -> passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

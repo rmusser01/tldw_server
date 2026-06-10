@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 from math import log
 from typing import Any
 
@@ -22,6 +23,13 @@ _EXPOSURE_DEFERRED = "deferred"
 _EXPOSURE_RECOMMENDED_UNAVAILABLE = "recommended_unavailable"
 _REASON_INSTALLED_DIRECT = "installed_direct"
 _REASON_INSTALLED_DEFERRED = "installed_deferred"
+_AVAILABILITY_COUNT_KEYS = (
+    "count",
+    "installed_count",
+    "direct_count",
+    "deferred_installed_count",
+    "recommended_unavailable_count",
+)
 _RANKING_METADATA: dict[str, Any] = {
     "semantic_search": False,
     "scoring": "bm25_standard_library",
@@ -55,6 +63,15 @@ class _ToolEntry:
     activation: str | None = None
     unavailable_reason: str | None = None
     metadata: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class ProfileToolAvailability:
+    """Direct tool descriptors and callable deferred state for a profile."""
+
+    direct_tools: list[dict[str, Any]]
+    has_deferred_installed_tools: bool
+    has_recommended_unavailable_tools: bool
 
 
 def list_profile_tools(profile: MCPProfile, backend_tools: Any) -> dict[str, Any]:
@@ -158,24 +175,65 @@ def list_direct_profile_backend_tools(
 ) -> list[dict[str, Any]]:
     """Return caller-owned installed backend tools exposed directly to a profile."""
 
-    return [
-        deepcopy(entry.backend_tool)
-        for entry in _visible_entries(profile, backend_tools)
+    return profile_tool_availability(profile, backend_tools).direct_tools
+
+
+def profile_tool_availability(
+    profile: MCPProfile,
+    backend_tools: Any,
+) -> ProfileToolAvailability:
+    """Return direct tools and non-direct callable availability in one scan."""
+
+    direct_tools: list[dict[str, Any]] = []
+    has_deferred_installed_tools = False
+    has_recommended_unavailable_tools = False
+    for entry in _visible_entries(profile, backend_tools):
+        if entry.installation_status == _INSTALLED and entry.backend_tool is not None:
+            if entry.exposure == _EXPOSURE_DIRECT:
+                direct_tools.append(deepcopy(entry.backend_tool))
+            elif entry.exposure == _EXPOSURE_DEFERRED:
+                has_deferred_installed_tools = True
+        elif entry.installation_status == _RECOMMENDED_UNAVAILABLE:
+            has_recommended_unavailable_tools = True
+    return ProfileToolAvailability(
+        direct_tools=direct_tools,
+        has_deferred_installed_tools=has_deferred_installed_tools,
+        has_recommended_unavailable_tools=has_recommended_unavailable_tools,
+    )
+
+
+def profile_has_deferred_installed_tools(
+    profile: MCPProfile,
+    backend_tools: Any,
+) -> bool:
+    """Return whether a profile has callable installed tools outside direct exposure."""
+
+    return profile_tool_availability(
+        profile,
+        backend_tools,
+    ).has_deferred_installed_tools
+
+
+def find_direct_profile_backend_tool(
+    profile: MCPProfile,
+    backend_tools: Any,
+    tool_name: str,
+) -> dict[str, Any] | None:
+    """Return a caller-owned direct backend tool without copying the full catalog."""
+
+    normalized_tool_name = _clean_text(tool_name)
+    if normalized_tool_name is None:
+        return None
+
+    for entry in _visible_entries(profile, backend_tools):
         if (
-            entry.installation_status == _INSTALLED
+            entry.tool_id == normalized_tool_name
+            and entry.installation_status == _INSTALLED
             and entry.exposure == _EXPOSURE_DIRECT
             and entry.backend_tool is not None
-        )
-    ]
-
-
-def profile_has_deferred_tools(profile: MCPProfile, backend_tools: Any) -> bool:
-    """Return whether a profile has searchable tools outside direct exposure."""
-
-    return any(
-        entry.exposure in {_EXPOSURE_DEFERRED, _EXPOSURE_RECOMMENDED_UNAVAILABLE}
-        for entry in _visible_entries(profile, backend_tools)
-    )
+        ):
+            return deepcopy(entry.backend_tool)
+    return None
 
 
 def _visible_entries(profile: MCPProfile, backend_tools: Any) -> list[_ToolEntry]:
@@ -448,14 +506,21 @@ def _installed_exposure(profile: MCPProfile, category: str) -> str:
 
     progressive = _progressive_disclosure(profile)
     normalized_category = _normalize_category(category) or _DEFAULT_CATEGORY
-    direct_categories = {
-        normalized
-        for value in progressive["direct_categories"]
-        if (normalized := _normalize_category(value)) is not None
-    }
+    direct_categories = _direct_category_set(tuple(progressive["direct_categories"]))
     if normalized_category in direct_categories:
         return _EXPOSURE_DIRECT
     return _EXPOSURE_DEFERRED
+
+
+@lru_cache(maxsize=128)
+def _direct_category_set(categories: tuple[str, ...]) -> frozenset[str]:
+    """Return cached normalized direct categories from profile metadata."""
+
+    return frozenset(
+        normalized
+        for value in categories
+        if (normalized := _normalize_category(value)) is not None
+    )
 
 
 def _category_priority(profile: MCPProfile) -> dict[str, int]:
@@ -522,28 +587,28 @@ def _category_payload(
 
     category_priorities = _category_priority(profile)
     fallback_priority = len(category_priorities)
-    categories: dict[str, Counter[str]] = {}
+    categories: dict[str, dict[str, int]] = {}
     for entry in entries:
         category = _normalize_category(entry.category) or _DEFAULT_CATEGORY
-        categories.setdefault(category, Counter())
-        categories[category]["count"] += 1
+        counts = categories.setdefault(category, _empty_availability_counts())
+        counts["count"] += 1
         if entry.installation_status == _INSTALLED:
-            categories[category]["installed_count"] += 1
+            counts["installed_count"] += 1
         if entry.installation_status == _RECOMMENDED_UNAVAILABLE:
-            categories[category]["recommended_unavailable_count"] += 1
+            counts["recommended_unavailable_count"] += 1
         if entry.exposure == _EXPOSURE_DIRECT:
-            categories[category]["direct_count"] += 1
+            counts["direct_count"] += 1
         if entry.exposure == _EXPOSURE_DEFERRED:
-            categories[category]["deferred_installed_count"] += 1
+            counts["deferred_installed_count"] += 1
 
     return [
         {
             "category": category,
-            "count": counts.get("count", 0),
-            "direct_count": counts.get("direct_count", 0),
-            "deferred_installed_count": counts.get("deferred_installed_count", 0),
-            "installed_count": counts.get("installed_count", 0),
-            "recommended_unavailable_count": counts.get("recommended_unavailable_count", 0),
+            "count": counts["count"],
+            "direct_count": counts["direct_count"],
+            "deferred_installed_count": counts["deferred_installed_count"],
+            "installed_count": counts["installed_count"],
+            "recommended_unavailable_count": counts["recommended_unavailable_count"],
         }
         for category, counts in sorted(
             categories.items(),
@@ -561,7 +626,7 @@ def _category_payload(
 def _availability_payload(entries: list[_ToolEntry]) -> dict[str, int]:
     """Return whole-catalog availability counts for profile discovery clients."""
 
-    counts: Counter[str] = Counter()
+    counts = _empty_availability_counts()
     for entry in entries:
         counts["count"] += 1
         if entry.installation_status == _INSTALLED:
@@ -572,13 +637,13 @@ def _availability_payload(entries: list[_ToolEntry]) -> dict[str, int]:
             counts["direct_count"] += 1
         if entry.exposure == _EXPOSURE_DEFERRED:
             counts["deferred_installed_count"] += 1
-    return {
-        "count": counts.get("count", 0),
-        "installed_count": counts.get("installed_count", 0),
-        "direct_count": counts.get("direct_count", 0),
-        "deferred_installed_count": counts.get("deferred_installed_count", 0),
-        "recommended_unavailable_count": counts.get("recommended_unavailable_count", 0),
-    }
+    return counts
+
+
+def _empty_availability_counts() -> dict[str, int]:
+    """Return a fresh availability counter payload."""
+
+    return dict.fromkeys(_AVAILABILITY_COUNT_KEYS, 0)
 
 
 def _entry_payload(entry: _ToolEntry, *, score: float) -> dict[str, Any]:
@@ -741,9 +806,12 @@ def _normalize_sort_text(value: str) -> str:
 
 __all__ = [
     "describe_profile_tool",
+    "find_direct_profile_backend_tool",
     "list_direct_profile_backend_tools",
     "list_profile_tools",
-    "profile_has_deferred_tools",
+    "profile_has_deferred_installed_tools",
+    "profile_tool_availability",
+    "ProfileToolAvailability",
     "resolve_profile_tool_call",
     "search_profile_tools",
 ]

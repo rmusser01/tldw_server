@@ -9,7 +9,10 @@ from typing import Any
 from mcp_unified.gateway import tool_discovery
 from mcp_unified.gateway.tool_discovery import (
     describe_profile_tool,
+    find_direct_profile_backend_tool,
     list_profile_tools,
+    profile_has_deferred_installed_tools,
+    profile_tool_availability,
     resolve_profile_tool_call,
     search_profile_tools,
 )
@@ -161,6 +164,86 @@ def test_profile_tools_classify_direct_deferred_and_recommended_availability() -
         "deferred_installed_count": 1,
         "recommended_unavailable_count": 1,
     }
+
+
+def test_profile_tool_availability_reports_callable_deferred_tools_only() -> None:
+    profile = MCPProfile(
+        id="engineer",
+        name="Engineer",
+        policy_document=ProfilePolicy(capabilities=["code_search", "browser.inspect"]),
+        metadata={
+            "tooling": {
+                "recommended_tools": [
+                    {
+                        "id": "browser.trace",
+                        "category": "browser",
+                        "description": "Browser trace capture",
+                        "capability": "browser.inspect",
+                    }
+                ],
+                "progressive_disclosure": {
+                    "direct_categories": ["code"],
+                    "deferred_categories": ["browser"],
+                    "max_direct_tools": 24,
+                },
+            }
+        },
+    )
+    tools = [
+        {
+            "name": "code.search",
+            "description": "Search code",
+            "metadata": {"capability": "code_search", "category": "code"},
+        },
+        {
+            "name": "browser.snapshot",
+            "description": "Browser DOM snapshot",
+            "metadata": {"capability": "browser.inspect", "category": "browser"},
+        },
+    ]
+
+    availability = profile_tool_availability(profile, tools)
+    direct_tool = find_direct_profile_backend_tool(profile, tools, "code.search")
+
+    assert [tool["name"] for tool in availability.direct_tools] == ["code.search"]
+    assert availability.direct_tools[0] is not tools[0]
+    assert availability.has_deferred_installed_tools is True
+    assert availability.has_recommended_unavailable_tools is True
+    assert profile_has_deferred_installed_tools(profile, tools) is True
+    assert direct_tool == tools[0]
+    assert direct_tool is not tools[0]
+    assert find_direct_profile_backend_tool(profile, tools, "browser.snapshot") is None
+
+
+def test_profile_tools_ignore_malformed_direct_category_metadata() -> None:
+    profile = MCPProfile(
+        id="engineer",
+        name="Engineer",
+        policy_document=ProfilePolicy(capabilities=["code_search"]),
+        metadata={
+            "tooling": {
+                "progressive_disclosure": {
+                    "direct_categories": {"code": True},
+                    "deferred_categories": ["code"],
+                    "max_direct_tools": 24,
+                },
+            }
+        },
+    )
+    tools = [
+        {
+            "name": "code.search",
+            "description": "Search code",
+            "metadata": {"capability": "code_search", "category": "code"},
+        }
+    ]
+
+    payload = list_profile_tools(profile, tools)
+
+    assert payload["tools"][0]["tool_id"] == "code.search"
+    assert payload["tools"][0]["exposure"] == "deferred"
+    assert payload["availability"]["direct_count"] == 0
+    assert payload["availability"]["deferred_installed_count"] == 1
 
 
 def test_tool_search_orders_installed_before_unavailable_then_bm25() -> None:

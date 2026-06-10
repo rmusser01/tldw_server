@@ -19,9 +19,9 @@ from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .tool_discovery import (
     describe_profile_tool,
-    list_direct_profile_backend_tools,
+    find_direct_profile_backend_tool,
     list_profile_tools,
-    profile_has_deferred_tools,
+    profile_tool_availability,
     resolve_profile_tool_call,
     search_profile_tools,
 )
@@ -194,10 +194,8 @@ class ProfileAwareGatewayRuntime:
             return []
 
         tools = await self._safe_backend_tools(context)
-        direct_tools = list_direct_profile_backend_tools(
-            profile_result.profile,
-            tools,
-        )
+        availability = profile_tool_availability(profile_result.profile, tools)
+        direct_tools = availability.direct_tools
         allowed_tool_names = {
             name
             for tool in direct_tools
@@ -205,7 +203,7 @@ class ProfileAwareGatewayRuntime:
         }
         include_tool_call = (
             _profile_has_deferred_categories(profile_result.profile)
-            or profile_has_deferred_tools(profile_result.profile, tools)
+            or availability.has_deferred_installed_tools
         )
         return [
             *direct_tools,
@@ -396,7 +394,11 @@ class ProfileAwareGatewayRuntime:
             return description
         if name == _TOOL_CALL:
             tool_id, delegated_arguments = _validated_tool_call_arguments(arguments)
-            if not _profile_has_deferred_categories(profile):
+            availability = profile_tool_availability(profile, backend_tools)
+            if not (
+                _profile_has_deferred_categories(profile)
+                or availability.has_deferred_installed_tools
+            ):
                 raise GatewayPolicyDenied(
                     "Gateway profile denied tool execution: tool_not_allowed",
                     reason_code="tool_not_allowed",
@@ -529,13 +531,7 @@ def _allowed_backend_tool_by_name(
 ) -> dict[str, Any] | None:
     """Return an allowed backend descriptor matching a bridge-reserved name."""
 
-    for tool in list_direct_profile_backend_tools(profile, backend_tools):
-        if (
-            isinstance(tool, dict)
-            and _tool_name(tool) == name
-        ):
-            return tool
-    return None
+    return find_direct_profile_backend_tool(profile, backend_tools, name)
 
 
 def _profile_bridge_tool_descriptors(
