@@ -1128,7 +1128,7 @@ git commit -m "feat: add scheduled task automation frontend client types"
 - Modify: `apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskDetailDrawer.test.tsx`
 
-- [ ] **Step 1: Write failing editor tests**
+- [x] **Step 1: Write failing editor tests**
 
 Cover:
 
@@ -1171,7 +1171,7 @@ it("previews and creates a recurring question definition", async () => {
 })
 ```
 
-- [ ] **Step 2: Run editor tests to verify failure**
+- [x] **Step 2: Run editor tests to verify failure**
 
 Run:
 
@@ -1182,7 +1182,7 @@ bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskAuto
 
 Expected: FAIL because editor does not exist.
 
-- [ ] **Step 3: Implement editor component**
+- [x] **Step 3: Implement editor component**
 
 Keep the editor focused:
 
@@ -1196,7 +1196,7 @@ Keep the editor focused:
 
 Do not implement advanced schedule builders in this task. Use basic fields and JSON textareas where necessary to keep the reference client honest and API-first.
 
-- [ ] **Step 4: Wire create panel and page**
+- [x] **Step 4: Wire create panel and page**
 
 In `ScheduledTasksPage.tsx`:
 
@@ -1212,7 +1212,7 @@ In `ScheduledTaskCreatePanel.tsx`:
 - for API-available `recurring_question` and `agent_task`, expose create affordance;
 - keep planned copy when capability fetch fails or action is unavailable.
 
-- [ ] **Step 5: Wire table and detail drawer**
+- [x] **Step 5: Wire table and detail drawer**
 
 Table:
 
@@ -1229,7 +1229,7 @@ Detail drawer:
 - show pause/resume/archive/duplicate actions;
 - no fake run rows.
 
-- [ ] **Step 6: Run frontend tests**
+- [x] **Step 6: Run frontend tests**
 
 Run:
 
@@ -1245,7 +1245,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit WebUI wiring**
+- [x] **Step 7: Commit WebUI wiring**
 
 ```bash
 git add \

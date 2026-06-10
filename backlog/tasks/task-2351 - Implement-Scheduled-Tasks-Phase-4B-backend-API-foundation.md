@@ -55,6 +55,9 @@ Task 5 review: spec-compliance reviewer approved. Code-quality reviewer approved
 Task 6 completed across commits e27c3ec169, e269e62004, and a0a2485fec: added frontend automation client types/methods, automation definition status/type helpers, projected-id normalization, idempotency header support, and backend-aligned status handling.
 Task 6 verification: targeted Vitest helper/client suite passed with 34 tests; git diff --check passed in worker/reviewer verification.
 Task 6 review: spec-compliance reviewer approved. Code-quality review found projected-id normalization, unknown-status, and client-method coverage gaps; worker fixed them and aligned helper statuses with backend projection. Final spec and code-quality re-reviews approved.
+Task 7 completed across commits 4f3924e128, 18cd196bb5, and 27afbc9dc2: wired the WebUI reference client for automation definition preview/create/update, lifecycle actions, duplicate, detail/audit display, real-results-only row actions, and API error display without execution behavior.
+Task 7 verification: focused Scheduled Tasks Vitest suite passed with 93 tests; git diff --check and touched-scope Bandit scans passed in worker/reviewer verification.
+Task 7 review: spec-compliance review initially found missing update reachability and row-level fake Results actions; worker fixed both. Code-quality review found schedule/agent_ref contract, stale preview, JSON validation, and API error parsing issues; worker fixed them. Final spec and code-quality re-reviews approved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
