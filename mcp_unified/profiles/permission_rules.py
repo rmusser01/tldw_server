@@ -1,4 +1,23 @@
-"""Claude-style permission rule parsing for MCP profile policies."""
+"""Claude-style permission rule parsing for MCP profile policies.
+
+This module compiles human-authored permission patterns into
+``PolicyDecisionRule`` objects and evaluates them against specific subjects.
+Claude-style patterns use either an exact tool name, an external MCP identifier,
+or ``ToolName(specifier)`` syntax. Supported subject families are tools,
+commands, paths, domains, external MCP tools, skills, and agents.
+
+Primary APIs:
+- ``parse_permission_rule()`` parses one string rule.
+- ``compile_permission_rules()`` compiles a profile policy document field.
+- ``evaluate_permission_rule_decision()`` evaluates compiled rules with
+  deny-over-ask-over-allow precedence.
+
+Examples:
+    ``parse_permission_rule("Read(/docs/**)", outcome="ask")`` produces a
+    path rule for files below ``/docs``.
+    ``parse_permission_rule("mcp__github__*", outcome="deny")`` produces an
+    external MCP wildcard rule.
+"""
 
 from __future__ import annotations
 
@@ -48,7 +67,31 @@ def parse_permission_rule(
     source: str = "permission_rules",
     reason_code: str | None = None,
 ) -> PolicyDecisionRule:
-    """Parse one Claude-style permission rule into a policy decision rule."""
+    """Parse one Claude-style permission rule into a PolicyDecisionRule.
+
+    Args:
+        pattern: Rule pattern text. Plain names compile as exact tool rules,
+            ``mcp__server__tool`` patterns compile as external MCP rules, and
+            ``ToolName(specifier)`` forms compile to command, path, domain,
+            skill, or agent rules for supported tool families.
+        outcome: Decision outcome applied when the rule matches. Defaults to
+            ``"allow"``.
+        source: Source label copied into matched-rule metadata for policy
+            explanations. Defaults to ``"permission_rules"``.
+        reason_code: Optional reason code to report when the rule matches.
+
+    Returns:
+        A ``PolicyDecisionRule`` with ``rule_type``, normalized ``pattern``,
+        optional command ``argv``, outcome, source, and reason metadata.
+
+    Raises:
+        ValueError: If the pattern or specifier is empty, if command parsing
+            fails, or if a command rule uses broad shell control syntax.
+
+    Example:
+        ``parse_permission_rule("Bash(git status)", outcome="allow")``
+        returns a command rule with ``argv=("git", "status")``.
+    """
 
     raw_pattern = _required_string(pattern, "permission rule pattern")
     raw_lower = raw_pattern.lower()
@@ -131,7 +174,32 @@ def compile_permission_rules(
     *,
     field_name: str = "permission_rules",
 ) -> list[PolicyDecisionRule]:
-    """Compile Claude-style permission rules from a policy document field."""
+    """Compile Claude-style permission rules from a policy document field.
+
+    ``compile_permission_rules`` reads ``field_name`` from a mapping,
+    Pydantic-style model, or object attribute. The field may contain a single
+    rule or a sequence of rules. String entries are parsed with
+    ``parse_permission_rule()``. Mapping entries may provide ``pattern``,
+    ``outcome``, ``source``, and ``reason_code`` fields. Existing
+    ``PolicyDecisionRule`` instances pass through unchanged.
+
+    Args:
+        policy_document: Policy document that owns the permission-rule field,
+            or ``None`` for no rules.
+        field_name: Field or attribute name to read. Defaults to
+            ``"permission_rules"``.
+
+    Returns:
+        A list of compiled ``PolicyDecisionRule`` objects.
+
+    Raises:
+        ValueError: If a rule has an invalid type, outcome, structure, or
+            pattern.
+
+    Example:
+        ``compile_permission_rules({"permission_rules": ["Read(/docs/**)"]})``
+        returns a list containing one path ``PolicyDecisionRule``.
+    """
 
     rules: list[PolicyDecisionRule] = []
     for index, rule_document in enumerate(_as_sequence(_policy_value(policy_document, field_name))):
@@ -146,7 +214,35 @@ def evaluate_permission_rule_decision(
     value: str,
     argv: Sequence[str] | None = None,
 ) -> PolicyDecision:
-    """Evaluate one subject against compiled permission rules."""
+    """Evaluate one subject against compiled permission rules.
+
+    Rules are considered only when ``rule.rule_type`` matches ``subject_type``.
+    Tool, domain, skill, and agent values use bounded glob matching. MCP values
+    are lowercased before glob matching. Path matching is segment-aware:
+    ``*`` matches within one path segment and ``**`` may cross segments.
+    Command matching compares parsed argv tokens exactly, with ``*`` allowed as
+    a single-token wildcard after a fixed executable.
+
+    Matching rules are converted to ``PolicyDecision`` values and merged with
+    existing ``merge_policy_decisions()`` precedence, where deny wins over ask
+    and ask wins over allow. The function has no side effects.
+
+    Args:
+        rules: Iterable of compiled ``PolicyDecisionRule`` objects.
+        subject_type: Subject family to evaluate.
+        value: Subject value, such as a tool name, path, URL, MCP tool name, or
+            command string.
+        argv: Optional pre-parsed command argv. Used only when
+            ``subject_type`` is ``"command"``.
+
+    Returns:
+        A ``PolicyDecision`` with the final outcome, subject metadata, and
+        matched-rule details.
+
+    Raises:
+        ValueError: If command subject argv is missing or invalid, or if
+            command string parsing fails.
+    """
 
     normalized_value = _normalize_subject_value(subject_type, value)
     subject = PolicyDecisionSubject(type=subject_type, normalized=normalized_value)

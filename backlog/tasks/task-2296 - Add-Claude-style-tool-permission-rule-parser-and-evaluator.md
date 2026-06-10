@@ -55,6 +55,8 @@ Verification:
 
 PR review follow-up after rebasing on latest `origin/dev`: verified and fixed all still-valid Qodo/Gemini findings. Domain normalization now uses URL host parsing and normalizes bracketed IPv6 literals without ports/brackets; MCP rule detection and precompiled MCP matching are case-insensitive; command argv validation allows empty string arguments after a fixed executable; and path matching is segment-aware so `*` does not cross `/` while `**` remains the cross-segment wildcard. Added regression tests for each issue and documented the clarified semantics.
 
+Second PR review follow-up: verified the remaining CodeRabbit public-docstring comments against current code and addressed the still-valid documentation gaps for `mcp_unified.profiles.permission_rules`, `parse_permission_rule()`, `compile_permission_rules()`, and `evaluate_permission_rule_decision()`. The docstrings now describe accepted inputs, return types, exceptions, examples, and the actual command/path/domain/MCP matching semantics.
+
 Review-fix verification:
 - Rebase: `git rebase origin/dev` reported the branch was up to date.
 - Red regression run: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_profile_permission_rules.py -q` failed on IPv6 normalization, mixed-case MCP detection, empty argv token validation, and segment-aware path matching before the fixes.
