@@ -260,6 +260,68 @@ Recommendation catalog patches only change discovery metadata. They do not grant
 execution authority, start external servers, create credential grants, or bypass
 profile policy and approval requirements.
 
+### Profile Permission Rule Grammar
+
+Profiles can author first-slice Claude-style permission rules in the
+`permission_rules` policy field. Rules compile into the same package-owned
+`deny`, `ask`, and `allow` decision primitives used by profile explanations and
+future hook/runtime integrations.
+
+Examples:
+
+```json
+{
+  "policy_document": {
+    "permission_rules": [
+      "Read(/docs/**)",
+      {"pattern": "Edit(src/*.py)", "outcome": "ask"},
+      {"pattern": "Bash(git *)", "outcome": "allow"},
+      {"pattern": "WebFetch(https://*.example.com/docs)", "outcome": "ask"},
+      {"pattern": "mcp__github__delete_repo", "outcome": "deny"},
+      "Skill(review)",
+      {"pattern": "Agent(backend-*)", "outcome": "ask"}
+    ]
+  }
+}
+```
+
+Supported subject families in this slice:
+
+- Exact tools, such as `fs.read`.
+- Governed command aliases: `Bash(...)`, `Shell(...)`, `PowerShell(...)`, and
+  `Monitor(...)`.
+- Path-oriented tools: `Read(...)`, `Edit(...)`, `Write(...)`,
+  `NotebookEdit(...)`, `Grep(...)`, `Glob(...)`, and `LSP(...)`.
+- Domain-oriented tools: `WebFetch(...)` and `WebSearch(...)`.
+- External MCP wildcard names, such as `mcp__github__*`.
+- `Skill(...)` and `Agent(...)` subjects for future reusable workflow and
+  subagent routing.
+
+Command rules match parsed argv tokens rather than raw shell strings. `*`
+matches exactly one argv token, and the executable token must be fixed. Broad
+command grants such as `Bash(*)` are rejected, and shell control syntax such as
+`&&`, `||`, `;`, `|`, redirection, command substitution, or backticks is not
+accepted by this parser. These rules authorize only the governed virtual command
+surfaces; they do not grant raw host shell execution. Empty string arguments are
+valid after the executable, so patterns such as `Bash(git commit -m '')` can
+match explicit empty argument values without allowing an empty executable.
+
+Path rules are segment-aware. `*` matches within one path segment, while `**`
+is the cross-segment wildcard. For example, `Edit(src/*.py)` matches
+`src/app.py` but not `src/pkg/app.py`.
+
+Domain rules normalize URL hosts before matching. URL credentials, ports, and
+IPv6 brackets are stripped, so `WebFetch(http://[::1]:8000/docs)` and a subject
+such as `http://[::1]:9999/anything` both match the normalized host `::1`.
+
+`permission_rules` do not replace existing runtime checks. A path rule such as
+`Read(/docs/**)` does not by itself grant the `fs.read` tool in
+`evaluate_profile_tool_decision()`, and tool execution still needs the relevant
+profile grants, path grants, credential grants, sandbox/process checks, and
+runtime approvals. Runtime integrations for governed shell execution, WebFetch,
+WebSearch, LSP diagnostics, hooks, and admin policy simulation are separate
+follow-up tasks.
+
 ### Git Inspection Tools
 
 The `tldw-server` MCP host can expose optional native Git inspection tools when

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from mcp_unified.profiles.decisions import (
     PolicyDecision,
     PolicyDecisionRule,
@@ -492,7 +491,7 @@ def test_policy_decision_rule_accepts_command_list_argv() -> None:
     assert rule.argv == ("git", "status")
 
 
-@pytest.mark.parametrize("argv", [None, (), ("git", "")])
+@pytest.mark.parametrize("argv", [None, ()])
 def test_policy_decision_rule_rejects_invalid_command_argv(
     argv: tuple[str, ...] | None,
 ) -> None:
@@ -503,6 +502,17 @@ def test_policy_decision_rule_rejects_invalid_command_argv(
             source="precompiled",
             argv=argv,
         )
+
+
+def test_policy_decision_rule_accepts_empty_non_executable_argv_tokens() -> None:
+    rule = PolicyDecisionRule(
+        rule_type="command",
+        outcome="allow",
+        source="precompiled",
+        argv=("git", "commit", "-m", ""),
+    )
+
+    assert rule.argv == ("git", "commit", "-m", "")
 
 
 def test_compile_profile_policy_rules_revalidates_precompiled_command_rules() -> None:

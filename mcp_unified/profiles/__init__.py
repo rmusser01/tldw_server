@@ -25,6 +25,12 @@ from .path_grants import (
     compile_policy_path_grants,
     has_path_grant_policy,
 )
+from .permission_rules import (
+    PermissionRuleSubject,
+    compile_permission_rules,
+    evaluate_permission_rule_decision,
+    parse_permission_rule,
+)
 from .presets import (
     ProfilePreset,
     duplicate_builtin_preset,
@@ -66,6 +72,7 @@ __all__ = [
     "PolicyMatchedRule",
     "PathGrantCompilationResult",
     "PathGrantDiagnostic",
+    "PermissionRuleSubject",
     "ProfileAlreadyExistsError",
     "ProfilePolicy",
     "ProfilePreset",
@@ -76,14 +83,17 @@ __all__ = [
     "StoreBackedProfileResolver",
     "build_effective_policy_result",
     "compile_hierarchical_path_grants",
+    "compile_permission_rules",
     "compile_policy_path_grants",
     "compile_profile_policy_rules",
     "duplicate_builtin_preset",
     "evaluate_profile_tool_decision",
+    "evaluate_permission_rule_decision",
     "explain_profile_tool_decision",
     "get_builtin_preset",
     "has_path_grant_policy",
     "list_builtin_presets",
     "merge_policy_decisions",
+    "parse_permission_rule",
     "validate_preset_safety",
 ]
