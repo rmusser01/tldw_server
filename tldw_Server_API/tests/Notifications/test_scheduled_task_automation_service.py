@@ -538,6 +538,133 @@ def test_pause_resume_archive_idempotency_replay_without_extra_audit_events(tmp_
     assert _audit_count(repo, definition.id) == 4  # created, paused, resumed, archived  # nosec B101
 
 
+def test_lifecycle_idempotency_replay_returns_original_snapshot_after_later_mutation(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+
+    paused_snapshot = service.pause_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="snapshot-pause-key",
+    )
+    service.resume_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+    replay = service.pause_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="snapshot-pause-key",
+    )
+    current = repo.get_definition(owner_id=OWNER_ID, definition_id=definition.id)
+
+    assert paused_snapshot.lifecycle == "paused"  # nosec B101
+    assert paused_snapshot.version == 2  # nosec B101
+    assert current.lifecycle == "configured"  # nosec B101
+    assert current.version == 3  # nosec B101
+    assert replay.model_dump(mode="json") == paused_snapshot.model_dump(mode="json")  # nosec B101
+
+
+def test_create_idempotency_replay_returns_original_snapshot_after_later_mutation(tmp_path):
+    service, _repo = _service(tmp_path)
+    preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
+    payload = ScheduledTaskDefinitionCreateRequest(preview_id=preview.id)
+
+    created_snapshot = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=payload,
+        idempotency_key="snapshot-create-key",
+    )
+    service.pause_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=created_snapshot.id)
+    replay = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=payload,
+        idempotency_key="snapshot-create-key",
+    )
+
+    assert created_snapshot.lifecycle == "configured"  # nosec B101
+    assert created_snapshot.version == 1  # nosec B101
+    assert replay.model_dump(mode="json") == created_snapshot.model_dump(mode="json")  # nosec B101
+
+
+def test_update_idempotency_replay_returns_original_snapshot_after_later_update(tmp_path):
+    service, _repo = _service(tmp_path)
+    definition = _create_definition(service)
+    first_preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version,
+            name="First keyed update",
+        ),
+    )
+    first_payload = ScheduledTaskDefinitionUpdateRequest(preview_id=first_preview.id)
+    first_snapshot = service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=first_payload,
+        idempotency_key="snapshot-update-key",
+    )
+    second_preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=first_snapshot.version,
+            name="Second unkeyed update",
+        ),
+    )
+    service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=ScheduledTaskDefinitionUpdateRequest(preview_id=second_preview.id),
+    )
+
+    replay = service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=first_payload,
+        idempotency_key="snapshot-update-key",
+    )
+
+    assert first_snapshot.name == "First keyed update"  # nosec B101
+    assert first_snapshot.version == 2  # nosec B101
+    assert replay.model_dump(mode="json") == first_snapshot.model_dump(mode="json")  # nosec B101
+
+
+def test_duplicate_idempotency_replay_returns_original_snapshot_after_copy_mutation(tmp_path):
+    service, _repo = _service(tmp_path)
+    definition = _create_definition(service)
+    payload = ScheduledTaskDuplicateRequest(name="Snapshot duplicate")
+
+    duplicate_snapshot = service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=payload,
+        idempotency_key="snapshot-duplicate-key",
+    )
+    service.resume_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=duplicate_snapshot.id)
+    replay = service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=payload,
+        idempotency_key="snapshot-duplicate-key",
+    )
+
+    assert duplicate_snapshot.lifecycle == "paused"  # nosec B101
+    assert duplicate_snapshot.version == 1  # nosec B101
+    assert replay.model_dump(mode="json") == duplicate_snapshot.model_dump(mode="json")  # nosec B101
+
+
 def test_same_key_different_payload_conflict_for_create_update_duplicate_and_lifecycle_routes(tmp_path):
     service, _repo = _service(tmp_path)
     preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload(name="Create one"))

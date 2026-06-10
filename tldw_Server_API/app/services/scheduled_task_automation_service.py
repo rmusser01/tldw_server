@@ -814,6 +814,12 @@ class ScheduledTaskAutomationService:
         )
 
     def _load_response_ref(self, *, owner_id: int, response_ref: dict[str, Any]) -> BaseModel:
+        snapshot = response_ref.get("snapshot")
+        if isinstance(snapshot, dict):
+            if response_ref.get("type") == "preview":
+                return ScheduledTaskPreviewResponse.model_validate(snapshot)
+            if response_ref.get("type") == "definition":
+                return ScheduledTaskDefinitionResponse.model_validate(snapshot)
         if response_ref.get("type") == "preview":
             return self.get_preview(owner_id=owner_id, preview_id=str(response_ref["id"]))
         if response_ref.get("type") == "definition":
@@ -823,9 +829,17 @@ class ScheduledTaskAutomationService:
     @staticmethod
     def _response_ref(response: BaseModel) -> dict[str, Any]:
         if isinstance(response, ScheduledTaskPreviewResponse):
-            return {"type": "preview", "id": response.id}
+            return {
+                "type": "preview",
+                "id": response.id,
+                "snapshot": response.model_dump(mode="json"),
+            }
         if isinstance(response, ScheduledTaskDefinitionResponse):
-            return {"type": "definition", "id": response.id}
+            return {
+                "type": "definition",
+                "id": response.id,
+                "snapshot": response.model_dump(mode="json"),
+            }
         raise TypeError(f"unsupported idempotency response type: {type(response)!r}")
 
     def _preview_response(self, row: PreviewRow) -> ScheduledTaskPreviewResponse:
