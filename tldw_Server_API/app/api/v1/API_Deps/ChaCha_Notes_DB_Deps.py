@@ -45,6 +45,7 @@ _CHACHA_EXECUTOR_SHUTDOWN: bool = False
 _CHACHA_EXECUTOR_LOCK = threading.Lock()
 _CHACHA_EXECUTOR_MAX_WORKERS = max(1, int(os.getenv("CHACHA_EXECUTOR_MAX_WORKERS", "4")))
 _CHACHA_WATCHDOG_SECS = float(os.getenv("CHACHA_INIT_WATCHDOG_SECS", "5"))
+_CHACHA_INIT_TIMEOUT_SECS = float(os.getenv("CHACHA_INIT_TIMEOUT_SECS", "30"))
 _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL = "ChaChaNotes shutdown in progress"
 _CHACHA_CORRUPTION_ERROR_DETAIL = "ChaChaNotes DB corruption detected; repair or restore required"
 _CHACHA_RECOVERY_DOC = "Docs/Operations/ChaChaNotes_DB_Recovery.md"
@@ -205,6 +206,11 @@ def _set_chacha_shutting_down(value: bool) -> None:
 def _is_chacha_shutting_down() -> bool:
     with _CHACHA_SHUTDOWN_LOCK:
         return _CHACHA_SHUTTING_DOWN
+
+
+def _get_chacha_init_timeout_secs() -> float:
+    """Return the hard ChaChaNotes initialization timeout."""
+    return max(_CHACHA_INIT_TIMEOUT_SECS, _CHACHA_WATCHDOG_SECS * 3, 5)
 
 
 def reset_chacha_shutdown_state() -> None:
@@ -620,7 +626,7 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         return cached_instance
 
     if wait_for_existing_init:
-        wait_timeout = max(_CHACHA_WATCHDOG_SECS * 3, 5)
+        wait_timeout = _get_chacha_init_timeout_secs()
         try:
             completed = await asyncio.wait_for(
                 asyncio.to_thread(init_event.wait),
@@ -664,17 +670,18 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
 
     loop = asyncio.get_running_loop()
     start = time.perf_counter()
+    init_timeout = _get_chacha_init_timeout_secs()
     try:
         db_instance = await asyncio.wait_for(
             loop.run_in_executor(_get_chacha_executor(), _create_and_prepare_db, user_id, client_id),
-            timeout=max(_CHACHA_WATCHDOG_SECS * 3, 5),
+            timeout=init_timeout,
         )
         duration_ms = (time.perf_counter() - start) * 1000
         _record_init(duration_ms, True)
         if duration_ms / 1000 > _CHACHA_WATCHDOG_SECS:
             _maybe_dump_traceback(f"ChaChaNotes init exceeded {_CHACHA_WATCHDOG_SECS}s for user {user_id}")
     except asyncio.TimeoutError as e:
-        _record_init(_CHACHA_WATCHDOG_SECS * 1000, False, e)
+        _record_init(init_timeout * 1000, False, e)
         _maybe_dump_traceback(f"ChaChaNotes init timed out for user {user_id}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

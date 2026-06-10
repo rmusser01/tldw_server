@@ -650,7 +650,7 @@ def test_parse_helper_vm_status_downgrades_non_string_metadata_fields_to_unknown
     assert result.metadata.has_tldw_owner is False
 
 
-def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(monkeypatch) -> None:
+def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
 
     client = MacOSVirtualizationHelperClient()
@@ -662,8 +662,8 @@ def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(mon
             "run_id": "run-2",
             "session_id": "",
             "session_mode": "false",
-            "template": "/tmp/template.img",
-            "workspace_path": "/tmp/workspace",
+            "template": str(tmp_path / "template.img"),
+            "workspace_path": str(tmp_path / "workspace"),
         }
     )
 

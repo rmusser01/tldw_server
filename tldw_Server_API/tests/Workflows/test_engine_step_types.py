@@ -39,7 +39,7 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 5.0):
+def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 10.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
@@ -88,7 +88,7 @@ def test_wait_for_approval_then_resume(client_with_wf: TestClient):
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Nina"}}).json()["run_id"]
     # Wait until the run enters waiting state
     import time as _time
-    deadline = _time.time() + 5.0
+    deadline = _time.time() + 10.0
     waiting = False
     while _time.time() < deadline:
         rd = client.get(f"/api/v1/workflows/runs/{run_id}").json()

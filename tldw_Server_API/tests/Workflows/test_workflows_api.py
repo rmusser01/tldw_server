@@ -94,7 +94,7 @@ def _wait_for_run_row(db: WorkflowsDatabase, run_id: str, timeout: float = 5.0):
     pytest.fail(f"workflow run row was not created for {run_id}")
 
 
-def _wait_for_run_terminal_data(client: TestClient, run_id: str, timeout: float = 5.0) -> dict:
+def _wait_for_run_terminal_data(client: TestClient, run_id: str, timeout: float = 10.0) -> dict:
     deadline = time.time() + timeout
     last_status = None
     last_response_text = None
@@ -116,7 +116,7 @@ def _wait_for_run_terminal_data(client: TestClient, run_id: str, timeout: float 
     )
 
 
-def _wait_for_run_terminal(client: TestClient, run_id: str, timeout: float = 5.0) -> str:
+def _wait_for_run_terminal(client: TestClient, run_id: str, timeout: float = 10.0) -> str:
     return str(_wait_for_run_terminal_data(client, run_id, timeout=timeout).get("status"))
 
 

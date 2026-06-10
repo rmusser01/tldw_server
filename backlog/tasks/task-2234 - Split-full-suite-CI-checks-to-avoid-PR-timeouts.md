@@ -22,6 +22,7 @@ modified_files:
 - apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
 - apps/packages/ui/src/routes/option-setup.tsx
 - backlog/tasks/task-2234 - Split-full-suite-CI-checks-to-avoid-PR-timeouts.md
+- tldw_Server_API/app/core/DB_Management/PromptStudioDatabase.py
 - tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
 - tldw_Server_API/app/core/Embeddings/ChromaDB_Library.py
@@ -192,6 +193,12 @@ modified_files:
 - tldw_Server_API/tests/Workflows/adapters/test_control_adapters.py
 - tldw_Server_API/tests/Workflows/adapters/test_integration_adapters.py
 - tldw_Server_API/tests/Workflows/adapters/test_media_adapters.py
+- tldw_Server_API/tests/TTS/test_kokoro_health_and_errors.py
+- tldw_Server_API/tests/API_Deps/test_chacha_notes_db_deps_error_mapping.py
+- tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py
+- tldw_Server_API/tests/sandbox/test_run_started_metric_contract.py
+- tldw_Server_API/tests/sandbox/test_session_store_durability.py
+- tldw_Server_API/tests/Workflows/test_engine_step_types.py
 - tldw_Server_API/app/api/v1/endpoints/workflows.py
 - tldw_Server_API/app/core/Workflows/engine.py
 - tldw_Server_API/app/services/workflows_scheduler.py
@@ -212,6 +219,7 @@ modified_files:
 - tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
 - tldw_Server_API/tests/Workflows/test_workflows_extras.py
 - tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
+- tldw_Server_API/tests/Workflows/test_workflows_api.py
 - tldw_Server_API/tests/Workflows/test_webhook_replay_real.py
 - tldw_Server_API/tests/Workflows/conftest.py
 - tldw_Server_API/app/core/DB_Management/Workflows_DB.py
@@ -285,6 +293,8 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-10 PR #2258 run `27248793898` follow-up checked the completed failing rows before pushing. Actionable failures mapped to local fixes: media-audio Kokoro tests now patch the real imported `torch` module shape instead of replacing it with a non-package fake; workflow terminal wait helpers now allow 10s for CI-host scheduling jitter; Prompt Studio Postgres job acquisition rechecks live row status/lease in the final `UPDATE` to prevent duplicate multiprocessing acquisitions; ChaChaNotes dependency initialization keeps a hard timeout with watchdog headroom so cold DB setup does not return 503 just before completion; sandbox fake-Docker tests now stub Docker runtime preflight availability in their fake/no-execution paths; the Windows helper fake uses `tmp_path` instead of POSIX `/tmp` strings; and the uvicorn artifact traversal integration test now applies the same mocked Docker preflight as the neighboring artifact tests. Non-actionable `llm-local-backends` rows ended from runner shutdown/cancellation without pytest failure summaries. Aggregate summary logs were checked after the run became terminal; they only failed on the expected `full-suite shards finished with: failure` roll-up step. Verification: fresh combined touched-suite run passed locally with `128 passed`; artifact API neighbors passed with `5 passed`; sandbox preflight/path files passed with `71 passed`; exact uvicorn artifact traversal test skipped locally because the full-app uvicorn server did not report ready within the local startup deadline; compileall passed for touched Python files; `git diff --check` passed; Bandit JSON `/tmp/bandit_ci2258_followup_final.json` reported `errors=0` and `results=0`.
+
 2026-06-09 after pushing the follow-up CI fixes, PR #2258 reported `mergeable: CONFLICTING`, which prevented GitHub Actions from attaching new pull_request checks to commit `7d965f2d1b`. Merged `origin/dev` into `codex/ci-full-suite-shards` and resolved the only content conflict in `Helper_Scripts/update_privilege_registry_snapshot.py` by keeping the branch's deterministic AuthNZ database/profile defaults and the latest dev pytest/audio route inclusion behavior. Regenerated `tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json` for the merged live app after `audio.tts_provider_unload` split into its own privilege key. Verification: no conflict markers remained; exact router/VZ checks passed; exact privilege registry snapshot test passed after regeneration.
 
 2026-06-08 PR #2258 run 27174945567 also completed Ubuntu/Python 3.13 `platform-services-core` with `test_minimal_test_router_specs_participate_in_route_policy` failing on the merge ref because route policy calls included one additional known `workspaces` alias compared with the branch-head ordered list. The router policy contract now asserts every selected minimal spec contributes its required policy call and rejects unknown policy keys, without requiring a brittle exact ordered list when the merge ref has duplicate known aliases. Verification: exact router-policy test passed locally; full `test_router_groups_contract.py` passed locally with 175 tests.
@@ -748,6 +758,16 @@ Verification for this continuation: exact RAG failure passed after reproducing r
 Final drain of run `27239520208` completed with no queued or running jobs. New terminal rows after the previous note were Ubuntu/Python 3.13 `media-audio`, macOS/Python 3.12 `platform-sandbox-admin-artifacts`, macOS/Python 3.12 `platform-sandbox-ws-streams`, macOS/Python 3.12 `platform-sandbox-state-store`, and aggregate full-suite summary jobs. The media-audio row was the same ElevenLabs blocked-egress initialization failure already covered by the local `_fetch_user_voices` mock. The macOS sandbox rows were Docker runtime preflight gaps in tests that use fake Docker execution or only exercise persistence/ownership/artifact behavior: the shared-artifact client now stubs Docker preflight availability, the session execution-defaults roundtrip test now uses the existing preflight helper, and the run ownership tests now set scoped env vars plus the same mocked Docker preflight. Windows state-store also exposed a platform-shape mismatch in `test_cancel_run_kills_active_process_group_and_removes_run_dir`; the test no longer adds a fake `os.killpg` on platforms where the API is absent. Ubuntu/Python 3.12 and 3.13 `llm-local-backends` remained cancellation-only rows with no pytest assertion summary, and the aggregate full-suite failures were summary gates for failed shards.
 
 Additional verification after the final drain: exact macOS sandbox failures passed locally (`test_shared_artifacts_directory_persists_and_is_listed`, `test_session_execution_defaults_roundtrip_and_clone`, and both `test_run_ownership.py` tests), the full worktree runner file passed locally (`26 passed`), and a Windows-shaped no-`killpg` simulation for `WorktreeRunner.cancel_run` succeeded. A local CI-like sandbox state-store aggregate hit an unrelated local timing failure in `test_global_active_cap_enforced_across_service_instances` before reaching the worktree file, so it was not used as a passing gate.
+
+2026-06-09 fresh-head run `27248793898` exposed Ubuntu/Python 3.13 `product-workflows` failing `test_run_workflow_waits_for_deep_research_completion` because the async workflow run remained `running` just past the five-second test helper deadline under full-shard CI load. The shared workflow terminal-status helper now waits up to ten seconds, preserving the same terminal-state assertions while removing the CI scheduling race. The same run exposed Ubuntu/Python 3.12 `media-audio` failing `test_kokoro_pytorch_requires_pkg` when prior optional-ML tests left a minimal fake `torch` module in `sys.modules`; the Kokoro test now patches `torch.jit.load` and `torch.load` on the already-imported module object and creates a lightweight `jit` namespace when needed, avoiding pytest's string import resolver against a non-package torch stub. Ubuntu/Python 3.12 `llm-local-backends` remains a runner shutdown/cancellation row with no pytest assertion summary.
+
+The same run later exposed Ubuntu/Python 3.12 `product-prompt-studio` failing `test_parallel_acquire_distinct_jobs_multiprocessing[postgres]` with duplicate job acquisitions across processes. Root cause: the PostgreSQL `acquire_next_job()` statement used an advisory-lock candidate CTE, but the final `UPDATE` only checked `q.id`; if another transaction committed the same row as `processing` after the candidate snapshot but before the update recheck, PostgreSQL could update and return the already-claimed row. The final update now rechecks the live row status/lease predicate before returning the job.
+
+Ubuntu/Python 3.12 `product-workflows` also failed `test_wait_for_approval_then_resume` after the run stayed out of the expected waiting state just past the five-second loop deadline under full-shard load. The step-types workflow polling helper and approval-wait loop now use the same ten-second CI budget as the Workflows API polling helper.
+
+Windows/Python 3.12 `chat-character-legacy-core` later failed `test_message_placeholders_and_length_guard` because ChaChaNotes cold initialization on Windows completed roughly 0.7 seconds after the existing 15-second hard timeout fired. The follow-up fix will keep the five-second watchdog warning threshold but give the actual initialization request a longer hard timeout, with a focused regression covering the timeout value passed to `_get_or_init_db_instance()`.
+
+Further draining found sandbox-only failures: macOS state-store and ws/streams tests returned Docker runtime unavailable despite using fake sandbox execution/session behavior, and Windows sandbox-runtimes rejected a fake macOS helper VM template path as invalid. The follow-up will keep those tests isolated from host Docker availability and use platform-valid helper paths.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

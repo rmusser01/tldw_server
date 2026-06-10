@@ -198,6 +198,7 @@ def test_cross_service_destroy_removes_store_backed_workspace_root(
     tmp_path: Path,
 ) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
+    _force_docker_preflight_available(monkeypatch)
 
     creator = SandboxService()
     session = creator.create_session(

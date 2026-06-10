@@ -1,3 +1,5 @@
+import types
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -54,8 +56,10 @@ async def test_kokoro_pytorch_requires_pkg(monkeypatch):
         def to(self, *args, **kwargs):
             return self
 
-    monkeypatch.setattr("torch.jit.load", lambda *args, **kwargs: DummyTorchModule())
-    monkeypatch.setattr("torch.load", lambda *args, **kwargs: DummyTorchModule())
+    if not hasattr(torch, "jit"):
+        monkeypatch.setattr(torch, "jit", types.SimpleNamespace(), raising=False)
+    monkeypatch.setattr(torch.jit, "load", lambda *args, **kwargs: DummyTorchModule(), raising=False)
+    monkeypatch.setattr(torch, "load", lambda *args, **kwargs: DummyTorchModule(), raising=False)
 
     # Ensure 'kokoro' module import fails to trigger guidance error
     import builtins

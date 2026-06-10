@@ -42,6 +42,32 @@ def clear_chacha_dependency_state() -> Iterator[None]:
 
 
 @pytest.mark.asyncio
+async def test_chacha_init_uses_hard_timeout_headroom_beyond_watchdog(monkeypatch, tmp_path):
+    user_dir = tmp_path / "user-42"
+    recorded_timeouts: list[float] = []
+
+    class _FakeDB:
+        pass
+
+    def _create_db(_user_id, _client_id):
+        return _FakeDB()
+
+    async def _record_wait_for(awaitable, timeout):
+        recorded_timeouts.append(timeout)
+        return await awaitable
+
+    monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
+    monkeypatch.setattr(chacha_deps, "_CHACHA_WATCHDOG_SECS", 5.0)
+    monkeypatch.setattr(chacha_deps, "_create_and_prepare_db", _create_db)
+    monkeypatch.setattr(chacha_deps.asyncio, "wait_for", _record_wait_for)
+
+    db = await chacha_deps._get_or_init_db_instance(42, "client-42")
+
+    assert isinstance(db, _FakeDB)
+    assert recorded_timeouts == [30.0]
+
+
+@pytest.mark.asyncio
 async def test_chacha_init_sanitizes_runtime_errors(monkeypatch, tmp_path):
     user_dir = tmp_path / "user-123"
 
