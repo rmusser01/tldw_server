@@ -297,7 +297,7 @@ git commit -m "feat: add scheduled task automation API skeleton"
 - Create: `tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py`
 - Create: `tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Test per-user isolation, preview persistence, definition persistence, disabled lock fields, audit events, idempotency scoping, pagination, filtering, and redacted Agent Task storage.
 
@@ -341,7 +341,7 @@ Add separate tests:
 - `test_definition_persists_disabled_lock_kind_and_reason`
 - `test_agent_task_definition_and_audit_storage_do_not_contain_raw_message_secret`
 
-- [ ] **Step 2: Run repository tests to verify they fail**
+- [x] **Step 2: Run repository tests to verify they fail**
 
 Run:
 
@@ -352,7 +352,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automat
 
 Expected: FAIL because `Scheduled_Tasks_DB.py` does not exist.
 
-- [ ] **Step 3: Implement row dataclasses and schema**
+- [x] **Step 3: Implement row dataclasses and schema**
 
 Create `Scheduled_Tasks_DB.py` with:
 
@@ -409,7 +409,7 @@ Indexes:
 - audit: `(definition_id, created_at)`
 - idempotency: unique `(owner_id, route, key)`
 
-- [ ] **Step 4: Implement repository methods**
+- [x] **Step 4: Implement repository methods**
 
 Add focused methods:
 
@@ -430,7 +430,7 @@ Add focused methods:
 
 Use JSON helpers that always encode dictionaries/lists with sorted keys.
 
-- [ ] **Step 5: Run repository tests**
+- [x] **Step 5: Run repository tests**
 
 Run:
 
@@ -441,7 +441,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_task_automat
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit repository**
+- [x] **Step 6: Commit repository**
 
 ```bash
 git add \

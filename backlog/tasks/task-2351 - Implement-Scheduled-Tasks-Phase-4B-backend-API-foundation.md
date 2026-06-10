@@ -40,6 +40,9 @@ Implementation will follow `Docs/superpowers/plans/2026-06-09-scheduled-tasks-ph
 Task 1 completed in commit 8e2dd7b1fc: added automation schemas, route skeletons, capability service, primitive extension, and route/capability tests.
 Task 1 verification: focused pytest for `test_scheduled_task_automation_api.py` and `test_scheduled_tasks_control_plane.py` passed with 6 tests; touched-scope Bandit reported zero findings; git diff --check was clean.
 Task 1 review: spec-compliance reviewer approved; code-quality reviewer approved with one minor suggestion to add extra 501 skeleton assertions if useful before later endpoint wiring.
+Task 2 completed across commits 84a7007f37, d6f528ba1a, and cea06ef558: added the per-user SQLite repository, repository tests, and review-driven hardening for optimistic locking, preview ownership, single-use preview consumption, idempotency expiry/reuse, shared SQLite policy, strict JSON encoding, atomic create-from-preview, owner-checked update preview references, and owner-checked audit writes.
+Task 2 verification: repository pytest passed with 19 tests; formatting, py_compile, Bandit touched-scope scan, and git diff --check passed in the worker verification.
+Task 2 review: spec-compliance reviewer approved. Code-quality review initially found repository lifecycle/ownership issues; worker fixed them in two follow-up commits. Final code-quality re-review approved with no remaining issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
