@@ -9,8 +9,17 @@ import {
   Badge as DesignSystemBadge,
   type BadgeVariant
 } from "@/components/ui/primitives"
-import type { CreateScheduledTaskReminderPayload } from "@/services/scheduled-tasks-control-plane"
+import type {
+  CreateScheduledTaskReminderPayload,
+  ScheduledTaskAutomationCapabilitiesResponse,
+  ScheduledTaskAutomationFamily,
+  ScheduledTaskDefinitionCreateRequest,
+  ScheduledTaskDefinitionResponse,
+  ScheduledTaskPreviewCreateRequest,
+  ScheduledTaskPreviewResponse
+} from "@/services/scheduled-tasks-control-plane"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
+import { ScheduledTaskAutomationDefinitionEditor } from "./ScheduledTaskAutomationDefinitionEditor"
 import {
   applyScheduledTaskTemplateCapabilities,
   buildNotificationPolicyCopy,
@@ -45,6 +54,14 @@ export interface ScheduledTaskCreatePanelProps {
   onCreateReminder: (payload: CreateScheduledTaskReminderPayload) => Promise<void> | void
   savingReminder?: boolean
   templateCapabilities?: ScheduledTaskTemplateCapabilityMap
+  automationCapabilities?: ScheduledTaskAutomationCapabilitiesResponse | null
+  onPreviewAutomationDefinition?: (
+    payload: ScheduledTaskPreviewCreateRequest
+  ) => Promise<ScheduledTaskPreviewResponse> | ScheduledTaskPreviewResponse
+  onCreateAutomationDefinition?: (
+    payload: ScheduledTaskDefinitionCreateRequest
+  ) => Promise<ScheduledTaskDefinitionResponse | unknown> | ScheduledTaskDefinitionResponse | unknown
+  onAutomationDefinitionCreated?: (definition: ScheduledTaskDefinitionResponse | unknown) => void
 }
 
 const WATCHLISTS_HREF = "/watchlists"
@@ -54,6 +71,23 @@ const isTemplateFilterId = (value: SegmentedValue): value is ScheduledTaskTempla
 
 const requiresWatchlistsHandoff = (template: ScheduledTaskTemplate): boolean =>
   template.id === "watch" || template.id === "ingest"
+
+const templateIdToAutomationFamily = (
+  templateId: ScheduledTaskTemplateId
+): ScheduledTaskAutomationFamily | null =>
+  templateId === "recurring_question" || templateId === "agent_task"
+    ? templateId
+    : null
+
+const canCreateAutomationDefinition = (
+  capabilities: ScheduledTaskAutomationCapabilitiesResponse | null | undefined,
+  family: ScheduledTaskAutomationFamily
+): boolean =>
+  capabilities?.items.some(
+    (capability) =>
+      capability.family === family &&
+      capability.actions.create_definition?.status === "available"
+  ) ?? false
 
 const templateStateToBadgeVariant = (
   state: ScheduledTaskTemplate["state"]
@@ -341,7 +375,11 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
   onSelectTemplate,
   onCreateReminder,
   savingReminder,
-  templateCapabilities
+  templateCapabilities,
+  automationCapabilities,
+  onPreviewAutomationDefinition,
+  onCreateAutomationDefinition,
+  onAutomationDefinitionCreated
 }) => {
   const [finderText, setFinderText] = useState("")
   const [filterId, setFilterId] = useState<ScheduledTaskTemplateFilterId>("all")
@@ -381,6 +419,25 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
           saving={savingReminder}
           onClose={() => onSelectTemplate(null)}
           onSubmit={(payload) => onCreateReminder(payload as CreateScheduledTaskReminderPayload)}
+        />
+      )
+    }
+
+    const automationFamily = templateIdToAutomationFamily(selectedTemplate.id)
+    if (
+      automationFamily &&
+      canCreateAutomationDefinition(automationCapabilities, automationFamily) &&
+      onPreviewAutomationDefinition &&
+      onCreateAutomationDefinition
+    ) {
+      return (
+        <ScheduledTaskAutomationDefinitionEditor
+          family={automationFamily}
+          mode="create"
+          onPreview={onPreviewAutomationDefinition}
+          onCreate={onCreateAutomationDefinition}
+          onSaved={onAutomationDefinitionCreated}
+          onCancel={() => onSelectTemplate(null)}
         />
       )
     }

@@ -3,7 +3,12 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import type {
+  ScheduledTask,
+  ScheduledTaskAuditEventResponse,
+  ScheduledTaskDefinitionResponse,
+  ScheduledTaskPreviewResponse
+} from "@/services/scheduled-tasks-control-plane"
 import { ScheduledTaskDetailDrawer } from "../ScheduledTaskDetailDrawer"
 import { projectScheduledTaskResults } from "../scheduled-task-results"
 
@@ -50,6 +55,77 @@ const watchlistTask: ScheduledTask = {
     latest_output_id: 202
   }
 }
+
+const automationTask: ScheduledTask = {
+  id: "automation_definition:definition_1",
+  primitive: "automation_definition",
+  title: "Track answer",
+  description: "Ask until the answer appears",
+  status: "configured_execution_unavailable",
+  enabled: true,
+  schedule_summary: "0 9 * * *",
+  timezone: "UTC",
+  next_run_at: null,
+  last_run_at: null,
+  edit_mode: "native",
+  manage_url: null,
+  source_ref: {
+    definition_id: "definition_1",
+    family: "recurring_question",
+    lifecycle: "configured",
+    health: "execution_unavailable",
+    visibility: "private",
+    notification_policy: "none"
+  }
+}
+
+const automationDefinition: ScheduledTaskDefinitionResponse = {
+  id: "definition_1",
+  version: 2,
+  family: "recurring_question",
+  name: "Track answer",
+  description: "Ask until the answer appears",
+  lifecycle: "configured",
+  health: "execution_unavailable",
+  schedule: { kind: "cron", cron: "0 9 * * *", timezone: "UTC" },
+  input: { question: "Has the answer appeared?" },
+  config: {},
+  visibility_policy: { visibility: "private" },
+  notification_policy: { channels: [] },
+  approval_policy: { mode: "none" },
+  preview_id: "preview_1",
+  created_at: "2026-06-10T00:00:00Z",
+  updated_at: "2026-06-10T01:00:00Z"
+}
+
+const previewHistory: ScheduledTaskPreviewResponse[] = [
+  {
+    id: "preview_1",
+    mode: "create",
+    family: "recurring_question",
+    definition_id: "definition_1",
+    definition_version: 2,
+    status: "valid",
+    normalized_config: { name: "Track answer" },
+    validation_errors: [],
+    warnings: [],
+    visibility_policy: { visibility: "private" },
+    schedule_preview: { summary: "0 9 * * *" },
+    redaction_policy: { redacted_fields: [] },
+    expires_at: "2026-06-11T00:00:00Z"
+  }
+]
+
+const auditEvents: ScheduledTaskAuditEventResponse[] = [
+  {
+    id: "audit_1",
+    definition_id: "definition_1",
+    event_type: "definition.created",
+    actor: "user:1",
+    summary: "Definition created",
+    created_at: "2026-06-10T00:00:00Z"
+  }
+]
 
 describe("ScheduledTaskDetailDrawer", () => {
   it("shows reminder task details and native reminder actions", () => {
@@ -141,5 +217,40 @@ describe("ScheduledTaskDetailDrawer", () => {
       "/scheduled-tasks?tab=results&result_id=202"
     )
     expect(screen.getByText(/Watchlists remains the full workspace/i)).toBeInTheDocument()
+  })
+
+  it("shows automation definition details, preview history, audit, and lifecycle actions", () => {
+    render(
+      <ScheduledTaskDetailDrawer
+        open
+        task={automationTask}
+        automationDefinition={automationDefinition}
+        automationPreviewHistory={previewHistory}
+        automationAuditEvents={auditEvents}
+        onClose={vi.fn()}
+        onEditReminder={vi.fn()}
+        onDeleteReminder={vi.fn()}
+        onPauseAutomationDefinition={vi.fn()}
+        onResumeAutomationDefinition={vi.fn()}
+        onArchiveAutomationDefinition={vi.fn()}
+        onDuplicateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("dialog", { name: /Track answer/i })).toBeInTheDocument()
+    expect(screen.getByText("Recurring question")).toBeInTheDocument()
+    expect(screen.getByText("Managed here")).toBeInTheDocument()
+    expect(screen.getAllByText("configured").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("execution_unavailable").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("private").length).toBeGreaterThan(0)
+    expect(screen.getByText("Execution is not available yet")).toBeInTheDocument()
+    expect(screen.getByText("Preview history")).toBeInTheDocument()
+    expect(screen.getByText(/preview_1/)).toBeInTheDocument()
+    expect(screen.getByText("Audit events")).toBeInTheDocument()
+    expect(screen.getByText("Definition created")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Pause definition" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Archive definition" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Duplicate definition" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Open activity" })).not.toBeInTheDocument()
   })
 })

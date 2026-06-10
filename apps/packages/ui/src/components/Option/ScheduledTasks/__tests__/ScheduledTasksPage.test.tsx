@@ -12,6 +12,17 @@ import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 const mocks = vi.hoisted(() => ({
   useCanonicalConnectionConfig: vi.fn(),
   listScheduledTasks: vi.fn(),
+  getScheduledTaskCapabilities: vi.fn(),
+  createScheduledTaskPreview: vi.fn(),
+  createScheduledTaskDefinition: vi.fn(),
+  updateScheduledTaskDefinition: vi.fn(),
+  getScheduledTaskDefinition: vi.fn(),
+  listScheduledTaskPreviews: vi.fn(),
+  listScheduledTaskDefinitionAudit: vi.fn(),
+  pauseScheduledTaskDefinition: vi.fn(),
+  resumeScheduledTaskDefinition: vi.fn(),
+  archiveScheduledTaskDefinition: vi.fn(),
+  duplicateScheduledTaskDefinition: vi.fn(),
   createScheduledTaskReminder: vi.fn(),
   updateScheduledTaskReminder: vi.fn(),
   deleteScheduledTaskReminder: vi.fn()
@@ -24,6 +35,28 @@ vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
 
 vi.mock("@/services/scheduled-tasks-control-plane", () => ({
   listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args),
+  getScheduledTaskCapabilities: (...args: unknown[]) =>
+    mocks.getScheduledTaskCapabilities(...args),
+  createScheduledTaskPreview: (...args: unknown[]) =>
+    mocks.createScheduledTaskPreview(...args),
+  createScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.createScheduledTaskDefinition(...args),
+  updateScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.updateScheduledTaskDefinition(...args),
+  getScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.getScheduledTaskDefinition(...args),
+  listScheduledTaskPreviews: (...args: unknown[]) =>
+    mocks.listScheduledTaskPreviews(...args),
+  listScheduledTaskDefinitionAudit: (...args: unknown[]) =>
+    mocks.listScheduledTaskDefinitionAudit(...args),
+  pauseScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.pauseScheduledTaskDefinition(...args),
+  resumeScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.resumeScheduledTaskDefinition(...args),
+  archiveScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.archiveScheduledTaskDefinition(...args),
+  duplicateScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.duplicateScheduledTaskDefinition(...args),
   createScheduledTaskReminder: (...args: unknown[]) => mocks.createScheduledTaskReminder(...args),
   updateScheduledTaskReminder: (...args: unknown[]) => mocks.updateScheduledTaskReminder(...args),
   deleteScheduledTaskReminder: (...args: unknown[]) => mocks.deleteScheduledTaskReminder(...args)
@@ -46,6 +79,88 @@ const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
 const SLOW_SCHEDULE_FORM_TIMEOUT_MS = 20000
+
+const availableAutomationCapabilities = {
+  items: [
+    {
+      family: "recurring_question",
+      family_availability: "available",
+      actions: {
+        create_definition: {
+          status: "available",
+          reason: null,
+          required_permissions: []
+        },
+        update_definition: {
+          status: "available",
+          reason: null,
+          required_permissions: []
+        }
+      },
+      missing_dependencies: [],
+      related_capabilities: {},
+      schema_version: "2026-06-10"
+    },
+    {
+      family: "agent_task",
+      family_availability: "available",
+      actions: {
+        create_definition: {
+          status: "available",
+          reason: null,
+          required_permissions: []
+        }
+      },
+      missing_dependencies: [],
+      related_capabilities: {},
+      schema_version: "2026-06-10"
+    }
+  ]
+}
+
+const emptyAutomationCapabilities = {
+  items: []
+}
+
+const automationTask = (overrides: Record<string, unknown> = {}) => ({
+  id: "automation_definition:definition_1",
+  primitive: "automation_definition",
+  title: "Track answer",
+  description: "Ask until the answer appears",
+  status: "configured_execution_unavailable",
+  enabled: true,
+  schedule_summary: "0 9 * * *",
+  timezone: "UTC",
+  next_run_at: null,
+  last_run_at: null,
+  edit_mode: "native",
+  manage_url: null,
+  source_ref: {
+    definition_id: "definition_1",
+    family: "recurring_question",
+    lifecycle: "configured",
+    health: "execution_unavailable",
+    visibility: "private"
+  },
+  ...overrides
+})
+
+const definitionResponse = (overrides: Record<string, unknown> = {}) => ({
+  id: "definition_1",
+  version: 1,
+  family: "recurring_question",
+  name: "Track answer",
+  description: null,
+  lifecycle: "configured",
+  health: "execution_unavailable",
+  schedule: {},
+  input: {},
+  config: {},
+  visibility_policy: { visibility: "private" },
+  notification_policy: {},
+  approval_policy: {},
+  ...overrides
+})
 
 const expectInsideDesignSystemComponent = (
   text: string | RegExp,
@@ -98,6 +213,43 @@ describe("ScheduledTasksPage", () => {
         }
       })
     })
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(emptyAutomationCapabilities)
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_1",
+      mode: "create",
+      family: "recurring_question",
+      status: "valid",
+      normalized_config: {},
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: {},
+      schedule_preview: {},
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+    mocks.createScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+    mocks.updateScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+    mocks.getScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+    mocks.listScheduledTaskPreviews.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+      has_more: false
+    })
+    mocks.listScheduledTaskDefinitionAudit.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+      has_more: false
+    })
+    mocks.pauseScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "paused" }))
+    mocks.resumeScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "configured" }))
+    mocks.archiveScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "archived" }))
+    mocks.duplicateScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({ id: "definition_copy", lifecycle: "paused" })
+    )
   })
 
   it("shows an unsupported-state message without calling the list endpoint when scheduled tasks are unavailable", async () => {
@@ -425,6 +577,169 @@ describe("ScheduledTasksPage", () => {
       "/acp-playground"
     )
     expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("loads automation capabilities for API-first create flows", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=recurring_question"
+    )
+
+    expect(await screen.findByText("Create Recurring question")).toBeInTheDocument()
+    expect(mocks.getScheduledTaskCapabilities).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText("Question")).toBeInTheDocument()
+  })
+
+  it("creates a Recurring Question definition through preview and create APIs", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [automationTask()],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_recurring",
+      mode: "create",
+      family: "recurring_question",
+      status: "valid",
+      normalized_config: { name: "Track answer" },
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: { visibility: "private" },
+      schedule_preview: { summary: "Manual" },
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+    mocks.createScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=recurring_question"
+    )
+
+    await user.type(await screen.findByLabelText("Question"), "Has the answer appeared?")
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    expect(await screen.findByText("Preview ready")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          family: "recurring_question",
+          input: expect.objectContaining({
+            question: "Has the answer appeared?"
+          })
+        })
+      )
+    })
+    expect(mocks.createScheduledTaskDefinition).toHaveBeenCalledWith({
+      preview_id: "preview_recurring",
+      initial_lifecycle: "configured"
+    })
+    await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2))
+    await waitFor(() => {
+      expect(screen.getAllByText("Track answer").length).toBeGreaterThan(0)
+    })
+  })
+
+  it("runs automation definition lifecycle actions from rows and refreshes the list", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        automationTask(),
+        automationTask({
+          id: "automation_definition:paused",
+          title: "Paused agent",
+          status: "paused",
+          source_ref: {
+            definition_id: "paused",
+            family: "agent_task",
+            lifecycle: "paused",
+            health: "execution_unavailable"
+          }
+        })
+      ],
+      total: 2,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Pause Track answer" }))
+    await waitFor(() => {
+      expect(mocks.pauseScheduledTaskDefinition).toHaveBeenCalledWith(
+        "automation_definition:definition_1"
+      )
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Resume Paused agent" }))
+    await waitFor(() => {
+      expect(mocks.resumeScheduledTaskDefinition).toHaveBeenCalledWith(
+        "automation_definition:paused"
+      )
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Archive Track answer" }))
+    await waitFor(() => {
+      expect(mocks.archiveScheduledTaskDefinition).toHaveBeenCalledWith(
+        "automation_definition:definition_1"
+      )
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Duplicate Track answer" }))
+    await waitFor(() => {
+      expect(mocks.duplicateScheduledTaskDefinition).toHaveBeenCalledWith(
+        "automation_definition:definition_1",
+        expect.objectContaining({ name: expect.stringContaining("Track answer") })
+      )
+    })
+    await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(5))
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
+  it("shows API error detail code and message for automation lifecycle failures", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.pauseScheduledTaskDefinition.mockRejectedValue({
+      detail: {
+        code: "definition_locked",
+        message: "Definition is locked by policy."
+      }
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Pause Track answer" }))
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("definition_locked: Definition is locked by policy.").length
+      ).toBeGreaterThan(0)
+    })
   })
 
   it("opens a task detail deep link after task data loads", async () => {

@@ -20,6 +20,7 @@ import {
   type ScheduledTaskProductStatus,
   type ScheduledTaskStatusKey
 } from "./scheduled-task-status"
+import { isAutomationDefinitionTask } from "./scheduled-task-automation-status"
 import { WatchlistTaskActionLinks } from "./WatchlistTaskActionLinks"
 import type { ScheduledTaskResultItem } from "./scheduled-task-results"
 
@@ -35,6 +36,10 @@ export interface ScheduledTaskTableProps {
   onOpenTaskResults?: (task: ScheduledTask) => void
   onEditReminder: (task: ScheduledTask) => void
   onDeleteReminder: (task: ScheduledTask) => void
+  onPauseAutomationDefinition?: (task: ScheduledTask) => void
+  onResumeAutomationDefinition?: (task: ScheduledTask) => void
+  onArchiveAutomationDefinition?: (task: ScheduledTask) => void
+  onDuplicateAutomationDefinition?: (task: ScheduledTask) => void
 }
 
 type ScheduledTaskStatusFilter = "all" | ScheduledTaskStatusKey
@@ -99,7 +104,8 @@ const typeFilterOptions: Array<{
 }> = [
   { value: "all", label: "All types" },
   { value: "reminder_task", label: "Reminder" },
-  { value: "watchlist_job", label: "Watchlist monitor" }
+  { value: "watchlist_job", label: "Watchlist monitor" },
+  { value: "automation_definition", label: "Automation definition" }
 ]
 
 export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
@@ -109,7 +115,11 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
   onInspectTask,
   onOpenTaskResults,
   onEditReminder,
-  onDeleteReminder
+  onDeleteReminder,
+  onPauseAutomationDefinition,
+  onResumeAutomationDefinition,
+  onArchiveAutomationDefinition,
+  onDuplicateAutomationDefinition
 }) => {
   const [searchText, setSearchText] = useState("")
   const [statusFilter, setStatusFilter] =
@@ -150,6 +160,59 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       >
         Results
       </Button>
+    )
+  }
+
+  const renderAutomationActions = (task: ScheduledTask) => {
+    const lifecycle =
+      typeof task.source_ref?.lifecycle === "string" ? task.source_ref.lifecycle : task.status
+    const isPaused = lifecycle === "paused"
+    const isArchived = lifecycle === "archived"
+
+    return (
+      <Space wrap>
+        <Button
+          size="small"
+          aria-label={rowActionLabel("Inspect", task)}
+          onClick={() => onInspectTask(task)}
+        >
+          Inspect
+        </Button>
+        {renderResultsButton(task)}
+        {isPaused ? (
+          <Button
+            size="small"
+            aria-label={rowActionLabel("Resume", task)}
+            onClick={() => onResumeAutomationDefinition?.(task)}
+          >
+            Resume
+          </Button>
+        ) : !isArchived ? (
+          <Button
+            size="small"
+            aria-label={rowActionLabel("Pause", task)}
+            onClick={() => onPauseAutomationDefinition?.(task)}
+          >
+            Pause
+          </Button>
+        ) : null}
+        {!isArchived ? (
+          <Button
+            size="small"
+            aria-label={rowActionLabel("Archive", task)}
+            onClick={() => onArchiveAutomationDefinition?.(task)}
+          >
+            Archive
+          </Button>
+        ) : null}
+        <Button
+          size="small"
+          aria-label={rowActionLabel("Duplicate", task)}
+          onClick={() => onDuplicateAutomationDefinition?.(task)}
+        >
+          Duplicate
+        </Button>
+      </Space>
     )
   }
 
@@ -228,8 +291,12 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
       title: "Management",
       key: "management",
       render: (_, task) => (
-        <DesignSystemBadge variant={isNativeReminderTask(task) ? "info" : "warning"}>
-          {isNativeReminderTask(task) ? "Managed here" : "Managed in Watchlists"}
+        <DesignSystemBadge
+          variant={isNativeReminderTask(task) || isAutomationDefinitionTask(task) ? "info" : "warning"}
+        >
+          {isNativeReminderTask(task) || isAutomationDefinitionTask(task)
+            ? "Managed here"
+            : "Managed in Watchlists"}
         </DesignSystemBadge>
       )
     },
@@ -265,6 +332,10 @@ export const ScheduledTaskTable: React.FC<ScheduledTaskTableProps> = ({
               </Button>
             </Space>
           )
+        }
+
+        if (isAutomationDefinitionTask(task)) {
+          return renderAutomationActions(task)
         }
 
         return (
