@@ -1,0 +1,671 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas import (
+    ScheduledTaskDefinitionCreateRequest,
+    ScheduledTaskDefinitionUpdateRequest,
+    ScheduledTaskDuplicateRequest,
+    ScheduledTaskPreviewCreateRequest,
+)
+from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
+from tldw_Server_API.app.services.scheduled_task_automation_service import ScheduledTaskAutomationService
+
+OWNER_ID = 4101
+OTHER_OWNER_ID = 4102
+ACTOR = "task-service-test"
+RAW_SENTINEL = "RAW_AGENT_SECRET_DO_NOT_LEAK_4B"
+
+
+def _service(tmp_path: Path) -> tuple[ScheduledTaskAutomationService, ScheduledTasksDatabase]:
+    repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks_service.db")
+    repo.ensure_schema()
+    return ScheduledTaskAutomationService(repository=repo), repo
+
+
+def _payload(
+    *,
+    family: str = "recurring_question",
+    mode: str = "create",
+    definition_id: str | None = None,
+    definition_version: int | None = None,
+    name: str = "Daily research check",
+    input_payload: dict[str, Any] | None = None,
+    schedule: dict[str, Any] | None = None,
+) -> ScheduledTaskPreviewCreateRequest:
+    if input_payload is None:
+        input_payload = (
+            {"question": "What changed in the selected sources?"}
+            if family == "recurring_question"
+            else {"agent_ref": "agent:triage", "message": "Summarize high priority changes."}
+        )
+    return ScheduledTaskPreviewCreateRequest(
+        mode=mode,
+        family=family,
+        definition_id=definition_id,
+        definition_version=definition_version,
+        name=name,
+        description="Service lifecycle test",
+        input=input_payload,
+        schedule=schedule or {"kind": "daily", "time": "09:00", "timezone": "UTC"},
+        visibility_policy={"mode": "findings_only"},
+        notification_policy={"channels": ["in_app"]},
+        approval_policy={"required": False},
+    )
+
+
+def _create_definition(
+    service: ScheduledTaskAutomationService,
+    *,
+    owner_id: int = OWNER_ID,
+    name: str = "Daily research check",
+    initial_lifecycle: str = "configured",
+):
+    preview = service.create_preview(
+        owner_id=owner_id,
+        actor=ACTOR,
+        payload=_payload(name=name),
+    )
+    return service.create_definition(
+        owner_id=owner_id,
+        actor=ACTOR,
+        payload=ScheduledTaskDefinitionCreateRequest(
+            preview_id=preview.id,
+            initial_lifecycle=initial_lifecycle,
+        ),
+    )
+
+
+def _as_json_text(value: Any) -> str:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")
+    return json.dumps(value, sort_keys=True)
+
+
+def _database_bytes(repo: ScheduledTasksDatabase) -> bytes:
+    payload = repo.db_path.read_bytes()
+    wal_path = Path(f"{repo.db_path}-wal")
+    if wal_path.exists():
+        payload += wal_path.read_bytes()
+    return payload
+
+
+def _set_preview_expires_at(repo: ScheduledTasksDatabase, *, preview_id: str, expires_at: str) -> None:
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute(
+            "UPDATE scheduled_task_previews SET expires_at = ? WHERE id = ?",
+            [expires_at, preview_id],
+        )
+
+
+def _audit_count(repo: ScheduledTasksDatabase, definition_id: str) -> int:
+    return repo.list_audit_events(
+        owner_id=OWNER_ID,
+        definition_id=definition_id,
+        limit=100,
+        offset=0,
+    )[1]
+
+
+def test_invalid_semantic_preview_is_persisted_with_errors_and_id(tmp_path):
+    service, repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(input_payload={"question": "   "}, schedule={"kind": "not-a-schedule"}),
+    )
+
+    stored = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    assert preview.id  # nosec B101
+    assert preview.status == "invalid"  # nosec B101
+    assert preview.validation_errors  # nosec B101
+    assert stored is not None  # nosec B101
+    assert stored.status == "invalid"  # nosec B101
+    assert stored.validation_errors == preview.validation_errors  # nosec B101
+
+
+def test_agent_task_preview_redacts_raw_message_in_responses_and_storage(tmp_path):
+    service, repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            family="agent_task",
+            input_payload={"agent_ref": "agent:incident-triage", "message": RAW_SENTINEL},
+        ),
+    )
+
+    stored = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    assert preview.status == "valid"  # nosec B101
+    assert preview.normalized_config["input"]["message_redacted"] is True  # nosec B101
+    assert RAW_SENTINEL not in _as_json_text(preview)  # nosec B101
+    assert stored is not None  # nosec B101
+    assert RAW_SENTINEL not in json.dumps(stored.normalized_config, sort_keys=True)  # nosec B101
+    assert RAW_SENTINEL.encode("utf-8") not in _database_bytes(repo)  # nosec B101
+
+
+def test_create_consumes_valid_preview_and_rejects_consumed_reuse_without_idempotency_key(tmp_path):
+    service, repo = _service(tmp_path)
+    preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
+
+    definition = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=ScheduledTaskDefinitionCreateRequest(preview_id=preview.id),
+    )
+
+    consumed = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    assert definition.preview_id == preview.id  # nosec B101
+    assert definition.health == "execution_unavailable"  # nosec B101
+    assert consumed.status == "consumed"  # nosec B101
+    with pytest.raises(ValueError, match="preview_consumed"):
+        service.create_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=ScheduledTaskDefinitionCreateRequest(preview_id=preview.id),
+        )
+
+
+def test_preview_validation_rejects_expired_stale_consumed_and_cross_user_previews(tmp_path):
+    service, repo = _service(tmp_path)
+    expired = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
+    _set_preview_expires_at(repo, preview_id=expired.id, expires_at="2020-01-01T00:00:00+00:00")
+
+    with pytest.raises(ValueError, match="preview_expired"):
+        service.create_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=ScheduledTaskDefinitionCreateRequest(preview_id=expired.id),
+        )
+
+    definition = _create_definition(service)
+    stale_preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version,
+            name="Updated name",
+        ),
+    )
+    service.pause_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+
+    with pytest.raises(ValueError, match="definition_version_mismatch"):
+        service.update_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDefinitionUpdateRequest(preview_id=stale_preview.id),
+        )
+
+    consumed_preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload(name="Consumed"))
+    service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=ScheduledTaskDefinitionCreateRequest(preview_id=consumed_preview.id),
+    )
+    with pytest.raises(ValueError, match="preview_consumed"):
+        service.create_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=ScheduledTaskDefinitionCreateRequest(preview_id=consumed_preview.id),
+        )
+
+    other_preview = service.create_preview(owner_id=OTHER_OWNER_ID, actor=ACTOR, payload=_payload())
+    with pytest.raises(KeyError, match="preview_not_found"):
+        service.create_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=ScheduledTaskDefinitionCreateRequest(preview_id=other_preview.id),
+        )
+
+
+def test_update_requires_preview_version_match_and_consumes_preview(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version,
+            name="Renamed question",
+        ),
+    )
+
+    updated = service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=ScheduledTaskDefinitionUpdateRequest(preview_id=preview.id),
+    )
+
+    consumed = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    assert updated.version == definition.version + 1  # nosec B101
+    assert updated.name == "Renamed question"  # nosec B101
+    assert consumed.status == "consumed"  # nosec B101
+
+
+def test_duplicate_creates_paused_copy_and_two_audit_events(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+
+    copy = service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=ScheduledTaskDuplicateRequest(name="Paused copy"),
+    )
+
+    original_events, original_total = repo.list_audit_events(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        limit=10,
+        offset=0,
+    )
+    copy_events, copy_total = repo.list_audit_events(
+        owner_id=OWNER_ID,
+        definition_id=copy.id,
+        limit=10,
+        offset=0,
+    )
+    assert copy.id != definition.id  # nosec B101
+    assert copy.lifecycle == "paused"  # nosec B101
+    assert copy.name == "Paused copy"  # nosec B101
+    assert original_total == 2  # nosec B101
+    assert copy_total == 1  # nosec B101
+    assert {event.event_type for event in original_events + copy_events} >= {  # nosec B101
+        "definition.created",
+        "definition_duplicated",
+        "definition_duplicate_created",
+    }
+
+
+@pytest.mark.parametrize("lock_kind", ["none", "system"])
+def test_duplicate_disabled_definition_succeeds_for_non_admin_non_security_locks(tmp_path, lock_kind):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    repo.update_definition(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        patch={
+            "lifecycle": "disabled",
+            "disabled_lock_kind": lock_kind,
+            "disabled_reason": "Temporarily unavailable",
+            "updated_by": ACTOR,
+        },
+        expected_version=definition.version,
+    )
+
+    copy = service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=ScheduledTaskDuplicateRequest(name=f"Copy {lock_kind}"),
+    )
+
+    assert copy.lifecycle == "paused"  # nosec B101
+    assert copy.disabled_lock_kind == "none"  # nosec B101
+
+
+@pytest.mark.parametrize("lock_kind", ["admin", "security"])
+def test_duplicate_disabled_definition_with_admin_or_security_lock_fails_without_copy(tmp_path, lock_kind):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    repo.update_definition(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        patch={
+            "lifecycle": "disabled",
+            "disabled_lock_kind": lock_kind,
+            "disabled_reason": "Locked by policy",
+            "updated_by": ACTOR,
+        },
+        expected_version=definition.version,
+    )
+
+    with pytest.raises(ValueError, match="definition_disabled_locked"):
+        service.duplicate_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDuplicateRequest(name="Should not exist"),
+        )
+
+    definitions, total = repo.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)
+    assert total == 1  # nosec B101
+    assert definitions[0].id == definition.id  # nosec B101
+
+
+def test_pause_resume_archive_transition_matrix(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+
+    paused = service.pause_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+    paused_again = service.pause_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+    resumed = service.resume_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+    resumed_again = service.resume_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+    archived = service.archive_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+    archived_again = service.archive_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+
+    assert paused.lifecycle == "paused"  # nosec B101
+    assert paused_again.lifecycle == "paused"  # nosec B101
+    assert resumed.lifecycle == "configured"  # nosec B101
+    assert resumed_again.lifecycle == "configured"  # nosec B101
+    assert archived.lifecycle == "archived"  # nosec B101
+    assert archived_again.lifecycle == "archived"  # nosec B101
+    assert _audit_count(repo, definition.id) == 4  # created, paused, resumed, archived  # nosec B101
+
+    for operation in (
+        lambda: service.pause_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id),
+        lambda: service.resume_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id),
+        lambda: service.update_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDefinitionUpdateRequest(preview_id="unused"),
+        ),
+        lambda: service.duplicate_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDuplicateRequest(name="Archived copy"),
+        ),
+    ):
+        with pytest.raises(ValueError, match="definition_archived"):
+            operation()
+
+
+def test_preview_idempotency_replay_and_same_key_different_payload_conflict(tmp_path):
+    service, repo = _service(tmp_path)
+    payload = _payload(name="Idempotent preview")
+
+    first = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=payload, idempotency_key="preview-key")
+    replay = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=payload, idempotency_key="preview-key")
+
+    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+        service.create_preview(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=_payload(name="Different preview"),
+            idempotency_key="preview-key",
+        )
+
+    previews, total = repo.list_previews(owner_id=OWNER_ID, limit=10, offset=0)
+    assert replay.id == first.id  # nosec B101
+    assert total == 1  # nosec B101
+    assert previews[0].id == first.id  # nosec B101
+
+
+def test_create_idempotency_replay_before_preview_consumption(tmp_path):
+    service, repo = _service(tmp_path)
+    preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
+    payload = ScheduledTaskDefinitionCreateRequest(preview_id=preview.id)
+
+    first = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=payload,
+        idempotency_key="create-key",
+    )
+    replay = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=payload,
+        idempotency_key="create-key",
+    )
+
+    assert replay.id == first.id  # nosec B101
+    assert repo.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)[1] == 1  # nosec B101
+    assert _audit_count(repo, first.id) == 1  # nosec B101
+
+
+def test_update_idempotency_replay_after_preview_consumption(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version,
+            name="Idempotently updated",
+        ),
+    )
+    payload = ScheduledTaskDefinitionUpdateRequest(preview_id=preview.id)
+
+    first = service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=payload,
+        idempotency_key="update-key",
+    )
+    replay = service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=payload,
+        idempotency_key="update-key",
+    )
+
+    assert replay.id == first.id  # nosec B101
+    assert replay.version == first.version  # nosec B101
+    assert repo.get_definition(owner_id=OWNER_ID, definition_id=definition.id).version == first.version  # nosec B101
+    assert _audit_count(repo, definition.id) == 2  # created + updated  # nosec B101
+
+
+def test_duplicate_idempotency_replay_does_not_create_second_copy_or_audit_pair(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    payload = ScheduledTaskDuplicateRequest(name="Idempotent duplicate")
+
+    first = service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=payload,
+        idempotency_key="duplicate-key",
+    )
+    replay = service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=payload,
+        idempotency_key="duplicate-key",
+    )
+
+    assert replay.id == first.id  # nosec B101
+    assert repo.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)[1] == 2  # nosec B101
+    assert _audit_count(repo, definition.id) == 2  # created + duplicated  # nosec B101
+    assert _audit_count(repo, first.id) == 1  # duplicate created only  # nosec B101
+
+
+def test_pause_resume_archive_idempotency_replay_without_extra_audit_events(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+
+    paused = service.pause_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="pause-key",
+    )
+    pause_replay = service.pause_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="pause-key",
+    )
+    resumed = service.resume_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="resume-key",
+    )
+    resume_replay = service.resume_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="resume-key",
+    )
+    archived = service.archive_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="archive-key",
+    )
+    archive_replay = service.archive_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="archive-key",
+    )
+
+    assert pause_replay.version == paused.version  # nosec B101
+    assert resume_replay.version == resumed.version  # nosec B101
+    assert archive_replay.version == archived.version  # nosec B101
+    assert _audit_count(repo, definition.id) == 4  # created, paused, resumed, archived  # nosec B101
+
+
+def test_same_key_different_payload_conflict_for_create_update_duplicate_and_lifecycle_routes(tmp_path):
+    service, _repo = _service(tmp_path)
+    preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload(name="Create one"))
+    service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=ScheduledTaskDefinitionCreateRequest(preview_id=preview.id),
+        idempotency_key="create-conflict",
+    )
+    other_preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload(name="Create two"))
+    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+        service.create_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            payload=ScheduledTaskDefinitionCreateRequest(preview_id=other_preview.id),
+            idempotency_key="create-conflict",
+        )
+
+    definition = _create_definition(service, name="Update conflict")
+    update_preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version,
+            name="Update one",
+        ),
+    )
+    service.update_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        payload=ScheduledTaskDefinitionUpdateRequest(preview_id=update_preview.id),
+        idempotency_key="update-conflict",
+    )
+    next_update_preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            mode="update",
+            definition_id=definition.id,
+            definition_version=definition.version + 1,
+            name="Update two",
+        ),
+    )
+    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+        service.update_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDefinitionUpdateRequest(preview_id=next_update_preview.id),
+            idempotency_key="update-conflict",
+        )
+
+    duplicate_source = _create_definition(service, name="Duplicate conflict")
+    service.duplicate_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=duplicate_source.id,
+        payload=ScheduledTaskDuplicateRequest(name="Duplicate one"),
+        idempotency_key="duplicate-conflict",
+    )
+    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+        service.duplicate_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=duplicate_source.id,
+            payload=ScheduledTaskDuplicateRequest(name="Duplicate two"),
+            idempotency_key="duplicate-conflict",
+        )
+
+    lifecycle_definition = _create_definition(service, name="Lifecycle conflict one")
+    other_lifecycle_definition = _create_definition(service, name="Lifecycle conflict two")
+    service.pause_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=lifecycle_definition.id,
+        idempotency_key="lifecycle-conflict",
+    )
+    with pytest.raises(ValueError, match="scheduled_task_idempotency_conflict"):
+        service.pause_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=other_lifecycle_definition.id,
+            idempotency_key="lifecycle-conflict",
+        )
+
+
+def test_agent_task_raw_sentinel_absent_from_all_response_and_repository_surfaces(tmp_path):
+    service, repo = _service(tmp_path)
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            family="agent_task",
+            input_payload={"agent_ref": "agent:security", "message": RAW_SENTINEL},
+            name="Agent redaction",
+        ),
+    )
+    definition = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=ScheduledTaskDefinitionCreateRequest(preview_id=preview.id, initial_lifecycle="paused"),
+    )
+    detail = service.get_definition(owner_id=OWNER_ID, definition_id=definition.id)
+    definitions = service.list_definitions(owner_id=OWNER_ID, limit=10, offset=0)
+    audits = service.list_audit_events(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        limit=10,
+        offset=0,
+    )
+    stored_preview = repo.get_preview(owner_id=OWNER_ID, preview_id=preview.id)
+    stored_definition = repo.get_definition(owner_id=OWNER_ID, definition_id=definition.id)
+    stored_audits = repo.list_audit_events(owner_id=OWNER_ID, definition_id=definition.id, limit=10, offset=0)[0]
+
+    all_serialized = "\n".join(
+        [
+            _as_json_text(preview),
+            _as_json_text(definition),
+            _as_json_text(detail),
+            _as_json_text(definitions),
+            _as_json_text(audits),
+            json.dumps(stored_preview.normalized_config, sort_keys=True),
+            json.dumps(stored_definition.input, sort_keys=True),
+            json.dumps([event.after for event in stored_audits], sort_keys=True),
+        ]
+    )
+    assert RAW_SENTINEL not in all_serialized  # nosec B101
+    assert RAW_SENTINEL.encode("utf-8") not in _database_bytes(repo)  # nosec B101
