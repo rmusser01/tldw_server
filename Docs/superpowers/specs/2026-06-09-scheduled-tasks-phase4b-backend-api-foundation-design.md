@@ -1,7 +1,7 @@
 # Scheduled Tasks Phase 4B Backend API Foundation Design
 
 Date: 2026-06-09
-Status: Needs User Review
+Status: Approved For Implementation Planning
 Owner: Codex brainstorming session
 Backlog: TASK-2349
 
@@ -178,7 +178,7 @@ Related capabilities can report RAG or ACP readiness, but related readiness must
 | --- | --- |
 | Capability | `family`, `family_availability`, `actions`, `missing_dependencies`, `related_capabilities`, `reason`, `schema_version` |
 | Preview | `id`, `owner_id`, `mode`, `family`, `definition_id?`, `definition_version?`, `status`, `payload_hash`, `normalized_config`, `validation_errors`, `warnings`, `risk_class`, `visibility_policy`, `schedule_preview`, `redaction_policy`, `expires_at`, `created_by`, `created_at`, `consumed_at?`, `created_definition_id?` |
-| Definition | `id`, `owner_id`, `version`, `family`, `name`, `description`, `lifecycle`, `health`, `schedule`, `input`, `visibility_policy`, `notification_policy`, `approval_policy`, `preview_id`, `created_by`, `updated_by`, timestamps |
+| Definition | `id`, `owner_id`, `version`, `family`, `name`, `description`, `lifecycle`, `health`, `disabled_lock_kind?`, `disabled_reason?`, `schedule`, `input`, `visibility_policy`, `notification_policy`, `approval_policy`, `preview_id`, `created_by`, `updated_by`, timestamps |
 | Audit event | `id`, `definition_id`, `event_type`, `actor`, `summary`, `before`, `after`, `created_at`, `request_id`, `idempotency_key` |
 | Idempotency record | `owner_id`, `key`, `route`, `payload_hash`, `response_ref`, `created_at`, `expires_at` |
 
@@ -200,6 +200,13 @@ Lifecycle values:
 - `paused`
 - `archived`
 - `disabled`
+
+Disabled lock kinds:
+
+- `none`
+- `admin`
+- `security`
+- `system`
 
 Health values:
 
@@ -979,6 +986,6 @@ Additional human-requested self-review before implementation planning found impl
 - make `owner_id` part of Preview, Definition, and Idempotency record contracts, with explicit cross-user isolation expectations;
 - define health precedence so related capability readiness does not blur into execution support;
 - make duplicate audit deterministic on both source and copied definitions;
-- require duplicate to re-evaluate health and avoid bypassing admin/security disabled states;
+- add `disabled_lock_kind`/`disabled_reason` so duplicate can re-evaluate health and avoid bypassing admin/security disabled states;
 - define `automation_definition` projection fields and status tokens for the existing `/scheduled-tasks` list model;
 - require WebUI status handling to interpret automation definition lifecycle/health before legacy `enabled` fallbacks.
