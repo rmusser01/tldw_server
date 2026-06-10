@@ -16,7 +16,8 @@ import { getAutomationDefinitionFamilyLabel } from "./scheduled-task-automation-
 export interface ScheduledTaskAutomationDefinitionEditorValues {
   name?: string
   description?: string
-  scheduleKind?: "manual" | "cron"
+  scheduleKind?: ScheduledTaskAutomationEditorScheduleKind
+  schedule?: Record<string, unknown>
   cron?: string
   timezone?: string
   visibility?: "private" | "shared"
@@ -51,7 +52,23 @@ export interface ScheduledTaskAutomationDefinitionEditorProps {
 }
 
 const DEFAULT_SCOPE_JSON = "{}"
-const DEFAULT_AGENT_REF_JSON = "{}"
+const DEFAULT_AGENT_REF = ""
+
+export type ScheduledTaskAutomationEditorScheduleKind =
+  | "one_time"
+  | "interval"
+  | "daily"
+  | "weekly"
+  | "cron"
+
+const DEFAULT_SCHEDULE_KIND: ScheduledTaskAutomationEditorScheduleKind = "daily"
+const SUPPORTED_SCHEDULE_KINDS = new Set<string>([
+  "one_time",
+  "interval",
+  "daily",
+  "weekly",
+  "cron"
+])
 
 const toStringList = (value: string): string[] =>
   value
@@ -59,23 +76,50 @@ const toStringList = (value: string): string[] =>
     .map((item) => item.trim())
     .filter(Boolean)
 
-const parseJsonObject = (value: string, fallback: Record<string, unknown>): Record<string, unknown> => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const isSupportedScheduleKind = (
+  value: unknown
+): value is ScheduledTaskAutomationEditorScheduleKind =>
+  typeof value === "string" && SUPPORTED_SCHEDULE_KINDS.has(value)
+
+const normalizeScheduleKind = (
+  value: unknown
+): ScheduledTaskAutomationEditorScheduleKind =>
+  isSupportedScheduleKind(value) ? value : DEFAULT_SCHEDULE_KIND
+
+const parseJsonObject = (
+  value: string,
+  fieldLabel: string
+): { value: Record<string, unknown> } | { error: string } => {
   const trimmed = value.trim()
-  if (!trimmed) return fallback
+  if (!trimmed) return { value: {} }
 
   try {
     const parsed = JSON.parse(trimmed)
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : fallback
+    return isRecord(parsed)
+      ? { value: parsed }
+      : { error: `${fieldLabel} must be a valid JSON object` }
   } catch {
-    return fallback
+    return { error: `${fieldLabel} must be a valid JSON object` }
   }
+}
+
+const readErrorDetail = (error: unknown): unknown => {
+  if (!isRecord(error)) return null
+
+  const details = error.details
+  if (isRecord(details) && isRecord(details.detail)) {
+    return details.detail
+  }
+
+  return isRecord(error.detail) ? error.detail : null
 }
 
 const readErrorMessage = (error: unknown, fallback: string): string => {
   if (error && typeof error === "object") {
-    const detail = "detail" in error ? (error as { detail?: unknown }).detail : null
+    const detail = readErrorDetail(error)
     if (detail && typeof detail === "object") {
       const code = "code" in detail ? String((detail as { code?: unknown }).code || "") : ""
       const message =
@@ -111,6 +155,31 @@ const isPreviewUsable = (
 const getFamilyLabel = (family: ScheduledTaskAutomationFamily): string =>
   getAutomationDefinitionFamilyLabel({ source_ref: { family } })
 
+const buildSchedule = (
+  values: Required<ScheduledTaskAutomationDefinitionEditorValues>
+): Record<string, unknown> => {
+  const timezone = values.timezone.trim() || "UTC"
+  const scheduleKind = normalizeScheduleKind(values.scheduleKind)
+  const existingSchedule = isRecord(values.schedule) ? values.schedule : {}
+  const baseSchedule =
+    existingSchedule.kind === scheduleKind ? { ...existingSchedule } : {}
+
+  if (scheduleKind === "cron") {
+    return {
+      ...baseSchedule,
+      kind: "cron",
+      cron: values.cron.trim(),
+      timezone
+    }
+  }
+
+  return {
+    ...baseSchedule,
+    kind: scheduleKind,
+    timezone
+  }
+}
+
 export const buildAutomationDefinitionPreviewPayload = ({
   family,
   mode,
@@ -124,21 +193,16 @@ export const buildAutomationDefinitionPreviewPayload = ({
   definitionVersion?: number | null
   values: Required<ScheduledTaskAutomationDefinitionEditorValues>
 }): ScheduledTaskPreviewCreateRequest => {
-  const schedule =
-    values.scheduleKind === "cron"
-      ? {
-          kind: "cron",
-          cron: values.cron.trim(),
-          timezone: values.timezone.trim()
-        }
-      : {
-          kind: "manual",
-          timezone: values.timezone.trim()
-        }
+  const schedule = buildSchedule(values)
   const visibility_policy = { visibility: values.visibility }
   const notification_policy = { channels: [] }
 
   if (family === "recurring_question") {
+    const parsedScope = parseJsonObject(values.scopeJson, "Scope JSON")
+    if ("error" in parsedScope) {
+      throw new Error(parsedScope.error)
+    }
+
     return {
       mode,
       family,
@@ -149,7 +213,7 @@ export const buildAutomationDefinitionPreviewPayload = ({
       input: {
         question: values.question.trim(),
         success_criteria: values.successCriteria.trim() || null,
-        scope: parseJsonObject(values.scopeJson, {})
+        scope: parsedScope.value
       },
       config: {},
       schedule,
@@ -167,7 +231,7 @@ export const buildAutomationDefinitionPreviewPayload = ({
     name: values.name.trim() || "Agent task",
     description: values.description.trim() || null,
     input: {
-      agent_ref: parseJsonObject(values.agentRef, { raw: values.agentRef.trim() }),
+      agent_ref: values.agentRef.trim(),
       message: values.message.trim()
     },
     config: {
@@ -198,14 +262,15 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
   const [values, setValues] = React.useState<Required<ScheduledTaskAutomationDefinitionEditorValues>>({
     name: initialValues?.name ?? "",
     description: initialValues?.description ?? "",
-    scheduleKind: initialValues?.scheduleKind ?? "manual",
+    scheduleKind: normalizeScheduleKind(initialValues?.scheduleKind),
+    schedule: initialValues?.schedule ?? {},
     cron: initialValues?.cron ?? "",
     timezone: initialValues?.timezone ?? "UTC",
     visibility: initialValues?.visibility ?? "private",
     question: initialValues?.question ?? "",
     successCriteria: initialValues?.successCriteria ?? "",
     scopeJson: initialValues?.scopeJson ?? DEFAULT_SCOPE_JSON,
-    agentRef: initialValues?.agentRef ?? DEFAULT_AGENT_REF_JSON,
+    agentRef: initialValues?.agentRef ?? DEFAULT_AGENT_REF,
     message: initialValues?.message ?? "",
     allowedToolClasses: initialValues?.allowedToolClasses ?? "",
     deniedToolClasses: initialValues?.deniedToolClasses ?? "",
@@ -217,36 +282,56 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
   const [saving, setSaving] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [saved, setSaved] = React.useState(false)
+  const valuesSignatureRef = React.useRef(JSON.stringify(values))
+  const latestPreviewRequestRef = React.useRef(0)
 
   const updateValue = <K extends keyof ScheduledTaskAutomationDefinitionEditorValues>(
     key: K,
     value: Required<ScheduledTaskAutomationDefinitionEditorValues>[K]
   ) => {
-    setValues((current) => ({ ...current, [key]: value }))
+    setValues((current) => {
+      const nextValues = { ...current, [key]: value }
+      valuesSignatureRef.current = JSON.stringify(nextValues)
+      return nextValues
+    })
     setPreview(null)
     setSaved(false)
   }
 
   const handlePreview = async () => {
+    const requestId = latestPreviewRequestRef.current + 1
+    latestPreviewRequestRef.current = requestId
+    const requestSignature = valuesSignatureRef.current
     setPreviewing(true)
     setErrorMessage(null)
     setSaved(false)
     try {
-      const nextPreview = await onPreview(
-        buildAutomationDefinitionPreviewPayload({
-          family,
-          mode,
-          definitionId,
-          definitionVersion,
-          values
-        })
-      )
-      setPreview(nextPreview)
+      const payload = buildAutomationDefinitionPreviewPayload({
+        family,
+        mode,
+        definitionId,
+        definitionVersion,
+        values
+      })
+      const nextPreview = await onPreview(payload)
+      if (
+        latestPreviewRequestRef.current === requestId &&
+        valuesSignatureRef.current === requestSignature
+      ) {
+        setPreview(nextPreview)
+      }
     } catch (error) {
-      setPreview(null)
-      setErrorMessage(readErrorMessage(error, "Unable to preview definition"))
+      if (
+        latestPreviewRequestRef.current === requestId &&
+        valuesSignatureRef.current === requestSignature
+      ) {
+        setPreview(null)
+        setErrorMessage(readErrorMessage(error, "Unable to preview definition"))
+      }
     } finally {
-      setPreviewing(false)
+      if (latestPreviewRequestRef.current === requestId) {
+        setPreviewing(false)
+      }
     }
   }
 
@@ -301,7 +386,10 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
             value={values.scheduleKind}
             onChange={(value) => updateValue("scheduleKind", value)}
             options={[
-              { value: "manual", label: "Manual" },
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+              { value: "interval", label: "Interval" },
+              { value: "one_time", label: "One time" },
               { value: "cron", label: "Cron" }
             ]}
             style={{ width: 140 }}

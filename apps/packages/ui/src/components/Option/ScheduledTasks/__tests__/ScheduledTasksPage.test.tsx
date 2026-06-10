@@ -744,6 +744,140 @@ describe("ScheduledTasksPage", () => {
     await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2))
   }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
+  it.each(["daily", "weekly", "interval", "one_time"])(
+    "preserves %s schedule kind when updating an automation definition",
+    async (scheduleKind) => {
+      const user = userEvent.setup()
+      mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+      mocks.listScheduledTasks.mockResolvedValue({
+        items: [automationTask()],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+      mocks.getScheduledTaskDefinition.mockResolvedValue(
+        definitionResponse({
+          version: 5,
+          input: {
+            question: "Has the answer appeared?",
+            scope: { collection_id: "research" }
+          },
+          schedule: {
+            kind: scheduleKind,
+            timezone: "America/New_York",
+            run_at: "2030-04-05T12:30:00Z",
+            every_seconds: 3600,
+            day_of_week: "monday"
+          }
+        })
+      )
+      mocks.createScheduledTaskPreview.mockResolvedValue({
+        id: `preview_${scheduleKind}`,
+        mode: "update",
+        family: "recurring_question",
+        definition_id: "definition_1",
+        definition_version: 5,
+        status: "valid",
+        normalized_config: { name: "Track answer" },
+        validation_errors: [],
+        warnings: [],
+        visibility_policy: { visibility: "private" },
+        schedule_preview: { summary: scheduleKind },
+        redaction_policy: {},
+        expires_at: "2026-06-10T00:00:00Z"
+      })
+
+      renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+      await user.click(await screen.findByRole("button", { name: "Edit Track answer" }))
+      expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Preview" }))
+
+      await waitFor(() => {
+        expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+          expect.objectContaining({
+            mode: "update",
+            definition_id: "definition_1",
+            schedule: expect.objectContaining({
+              kind: scheduleKind,
+              timezone: "America/New_York"
+            })
+          })
+        )
+      })
+    },
+    SLOW_SCHEDULE_FORM_TIMEOUT_MS
+  )
+
+  it("preserves an Agent Task string agent ref when updating", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        automationTask({
+          title: "Dispatch agent",
+          source_ref: {
+            definition_id: "agent_definition",
+            family: "agent_task",
+            lifecycle: "configured",
+            health: "execution_unavailable",
+            visibility: "private"
+          }
+        })
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({
+        id: "agent_definition",
+        version: 2,
+        family: "agent_task",
+        name: "Dispatch agent",
+        input: {
+          agent_ref: "agent://primary",
+          message: "Summarize the report"
+        },
+        schedule: { kind: "daily", timezone: "UTC" }
+      })
+    )
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_agent_update",
+      mode: "update",
+      family: "agent_task",
+      definition_id: "agent_definition",
+      definition_version: 2,
+      status: "valid",
+      normalized_config: { name: "Dispatch agent" },
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: { visibility: "private" },
+      schedule_preview: { summary: "Daily" },
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Edit Dispatch agent" }))
+    expect(await screen.findByDisplayValue("agent://primary")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          family: "agent_task",
+          definition_id: "agent_definition",
+          input: expect.objectContaining({
+            agent_ref: "agent://primary",
+            message: "Summarize the report"
+          })
+        })
+      )
+    })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
   it("runs automation definition lifecycle actions from rows and refreshes the list", async () => {
     const user = userEvent.setup()
     mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
@@ -810,9 +944,11 @@ describe("ScheduledTasksPage", () => {
       errors: []
     })
     mocks.pauseScheduledTaskDefinition.mockRejectedValue({
-      detail: {
-        code: "definition_locked",
-        message: "Definition is locked by policy."
+      details: {
+        detail: {
+          code: "definition_locked",
+          message: "Definition is locked by policy."
+        }
       }
     })
 

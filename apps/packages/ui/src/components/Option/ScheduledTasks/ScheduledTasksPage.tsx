@@ -36,6 +36,7 @@ import { ScheduledTaskDetailDrawer } from "./ScheduledTaskDetailDrawer"
 import { ScheduledTaskCreatePanel } from "./ScheduledTaskCreatePanel"
 import {
   ScheduledTaskAutomationDefinitionEditor,
+  type ScheduledTaskAutomationEditorScheduleKind,
   type ScheduledTaskAutomationDefinitionEditorValues
 } from "./ScheduledTaskAutomationDefinitionEditor"
 import { ScheduledTaskResultsPanel } from "./ScheduledTaskResultsPanel"
@@ -59,6 +60,13 @@ import {
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 const SCHEDULED_TASKS_SUPPORT_PROBE_TIMEOUT_MS = 8000
+const SUPPORTED_AUTOMATION_SCHEDULE_KINDS = new Set([
+  "one_time",
+  "interval",
+  "daily",
+  "weekly",
+  "cron"
+])
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -94,6 +102,24 @@ const stringifyEditorJson = (value: unknown): string => {
   }
 }
 
+const stringifyEditorText = (value: unknown): string => {
+  if (typeof value === "string") return value
+  if (!isRecord(value)) return ""
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return ""
+  }
+}
+
+const normalizeAutomationScheduleKind = (
+  value: unknown
+): ScheduledTaskAutomationEditorScheduleKind =>
+  typeof value === "string" && SUPPORTED_AUTOMATION_SCHEDULE_KINDS.has(value)
+    ? (value as ScheduledTaskAutomationEditorScheduleKind)
+    : "daily"
+
 const getAutomationDefinitionIdForTask = (task: ScheduledTask): string => {
   const sourceDefinitionId = task.source_ref?.definition_id
   if (typeof sourceDefinitionId === "string" && sourceDefinitionId.trim()) {
@@ -120,14 +146,15 @@ const buildAutomationEditorInitialValues = (
   return {
     name: definition.name,
     description: definition.description ?? "",
-    scheduleKind: schedule.kind === "cron" ? "cron" : "manual",
+    schedule,
+    scheduleKind: normalizeAutomationScheduleKind(schedule.kind),
     cron: readStringField(schedule, "cron"),
     timezone: readStringField(schedule, "timezone") || "UTC",
     visibility,
     question: readStringField(input, "question"),
     successCriteria: readStringField(input, "success_criteria"),
     scopeJson: stringifyEditorJson(input.scope),
-    agentRef: stringifyEditorJson(input.agent_ref),
+    agentRef: stringifyEditorText(input.agent_ref),
     message: readStringField(input, "message"),
     allowedToolClasses: readStringListField(config, "allowed_tool_classes"),
     deniedToolClasses: readStringListField(config, "denied_tool_classes"),
@@ -463,7 +490,13 @@ export const ScheduledTasksPage: React.FC = () => {
     fallback: string
   ): string => {
     if (error && typeof error === "object") {
-      const detail = "detail" in error ? (error as { detail?: unknown }).detail : null
+      const details = "details" in error ? (error as { details?: unknown }).details : null
+      const detail =
+        details && typeof details === "object" && "detail" in details
+          ? (details as { detail?: unknown }).detail
+          : "detail" in error
+            ? (error as { detail?: unknown }).detail
+            : null
       if (detail && typeof detail === "object") {
         const code =
           "code" in detail ? String((detail as { code?: unknown }).code || "") : ""

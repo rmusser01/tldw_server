@@ -48,6 +48,14 @@ const definitionResponse = (
 })
 
 describe("ScheduledTaskAutomationDefinitionEditor", () => {
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((promiseResolve) => {
+      resolve = promiseResolve
+    })
+    return { promise, resolve }
+  }
+
   it("previews and creates a recurring question definition", async () => {
     const user = userEvent.setup()
     const onPreview = vi.fn().mockResolvedValue(validPreview())
@@ -72,6 +80,10 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       expect.objectContaining({
         mode: "create",
         family: "recurring_question",
+        schedule: expect.objectContaining({
+          kind: "daily",
+          timezone: "UTC"
+        }),
         input: expect.objectContaining({
           question: "Has the answer appeared?"
         })
@@ -113,7 +125,74 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
     await user.click(screen.getByRole("button", { name: "Preview" }))
 
     expect(await screen.findByText("Preview ready")).toBeInTheDocument()
+    expect(onPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          agent_ref: '{"agent_id":"agent_1","api_key":"secret"}'
+        })
+      })
+    )
     expect(screen.getByText("Redacted: agent_ref.api_key, message.secret")).toBeInTheDocument()
+  })
+
+  it("does not allow an older in-flight preview to become saveable after fields change", async () => {
+    const user = userEvent.setup()
+    const firstPreview = deferred<ScheduledTaskPreviewResponse>()
+    const onPreview = vi.fn().mockReturnValue(firstPreview.promise)
+    const onCreate = vi.fn().mockResolvedValue(definitionResponse())
+
+    render(
+      <ScheduledTaskAutomationDefinitionEditor
+        family="recurring_question"
+        mode="create"
+        onPreview={onPreview}
+        onCreate={onCreate}
+        onCancel={vi.fn()}
+      />
+    )
+
+    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Has the answer changed?" }
+    })
+    firstPreview.resolve(validPreview({ id: "preview_stale" }))
+
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(1))
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save definition" })).toBeDisabled()
+    })
+    expect(screen.queryByText("Preview ready")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it("blocks preview and save when scope JSON is malformed", async () => {
+    const user = userEvent.setup()
+    const onPreview = vi.fn().mockResolvedValue(validPreview())
+    const onCreate = vi.fn().mockResolvedValue(definitionResponse())
+
+    render(
+      <ScheduledTaskAutomationDefinitionEditor
+        family="recurring_question"
+        mode="create"
+        onPreview={onPreview}
+        onCreate={onCreate}
+        onCancel={vi.fn()}
+      />
+    )
+
+    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    fireEvent.change(screen.getByLabelText("Scope JSON"), {
+      target: { value: '{"collection_id":' }
+    })
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+
+    expect(await screen.findByText("Scope JSON must be a valid JSON object")).toBeInTheDocument()
+    expect(onPreview).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Save definition" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+    expect(onCreate).not.toHaveBeenCalled()
   })
 
   it("prompts for another preview when the preview is expired", async () => {
