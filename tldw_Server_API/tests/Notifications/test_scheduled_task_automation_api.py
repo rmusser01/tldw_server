@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -299,6 +300,60 @@ def test_definition_filters_preview_filters_audit_filters_and_pagination(schedul
     assert audit.status_code == 200, audit.text  # nosec B101
     assert audit.json()["total"] == 1  # nosec B101
     assert audit.json()["items"][0]["event_type"] == "definition.paused"  # nosec B101
+
+
+def test_api_created_audit_events_store_and_filter_by_request_id(scheduled_tasks_client, auth_headers):
+    definition = _create_definition(scheduled_tasks_client, auth_headers, name="Request id audit")
+
+    audit = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/audit?request_id=test-request-id",
+        headers=auth_headers,
+    )
+
+    assert audit.status_code == 200, audit.text  # nosec B101
+    body = audit.json()
+    assert body["total"] == 1  # nosec B101
+    assert body["items"][0]["event_type"] == "definition.created"  # nosec B101
+    assert body["items"][0]["request_id"] == "test-request-id"  # nosec B101
+
+
+def test_datetime_filters_reject_invalid_values_with_error_envelope(scheduled_tasks_client, auth_headers):
+    definition = _create_definition(scheduled_tasks_client, auth_headers, name="Invalid datetime filters")
+
+    definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?created_from=not-a-date",
+        headers=auth_headers,
+    )
+    audit = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/audit?created_to=not-a-date",
+        headers=auth_headers,
+    )
+
+    _assert_error_envelope(definitions, code="scheduled_task_filter_invalid", status_code=422)
+    _assert_error_envelope(audit, code="scheduled_task_filter_invalid", status_code=422)
+
+
+def test_datetime_filters_normalize_offset_timestamps(scheduled_tasks_client, auth_headers):
+    definition = _create_definition(scheduled_tasks_client, auth_headers, name="Offset datetime filters")
+    created_at = datetime.fromisoformat(definition["created_at"])
+    created_from = created_at.astimezone(timezone(timedelta(hours=5, minutes=30))).isoformat()
+
+    definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions",
+        headers=auth_headers,
+        params={"created_from": created_from},
+    )
+    audit = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/audit",
+        headers=auth_headers,
+        params={"created_from": created_from},
+    )
+
+    assert definitions.status_code == 200, definitions.text  # nosec B101
+    assert [item["id"] for item in definitions.json()["items"]] == [definition["id"]]  # nosec B101
+    assert audit.status_code == 200, audit.text  # nosec B101
+    assert audit.json()["total"] == 1  # nosec B101
+    assert audit.json()["items"][0]["definition_id"] == definition["id"]  # nosec B101
 
 
 def test_routes_require_read_or_control_permissions(client_user_only, auth_headers):

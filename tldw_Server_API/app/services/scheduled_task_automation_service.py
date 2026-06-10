@@ -246,6 +246,7 @@ class ScheduledTaskAutomationService:
         actor: str,
         payload: ScheduledTaskDefinitionCreateRequest | dict[str, Any],
         idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         request = (
             payload
@@ -264,6 +265,7 @@ class ScheduledTaskAutomationService:
                 actor=actor,
                 request=request,
                 idempotency_key=idempotency_key,
+                request_id=request_id,
             ),
         )
 
@@ -275,6 +277,7 @@ class ScheduledTaskAutomationService:
         definition_id: str,
         payload: ScheduledTaskDefinitionUpdateRequest | dict[str, Any],
         idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         request = (
             payload
@@ -294,6 +297,7 @@ class ScheduledTaskAutomationService:
                 definition_id=definition_id,
                 request=request,
                 idempotency_key=idempotency_key,
+                request_id=request_id,
             ),
         )
 
@@ -346,6 +350,7 @@ class ScheduledTaskAutomationService:
         actor: str,
         definition_id: str,
         idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         payload_hash = _canonical_hash({"definition_id": definition_id, "action": "pause"})
         return self._with_idempotency(
@@ -363,6 +368,7 @@ class ScheduledTaskAutomationService:
                 event_type="definition.paused",
                 summary="Paused definition",
                 idempotency_key=idempotency_key,
+                request_id=request_id,
             ),
         )
 
@@ -373,6 +379,7 @@ class ScheduledTaskAutomationService:
         actor: str,
         definition_id: str,
         idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         payload_hash = _canonical_hash({"definition_id": definition_id, "action": "resume"})
         return self._with_idempotency(
@@ -390,6 +397,7 @@ class ScheduledTaskAutomationService:
                 event_type="definition.resumed",
                 summary="Resumed definition",
                 idempotency_key=idempotency_key,
+                request_id=request_id,
             ),
         )
 
@@ -400,6 +408,7 @@ class ScheduledTaskAutomationService:
         actor: str,
         definition_id: str,
         idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         payload_hash = _canonical_hash({"definition_id": definition_id, "action": "archive"})
         return self._with_idempotency(
@@ -413,6 +422,7 @@ class ScheduledTaskAutomationService:
                 actor=actor,
                 definition_id=definition_id,
                 idempotency_key=idempotency_key,
+                request_id=request_id,
             ),
         )
 
@@ -424,6 +434,7 @@ class ScheduledTaskAutomationService:
         definition_id: str,
         payload: ScheduledTaskDuplicateRequest | dict[str, Any],
         idempotency_key: str | None = None,
+        request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         request = payload if isinstance(payload, ScheduledTaskDuplicateRequest) else ScheduledTaskDuplicateRequest(**payload)
         payload_hash = _canonical_hash({"definition_id": definition_id, **request.model_dump(mode="json")})
@@ -439,6 +450,7 @@ class ScheduledTaskAutomationService:
                 definition_id=definition_id,
                 request=request,
                 idempotency_key=idempotency_key,
+                request_id=request_id,
             ),
         )
 
@@ -525,6 +537,7 @@ class ScheduledTaskAutomationService:
         actor: str,
         request: ScheduledTaskDefinitionCreateRequest,
         idempotency_key: str | None,
+        request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         preview = self._require_valid_preview(tx=tx, owner_id=owner_id, preview_id=request.preview_id)
         if preview.mode != "create" or preview.definition_id is not None:
@@ -557,6 +570,7 @@ class ScheduledTaskAutomationService:
             before=None,
             after=response.model_dump(mode="json"),
             idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         return response
 
@@ -569,6 +583,7 @@ class ScheduledTaskAutomationService:
         definition_id: str,
         request: ScheduledTaskDefinitionUpdateRequest,
         idempotency_key: str | None,
+        request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if current.lifecycle == "archived":
@@ -612,6 +627,7 @@ class ScheduledTaskAutomationService:
             before=self._definition_response(current).model_dump(mode="json"),
             after=response.model_dump(mode="json"),
             idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         return response
 
@@ -627,6 +643,7 @@ class ScheduledTaskAutomationService:
         event_type: str,
         summary: str,
         idempotency_key: str | None,
+        request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if current.lifecycle == "archived":
@@ -652,6 +669,7 @@ class ScheduledTaskAutomationService:
             before=self._definition_response(current).model_dump(mode="json"),
             after=response.model_dump(mode="json"),
             idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         return response
 
@@ -663,6 +681,7 @@ class ScheduledTaskAutomationService:
         actor: str,
         definition_id: str,
         idempotency_key: str | None,
+        request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if current.lifecycle == "archived":
@@ -684,6 +703,7 @@ class ScheduledTaskAutomationService:
             before=self._definition_response(current).model_dump(mode="json"),
             after=response.model_dump(mode="json"),
             idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         return response
 
@@ -696,6 +716,7 @@ class ScheduledTaskAutomationService:
         definition_id: str,
         request: ScheduledTaskDuplicateRequest,
         idempotency_key: str | None,
+        request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         source = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
         if source.lifecycle == "archived":
@@ -766,6 +787,7 @@ class ScheduledTaskAutomationService:
             before=source_response.model_dump(mode="json"),
             after={"duplicate_definition_id": created.id, "name": copy_name},
             idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         self._create_audit(
             tx=tx,
@@ -777,6 +799,7 @@ class ScheduledTaskAutomationService:
             before=None,
             after={**response.model_dump(mode="json"), "source_definition_id": source.id},
             idempotency_key=idempotency_key,
+            request_id=request_id,
         )
         return response
 
@@ -899,6 +922,7 @@ class ScheduledTaskAutomationService:
         before: dict[str, Any] | None,
         after: dict[str, Any] | None,
         idempotency_key: str | None,
+        request_id: str | None = None,
     ) -> None:
         target = tx if tx is not None else self._repo(owner_id)
         target.create_audit_event(
@@ -909,7 +933,7 @@ class ScheduledTaskAutomationService:
             summary=summary,
             before=before,
             after=after,
-            request_id=None,
+            request_id=request_id,
             idempotency_key=idempotency_key,
         )
 

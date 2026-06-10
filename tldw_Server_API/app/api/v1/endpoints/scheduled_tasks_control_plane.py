@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -229,6 +230,40 @@ def _idempotency_key(request: Request) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _request_id(request: Request) -> str | None:
+    value = getattr(getattr(request, "state", None), "request_id", None)
+    return str(value) if value else None
+
+
+def _normalize_datetime_filter(
+    *,
+    request: Request,
+    value: str | None,
+    field: str,
+) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _scheduled_task_error(
+            request=request,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="scheduled_task_filter_invalid",
+            message="Scheduled task datetime filter is invalid.",
+            details={"field": field, "value": value},
+        ) from exc
+    if parsed.tzinfo is None:
+        raise _scheduled_task_error(
+            request=request,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="scheduled_task_filter_invalid",
+            message="Scheduled task datetime filter must include a timezone.",
+            details={"field": field, "value": value},
+        )
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 @router.get(
     "",
     response_model=ScheduledTaskListResponse,
@@ -331,6 +366,7 @@ async def get_scheduled_task_automation_preview(
     dependencies=[Depends(rbac_rate_limit("tasks.read"))],
 )
 async def list_scheduled_task_automation_definitions(
+    request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     family: str | None = Query(default=None),
@@ -344,6 +380,16 @@ async def list_scheduled_task_automation_definitions(
     _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
     service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
 ) -> ScheduledTaskDefinitionListResponse:
+    normalized_created_from = _normalize_datetime_filter(
+        request=request,
+        value=created_from,
+        field="created_from",
+    )
+    normalized_created_to = _normalize_datetime_filter(
+        request=request,
+        value=created_to,
+        field="created_to",
+    )
     return service.list_definitions(
         owner_id=int(current_user.id),
         limit=limit,
@@ -353,8 +399,8 @@ async def list_scheduled_task_automation_definitions(
         health=health,
         visibility_policy=visibility_policy,
         query=q,
-        created_from=created_from,
-        created_to=created_to,
+        created_from=normalized_created_from,
+        created_to=normalized_created_to,
     )
 
 
@@ -377,6 +423,7 @@ async def create_scheduled_task_automation_definition(
             actor=_actor_from_principal(principal, current_user),
             payload=payload,
             idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except (KeyError, ValueError) as exc:
         _raise_automation_error(request, exc)
@@ -402,6 +449,16 @@ async def list_scheduled_task_automation_definition_audit(
     _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
     service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
 ) -> ScheduledTaskAuditListResponse:
+    normalized_created_from = _normalize_datetime_filter(
+        request=request,
+        value=created_from,
+        field="created_from",
+    )
+    normalized_created_to = _normalize_datetime_filter(
+        request=request,
+        value=created_to,
+        field="created_to",
+    )
     try:
         return service.list_audit_events(
             owner_id=int(current_user.id),
@@ -410,8 +467,8 @@ async def list_scheduled_task_automation_definition_audit(
             offset=offset,
             event_type=event_type,
             actor=actor,
-            created_from=created_from,
-            created_to=created_to,
+            created_from=normalized_created_from,
+            created_to=normalized_created_to,
             idempotency_key=idempotency_key,
             request_id=request_id,
         )
@@ -457,6 +514,7 @@ async def update_scheduled_task_automation_definition(
             definition_id=definition_id,
             payload=payload,
             idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except (KeyError, ValueError) as exc:
         _raise_automation_error(request, exc)
@@ -480,6 +538,7 @@ async def pause_scheduled_task_automation_definition(
             actor=_actor_from_principal(principal, current_user),
             definition_id=definition_id,
             idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except (KeyError, ValueError) as exc:
         _raise_automation_error(request, exc)
@@ -503,6 +562,7 @@ async def resume_scheduled_task_automation_definition(
             actor=_actor_from_principal(principal, current_user),
             definition_id=definition_id,
             idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except (KeyError, ValueError) as exc:
         _raise_automation_error(request, exc)
@@ -526,6 +586,7 @@ async def archive_scheduled_task_automation_definition(
             actor=_actor_from_principal(principal, current_user),
             definition_id=definition_id,
             idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except (KeyError, ValueError) as exc:
         _raise_automation_error(request, exc)
@@ -551,6 +612,7 @@ async def duplicate_scheduled_task_automation_definition(
             definition_id=definition_id,
             payload=payload,
             idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except (KeyError, ValueError) as exc:
         _raise_automation_error(request, exc)
