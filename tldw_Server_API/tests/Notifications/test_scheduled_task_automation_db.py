@@ -479,6 +479,126 @@ def test_create_definition_rejects_cross_owner_preview(tmp_path, monkeypatch):
         )
 
 
+def test_create_definition_consumes_preview_and_rejects_second_definition(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    preview = _create_preview(repo)
+    first_definition = repo.create_definition(
+        owner_id=101,
+        family="recurring_question",
+        name="First definition",
+        description=None,
+        lifecycle="configured",
+        health="execution_unavailable",
+        schedule={"cron": "0 9 * * *"},
+        input={"question": "What changed?"},
+        visibility_policy="findings_only",
+        notification_policy={"channels": []},
+        approval_policy={"required": False},
+        preview_id=preview.id,
+        created_by="101",
+        updated_by="101",
+    )
+
+    with pytest.raises(ValueError, match="preview already consumed"):
+        repo.create_definition(
+            owner_id=101,
+            family="recurring_question",
+            name="Second definition",
+            description=None,
+            lifecycle="configured",
+            health="execution_unavailable",
+            schedule={"cron": "0 9 * * *"},
+            input={"question": "What changed?"},
+            visibility_policy="findings_only",
+            notification_policy={"channels": []},
+            approval_policy={"required": False},
+            preview_id=preview.id,
+            created_by="101",
+            updated_by="101",
+        )
+
+    loaded_preview = repo.get_preview(owner_id=101, preview_id=preview.id)
+    assert loaded_preview.status == "consumed"  # nosec B101
+    assert loaded_preview.created_definition_id == first_definition.id  # nosec B101
+    definitions, total = repo.list_definitions(owner_id=101, limit=10, offset=0)
+    assert total == 1  # nosec B101
+    assert definitions[0].id == first_definition.id  # nosec B101
+
+
+def test_update_definition_rejects_missing_preview_patch(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+
+    with pytest.raises(KeyError, match="preview not found"):
+        repo.update_definition(
+            owner_id=101,
+            definition_id=definition.id,
+            patch={
+                "preview_id": "missing-preview",
+                "updated_by": "101",
+            },
+            expected_version=1,
+        )
+
+
+def test_update_definition_rejects_cross_owner_preview_patch(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    owner_202_preview = _create_preview(
+        repo,
+        owner_id=202,
+        mode="update",
+        definition_id=definition.id,
+        definition_version=definition.version,
+    )
+
+    with pytest.raises(KeyError, match="preview not found"):
+        repo.update_definition(
+            owner_id=101,
+            definition_id=definition.id,
+            patch={
+                "preview_id": owner_202_preview.id,
+                "updated_by": "101",
+            },
+            expected_version=1,
+        )
+
+
+def test_create_audit_event_rejects_missing_definition(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+
+    with pytest.raises(KeyError, match="definition not found"):
+        repo.create_audit_event(
+            owner_id=101,
+            definition_id="missing-definition",
+            event_type="definition.created",
+            actor="101",
+            summary="Should fail",
+            before=None,
+            after={"name": "Missing"},
+        )
+
+
+def test_create_audit_event_rejects_cross_owner_definition(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    owner_202_definition = _create_definition(
+        repo,
+        owner_id=202,
+        name="Other owner definition",
+    )
+
+    with pytest.raises(KeyError, match="definition not found"):
+        repo.create_audit_event(
+            owner_id=101,
+            definition_id=owner_202_definition.id,
+            event_type="definition.updated",
+            actor="101",
+            summary="Should fail",
+            before=None,
+            after={"name": "Other owner definition"},
+        )
+
+
 def test_json_persistence_rejects_nan_values(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
 

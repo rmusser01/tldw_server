@@ -564,6 +564,21 @@ class ScheduledTasksDatabase:
             ).fetchone()
             if preview_exists is None:
                 raise KeyError(f"preview not found: {preview_id}")
+            preview_cursor = conn.execute(
+                """
+                UPDATE scheduled_task_previews
+                SET status = 'consumed',
+                    consumed_at = ?,
+                    created_definition_id = ?
+                WHERE owner_id = ?
+                    AND id = ?
+                    AND consumed_at IS NULL
+                    AND status != 'consumed'
+                """,
+                [created_at, definition_id, owner_id, preview_id],
+            )
+            if preview_cursor.rowcount == 0:
+                raise ValueError("preview already consumed")
             conn.execute(
                 """
                 INSERT INTO scheduled_task_definitions (
@@ -702,6 +717,18 @@ class ScheduledTasksDatabase:
             "updated_at": _utcnow_iso(),
         }
         with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            if "preview_id" in patch:
+                preview_exists = conn.execute(
+                    """
+                    SELECT 1
+                    FROM scheduled_task_previews
+                    WHERE owner_id = ? AND id = ?
+                    """,
+                    [owner_id, patch["preview_id"]],
+                ).fetchone()
+                if preview_exists is None:
+                    raise KeyError(f"preview not found: {patch['preview_id']}")
             cursor = conn.execute(
                 """
                 UPDATE scheduled_task_definitions
@@ -777,6 +804,17 @@ class ScheduledTasksDatabase:
         event_id = _new_id()
         created_at = _utcnow_iso()
         with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            definition_exists = conn.execute(
+                """
+                SELECT 1
+                FROM scheduled_task_definitions
+                WHERE owner_id = ? AND id = ?
+                """,
+                [owner_id, definition_id],
+            ).fetchone()
+            if definition_exists is None:
+                raise KeyError(f"definition not found: {definition_id}")
             conn.execute(
                 """
                 INSERT INTO scheduled_task_audit_events (
