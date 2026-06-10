@@ -872,7 +872,7 @@ Task 4 review hardening also added direct public error-code aliases, audit reque
 - Modify: `tldw_Server_API/app/api/v1/schemas/scheduled_tasks_control_plane_schemas.py`
 - Modify: `tldw_Server_API/tests/Notifications/test_scheduled_tasks_control_plane.py`
 
-- [ ] **Step 1: Write failing projection tests**
+- [x] **Step 1: Write failing projection tests**
 
 Extend `test_scheduled_tasks_endpoint_combines_reminders_and_watchlist_jobs` or add a new test:
 
@@ -925,7 +925,7 @@ Add compatibility checks:
 - get detail works for `automation_definition:{definition_id}`;
 - paused/archived definitions do not project as generic disabled unless status token says so.
 
-- [ ] **Step 2: Run projection tests to verify failures**
+- [x] **Step 2: Run projection tests to verify failures**
 
 Run:
 
@@ -936,7 +936,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_tasks_contro
 
 Expected: FAIL until projection is implemented.
 
-- [ ] **Step 3: Compose automation repository into control-plane service**
+- [x] **Step 3: Compose automation repository into control-plane service**
 
 In `ScheduledTasksControlPlaneService`:
 
@@ -966,7 +966,7 @@ def _automation_definition_status(row: DefinitionRow) -> tuple[bool, str]:
     return False, "needs_attention"
 ```
 
-- [ ] **Step 4: Run projection tests**
+- [x] **Step 4: Run projection tests**
 
 Run:
 
@@ -977,7 +977,7 @@ python -m pytest tldw_Server_API/tests/Notifications/test_scheduled_tasks_contro
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit projection**
+- [x] **Step 5: Commit projection**
 
 ```bash
 git add \

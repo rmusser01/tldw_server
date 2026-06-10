@@ -49,6 +49,9 @@ Task 3 review: spec-compliance review initially found stale idempotency replay r
 Task 4 completed across commits f3050f3c13, 688ce4c5e5, and b6d8caef1c: exposed preview, definition, lifecycle, duplicate, audit, idempotency, filter, and public error-envelope API endpoints with owner scoping and no execution behavior.
 Task 4 verification: endpoint/control-plane pytest passed with 34 tests; service/db pytest passed with 45 tests; targeted endpoint pytest passed with 30 tests; git diff --check and Bandit touched-scope scan passed in worker/reviewer verification.
 Task 4 review: spec-compliance review found a missing direct public `scheduled_task_definition_not_found` alias and worker fixed it. Code-quality review found audit request-id and datetime filter correctness issues and worker/coordinator fixed them. Final spec and code-quality re-reviews approved.
+Task 5 completed in commit 5f7f6cd632: projected automation definitions into the unified `/api/v1/scheduled-tasks` control-plane list/detail responses while preserving reminder and Watchlists behavior.
+Task 5 verification: control-plane pytest passed with 7 tests; automation API pytest passed with 30 tests; git diff --check and Bandit touched-scope scan passed in worker/reviewer verification.
+Task 5 review: spec-compliance reviewer approved. Code-quality reviewer approved with only residual optional coverage suggestions for disabled lifecycle and cross-user/missing detail behavior.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
