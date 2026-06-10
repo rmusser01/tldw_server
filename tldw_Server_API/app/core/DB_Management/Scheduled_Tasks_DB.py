@@ -17,6 +17,10 @@ from typing import Any
 from uuid import uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
+    begin_immediate_if_needed,
+    configure_sqlite_connection,
+)
 
 _SCHEDULED_TASKS_DB_NAME = "ScheduledTasks.db"
 _DISABLED_LOCK_KINDS = {"none", "admin", "security", "system"}
@@ -105,7 +109,7 @@ def _new_id() -> str:
 
 
 def _json_dumps(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def _json_loads(raw_value: str) -> Any:
@@ -130,6 +134,43 @@ def _validate_limit_offset(limit: int, offset: int) -> None:
 def _validate_disabled_lock_kind(value: str) -> None:
     if value not in _DISABLED_LOCK_KINDS:
         raise ValueError(f"invalid disabled_lock_kind: {value!r}")
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_expired(expires_at: str) -> bool:
+    return _parse_iso_datetime(expires_at) <= datetime.now(timezone.utc)
+
+
+def _prune_expired_idempotency_record(
+    conn: sqlite3.Connection,
+    *,
+    owner_id: int,
+    route: str,
+    key: str,
+) -> None:
+    row = conn.execute(
+        """
+        SELECT expires_at
+        FROM scheduled_task_idempotency
+        WHERE owner_id = ? AND route = ? AND key = ?
+        """,
+        [owner_id, route, key],
+    ).fetchone()
+    if row is not None and _is_expired(row["expires_at"]):
+        conn.execute(
+            """
+            DELETE FROM scheduled_task_idempotency
+            WHERE owner_id = ? AND route = ? AND key = ?
+            """,
+            [owner_id, route, key],
+        )
 
 
 def _preview_from_row(row: sqlite3.Row | None) -> PreviewRow | None:
@@ -462,16 +503,20 @@ class ScheduledTasksDatabase:
     ) -> PreviewRow:
         consumed_at = _utcnow_iso()
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE scheduled_task_previews
                 SET status = 'consumed',
                     consumed_at = ?,
                     created_definition_id = ?
-                WHERE owner_id = ? AND id = ?
+                WHERE owner_id = ?
+                    AND id = ?
+                    AND consumed_at IS NULL
+                    AND status != 'consumed'
                 """,
                 [consumed_at, created_definition_id, owner_id, preview_id],
             )
+            updated_count = cursor.rowcount
             row = conn.execute(
                 "SELECT * FROM scheduled_task_previews WHERE owner_id = ? AND id = ?",
                 [owner_id, preview_id],
@@ -479,6 +524,8 @@ class ScheduledTasksDatabase:
         consumed = _preview_from_row(row)
         if consumed is None:
             raise KeyError(f"preview not found: {preview_id}")
+        if updated_count == 0:
+            raise ValueError("preview already consumed")
         return consumed
 
     def create_definition(
@@ -506,6 +553,17 @@ class ScheduledTasksDatabase:
         definition_id = _new_id()
         created_at = _utcnow_iso()
         with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            preview_exists = conn.execute(
+                """
+                SELECT 1
+                FROM scheduled_task_previews
+                WHERE owner_id = ? AND id = ?
+                """,
+                [owner_id, preview_id],
+            ).fetchone()
+            if preview_exists is None:
+                raise KeyError(f"preview not found: {preview_id}")
             conn.execute(
                 """
                 INSERT INTO scheduled_task_definitions (
@@ -622,8 +680,6 @@ class ScheduledTasksDatabase:
         current = self.get_definition(owner_id=owner_id, definition_id=definition_id)
         if current is None:
             raise KeyError(f"definition not found: {definition_id}")
-        if expected_version is not None and current.version != expected_version:
-            raise ValueError("definition version conflict")
         if "disabled_lock_kind" in patch:
             _validate_disabled_lock_kind(str(patch["disabled_lock_kind"]))
 
@@ -646,7 +702,7 @@ class ScheduledTasksDatabase:
             "updated_at": _utcnow_iso(),
         }
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE scheduled_task_definitions
                 SET version = ?,
@@ -666,6 +722,7 @@ class ScheduledTasksDatabase:
                     updated_by = ?,
                     updated_at = ?
                 WHERE owner_id = ? AND id = ?
+                    AND (? IS NULL OR version = ?)
                 """,
                 [
                     next_values["version"],
@@ -686,14 +743,21 @@ class ScheduledTasksDatabase:
                     next_values["updated_at"],
                     owner_id,
                     definition_id,
+                    expected_version,
+                    expected_version,
                 ],
             )
+            updated_count = cursor.rowcount
             row = conn.execute(
                 "SELECT * FROM scheduled_task_definitions WHERE owner_id = ? AND id = ?",
                 [owner_id, definition_id],
             ).fetchone()
         updated = _definition_from_row(row)
         if updated is None:
+            raise KeyError(f"definition not found after update: {definition_id}")
+        if updated_count == 0:
+            if expected_version is not None:
+                raise ValueError("definition version conflict")
             raise KeyError(f"definition not found after update: {definition_id}")
         return updated
 
@@ -799,6 +863,12 @@ class ScheduledTasksDatabase:
         key: str,
     ) -> IdempotencyRecordRow | None:
         with self._connect() as conn:
+            _prune_expired_idempotency_record(
+                conn,
+                owner_id=owner_id,
+                route=route,
+                key=key,
+            )
             row = conn.execute(
                 """
                 SELECT * FROM scheduled_task_idempotency
@@ -820,6 +890,12 @@ class ScheduledTasksDatabase:
     ) -> IdempotencyRecordRow:
         created_at = _utcnow_iso()
         with self._connect() as conn:
+            _prune_expired_idempotency_record(
+                conn,
+                owner_id=owner_id,
+                route=route,
+                key=key,
+            )
             conn.execute(
                 """
                 INSERT INTO scheduled_task_idempotency (
@@ -854,5 +930,5 @@ class ScheduledTasksDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
+        configure_sqlite_connection(conn)
         return conn

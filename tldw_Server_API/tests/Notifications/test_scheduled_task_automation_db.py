@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +17,14 @@ def _repo(tmp_path, monkeypatch, *, user_id: int = 101) -> ScheduledTasksDatabas
     repo = ScheduledTasksDatabase.for_user(user_id=user_id)
     repo.ensure_schema()
     return repo
+
+
+def _database_bytes(repo: ScheduledTasksDatabase) -> bytes:
+    payload = repo.db_path.read_bytes()
+    wal_path = Path(f"{repo.db_path}-wal")
+    if wal_path.exists():
+        payload += wal_path.read_bytes()
+    return payload
 
 
 def _create_preview(
@@ -157,7 +167,7 @@ def test_create_definition_and_audit_roundtrip(tmp_path, monkeypatch):
         limit=10,
         offset=0,
     )
-    db_bytes = repo.db_path.read_bytes()
+    db_bytes = _database_bytes(repo)
 
     assert loaded == definition  # nosec B101
     assert audit.id == events[0].id  # nosec B101
@@ -183,6 +193,27 @@ def test_update_preview_consumption_sets_consumed_at(tmp_path, monkeypatch):
     assert consumed.created_definition_id == "definition-1"  # nosec B101
 
 
+def test_mark_preview_consumed_rejects_second_consume_and_preserves_definition_id(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    preview = _create_preview(repo)
+    first = repo.mark_preview_consumed(
+        owner_id=101,
+        preview_id=preview.id,
+        created_definition_id="definition-1",
+    )
+
+    with pytest.raises(ValueError, match="preview already consumed"):
+        repo.mark_preview_consumed(
+            owner_id=101,
+            preview_id=preview.id,
+            created_definition_id="definition-2",
+        )
+
+    loaded = repo.get_preview(owner_id=101, preview_id=preview.id)
+    assert loaded.consumed_at == first.consumed_at  # nosec B101
+    assert loaded.created_definition_id == "definition-1"  # nosec B101
+
+
 def test_idempotency_records_are_owner_and_route_scoped(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     first = repo.create_idempotency_record(
@@ -191,7 +222,7 @@ def test_idempotency_records_are_owner_and_route_scoped(tmp_path, monkeypatch):
         key="same-key",
         payload_hash="hash-1",
         response_ref={"preview_id": "preview-1"},
-        expires_at="2026-06-10T00:00:00+00:00",
+        expires_at="2099-01-01T00:00:00+00:00",
     )
     by_route = repo.create_idempotency_record(
         owner_id=101,
@@ -199,7 +230,7 @@ def test_idempotency_records_are_owner_and_route_scoped(tmp_path, monkeypatch):
         key="same-key",
         payload_hash="hash-2",
         response_ref={"definition_id": "definition-1"},
-        expires_at="2026-06-10T00:00:00+00:00",
+        expires_at="2099-01-01T00:00:00+00:00",
     )
     by_owner = repo.create_idempotency_record(
         owner_id=202,
@@ -207,7 +238,7 @@ def test_idempotency_records_are_owner_and_route_scoped(tmp_path, monkeypatch):
         key="same-key",
         payload_hash="hash-3",
         response_ref={"preview_id": "preview-2"},
-        expires_at="2026-06-10T00:00:00+00:00",
+        expires_at="2099-01-01T00:00:00+00:00",
     )
 
     assert (
@@ -242,8 +273,40 @@ def test_idempotency_records_are_owner_and_route_scoped(tmp_path, monkeypatch):
             key="same-key",
             payload_hash="hash-conflict",
             response_ref={"preview_id": "preview-conflict"},
-            expires_at="2026-06-10T00:00:00+00:00",
+            expires_at="2099-01-01T00:00:00+00:00",
         )
+
+
+def test_expired_idempotency_record_lookup_returns_none_and_key_can_be_reused(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    repo.create_idempotency_record(
+        owner_id=101,
+        route="/api/v1/scheduled-tasks/previews",
+        key="reusable-key",
+        payload_hash="old-hash",
+        response_ref={"preview_id": "old-preview"},
+        expires_at="2020-01-01T00:00:00+00:00",
+    )
+
+    assert (  # nosec B101
+        repo.get_idempotency_record(
+            owner_id=101,
+            route="/api/v1/scheduled-tasks/previews",
+            key="reusable-key",
+        )
+        is None
+    )
+    replacement = repo.create_idempotency_record(
+        owner_id=101,
+        route="/api/v1/scheduled-tasks/previews",
+        key="reusable-key",
+        payload_hash="new-hash",
+        response_ref={"preview_id": "new-preview"},
+        expires_at="2099-01-01T00:00:00+00:00",
+    )
+
+    assert replacement.payload_hash == "new-hash"  # nosec B101
+    assert replacement.response_ref == {"preview_id": "new-preview"}  # nosec B101
 
 
 def test_list_definitions_filters_by_family_lifecycle_health_and_query(tmp_path, monkeypatch):
@@ -311,6 +374,121 @@ def test_definition_persists_disabled_lock_kind_and_reason(tmp_path, monkeypatch
     assert loaded.disabled_reason == "Agent capability was disabled by policy"  # nosec B101
 
 
+def test_update_definition_with_expected_version_updates_and_conflicts_on_wrong_version(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo, name="Original")
+
+    updated = repo.update_definition(
+        owner_id=101,
+        definition_id=definition.id,
+        patch={"name": "Updated", "updated_by": "101"},
+        expected_version=1,
+    )
+
+    assert updated.version == 2  # nosec B101
+    assert updated.name == "Updated"  # nosec B101
+    with pytest.raises(ValueError, match="definition version conflict"):
+        repo.update_definition(
+            owner_id=101,
+            definition_id=definition.id,
+            patch={"name": "Stale update", "updated_by": "101"},
+            expected_version=1,
+        )
+
+
+def test_update_definition_expected_version_conflicts_if_row_changes_between_read_and_write(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo, name="Original")
+    concurrent_repo = ScheduledTasksDatabase(repo.db_path)
+    original_get_definition = repo.get_definition
+    raced = False
+
+    def _get_definition_after_concurrent_update(owner_id: int, definition_id: str):
+        nonlocal raced
+        row = original_get_definition(owner_id=owner_id, definition_id=definition_id)
+        if row is not None and not raced:
+            raced = True
+            concurrent_repo.update_definition(
+                owner_id=owner_id,
+                definition_id=definition_id,
+                patch={
+                    "name": "Concurrent update",
+                    "updated_by": "202",
+                },
+                expected_version=None,
+            )
+        return row
+
+    monkeypatch.setattr(repo, "get_definition", _get_definition_after_concurrent_update)
+
+    with pytest.raises(ValueError, match="definition version conflict"):
+        repo.update_definition(
+            owner_id=101,
+            definition_id=definition.id,
+            patch={"name": "Stale update", "updated_by": "101"},
+            expected_version=1,
+        )
+
+    loaded = original_get_definition(owner_id=101, definition_id=definition.id)
+    assert loaded.version == 2  # nosec B101
+    assert loaded.name == "Concurrent update"  # nosec B101
+
+
+def test_create_definition_rejects_missing_preview(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+
+    with pytest.raises(KeyError, match="preview not found"):
+        repo.create_definition(
+            owner_id=101,
+            family="recurring_question",
+            name="Missing preview",
+            description=None,
+            lifecycle="configured",
+            health="execution_unavailable",
+            schedule={"cron": "0 9 * * *"},
+            input={"question": "What changed?"},
+            visibility_policy="findings_only",
+            notification_policy={"channels": []},
+            approval_policy={"required": False},
+            preview_id="missing-preview",
+            created_by="101",
+            updated_by="101",
+        )
+
+
+def test_create_definition_rejects_cross_owner_preview(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    owner_202_preview = _create_preview(repo, owner_id=202)
+
+    with pytest.raises(KeyError, match="preview not found"):
+        repo.create_definition(
+            owner_id=101,
+            family="recurring_question",
+            name="Cross-owner preview",
+            description=None,
+            lifecycle="configured",
+            health="execution_unavailable",
+            schedule={"cron": "0 9 * * *"},
+            input={"question": "What changed?"},
+            visibility_policy="findings_only",
+            notification_policy={"channels": []},
+            approval_policy={"required": False},
+            preview_id=owner_202_preview.id,
+            created_by="101",
+            updated_by="101",
+        )
+
+
+def test_json_persistence_rejects_nan_values(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError):
+        _create_preview(
+            repo,
+            normalized_config={"threshold": math.nan},
+        )
+
+
 def test_agent_task_definition_and_audit_storage_do_not_contain_raw_message_secret(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     sentinel = "RAW_AGENT_TASK_SENTINEL_SHOULD_NOT_PERSIST"
@@ -361,4 +539,4 @@ def test_agent_task_definition_and_audit_storage_do_not_contain_raw_message_secr
     persisted_text = json.dumps([preview_payload, definition_payload, audit_payloads], sort_keys=True)
 
     assert sentinel not in persisted_text  # nosec B101
-    assert sentinel.encode("utf-8") not in repo.db_path.read_bytes()  # nosec B101
+    assert sentinel.encode("utf-8") not in _database_bytes(repo)  # nosec B101
