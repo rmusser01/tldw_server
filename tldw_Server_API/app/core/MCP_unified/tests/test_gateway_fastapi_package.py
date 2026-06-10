@@ -180,7 +180,7 @@ class _MultiToolGatewayRuntime(_FakeGatewayRuntime):
                     "properties": {"query": {"type": "string"}},
                     "required": ["query"],
                 },
-                "metadata": {"category": "test", "capability": "code_search"},
+                "metadata": {"category": "code", "capability": "code_search"},
             },
             {
                 "name": "admin.delete",
@@ -2656,7 +2656,7 @@ def test_profile_runtime_exposes_discovery_bridge_tools_for_deferred_categories(
 
     _assert_profile_runtime_tool_names(
         tools,
-        backend_tools=["browser.snapshot"],
+        backend_tools=[],
         includes_tool_call=True,
     )
     for name in (
@@ -2683,7 +2683,7 @@ def test_profile_runtime_omits_tool_call_without_deferred_categories() -> None:
     profile = _profile_with_tooling_metadata(
         "researcher",
         capabilities=["code_search"],
-        direct_categories=["test"],
+        direct_categories=["code"],
         deferred_categories=[],
     )
     runtime = ProfileAwareGatewayRuntime(
@@ -2695,6 +2695,51 @@ def test_profile_runtime_omits_tool_call_without_deferred_categories() -> None:
     tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="bridge-read-only")))
 
     _assert_profile_runtime_tool_names(tools, backend_tools=["echo.search"])
+
+
+def test_profile_runtime_omits_tool_call_for_recommendations_without_deferred_categories() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayPolicyDenied, GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([])
+    profile = _profile_with_tooling_metadata(
+        "frontend",
+        allowed_tools=["browser.trace"],
+        recommended_tools=[
+            {
+                "id": "browser.trace",
+                "category": "browser",
+                "description": "Browser trace capture.",
+                "activation": "requires_browser_runtime",
+            }
+        ],
+        direct_categories=["code"],
+        deferred_categories=[],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="frontend",
+    )
+    context = GatewayRequestContext(request_id="recommendation-only-tools")
+
+    tools = asyncio.run(runtime.list_tools(context))
+    catalog = asyncio.run(runtime.call_tool("profile.tools.list", {}, context))
+
+    _assert_profile_runtime_tool_names(tools, backend_tools=[])
+    assert [tool["tool_id"] for tool in catalog["tools"]] == ["browser.trace"]
+    assert catalog["tools"][0]["installation_status"] == "recommended_unavailable"
+    with pytest.raises(GatewayPolicyDenied) as exc_info:
+        asyncio.run(
+            runtime.call_tool(
+                "tool_call",
+                {"tool_id": "browser.trace", "arguments": {}},
+                context,
+            )
+        )
+    assert exc_info.value.reason_code == "tool_not_allowed"
+    assert backend.call_requests == []
 
 
 def test_profile_runtime_tool_search_bridge_returns_profile_scoped_results() -> None:
@@ -2765,6 +2810,131 @@ def test_profile_runtime_tool_search_bridge_returns_profile_scoped_results() -> 
     assert results["tools"][0]["installation_status"] == "installed"
     assert results["tools"][1]["installation_status"] == "recommended_unavailable"
     assert backend.call_requests == []
+
+
+def test_profile_runtime_hides_deferred_installed_tools_from_initial_list() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "code.search",
+                "description": "Search code.",
+                "metadata": {
+                    "capability": "code_search",
+                    "category": "code",
+                },
+            },
+            {
+                "name": "browser.snapshot",
+                "description": "Browser DOM snapshot.",
+                "metadata": {
+                    "capability": "browser.inspect",
+                    "category": "browser",
+                },
+            },
+        ]
+    )
+    profile = _profile_with_tooling_metadata(
+        "frontend",
+        capabilities=["code_search", "browser.inspect"],
+        direct_categories=["code"],
+        deferred_categories=[],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="frontend",
+    )
+
+    tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="direct-only")))
+
+    _assert_profile_runtime_tool_names(
+        tools,
+        backend_tools=["code.search"],
+        includes_tool_call=True,
+    )
+    assert "browser.snapshot" not in _listed_tool_names(tools)
+
+
+def test_profile_runtime_search_and_calls_deferred_installed_tools() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "code.search",
+                "description": "Search code.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+                "metadata": {
+                    "capability": "code_search",
+                    "category": "code",
+                },
+            },
+            {
+                "name": "browser.snapshot",
+                "description": "Browser DOM snapshot.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+                "metadata": {
+                    "capability": "browser.inspect",
+                    "category": "browser",
+                },
+            },
+        ]
+    )
+    profile = _profile_with_tooling_metadata(
+        "frontend",
+        capabilities=["code_search", "browser.inspect"],
+        direct_categories=["code"],
+        deferred_categories=["browser"],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="frontend",
+    )
+    context = GatewayRequestContext(request_id="deferred-search-call")
+
+    tools = asyncio.run(runtime.list_tools(context))
+    catalog = asyncio.run(runtime.call_tool("profile.tools.list", {}, context))
+    results = asyncio.run(
+        runtime.call_tool(
+            "tool_search",
+            {"query": "browser", "category": "browser", "limit": 10},
+            context,
+        )
+    )
+    payload = asyncio.run(
+        runtime.call_tool(
+            "tool_call",
+            {"tool_id": "browser.snapshot", "arguments": {"query": "dom"}},
+            context,
+        )
+    )
+
+    catalog_entries = {tool["tool_id"]: tool for tool in catalog["tools"]}
+    _assert_profile_runtime_tool_names(
+        tools,
+        backend_tools=["code.search"],
+        includes_tool_call=True,
+    )
+    assert catalog_entries["code.search"]["exposure"] == "direct"
+    assert catalog_entries["browser.snapshot"]["exposure"] == "deferred"
+    assert [tool["tool_id"] for tool in results["tools"]] == ["browser.snapshot"]
+    assert results["tools"][0]["installation_status"] == "installed"
+    assert results["tools"][0]["exposure"] == "deferred"
+    assert payload["content"][0]["text"] == "browser.snapshot:dom"
+    assert backend.call_requests[-1][0] == "browser.snapshot"
 
 
 def test_profile_runtime_tool_describe_bridge_hides_denied_tools() -> None:
