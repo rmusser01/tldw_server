@@ -48,6 +48,94 @@ describe("scheduled task automation status", () => {
     expect(status.label).toBe("Paused")
   })
 
+  it("maps ready backend-projected definitions to configured", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_ready",
+      primitive: "automation_definition",
+      title: "Ready task",
+      status: "ready",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {
+        family: "agent_task",
+        lifecycle: "configured",
+        health: "ready"
+      }
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "waiting",
+      label: "Configured",
+      tone: "processing"
+    })
+  })
+
+  it("maps capability-blocked backend projection to blocked warning copy", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_capability",
+      primitive: "automation_definition",
+      title: "Capability blocked task",
+      status: "blocked_capability_unavailable",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {
+        family: "agent_task",
+        lifecycle: "configured",
+        health: "capability_unavailable"
+      }
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "blocked",
+      label: "Execution unavailable",
+      tone: "warning"
+    })
+  })
+
+  it("maps permission-blocked backend projection to blocked warning copy", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_permission",
+      primitive: "automation_definition",
+      title: "Permission blocked task",
+      status: "blocked_permission_required",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {
+        family: "recurring_question",
+        lifecycle: "configured",
+        health: "permission_required"
+      }
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "blocked",
+      label: "Execution unavailable",
+      tone: "warning"
+    })
+  })
+
+  it("maps needs-attention backend projection intentionally", () => {
+    const status = getAutomationDefinitionProductStatus({
+      id: "automation_definition:def_attention",
+      primitive: "automation_definition",
+      title: "Attention task",
+      status: "needs_attention",
+      enabled: true,
+      edit_mode: "native",
+      source_ref: {
+        family: "agent_task",
+        lifecycle: "configured",
+        health: "needs_attention"
+      }
+    } as const)
+
+    expect(status).toMatchObject({
+      key: "needs_attention",
+      label: "Needs attention",
+      tone: "error"
+    })
+  })
+
   it("treats unknown automation lifecycle and status as needing attention", () => {
     const status = getAutomationDefinitionProductStatus({
       id: "automation_definition:def_3",

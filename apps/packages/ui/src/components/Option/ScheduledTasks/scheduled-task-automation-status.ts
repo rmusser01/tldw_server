@@ -49,6 +49,10 @@ const KNOWN_AUTOMATION_HEALTH = new Set([
 const KNOWN_AUTOMATION_STATUSES = new Set([
   "configured",
   "configured_execution_unavailable",
+  "ready",
+  "blocked_capability_unavailable",
+  "blocked_permission_required",
+  "needs_attention",
   "paused",
   "archived",
   "disabled"
