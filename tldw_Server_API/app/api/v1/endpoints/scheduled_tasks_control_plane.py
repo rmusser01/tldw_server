@@ -75,6 +75,11 @@ _VALUE_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         "scheduled_task_preview_required",
         "A valid scheduled task preview is required.",
     ),
+    "scheduled_task_definition_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "scheduled_task_definition_not_found",
+        "Scheduled task definition was not found.",
+    ),
     "scheduled_task_preview_mismatch": (
         status.HTTP_409_CONFLICT,
         "scheduled_task_preview_mismatch",

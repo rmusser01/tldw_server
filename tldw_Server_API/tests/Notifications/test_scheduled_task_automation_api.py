@@ -525,15 +525,24 @@ def test_same_idempotency_key_with_different_payload_conflicts_on_mutating_route
 @pytest.mark.parametrize(
     ("service_error", "public_code", "status_code"),
     [
-        ("preview_invalid", "scheduled_task_schedule_invalid", 422),
+        ("scheduled_task_family_unavailable", "scheduled_task_family_unavailable", 409),
+        ("scheduled_task_preview_required", "scheduled_task_preview_required", 400),
+        ("scheduled_task_definition_not_found", "scheduled_task_definition_not_found", 404),
+        ("scheduled_task_preview_mismatch", "scheduled_task_preview_mismatch", 409),
+        ("scheduled_task_preview_expired", "scheduled_task_preview_expired", 409),
+        ("scheduled_task_schedule_invalid", "scheduled_task_schedule_invalid", 422),
         ("scheduled_task_scope_invalid", "scheduled_task_scope_invalid", 422),
         ("scheduled_task_agent_ref_invalid", "scheduled_task_agent_ref_invalid", 422),
         ("scheduled_task_permission_policy_invalid", "scheduled_task_permission_policy_invalid", 422),
-        ("scheduled_task_family_unavailable", "scheduled_task_family_unavailable", 409),
         ("scheduled_task_execution_unavailable", "scheduled_task_execution_unavailable", 409),
+        ("scheduled_task_definition_version_conflict", "scheduled_task_definition_version_conflict", 409),
+        ("scheduled_task_definition_archived", "scheduled_task_definition_archived", 409),
+        ("scheduled_task_lifecycle_transition_invalid", "scheduled_task_lifecycle_transition_invalid", 409),
+        ("scheduled_task_idempotency_conflict", "scheduled_task_idempotency_conflict", 409),
+        ("preview_invalid", "scheduled_task_schedule_invalid", 422),
     ],
 )
-def test_validation_and_capability_errors_use_public_error_envelopes(
+def test_required_public_error_code_aliases_use_public_error_envelopes(
     scheduled_tasks_client,
     auth_headers,
     service_error,
