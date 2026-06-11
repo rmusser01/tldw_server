@@ -22,19 +22,18 @@ from loguru import logger
 
 # Unified audit service
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
-from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus
+from ....core.Chatbooks.chatbook_models import ContentType, ExportStatus
 from ....core.Chatbooks.chatbook_service import ChatbookService
 from ....core.Chatbooks.chatbook_validators import ChatbookValidator
-from ....core.Chatbooks.exceptions import JobError
+from ....core.Chatbooks.exceptions import ExportError, JobError
 from ....core.Chatbooks.quota_manager import QuotaManager
 from ....core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from ....core.DB_Management.db_path_utils import DatabasePaths
-from ._pagination_utils import build_offset_pagination_meta
 from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as get_chacha_db
 from ..schemas.chatbook_schemas import (
     CancelJobResponse,
@@ -55,6 +54,7 @@ from ..schemas.chatbook_schemas import (
 from ..schemas.chatbook_schemas import (
     ChatbookVersion as SchemaChatbookVersion,
 )
+from ._pagination_utils import build_offset_pagination_meta
 
 _CHATBOOKS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -124,60 +124,14 @@ def _persist_completed_sync_export_job(
     output_path: str | Path,
 ) -> tuple[str, str, Path, int]:
     """Persist a sync export result as a completed job for job-backed downloads."""
-    job_id = str(uuid4())
-    file_path = Path(output_path).resolve()
-    expected_base = Path(service.export_dir).resolve()
     try:
-        file_path.relative_to(expected_base)
-    except ValueError:
-        raise HTTPException(status_code=500, detail="Export path validation failed") from None
-
-    try:
-        if not file_path.exists() or not file_path.is_file():
-            raise HTTPException(status_code=500, detail="Export archive was not created")
-        file_size = file_path.stat().st_size
-    except HTTPException:
-        raise
-    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        raise HTTPException(status_code=500, detail="Export archive validation failed") from None
-
-    now_utc = datetime.now(timezone.utc)
-    expires_at = service._get_export_expiry(now_utc)
-    download_expires_at = service._get_download_expiry(now_utc, expires_at)
-    download_url = service._build_download_url(job_id, download_expires_at)
-
-    job = ExportJob(
-        job_id=job_id,
-        user_id=user_id,
-        status=ExportStatus.COMPLETED,
-        chatbook_name=chatbook_name,
-        output_path=str(file_path),
-        created_at=now_utc,
-        started_at=now_utc,
-        completed_at=now_utc,
-        error_message=None,
-        progress_percentage=100,
-        total_items=0,
-        processed_items=0,
-        file_size_bytes=file_size,
-        download_url=download_url,
-        expires_at=expires_at,
-    )
-    try:
-        service._save_export_job(job)  # noqa: SLF001 (internal helper is appropriate here)
-    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.warning("Failed to persist completed export job for sync path")
-        try:
-            if file_path.exists():
-                file_path.unlink()
-        except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-            logger.warning("Failed to remove export archive after job persistence failure")
-        raise HTTPException(
-            status_code=500,
-            detail="Export completed but failed to persist job metadata",
-        ) from None
-
-    return job_id, download_url, file_path, file_size
+        return service.register_completed_sync_export(
+            user_id=user_id,
+            chatbook_name=chatbook_name,
+            output_path=output_path,
+        )
+    except ExportError as exc:
+        raise HTTPException(status_code=500, detail=exc.message) from None
 
 
 def get_chatbook_service(

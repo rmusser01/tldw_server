@@ -80,7 +80,12 @@ def enqueue_explainer_node_expansion_job(
         owner_user_id=str(owner_user_id),
         priority=priority,
         max_retries=2,
-        idempotency_key=f"explainer:{session.id}:{node.id}:{intent}:{answer_revision}",
+        idempotency_key=expansion_batch_key(
+            session_id=session.id,
+            node_id=node.id,
+            intent=intent,
+            answer_revision=answer_revision,
+        ),
     )
     status = str(job.get("status") or "queued").strip().lower()
     if status not in _ENQUEUEABLE_JOB_STATUSES:
@@ -178,10 +183,10 @@ async def handle_explainer_node_expansion_job(
     if session is None or node_id not in session.nodes:
         raise KeyError("Explainer node not found")
     node = session.nodes[node_id]
-    effective_intent = intent or node.intent or session.output_intent
+    effective_intent = effective_expansion_intent(requested=intent, node=node, session=session)
     payload_revision = str(payload.get("answer_revision") or "").strip()
     current_revision = current_answer_revision(node)
-    batch_key = _expansion_batch_key(
+    batch_key = expansion_batch_key(
         session_id=session.id,
         node_id=node.id,
         intent=effective_intent,
@@ -328,43 +333,28 @@ def _persist_children(
     children: list[GroundedExplainerChild],
     metadata: dict[str, Any],
 ) -> list[str]:
-    created_child_ids: list[str] = []
-    persisted_child_ids: list[str] = []
-    try:
-        for child in children:
-            created = repo.create_node(
-                session.id,
-                owner_user_id=owner_user_id,
-                parent_id=node.id,
-                title=child.title,
-                body=child.body,
-                kind=child.kind,
-                intent=child.intent,
-                status=ExplainerNodeStatus.COMPLETE.value,
-                evidence_state=child.evidence_state,
-                outside_knowledge_used=child.outside_knowledge_used,
-                citations=child.citations,
-            )
-            if created is None:
-                raise KeyError("Explainer session not found while writing child node")
-            created_child_ids.append(created.id)
-            updated = repo.update_node(
-                session.id,
-                created.id,
-                owner_user_id=owner_user_id,
-                generation_metadata=metadata,
-            )
-            if updated is None:
-                raise KeyError("Explainer child not found while writing generation metadata")
-            persisted_child_ids.append(updated.id)
-        return persisted_child_ids
-    except Exception:
-        for child_id in reversed(created_child_ids):
-            try:
-                repo.delete_node(session.id, child_id, owner_user_id=owner_user_id)
-            except Exception as rollback_error:
-                _ = rollback_error
-        raise
+    created = repo.create_child_nodes(
+        session.id,
+        owner_user_id=owner_user_id,
+        parent_id=node.id,
+        children=[
+            {
+                "title": child.title,
+                "body": child.body,
+                "kind": child.kind,
+                "intent": child.intent,
+                "status": ExplainerNodeStatus.COMPLETE.value,
+                "evidence_state": child.evidence_state,
+                "outside_knowledge_used": child.outside_knowledge_used,
+                "citations": child.citations,
+                "generation_metadata": metadata,
+            }
+            for child in children
+        ],
+    )
+    if created is None:
+        raise KeyError("Explainer session not found while writing child nodes")
+    return [child.id for child in created]
 
 
 def _enforce_selected_citations(
@@ -475,14 +465,25 @@ def current_answer_revision(node: ExplainerNode) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def _expansion_batch_key(
+def expansion_batch_key(
     *,
     session_id: str,
     node_id: str,
     intent: str,
     answer_revision: str,
 ) -> str:
+    """Single source of truth for expansion identity (Jobs idempotency + child dedup)."""
     return f"explainer:{session_id}:{node_id}:{intent}:{answer_revision}"
+
+
+def effective_expansion_intent(
+    *,
+    requested: str | None,
+    node: ExplainerNode,
+    session: ExplainerSession,
+) -> str:
+    """Single source of truth for the requested→node→session intent fallback."""
+    return requested or node.intent or session.output_intent
 
 
 def _existing_batch_child_ids(
@@ -663,7 +664,9 @@ __all__ = [
     "ExplainerJobAccepted",
     "ExplainerTerminalJobError",
     "current_answer_revision",
+    "effective_expansion_intent",
     "enqueue_explainer_node_expansion_job",
+    "expansion_batch_key",
     "handle_explainer_node_expansion_job",
     "is_explainer_generation_configured",
     "make_configured_explainer_generator",

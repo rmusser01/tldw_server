@@ -8,13 +8,7 @@ import {
   type ExplainerSessionCreatePayload,
   type ExplainerSessionPatchPayload
 } from "@/services/tldw/TldwApiClient"
-import type {
-  ExplainerExportResponse,
-  ExplainerJobStatus,
-  ExplainerSession,
-  ExplainerSessionListResponse,
-  ExplainerSourceCandidate
-} from "./types"
+import type { ExplainerSourceCandidate } from "./types"
 
 const toArray = (value: unknown): Record<string, unknown>[] => {
   if (Array.isArray(value)) return value.filter(isRecord)
@@ -76,16 +70,15 @@ const normalizeNoteCandidate = (item: Record<string, unknown>): ExplainerSourceC
 
 export const explainerApi = {
   listSessions: (params?: { limit?: number; offset?: number }) =>
-    tldwClient.listExplainerSessions(params) as Promise<ExplainerSessionListResponse>,
+    tldwClient.listExplainerSessions(params),
 
-  getSession: (sessionId: string) =>
-    tldwClient.getExplainerSession(sessionId) as Promise<ExplainerSession>,
+  getSession: (sessionId: string) => tldwClient.getExplainerSession(sessionId),
 
   createSession: (payload: ExplainerSessionCreatePayload) =>
-    tldwClient.createExplainerSession(payload) as Promise<ExplainerSession>,
+    tldwClient.createExplainerSession(payload),
 
   updateSession: (sessionId: string, payload: ExplainerSessionPatchPayload) =>
-    tldwClient.updateExplainerSession(sessionId, payload) as Promise<ExplainerSession>,
+    tldwClient.updateExplainerSession(sessionId, payload),
 
   deleteSession: (sessionId: string) => tldwClient.deleteExplainerSession(sessionId),
 
@@ -107,14 +100,10 @@ export const explainerApi = {
     payload: ExplainerQuestionAnswerPayload
   ) => tldwClient.answerExplainerQuestion(sessionId, nodeId, payload),
 
-  getJob: (jobId: string) =>
-    tldwClient.getExplainerJob(jobId) as Promise<ExplainerJobStatus>,
+  getJob: (jobId: string) => tldwClient.getExplainerJob(jobId),
 
   exportChatbook: (sessionId: string, payload?: ExplainerChatbookExportPayload) =>
-    tldwClient.exportExplainerChatbook(
-      sessionId,
-      payload
-    ) as Promise<ExplainerExportResponse>,
+    tldwClient.exportExplainerChatbook(sessionId, payload),
 
   searchSources: async (query: string): Promise<ExplainerSourceCandidate[]> => {
     const normalized = query.trim()

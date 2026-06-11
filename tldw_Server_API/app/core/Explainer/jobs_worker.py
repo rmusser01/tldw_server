@@ -11,8 +11,8 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.Explainer_DB import open_explainer_db
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
@@ -88,8 +88,6 @@ def build_explainer_job_handler(
         owner_user_id = str(job.get("owner_user_id") or "").strip()
         if not owner_user_id:
             raise ValueError("Explainer job is missing owner_user_id")
-        db_path = resolved_db_path(owner_user_id)
-        db = ExplainerDatabase(db_path=db_path, client_id=owner_user_id)
         configured_generator: ExplainerGenerator | None = None
 
         def _lazy_generator(prompt):
@@ -98,7 +96,7 @@ def build_explainer_job_handler(
                 configured_generator = generator_factory()
             return configured_generator(prompt)
 
-        try:
+        with open_explainer_db(owner_user_id, db_path=resolved_db_path(owner_user_id)) as db:
             retriever = retriever_factory() if retriever_factory is not None else None
             return await handle_explainer_node_expansion_job(
                 job,
@@ -106,8 +104,6 @@ def build_explainer_job_handler(
                 generator=_lazy_generator,
                 retriever=retriever,
             )
-        finally:
-            db.close_connection()
 
     return _handler
 

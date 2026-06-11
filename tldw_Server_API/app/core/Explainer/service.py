@@ -6,6 +6,13 @@ from dataclasses import asdict
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import InputError
+from tldw_Server_API.app.core.Explainer.jobs import (
+    ExplainerJobAccepted,
+    ExplainerTerminalJobError,
+    effective_expansion_intent,
+    enqueue_explainer_node_expansion_job,
+    is_explainer_generation_configured,
+)
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerGrounding,
     ExplainerNode,
@@ -14,12 +21,6 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerSelectedSource,
     ExplainerSession,
     ExplainerSessionSummary,
-)
-from tldw_Server_API.app.core.Explainer.jobs import (
-    ExplainerJobAccepted,
-    ExplainerTerminalJobError,
-    enqueue_explainer_node_expansion_job,
-    is_explainer_generation_configured,
 )
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 
@@ -158,6 +159,21 @@ class ExplainerService:
             raise ExplainerNotFoundError("Explainer session not found")
         return node
 
+    # Request fields the API may patch, translated explicitly so schema and
+    # repository signatures can evolve independently.
+    _NODE_UPDATE_FIELDS = (
+        "title",
+        "body",
+        "status",
+        "evidence_state",
+        "outside_knowledge_used",
+        "selected_option_id",
+        "selected_custom_answer",
+        "question_options",
+        "generation_metadata",
+        "citations",
+    )
+
     def update_node(
         self,
         session_id: str,
@@ -166,11 +182,16 @@ class ExplainerService:
         owner_user_id: str,
         updates: dict[str, Any],
     ) -> ExplainerNode:
+        unknown_fields = sorted(set(updates) - set(self._NODE_UPDATE_FIELDS))
+        if unknown_fields:
+            raise ExplainerValidationError(
+                f"unsupported node update fields: {', '.join(unknown_fields)}"
+            )
         node = self.repo.update_node(
             session_id,
             node_id,
             owner_user_id=owner_user_id,
-            **updates,
+            **{field: updates[field] for field in self._NODE_UPDATE_FIELDS if field in updates},
         )
         if node is None:
             raise ExplainerNotFoundError("Explainer node not found")
@@ -181,6 +202,15 @@ class ExplainerService:
         if not deleted:
             raise ExplainerNotFoundError("Explainer node not found")
         return {"status": "deleted", "id": node_id}
+
+    # Status writes the expansion worker can race against; QUEUED must never
+    # overwrite a state the worker has already moved the node into.
+    _QUEUEABLE_NODE_STATUSES = (
+        ExplainerNodeStatus.IDLE.value,
+        ExplainerNodeStatus.ERROR.value,
+        ExplainerNodeStatus.COMPLETE.value,
+        ExplainerNodeStatus.QUEUED.value,
+    )
 
     def enqueue_node_expansion(
         self,
@@ -196,10 +226,21 @@ class ExplainerService:
         node = session.nodes.get(node_id)
         if node is None:
             raise ExplainerNotFoundError("Explainer node not found")
-        effective_intent = intent or node.intent or session.output_intent
+        effective_intent = effective_expansion_intent(requested=intent, node=node, session=session)
         self._validate_intent(effective_intent)
         if session.grounding != ExplainerGrounding.SOURCE_ONLY.value and not is_explainer_generation_configured():
             raise ExplainerValidationError("Explainer generation is not configured")
+
+        # Mark QUEUED before the Jobs row exists so the worker's later status
+        # writes (GENERATING/COMPLETE/ERROR) can never be overwritten here.
+        previous_status = node.status
+        marked_queued = self.repo.transition_node_status(
+            session_id,
+            node_id,
+            owner_user_id=owner_user_id,
+            to_status=ExplainerNodeStatus.QUEUED.value,
+            from_statuses=self._QUEUEABLE_NODE_STATUSES,
+        )
         try:
             accepted = enqueue_explainer_node_expansion_job(
                 jm=self.job_manager,
@@ -208,16 +249,18 @@ class ExplainerService:
                 owner_user_id=owner_user_id,
                 intent=effective_intent,
             )
-        except ExplainerTerminalJobError as exc:
-            raise ExplainerValidationError(str(exc)) from exc
-        queued = self.repo.update_node(
-            session_id,
-            node_id,
-            owner_user_id=owner_user_id,
-            status=ExplainerNodeStatus.QUEUED.value,
-        )
-        if queued is None:
-            raise ExplainerNotFoundError("Explainer node not found")
+        except Exception as exc:
+            if marked_queued:
+                self.repo.transition_node_status(
+                    session_id,
+                    node_id,
+                    owner_user_id=owner_user_id,
+                    to_status=previous_status,
+                    from_statuses=[ExplainerNodeStatus.QUEUED.value],
+                )
+            if isinstance(exc, ExplainerTerminalJobError):
+                raise ExplainerValidationError(str(exc)) from exc
+            raise
         return accepted
 
     def answer_question(

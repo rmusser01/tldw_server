@@ -27,6 +27,37 @@ class InputError(ValueError):
     """Raised for invalid Explainer input."""
 
 
+def explainer_db_for_user(
+    user_id: int | str,
+    *,
+    db_path: str | Path | None = None,
+) -> ExplainerDatabase:
+    """Single construction point for per-user Explainer databases.
+
+    Resolves the canonical per-user path unless an explicit ``db_path`` is
+    supplied (tests, workers with injected resolvers).
+    """
+    if db_path is None:
+        from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+        db_path = DatabasePaths.get_explainer_db_path(user_id)
+    return ExplainerDatabase(db_path=db_path, client_id=str(user_id))
+
+
+@contextmanager
+def open_explainer_db(
+    user_id: int | str,
+    *,
+    db_path: str | Path | None = None,
+) -> Iterable[ExplainerDatabase]:
+    """Context-managed Explainer database that closes its connection on exit."""
+    db = explainer_db_for_user(user_id, db_path=db_path)
+    try:
+        yield db
+    finally:
+        db.close_connection()
+
+
 class ExplainerDatabase:
     """Per-user SQLite database for Explainer sessions, nodes, sources, and citations."""
 

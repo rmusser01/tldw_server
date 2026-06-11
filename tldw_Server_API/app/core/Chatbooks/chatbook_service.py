@@ -26,9 +26,9 @@ import json
 import os
 import shutil
 import zipfile
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -36,24 +36,25 @@ import aiofiles
 import aiofiles.os
 from loguru import logger
 
-from tldw_Server_API.app.core.config import load_comprehensive_config, settings as core_settings
+from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config import settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
 from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from ..DB_Management.db_path_utils import DatabasePaths
+from ..DB_Management.Explainer_DB import open_explainer_db
+from ..Explainer.chatbook_adapter import (
+    EXPLAINER_CHATBOOK_FORMAT,
+    build_explainer_chatbook_payload,
+    restore_explainer_chatbook_payload,
+)
+from ..Explainer.repository import ExplainerRepository
 from ..Templating.template_renderer import (
     TemplateContext,
     TemplateEnv,
     options_from_env,
 )
 from ..Templating.template_renderer import render as render_template
-from ..DB_Management.Explainer_DB import ExplainerDatabase
-from ..Explainer.chatbook_adapter import (
-    EXPLAINER_CHATBOOK_FORMAT,
-    restore_explainer_chatbook_payload,
-    build_explainer_chatbook_payload,
-)
-from ..Explainer.repository import ExplainerRepository
 
 # Legacy job queue shim removed; using in-process task registry
 from .chatbook_models import (
@@ -117,9 +118,9 @@ try:
     from ..DB_Management.media_db.api import (  # type: ignore
         create_media_database,
         get_media_by_id,
+        get_media_by_uuid,
         get_media_prompts,
         get_media_transcripts,
-        get_media_by_uuid,
     )
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     create_media_database = None  # type: ignore
@@ -356,7 +357,7 @@ class ChatbookService:
 
     @staticmethod
     def _resolve_template_settings(manifest: ChatbookManifest) -> dict[str, Any]:
-        metadata = dict((manifest.metadata or {}))
+        metadata = dict(manifest.metadata or {})
         mode = str(metadata.get("template_mode", "pass_through")).strip().lower()
         if mode not in _CHATBOOK_TEMPLATE_MODES:
             mode = "pass_through"
@@ -466,8 +467,6 @@ class ChatbookService:
         self._media_db: Any | None = None
         self._evaluations_db: EvaluationsDatabase | None = None
         self._chroma_manager: ChromaDBManager | None = None
-        self._explainer_db: ExplainerDatabase | None = None
-        self._explainer_repo: ExplainerRepository | None = None
 
         # Secure user-specific directory under the configured user DB base.
         user_id_value = self.user_id_int if self.user_id_int is not None else self.user_id
@@ -686,15 +685,16 @@ class ChatbookService:
             self._chroma_manager = None
         return self._chroma_manager
 
-    def _get_explainer_repo(self) -> ExplainerRepository:
-        """Lazily initialize the ownership-scoped Explainer repository."""
-        if self._explainer_repo is not None:
-            return self._explainer_repo
+    @contextlib.contextmanager
+    def _explainer_repo_session(self):
+        """Context-managed, ownership-scoped Explainer repository.
+
+        Opens the per-user Explainer DB for one operation and closes the
+        connection on exit; no instance-level caching.
+        """
         user_id_value = self.user_id_int if self.user_id_int is not None else self.user_id
-        db_path = DatabasePaths.get_explainer_db_path(user_id_value)
-        self._explainer_db = ExplainerDatabase(db_path=db_path, client_id=self.user_id)
-        self._explainer_repo = ExplainerRepository(self._explainer_db)
-        return self._explainer_repo
+        with open_explainer_db(user_id_value) as db:
+            yield ExplainerRepository(db)
 
     @staticmethod
     def _normalize_datetime(value: Any) -> Any:
@@ -2441,6 +2441,71 @@ class ChatbookService:
             if extract_dir and extract_dir.exists():
                 shutil.rmtree(extract_dir, ignore_errors=True)
 
+    def register_completed_sync_export(
+        self,
+        *,
+        user_id: str,
+        chatbook_name: str,
+        output_path: str | Path,
+    ) -> tuple[str, str, Path, int]:
+        """Persist a synchronous export result as a completed, downloadable job.
+
+        Validates the archive against the service export directory and returns
+        (job_id, download_url, file_path, file_size). Raises ExportError when
+        the archive is invalid or job persistence fails.
+        """
+        job_id = str(uuid4())
+        file_path = Path(output_path).resolve()
+        expected_base = Path(self.export_dir).resolve()
+        try:
+            file_path.relative_to(expected_base)
+        except ValueError:
+            raise ExportError("Export path validation failed") from None
+
+        try:
+            if not file_path.exists() or not file_path.is_file():
+                raise ExportError("Export archive was not created")
+            file_size = file_path.stat().st_size
+        except ExportError:
+            raise
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            raise ExportError("Export archive validation failed") from None
+
+        now_utc = datetime.now(timezone.utc)
+        expires_at = self._get_export_expiry(now_utc)
+        download_expires_at = self._get_download_expiry(now_utc, expires_at)
+        download_url = self._build_download_url(job_id, download_expires_at)
+
+        job = ExportJob(
+            job_id=job_id,
+            user_id=user_id,
+            status=ExportStatus.COMPLETED,
+            chatbook_name=chatbook_name,
+            output_path=str(file_path),
+            created_at=now_utc,
+            started_at=now_utc,
+            completed_at=now_utc,
+            error_message=None,
+            progress_percentage=100,
+            total_items=0,
+            processed_items=0,
+            file_size_bytes=file_size,
+            download_url=download_url,
+            expires_at=expires_at,
+        )
+        try:
+            self._save_export_job(job)
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to persist completed export job for sync path")
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                logger.warning("Failed to remove export archive after job persistence failure")
+            raise ExportError("Export completed but failed to persist job metadata") from None
+
+        return job_id, download_url, file_path, file_size
+
     def _build_download_url(self, job_id: str, expires_at: datetime | None) -> str:
         """Build a (possibly signed) download URL for a job."""
         base = f"/api/v1/chatbooks/download/{job_id}"
@@ -3972,32 +4037,32 @@ class ChatbookService:
         """Collect complete Explainer sessions as first-class Chatbook content."""
         sessions_dir = work_dir / "content" / "explainer_sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
-        repo = self._get_explainer_repo()
 
-        for session_id in session_ids:
-            session_id_text = str(session_id)
-            payload = build_explainer_chatbook_payload(
-                repo=repo,
-                session_id=session_id_text,
-                owner_user_id=self.user_id,
-            )
-            session_data = payload["structured"]["session"]
-            session_file = sessions_dir / f"session_{session_id_text}.json"
-            with open(session_file, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
-
-            content.explainer_sessions[session_id_text] = payload
-            manifest.content_items.append(
-                ContentItem(
-                    id=session_id_text,
-                    type=ContentType.EXPLAINER_SESSION,
-                    title=session_data.get("title") or "Explainer session",
-                    created_at=self._parse_timestamp(session_data.get("createdAt")),
-                    updated_at=self._parse_timestamp(session_data.get("updatedAt")),
-                    file_path=f"content/explainer_sessions/session_{session_id_text}.json",
-                    metadata={"format": EXPLAINER_CHATBOOK_FORMAT},
+        with self._explainer_repo_session() as repo:
+            for session_id in session_ids:
+                session_id_text = str(session_id)
+                payload = build_explainer_chatbook_payload(
+                    repo=repo,
+                    session_id=session_id_text,
+                    owner_user_id=self.user_id,
                 )
-            )
+                session_data = payload["structured"]["session"]
+                session_file = sessions_dir / f"session_{session_id_text}.json"
+                with open(session_file, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
+
+                content.explainer_sessions[session_id_text] = payload
+                manifest.content_items.append(
+                    ContentItem(
+                        id=session_id_text,
+                        type=ContentType.EXPLAINER_SESSION,
+                        title=session_data.get("title") or "Explainer session",
+                        created_at=self._parse_timestamp(session_data.get("createdAt")),
+                        updated_at=self._parse_timestamp(session_data.get("updatedAt")),
+                        file_path=f"content/explainer_sessions/session_{session_id_text}.json",
+                        metadata={"format": EXPLAINER_CHATBOOK_FORMAT},
+                    )
+                )
 
     # Helper methods for importing content
 
@@ -4287,34 +4352,34 @@ class ChatbookService:
             if item.type == ContentType.EXPLAINER_SESSION
         }
         sessions_dir = extract_dir / "content" / "explainer_sessions"
-        repo = self._get_explainer_repo()
 
-        for session_id in session_ids:
-            session_id_text = str(session_id)
-            status.processed_items += 1
-            item = item_by_id.get(session_id_text)
-            rel_path = item.file_path if item and item.file_path else f"content/explainer_sessions/session_{session_id_text}.json"
-            payload_path = self._safe_extracted_content_path(extract_dir, rel_path)
-            if payload_path is None and sessions_dir.exists():
-                payload_path = sessions_dir / f"session_{session_id_text}.json"
-            if payload_path is None or not payload_path.exists():
-                status.failed_items += 1
-                status.warnings.append(f"Explainer session file not found: session_{session_id_text}.json")
-                continue
+        with self._explainer_repo_session() as repo:
+            for session_id in session_ids:
+                session_id_text = str(session_id)
+                status.processed_items += 1
+                item = item_by_id.get(session_id_text)
+                rel_path = item.file_path if item and item.file_path else f"content/explainer_sessions/session_{session_id_text}.json"
+                payload_path = self._safe_extracted_content_path(extract_dir, rel_path)
+                if payload_path is None and sessions_dir.exists():
+                    payload_path = sessions_dir / f"session_{session_id_text}.json"
+                if payload_path is None or not payload_path.exists():
+                    status.failed_items += 1
+                    status.warnings.append(f"Explainer session file not found: session_{session_id_text}.json")
+                    continue
 
-            try:
-                with open(payload_path, encoding="utf-8") as f:
-                    payload = json.load(f)
-                restore_explainer_chatbook_payload(
-                    repo=repo,
-                    payload=payload,
-                    owner_user_id=self.user_id,
-                    prefix_imported=prefix_imported,
-                )
-                status.successful_items += 1
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
-                status.failed_items += 1
-                status.warnings.append(f"Error importing Explainer session {session_id_text}: {str(exc)}")
+                try:
+                    with open(payload_path, encoding="utf-8") as f:
+                        payload = json.load(f)
+                    restore_explainer_chatbook_payload(
+                        repo=repo,
+                        payload=payload,
+                        owner_user_id=self.user_id,
+                        prefix_imported=prefix_imported,
+                    )
+                    status.successful_items += 1
+                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                    status.failed_items += 1
+                    status.warnings.append(f"Error importing Explainer session {session_id_text}: {str(exc)}")
 
     def _import_generated_document_explainer_sessions(
         self,
@@ -4331,46 +4396,45 @@ class ChatbookService:
             for item in manifest.content_items
             if item.type == ContentType.GENERATED_DOCUMENT
         }
-        repo = self._get_explainer_repo()
+        with self._explainer_repo_session() as repo:
+            for document_id in document_ids:
+                document_id_text = str(document_id)
+                status.processed_items += 1
+                item = item_by_id.get(document_id_text)
+                metadata = item.metadata if item and isinstance(item.metadata, dict) else {}
+                if metadata.get("subtype") != "explainer_session":
+                    status.skipped_items += 1
+                    status.warnings.append(
+                        f"Skipped generated document {document_id_text}: unsupported generated_document subtype"
+                    )
+                    continue
 
-        for document_id in document_ids:
-            document_id_text = str(document_id)
-            status.processed_items += 1
-            item = item_by_id.get(document_id_text)
-            metadata = item.metadata if item and isinstance(item.metadata, dict) else {}
-            if metadata.get("subtype") != "explainer_session":
-                status.skipped_items += 1
-                status.warnings.append(
-                    f"Skipped generated document {document_id_text}: unsupported generated_document subtype"
-                )
-                continue
+                rel_path = item.file_path if item and item.file_path else f"content/generated_documents/document_{document_id_text}.json"
+                payload_path = self._safe_extracted_content_path(extract_dir, rel_path)
+                if payload_path is None or not payload_path.exists():
+                    status.failed_items += 1
+                    status.warnings.append(f"Generated document file not found: document_{document_id_text}.json")
+                    continue
 
-            rel_path = item.file_path if item and item.file_path else f"content/generated_documents/document_{document_id_text}.json"
-            payload_path = self._safe_extracted_content_path(extract_dir, rel_path)
-            if payload_path is None or not payload_path.exists():
-                status.failed_items += 1
-                status.warnings.append(f"Generated document file not found: document_{document_id_text}.json")
-                continue
-
-            try:
-                with open(payload_path, encoding="utf-8") as f:
-                    payload = json.load(f)
-                if not isinstance(payload, dict):
-                    raise ValueError("generated document payload must be an object")
-                payload.setdefault("type", "generated_document")
-                payload.setdefault("metadata", metadata)
-                restore_explainer_chatbook_payload(
-                    repo=repo,
-                    payload=payload,
-                    owner_user_id=self.user_id,
-                    prefix_imported=prefix_imported,
-                )
-                status.successful_items += 1
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
-                status.failed_items += 1
-                status.warnings.append(
-                    f"Error importing generated Explainer document {document_id_text}: {str(exc)}"
-                )
+                try:
+                    with open(payload_path, encoding="utf-8") as f:
+                        payload = json.load(f)
+                    if not isinstance(payload, dict):
+                        raise ValueError("generated document payload must be an object")
+                    payload.setdefault("type", "generated_document")
+                    payload.setdefault("metadata", metadata)
+                    restore_explainer_chatbook_payload(
+                        repo=repo,
+                        payload=payload,
+                        owner_user_id=self.user_id,
+                        prefix_imported=prefix_imported,
+                    )
+                    status.successful_items += 1
+                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                    status.failed_items += 1
+                    status.warnings.append(
+                        f"Error importing generated Explainer document {document_id_text}: {str(exc)}"
+                    )
 
     def _import_characters(
         self,

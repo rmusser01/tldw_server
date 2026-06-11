@@ -91,6 +91,22 @@ export {
   normalizePersonaExemplar,
   normalizePersonaProfile
 } from "./persona-normalizers"
+import type {
+  ExplainerChatbookExportPayload,
+  ExplainerDeleteNodeResponse,
+  ExplainerExportResponse,
+  ExplainerJobAccepted,
+  ExplainerJobStatus,
+  ExplainerNode,
+  ExplainerNodeCreatePayload,
+  ExplainerNodeExpandPayload,
+  ExplainerNodePatchPayload,
+  ExplainerQuestionAnswerPayload,
+  ExplainerSession,
+  ExplainerSessionCreatePayload,
+  ExplainerSessionListResponse,
+  ExplainerSessionPatchPayload
+} from "./explainer-types"
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 const CHARACTER_CACHE_TTL_MS = 5 * 60 * 1000
@@ -204,83 +220,7 @@ export interface TldwConfig {
   authMode: 'single-user' | 'multi-user'
 }
 
-export type ExplainerMode = "goal" | "sources"
-export type ExplainerOutputIntent = "explain" | "plan" | "both"
-export type ExplainerGrounding = "source_only" | "source_led" | "open"
-export type ExplainerDepthPreset = "quick" | "standard" | "deep"
-export type ExplainerNodeKind = "question" | "answer" | "explanation" | "step" | "summary"
-export type ExplainerNodeStatus = "idle" | "queued" | "generating" | "error" | "complete"
-export type ExplainerEvidenceState =
-  | "supported"
-  | "partially_supported"
-  | "uncited"
-  | "insufficient"
-
-export interface ExplainerSelectedSourcePayload {
-  sourceId: string
-  sourceType: string
-  title: string
-  snapshotVersion?: string | null
-  metadata?: Record<string, unknown> | null
-}
-
-export interface ExplainerSessionCreatePayload {
-  title: string
-  mode: ExplainerMode
-  outputIntent: ExplainerOutputIntent
-  grounding: ExplainerGrounding
-  depthPreset: ExplainerDepthPreset
-  selectedSources: ExplainerSelectedSourcePayload[]
-  rootPrompt: string
-}
-
-export interface ExplainerSessionPatchPayload {
-  title?: string
-  outputIntent?: ExplainerOutputIntent
-  grounding?: ExplainerGrounding
-  depthPreset?: ExplainerDepthPreset
-  selectedSources?: ExplainerSelectedSourcePayload[]
-}
-
-export interface ExplainerNodeCreatePayload {
-  parentId?: string | null
-  title: string
-  body?: string | null
-  kind?: ExplainerNodeKind
-  intent?: ExplainerOutputIntent
-  status?: ExplainerNodeStatus
-  evidenceState?: ExplainerEvidenceState
-  outsideKnowledgeUsed?: boolean
-  citations?: Record<string, unknown>[]
-}
-
-export interface ExplainerNodePatchPayload {
-  title?: string | null
-  body?: string | null
-  status?: ExplainerNodeStatus
-  evidenceState?: ExplainerEvidenceState
-  outsideKnowledgeUsed?: boolean
-  selectedOptionId?: string | null
-  selectedCustomAnswer?: string | null
-  questionOptions?: Record<string, unknown>[] | null
-  generationMetadata?: Record<string, unknown> | null
-  citations?: Record<string, unknown>[] | null
-}
-
-export interface ExplainerNodeExpandPayload {
-  intent?: ExplainerOutputIntent | null
-}
-
-export interface ExplainerQuestionAnswerPayload {
-  selectedOptionId?: string | null
-  selectedCustomAnswer?: string | null
-}
-
-export interface ExplainerChatbookExportPayload {
-  name?: string | null
-  description?: string | null
-  asyncMode?: boolean
-}
+export * from "./explainer-types"
 
 export interface CurrentUserStorageQuotaResponse {
   user_id: number
@@ -5434,8 +5374,8 @@ export class TldwApiClientBase {
   }
 
   // Explainer Workspace
-  async createExplainerSession(payload: ExplainerSessionCreatePayload): Promise<any> {
-    return await bgRequest<any>({
+  async createExplainerSession(payload: ExplainerSessionCreatePayload): Promise<ExplainerSession> {
+    return await bgRequest<ExplainerSession>({
       path: "/api/v1/explainer/sessions",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5443,17 +5383,17 @@ export class TldwApiClientBase {
     })
   }
 
-  async listExplainerSessions(params?: { limit?: number; offset?: number }): Promise<any> {
+  async listExplainerSessions(params?: { limit?: number; offset?: number }): Promise<ExplainerSessionListResponse> {
     const query = this.buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerSessionListResponse>({
       path: `/api/v1/explainer/sessions${query}`,
       method: "GET"
     })
   }
 
-  async getExplainerSession(sessionId: string): Promise<any> {
+  async getExplainerSession(sessionId: string): Promise<ExplainerSession> {
     const id = encodeURIComponent(String(sessionId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerSession>({
       path: `/api/v1/explainer/sessions/${id}`,
       method: "GET"
     })
@@ -5462,9 +5402,9 @@ export class TldwApiClientBase {
   async updateExplainerSession(
     sessionId: string,
     payload: ExplainerSessionPatchPayload
-  ): Promise<any> {
+  ): Promise<ExplainerSession> {
     const id = encodeURIComponent(String(sessionId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerSession>({
       path: `/api/v1/explainer/sessions/${id}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -5472,9 +5412,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async deleteExplainerSession(sessionId: string): Promise<any> {
+  async deleteExplainerSession(sessionId: string): Promise<ExplainerSession> {
     const id = encodeURIComponent(String(sessionId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerSession>({
       path: `/api/v1/explainer/sessions/${id}`,
       method: "DELETE"
     })
@@ -5483,9 +5423,9 @@ export class TldwApiClientBase {
   async createExplainerNode(
     sessionId: string,
     payload: ExplainerNodeCreatePayload
-  ): Promise<any> {
+  ): Promise<ExplainerNode> {
     const id = encodeURIComponent(String(sessionId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerNode>({
       path: `/api/v1/explainer/sessions/${id}/nodes`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5497,10 +5437,10 @@ export class TldwApiClientBase {
     sessionId: string,
     nodeId: string,
     payload: ExplainerNodePatchPayload
-  ): Promise<any> {
+  ): Promise<ExplainerNode> {
     const sid = encodeURIComponent(String(sessionId))
     const nid = encodeURIComponent(String(nodeId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerNode>({
       path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -5508,10 +5448,10 @@ export class TldwApiClientBase {
     })
   }
 
-  async deleteExplainerNode(sessionId: string, nodeId: string): Promise<any> {
+  async deleteExplainerNode(sessionId: string, nodeId: string): Promise<ExplainerDeleteNodeResponse> {
     const sid = encodeURIComponent(String(sessionId))
     const nid = encodeURIComponent(String(nodeId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerDeleteNodeResponse>({
       path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}`,
       method: "DELETE"
     })
@@ -5521,10 +5461,10 @@ export class TldwApiClientBase {
     sessionId: string,
     nodeId: string,
     payload?: ExplainerNodeExpandPayload
-  ): Promise<any> {
+  ): Promise<ExplainerJobAccepted> {
     const sid = encodeURIComponent(String(sessionId))
     const nid = encodeURIComponent(String(nodeId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerJobAccepted>({
       path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}/expand`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5536,10 +5476,10 @@ export class TldwApiClientBase {
     sessionId: string,
     nodeId: string,
     payload: ExplainerQuestionAnswerPayload
-  ): Promise<any> {
+  ): Promise<ExplainerNode> {
     const sid = encodeURIComponent(String(sessionId))
     const nid = encodeURIComponent(String(nodeId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerNode>({
       path: `/api/v1/explainer/sessions/${sid}/nodes/${nid}/answer-question`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5547,9 +5487,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async getExplainerJob(jobId: string): Promise<any> {
+  async getExplainerJob(jobId: string): Promise<ExplainerJobStatus> {
     const id = encodeURIComponent(String(jobId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerJobStatus>({
       path: `/api/v1/explainer/jobs/${id}`,
       method: "GET"
     })
@@ -5558,9 +5498,9 @@ export class TldwApiClientBase {
   async exportExplainerChatbook(
     sessionId: string,
     payload?: ExplainerChatbookExportPayload
-  ): Promise<any> {
+  ): Promise<ExplainerExportResponse> {
     const id = encodeURIComponent(String(sessionId))
-    return await bgRequest<any>({
+    return await bgRequest<ExplainerExportResponse>({
       path: `/api/v1/explainer/sessions/${id}/export-chatbook`,
       method: "POST",
       headers: { "Content-Type": "application/json" },

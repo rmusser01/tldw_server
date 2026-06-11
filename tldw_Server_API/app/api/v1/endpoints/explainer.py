@@ -6,18 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.endpoints.chatbooks import (
-    _persist_completed_sync_export_job,
-    get_chatbook_service,
-)
+from tldw_Server_API.app.api.v1.endpoints.chatbooks import get_chatbook_service
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookResponse
 from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerChatbookExportRequest,
     ExplainerDeleteNodeResponse,
     ExplainerJobAcceptedResponse,
     ExplainerJobStatusResponse,
-    ExplainerNodeExpandRequest,
     ExplainerNodeCreateRequest,
+    ExplainerNodeExpandRequest,
     ExplainerNodePatchRequest,
     ExplainerNodeResponse,
     ExplainerQuestionAnswerRequest,
@@ -30,6 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.explainer import (
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ContentType
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.exceptions import ExportError
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.Explainer.jobs import EXPLAINER_DOMAIN
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
@@ -173,12 +171,14 @@ async def export_explainer_session_chatbook(
     )
     if success:
         if not request_body.async_mode and result:
-            job_id, download_url, _file_path, _file_size = _persist_completed_sync_export_job(
-                service=chatbook_service,
-                user_id=owner_user_id,
-                chatbook_name=request_body.name or f"{session.title} Explainer Session",
-                output_path=result,
-            )
+            try:
+                job_id, download_url, _file_path, _file_size = chatbook_service.register_completed_sync_export(
+                    user_id=owner_user_id,
+                    chatbook_name=request_body.name or f"{session.title} Explainer Session",
+                    output_path=result,
+                )
+            except ExportError as exc:
+                raise HTTPException(status_code=500, detail=exc.message) from None
             return CreateChatbookResponse(
                 success=True,
                 message=message,

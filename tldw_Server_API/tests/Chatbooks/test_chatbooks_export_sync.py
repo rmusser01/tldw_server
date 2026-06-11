@@ -1,13 +1,11 @@
-import os
-from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
+from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_mod
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_mod
+from tldw_Server_API.app.main import app
 
 
 class _DummyConn:
@@ -290,3 +288,46 @@ def test_chatbooks_continue_export_sync_rejects_missing_result_file(
     db = getattr(client, "_chatbooks_db", None)
     assert db is not None
     assert db._export_jobs == {}
+
+
+@pytest.mark.unit
+def test_service_register_completed_sync_export_persists_job(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+
+    service = ChatbookService("1", FakeDB(), user_id_int=1)
+    archive = Path(service.export_dir) / "demo.zip"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_bytes(b"zip")
+
+    job_id, download_url, file_path, file_size = service.register_completed_sync_export(
+        user_id="1",
+        chatbook_name="Demo",
+        output_path=archive,
+    )
+
+    assert download_url.endswith(job_id)
+    assert file_path == archive.resolve()
+    assert file_size == 3
+
+
+@pytest.mark.unit
+def test_service_register_completed_sync_export_rejects_outside_path(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+    from tldw_Server_API.app.core.Chatbooks.exceptions import ExportError
+
+    service = ChatbookService("1", FakeDB(), user_id_int=1)
+    outside = Path(service.export_dir).resolve().parent / "outside.zip"
+    outside.write_bytes(b"zip")
+
+    with pytest.raises(ExportError):
+        service.register_completed_sync_export(
+            user_id="1",
+            chatbook_name="Demo",
+            output_path=outside,
+        )

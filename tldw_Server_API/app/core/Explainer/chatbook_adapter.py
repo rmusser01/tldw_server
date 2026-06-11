@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerCitation,
     ExplainerDepthPreset,
@@ -145,6 +147,37 @@ def restore_explainer_chatbook_payload(
         root_prompt=root_prompt,
     )
 
+    try:
+        _restore_session_nodes(
+            repo=repo,
+            restored=restored,
+            owner_user_id=owner_user_id,
+            nodes_payload=nodes_payload,
+            first_root_payload=first_root_payload,
+        )
+        loaded = repo.get_session(restored.id, owner_user_id=owner_user_id)
+        if loaded is None:
+            raise ValueError("Restored Explainer session could not be reloaded")
+        return loaded
+    except Exception:
+        # A failed restore must not leave a partially imported session behind.
+        try:
+            repo.delete_session(restored.id, owner_user_id=owner_user_id)
+        except Exception:
+            logger.warning(
+                "Failed to clean up partially restored Explainer session {}", restored.id
+            )
+        raise
+
+
+def _restore_session_nodes(
+    *,
+    repo: ExplainerRepository,
+    restored: ExplainerSession,
+    owner_user_id: str,
+    nodes_payload: list[Any],
+    first_root_payload: dict[str, Any],
+) -> None:
     original_to_new: dict[str, str] = {}
     root_node_id = restored.root_node_ids[0]
     original_root_id = _text(first_root_payload.get("id"), "")
@@ -208,11 +241,6 @@ def restore_explainer_chatbook_payload(
         if not progressed:
             raise ValueError("Explainer payload node parent references could not be resolved")
         remaining = next_remaining
-
-    loaded = repo.get_session(restored.id, owner_user_id=owner_user_id)
-    if loaded is None:
-        raise ValueError("Restored Explainer session could not be reloaded")
-    return loaded
 
 
 def _unwrap_explainer_payload(payload: dict[str, Any]) -> dict[str, Any]:

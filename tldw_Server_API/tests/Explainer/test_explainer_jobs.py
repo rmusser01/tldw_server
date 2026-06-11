@@ -9,7 +9,6 @@ from tldw_Server_API.app.core.Explainer.jobs import (
     EXPLAINER_DOMAIN,
     EXPLAINER_JOB_TYPE,
     EXPLAINER_QUEUE,
-    ExplainerGenerationNotConfiguredError,
     current_answer_revision,
     handle_explainer_node_expansion_job,
     make_configured_explainer_generator,
@@ -827,28 +826,18 @@ async def test_mid_persist_failure_rolls_back_created_children(
     session = _create_session(explainer_repo)
     node_id = session.root_node_ids[0]
 
-    class FailingMetadataRepository:
+    class FailingBatchRepository:
         def __init__(self, wrapped: ExplainerRepository) -> None:
             self.wrapped = wrapped
 
         def get_session(self, *args, **kwargs):
             return self.wrapped.get_session(*args, **kwargs)
 
-        def create_node(self, *args, **kwargs):
-            return self.wrapped.create_node(*args, **kwargs)
+        def update_node(self, *args, **kwargs):
+            return self.wrapped.update_node(*args, **kwargs)
 
-        def delete_node(self, *args, **kwargs):
-            return self.wrapped.delete_node(*args, **kwargs)
-
-        def update_node(self, session_id, node_id, *, owner_user_id, **updates):
-            if "generation_metadata" in updates and node_id != session.root_node_ids[0]:
-                raise RuntimeError("metadata write failed")
-            return self.wrapped.update_node(
-                session_id,
-                node_id,
-                owner_user_id=owner_user_id,
-                **updates,
-            )
+        def create_child_nodes(self, *args, **kwargs):
+            raise RuntimeError("child batch write failed")
 
     async def fake_generator(_prompt):
         return {
@@ -877,7 +866,7 @@ async def test_mid_persist_failure_rolls_back_created_children(
                     "answer_revision": current_answer_revision(session.nodes[node_id]),
                 },
             },
-            repo=FailingMetadataRepository(explainer_repo),
+            repo=FailingBatchRepository(explainer_repo),
             generator=fake_generator,
         )
 
@@ -929,3 +918,128 @@ async def test_configured_generator_parses_json_response(monkeypatch: pytest.Mon
 
     assert result["children"][0]["title"] == "Configured child"
     assert result["generation_metadata"]["provider"] == "fake"
+
+
+def test_expand_marks_node_queued_before_job_row_is_created(
+    explainer_repo: ExplainerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "openai")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "test-model")
+    session = _create_session(explainer_repo)
+    node_id = session.root_node_ids[0]
+    observed: dict[str, str] = {}
+
+    class OrderObservingJobManager(FakeJobManager):
+        def create_job(self, **kwargs: Any) -> dict[str, Any]:
+            loaded = explainer_repo.get_session(session.id, owner_user_id="7")
+            assert loaded is not None
+            observed["status_at_create_job"] = loaded.nodes[node_id].status
+            return super().create_job(**kwargs)
+
+    service = ExplainerService(repo=explainer_repo, job_manager=OrderObservingJobManager())
+
+    service.enqueue_node_expansion(
+        session_id=session.id,
+        node_id=node_id,
+        owner_user_id="7",
+        intent="both",
+    )
+
+    assert observed["status_at_create_job"] == "queued"
+
+
+def test_expand_does_not_regress_generating_node_status(
+    fake_job_manager: FakeJobManager,
+    explainer_repo: ExplainerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "openai")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "test-model")
+    session = _create_session(explainer_repo)
+    node_id = session.root_node_ids[0]
+    explainer_repo.update_node(
+        session.id,
+        node_id,
+        owner_user_id="7",
+        status="generating",
+    )
+    service = ExplainerService(repo=explainer_repo, job_manager=fake_job_manager)
+
+    service.enqueue_node_expansion(
+        session_id=session.id,
+        node_id=node_id,
+        owner_user_id="7",
+        intent="both",
+    )
+
+    loaded = explainer_repo.get_session(session.id, owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[node_id].status == "generating"
+
+
+def test_enqueue_idempotency_key_matches_expansion_batch_key(
+    fake_job_manager: FakeJobManager,
+    explainer_repo: ExplainerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Explainer.jobs import expansion_batch_key
+
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "openai")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "test-model")
+    session = _create_session(explainer_repo)
+    node_id = session.root_node_ids[0]
+    service = ExplainerService(repo=explainer_repo, job_manager=fake_job_manager)
+
+    service.enqueue_node_expansion(
+        session_id=session.id,
+        node_id=node_id,
+        owner_user_id="7",
+        intent="both",
+    )
+
+    [job] = fake_job_manager.jobs
+    assert job["idempotency_key"] == expansion_batch_key(
+        session_id=session.id,
+        node_id=node_id,
+        intent="both",
+        answer_revision=current_answer_revision(session.nodes[node_id]),
+    )
+
+
+def test_effective_expansion_intent_prefers_request_then_node_then_session(
+    explainer_repo: ExplainerRepository,
+) -> None:
+    from dataclasses import replace
+
+    from tldw_Server_API.app.core.Explainer.jobs import effective_expansion_intent
+
+    session = _create_session(explainer_repo)
+    node = session.nodes[session.root_node_ids[0]]
+
+    assert effective_expansion_intent(requested="plan", node=node, session=session) == "plan"
+    assert effective_expansion_intent(requested=None, node=node, session=session) == node.intent
+    intentless = replace(node, intent="")
+    assert (
+        effective_expansion_intent(requested=None, node=intentless, session=session)
+        == session.output_intent
+    )
+
+
+def test_service_update_node_rejects_unknown_update_fields(
+    explainer_repo: ExplainerRepository,
+) -> None:
+    session = _create_session(explainer_repo)
+    node_id = session.root_node_ids[0]
+    service = ExplainerService(repo=explainer_repo)
+
+    with pytest.raises(ExplainerValidationError):
+        service.update_node(
+            session.id,
+            node_id,
+            owner_user_id="7",
+            updates={"bogus_field": "x"},
+        )

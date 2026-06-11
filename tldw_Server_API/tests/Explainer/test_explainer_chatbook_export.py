@@ -328,16 +328,16 @@ def test_export_chatbook_endpoint_honors_sync_export_mode(tmp_path, monkeypatch)
         return chatbook_service
 
     def _persist_sync(**kwargs):
-        assert kwargs["service"] is chatbook_service
         assert kwargs["user_id"] == "7"
         assert kwargs["chatbook_name"] == "Learn attention Explainer Session"
         assert kwargs["output_path"] == str(archive_path)
         return "sync-job-1", "/api/v1/chatbooks/download/sync-job-1", archive_path, 123
 
+    chatbook_service.register_completed_sync_export = MagicMock(side_effect=_persist_sync)
+
     app.dependency_overrides[get_request_user] = _override_user
     app.dependency_overrides[get_explainer_db] = _override_db
     app.dependency_overrides[explainer_endpoint.get_chatbook_service] = _override_chatbook_service
-    monkeypatch.setattr(explainer_endpoint, "_persist_completed_sync_export_job", _persist_sync)
 
     with TestClient(app) as client:
         response = client.post(
@@ -384,3 +384,36 @@ def test_export_chatbook_endpoint_rechecks_session_ownership(tmp_path):
 
     assert response.status_code == 404
     chatbook_service.create_chatbook.assert_not_awaited()
+
+
+def test_restore_failure_does_not_leave_partial_session(tmp_path):
+    source_repo = ExplainerRepository(ExplainerDatabase(tmp_path / "source.db"))
+    source_session = _create_complete_session(source_repo, owner_user_id="7")
+    payload = build_explainer_chatbook_payload(
+        repo=source_repo,
+        session_id=source_session.id,
+        owner_user_id="7",
+    )
+    payload["structured"]["nodes"].append(
+        {
+            "id": "node-orphan",
+            "parentId": "node-that-does-not-exist",
+            "title": "Orphaned node",
+            "kind": "explanation",
+            "intent": "explain",
+        }
+    )
+    target_repo = ExplainerRepository(ExplainerDatabase(tmp_path / "target.db"))
+
+    with pytest.raises(ValueError):
+        restore_explainer_chatbook_payload(
+            repo=target_repo,
+            payload=payload,
+            owner_user_id="8",
+        )
+
+    _summaries, total = target_repo.list_session_summaries(
+        owner_user_id="8",
+        include_archived=True,
+    )
+    assert total == 0
