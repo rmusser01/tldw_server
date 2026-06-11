@@ -1592,13 +1592,7 @@ def test_run_workflow_loads_bundle_refs_after_wait(monkeypatch, client_with_work
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_terminal_data(client, run_id)
 
     assert data["status"] == "succeeded"
     assert (data.get("outputs") or {}) == {

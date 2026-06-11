@@ -197,6 +197,7 @@ modified_files:
 - tldw_Server_API/tests/TTS/test_kokoro_health_and_errors.py
 - tldw_Server_API/tests/TTS/test_phoneme_overrides.py
 - tldw_Server_API/tests/TTS/test_tts_adapters_comprehensive.py
+- tldw_Server_API/tests/Audio/test_audio_tts_oauth_retry_unit.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_custom_voice_resolution.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_transcription_auth.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py
@@ -213,6 +214,10 @@ modified_files:
 - tldw_Server_API/tests/sandbox/test_snapshot_quota_enforcement.py
 - tldw_Server_API/tests/sandbox/test_execution_concurrency_cap.py
 - tldw_Server_API/tests/sandbox/test_seatbelt_policy.py
+- tldw_Server_API/tests/sandbox/test_seatbelt_runner.py
+- tldw_Server_API/tests/sandbox/test_workspace_diagnostics.py
+- tldw_Server_API/tests/sandbox/test_ws_connection_quotas.py
+- tldw_Server_API/tests/Workflows/test_workflows_api.py
 - tldw_Server_API/tests/Workflows/test_engine_step_types.py
 - tldw_Server_API/tests/Workflows/test_runs_cursor_pagination.py
 - tldw_Server_API/app/api/v1/endpoints/workflows.py
@@ -800,6 +805,10 @@ Additional late failures in run `27319036330` exposed Ubuntu/Python 3.12 and Win
 The final non-aggregate shard in run `27319036330` was Windows/Python 3.12 `platform-sandbox-runtimes`, failing `test_resolve_command_argv_uses_controlled_path` because the test created a POSIX-style executable named `runner-tool`; Windows `shutil.which()` requires a PATHEXT-compatible suffix for a command in PATH. The fake command is now platform-compatible while preserving the controlled-PATH resolver assertion. The remaining newly failed full-suite rows were aggregate summary gates for already-classified shard failures. Verification: full `test_seatbelt_policy.py` passed locally (`6 passed`).
 
 Final pre-push verification for the complete follow-up patch: the focused regression bundle covering sandbox concurrency, seatbelt policy, session upload, snapshot quota, workflow step types, workflow run pagination, custom voice resolution, the TTS history request-id regression, and the embeddings admin-auth regression passed locally (`52 passed`). Compileall passed for all touched Python files, `git diff --check` passed, and Bandit JSON on production plus test scopes reported `errors=[]` and `results_count=0`.
+
+Post-push run `27326161307` on `e5dbd99aed` completed with additional actionable shard failures. Media-audio shards on Ubuntu, Windows, and macOS exposed a stale sanitized-log assertion in `test_audio_speech_history_write_failure_log_is_sanitized` after the production TTS history debug log gained request-id context; the test now checks the sanitized message template plus request-id argument without accepting leaked private paths. macOS sandbox ws/state-store exposed two more tests that create Docker runs while depending on host Docker preflight (`test_sandbox_ws_per_user_quota_enforced_and_released`, `test_workspace_diagnostics_includes_run_created_through_sandbox_api`); both now stub Docker preflight availability around the sandbox API path under test. Windows sandbox runtimes exposed a POSIX-only `os.killpg` monkeypatch in `test_seatbelt_start_run_times_out_and_cleans_up`; the test now adds the monkeypatched attribute on platforms where it is absent. Ubuntu/Python 3.13 product-workflows exposed another inline workflow status poll that can see a transient run-status response without `status` before the run row is visible; that test now uses the shared terminal-wait helper. Non-actionable rows in the same run were aggregate full-suite gates, runner shutdowns for `llm-local-backends`, setup/cache failures before pytest in `product-claims-engine`, `chat-character-legacy-worldbook`, `platform-sandbox-state-store`, `vector-stores-unit`, and `ai-chunking-templates`, plus a Windows dependency-resolution failure before pytest in `llm-adapters-chat-errors-core`. Verification: exact five regression tests passed locally under `TLDW_TEST_NO_DOCKER=1` (`5 passed`), and the expanded touched-file run passed locally under the same env (`76 passed`).
+
+Final mechanical verification for this post-push follow-up: compileall passed for all newly touched Python files, `git diff --check` passed, and Bandit JSON on the touched test scope with test-only skips reported `errors=[]` and `results_count=0`.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

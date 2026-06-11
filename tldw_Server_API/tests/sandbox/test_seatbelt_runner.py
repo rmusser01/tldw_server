@@ -309,7 +309,12 @@ def test_seatbelt_start_run_times_out_and_cleans_up(monkeypatch, tmp_path: Path)
 
     monkeypatch.setattr(seatbelt_module.tempfile, "mkdtemp", lambda prefix: str(run_root))
     killpg_calls: list[tuple[int, int]] = []
-    monkeypatch.setattr(seatbelt_module.os, "killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+    monkeypatch.setattr(
+        seatbelt_module.os,
+        "killpg",
+        lambda pid, sig: killpg_calls.append((pid, sig)),
+        raising=False,
+    )
 
     class _TimeoutPopen:
         _timeout_seen = False
