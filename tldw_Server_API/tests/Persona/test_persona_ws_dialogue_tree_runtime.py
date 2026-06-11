@@ -104,7 +104,13 @@ def _events_for_text(text: str, *, session_id: str = "sess_runtime") -> list[dic
     return events
 
 
-def _notice_for_text(text: str, *, reason_code: str, session_id: str = "sess_runtime") -> dict:
+def _notice_for_text(
+    text: str,
+    *,
+    reason_code: str,
+    session_id: str = "sess_runtime",
+    timeout: float = 2.0,
+) -> dict:
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -124,6 +130,7 @@ def _notice_for_text(text: str, *, reason_code: str, session_id: str = "sess_run
                 ws,
                 lambda data: data.get("event") == "notice"
                 and data.get("reason_code") == reason_code,
+                timeout=timeout,
             )
 
 
@@ -477,6 +484,7 @@ def test_runtime_explorer_circuit_open_notice_has_distinct_reason(
         "find runtime notes while circuit is open",
         reason_code="RUNTIME_EXPLORER_CIRCUIT_OPEN",
         session_id="sess_runtime_circuit_open_notice",
+        timeout=5.0,
     )
 
     diagnostics = notice["runtime_explorer"]

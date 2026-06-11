@@ -159,7 +159,7 @@ def _read_valid_restart_pid(
         pytest.fail(f"helper restart pid file is unavailable: {exc}")
     if not stat.S_ISREG(stat_result.st_mode):
         pytest.fail("helper restart pid file must be a regular non-symlink file")
-    if stat_result.st_mode & 0o077:
+    if os.name != "nt" and stat_result.st_mode & 0o077:
         pytest.fail("helper restart pid file must be owner-only")
     try:
         raw_pid = lease.pid_file.read_text(encoding="utf-8").strip()
