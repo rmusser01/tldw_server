@@ -281,6 +281,7 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
 ):
     voices_root = tmp_path / "voices"
     expected_wav = _make_wav_bytes(b"\x02\x03" * 8)
+    seen: dict[str, object] = {}
 
     class _FakeVoiceManager:
         def get_user_voices_path(self, user_id):
@@ -305,17 +306,9 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
 
         async def generate(self, request):
             voice_path = request.extra_params.get("pocket_tts_cpp_voice_path")
-            assert voice_path is not None
-            voice_posix = Path(voice_path).as_posix()
-            assert voice_posix.endswith("/voices/providers/pocket_tts_cpp/custom_voice-1.wav")
-            assert Path(voice_path).exists()
-            assert Path(voice_path).read_bytes()[:4] == b"RIFF"
-            with wave.open(str(voice_path), "rb") as wav_file:
-                assert wav_file.getnchannels() == 1
-                assert wav_file.getsampwidth() == 2
-                assert wav_file.getframerate() == 24000
-            assert request.extra_params.get(PROVIDER_MANAGED_VOICE_TOKEN_KEY)
-            assert request.extra_params.get("pocket_tts_cpp_reference_text") == "stored text"
+            seen["voice_path"] = str(voice_path) if voice_path is not None else None
+            seen["trust_token"] = bool(request.extra_params.get(PROVIDER_MANAGED_VOICE_TOKEN_KEY))
+            seen["reference_text"] = request.extra_params.get("pocket_tts_cpp_reference_text")
             return TTSResponse(audio_data=b"ok", format=request.format, sample_rate=24000)
 
     def _fake_get_voice_manager():
@@ -361,6 +354,19 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
         )
         assert r.status_code == 200, r.text
         assert r.content == b"ok"
+        assert seen["voice_path"] is not None
+        voice_path = Path(str(seen["voice_path"]))
+        assert voice_path.name == "custom_voice-1.wav"
+        assert voice_path.parent.name == "pocket_tts_cpp"
+        assert voice_path.parent.parent.name == "providers"
+        assert voice_path.exists()
+        assert voice_path.read_bytes()[:4] == b"RIFF"
+        with wave.open(str(voice_path), "rb") as wav_file:
+            assert wav_file.getnchannels() == 1
+            assert wav_file.getsampwidth() == 2
+            assert wav_file.getframerate() == 24000
+        assert seen["trust_token"] is True
+        assert seen["reference_text"] == "stored text"
     finally:
         client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
 

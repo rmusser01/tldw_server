@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 pytestmark = pytest.mark.unit
 
+RUNNER_START_TIMEOUT_SEC = 10.0
+
 
 def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db_path = str(tmp_path / "sandbox_store.db")
@@ -131,7 +133,7 @@ def test_background_execution_respects_max_concurrent_runs(
         idem_key=None,
         raw_body={"command": ["echo", "one"]},
     )
-    assert first_started.wait(timeout=1.0) is True
+    assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
     run2 = svc.start_run_scaffold(
         user_id="user-cap",
@@ -150,7 +152,7 @@ def test_background_execution_respects_max_concurrent_runs(
     assert second_started.is_set() is False
 
     allow_first_finish.set()
-    assert second_started.wait(timeout=2.0) is True
+    assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
     done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
     done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
@@ -221,7 +223,7 @@ def test_global_active_cap_enforced_across_service_instances(
         idem_key=None,
         raw_body={"command": ["echo", "one"]},
     )
-    assert first_started.wait(timeout=1.0) is True
+    assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
     run2 = svc_b.start_run_scaffold(
         user_id="user-cap-b",
@@ -240,7 +242,7 @@ def test_global_active_cap_enforced_across_service_instances(
     assert second_started.is_set() is False
 
     allow_first_finish.set()
-    assert second_started.wait(timeout=2.0) is True
+    assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
     done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
     done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
@@ -312,7 +314,7 @@ def test_per_user_active_cap_enforced_across_service_instances(
         idem_key=None,
         raw_body={"command": ["echo", "one"]},
     )
-    assert first_started.wait(timeout=1.0) is True
+    assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
     run2 = svc_b.start_run_scaffold(
         user_id="user-same",
@@ -331,7 +333,7 @@ def test_per_user_active_cap_enforced_across_service_instances(
     assert second_started.is_set() is False
 
     allow_first_finish.set()
-    assert second_started.wait(timeout=2.0) is True
+    assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
     done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
     done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -90,10 +91,11 @@ def test_render_seatbelt_profile_escapes_embedded_quotes_and_newlines() -> None:
 def test_resolve_command_argv_uses_controlled_path(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    tool = bin_dir / "runner-tool"
-    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool_name = "runner-tool.cmd" if os.name == "nt" else "runner-tool"
+    tool = bin_dir / tool_name
+    tool.write_text("@echo off\r\nexit /b 0\r\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n")
     tool.chmod(0o755)
 
-    argv = resolve_command_argv(["runner-tool", "--flag"], str(bin_dir))
+    argv = resolve_command_argv([tool_name, "--flag"], str(bin_dir))
 
     assert argv == [str(tool), "--flag"]

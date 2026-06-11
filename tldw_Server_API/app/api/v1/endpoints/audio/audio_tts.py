@@ -680,7 +680,7 @@ async def create_speech(
                 pass
             history_written = True
         except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-            logger.debug("TTS history: failed to write record")
+            logger.debug("TTS history: failed to write record request_id={}", request_id)
 
     def _build_speech_iter():
         return tts_service.generate_speech(

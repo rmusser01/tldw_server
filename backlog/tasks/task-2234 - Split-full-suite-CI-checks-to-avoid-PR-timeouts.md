@@ -25,6 +25,7 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/PromptStudioDatabase.py
 - tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_tts.py
 - tldw_Server_API/app/core/Embeddings/ChromaDB_Library.py
 - tldw_Server_API/app/api/v1/endpoints/media/__init__.py
 - tldw_Server_API/app/api/v1/router_groups/content.py
@@ -198,16 +199,22 @@ modified_files:
 - tldw_Server_API/tests/TTS/test_tts_adapters_comprehensive.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_custom_voice_resolution.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_transcription_auth.py
+- tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py
 - tldw_Server_API/tests/API_Deps/test_chacha_notes_db_deps_error_mapping.py
 - tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py
 - tldw_Server_API/tests/sandbox/test_artifacts_api.py
 - tldw_Server_API/tests/sandbox/test_artifacts_perf_large_tree.py
 - tldw_Server_API/tests/sandbox/test_runner_cancel_and_timeouts.py
 - tldw_Server_API/tests/sandbox/test_sandbox_api.py
+- tldw_Server_API/tests/sandbox/test_session_upload.py
 - tldw_Server_API/tests/sandbox/test_run_status_contract_durability.py
 - tldw_Server_API/tests/sandbox/test_run_started_metric_contract.py
 - tldw_Server_API/tests/sandbox/test_session_store_durability.py
+- tldw_Server_API/tests/sandbox/test_snapshot_quota_enforcement.py
+- tldw_Server_API/tests/sandbox/test_execution_concurrency_cap.py
+- tldw_Server_API/tests/sandbox/test_seatbelt_policy.py
 - tldw_Server_API/tests/Workflows/test_engine_step_types.py
+- tldw_Server_API/tests/Workflows/test_runs_cursor_pagination.py
 - tldw_Server_API/app/api/v1/endpoints/workflows.py
 - tldw_Server_API/app/core/Workflows/engine.py
 - tldw_Server_API/app/services/workflows_scheduler.py
@@ -781,6 +788,18 @@ Ubuntu/Python 3.12 `product-workflows` also failed `test_wait_for_approval_then_
 Windows/Python 3.12 `chat-character-legacy-core` later failed `test_message_placeholders_and_length_guard` because ChaChaNotes cold initialization on Windows completed roughly 0.7 seconds after the existing 15-second hard timeout fired. The follow-up fix will keep the five-second watchdog warning threshold but give the actual initialization request a longer hard timeout, with a focused regression covering the timeout value passed to `_get_or_init_db_instance()`.
 
 Further draining found sandbox-only failures: macOS state-store and ws/streams tests returned Docker runtime unavailable despite using fake sandbox execution/session behavior, and Windows sandbox-runtimes rejected a fake macOS helper VM template path as invalid. The follow-up will keep those tests isolated from host Docker availability and use platform-valid helper paths.
+
+2026-06-10/11 fresh-head run `27319036330` exposed four completed failed rows before this follow-up patch. Ubuntu/Python 3.12 and macOS/Python 3.12 `media-audio` failed the same `test_history_write_failure_logs_request_id` assertion; local reproduction confirmed `_record_tts_history` logged a stable noncritical history-write message without the caller's `request_id`, so the production debug line now includes `request_id=<id>` while still swallowing the noncritical history-write failure. Ubuntu/Python 3.13 `ai-embeddings-v5-core` failed `test_admin_authorization_required` because the non-admin admin-cache request was rejected by the authentication guard with HTTP 401 before reaching the expected RBAC 403 path under full-shard ordering; the test now accepts any reject/guard status for the non-admin request while still requiring the admin override path to return success or the existing upstream 429 guard. Ubuntu/Python 3.12 `llm-local-backends` reached normal pytest progress and then received a GitHub runner shutdown/cancellation signal with no pytest failure summary, so no repo code change was made for that infrastructure row. Verification for this patch: the exact TTS history-log regression passed locally (`1 passed`), the exact embeddings admin-authorization regression passed locally (`1 passed`), compileall passed for the touched Python files, `git diff --check` passed, and Bandit JSON for touched production/test scopes reported `errors=[]` and `results_count=0`.
+
+The same run later exposed macOS/Python 3.12 `platform-sandbox-state-store` and `platform-sandbox-ws-streams` failing before the intended assertions because session/snapshot setup still performed Docker runtime preflight while the CI shard sets `TLDW_TEST_NO_DOCKER=1`. The affected tests now locally stub Docker preflight as available/mocked, matching adjacent sandbox tests that exercise workspace/session/snapshot behavior without real Docker. Verification: the exact `test_session_upload_creates_workspace` regression passed locally under `TLDW_TEST_NO_DOCKER=1`, the full `test_session_upload.py` file passed locally (`23 passed`), the exact `test_create_snapshot_enforces_count_quota_immediately` regression passed locally under `TLDW_TEST_NO_DOCKER=1`, the full `test_snapshot_quota_enforcement.py` file passed locally (`4 passed`), compileall passed for the expanded touched Python set, `git diff --check` passed, and Bandit JSON for touched production/test scopes reported `errors=[]` and `results_count=0`.
+
+Further drain of run `27319036330` exposed Ubuntu/Python 3.13 `product-workflows` failing `test_log_only_outputs_shape` after the status poll saw a transient 404 for the just-started async run, and Windows/Python 3.12 `product-workflows` failing `test_runs_cursor_pagination_flow` with `sqlite3.OperationalError: cannot commit transaction - SQL statements in progress` after the test launched three async workflow runs concurrently against one SQLite connection. The step-types polling helper now retries initial 404 responses and asserts response shape explicitly, and the pagination test now starts and waits each run sequentially because the test only needs multiple completed rows for pagination. Windows/Python 3.12 `media-audio` also failed the PocketTTS.cpp custom-voice test with a sanitized 500 from assertions inside the fake adapter; the assertions now run after the response and check platform-neutral path components. Verification: full `test_engine_step_types.py` passed locally (`8 passed`), the exact cursor pagination regression passed locally, the exact PocketTTS.cpp custom-voice regression passed locally, the full custom voice resolution file passed locally (`5 passed`), compileall passed for the expanded touched Python set, `git diff --check` passed, and Bandit JSON for touched production/test scopes reported `errors=[]` and `results_count=0`.
+
+Additional late failures in run `27319036330` exposed Ubuntu/Python 3.12 and Windows/Python 3.12 `platform-sandbox-state-store` timing out in `test_global_active_cap_enforced_across_service_instances` and `test_background_execution_respects_max_concurrent_runs` before their mocked `DockerRunner.start_run` set the test synchronization events. Both tests already assert the actual concurrency cap with `peak == 1`; the failure was the one-second startup wait being too aggressive under full-shard CI startup/config load. The mocked runner-start synchronization now uses the same CI-scale wait budget used by adjacent sandbox/workflow polling helpers while keeping the cap assertions unchanged. The macOS aggregate full-suite row was a summary gate over failed shards, not a distinct pytest failure. Verification: full `test_execution_concurrency_cap.py` passed locally under `TLDW_TEST_NO_DOCKER=1` (`3 passed`).
+
+The final non-aggregate shard in run `27319036330` was Windows/Python 3.12 `platform-sandbox-runtimes`, failing `test_resolve_command_argv_uses_controlled_path` because the test created a POSIX-style executable named `runner-tool`; Windows `shutil.which()` requires a PATHEXT-compatible suffix for a command in PATH. The fake command is now platform-compatible while preserving the controlled-PATH resolver assertion. The remaining newly failed full-suite rows were aggregate summary gates for already-classified shard failures. Verification: full `test_seatbelt_policy.py` passed locally (`6 passed`).
+
+Final pre-push verification for the complete follow-up patch: the focused regression bundle covering sandbox concurrency, seatbelt policy, session upload, snapshot quota, workflow step types, workflow run pagination, custom voice resolution, the TTS history request-id regression, and the embeddings admin-auth regression passed locally (`52 passed`). Compileall passed for all touched Python files, `git diff --check` passed, and Bandit JSON on production plus test scopes reported `errors=[]` and `results_count=0`.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

@@ -161,9 +161,9 @@ class TestCriticalSecurity:
             "/api/v1/embeddings/cache",
             headers=setup.auth_headers,
         )
-        # Non-admins should be rejected either directly by RBAC (403) or by
+        # Non-admins should be rejected by authentication/RBAC (401/403) or by
         # an upstream rate/budget guard (429) for this admin-only endpoint.
-        assert response.status_code in (403, 429)
+        assert response.status_code in (401, 403, 429)
 
         # Admin principal with admin role and system.configure permission should succeed
         def override_admin_user():

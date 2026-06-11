@@ -41,12 +41,26 @@ def client_with_wf(tmp_path, auth_headers):
 
 def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 15.0):
     deadline = time.time() + timeout_s
+    last_response = None
     while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        last_response = response
+        if response.status_code == 404:
+            time.sleep(0.05)
+            continue
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert "status" in data, data
         if data["status"] in ("succeeded", "failed", "cancelled"):
             return data
         time.sleep(0.02)
-    return client.get(f"/api/v1/workflows/runs/{run_id}").json()
+    response = client.get(f"/api/v1/workflows/runs/{run_id}")
+    if response.status_code == 404 and last_response is not None:
+        response = last_response
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "status" in data, data
+    return data
 
 
 def test_delay_step_then_log_succeeds(client_with_wf: TestClient):
