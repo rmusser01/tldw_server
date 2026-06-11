@@ -98,10 +98,10 @@ def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase
     status = _wait_for_status(workflows_db, run_id)
     assert status == "failed"
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
-    assert scheduler.queue_depth() == 0
+    assert stats["queue_depth"] == 0
 
 
 def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsDatabase):
@@ -136,7 +136,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
     assert status == "waiting_human"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is not None
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -176,7 +176,7 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
     status = _wait_for_status(workflows_db, run_id)
     assert status == "succeeded"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is None
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -252,7 +252,7 @@ def test_adapter_returned_research_checkpoint_wait_sets_run_waiting_human_withou
     assert step_run["status"] == "waiting_human"
     assert scheduled_timeouts == []
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 

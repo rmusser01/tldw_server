@@ -528,6 +528,7 @@ def test_session_backed_start_run_waits_for_snapshot_workspace_operation_across_
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     session_id = "sess-cross-worker-run"
     workspace_root = tmp_path / session_id / "workspace"

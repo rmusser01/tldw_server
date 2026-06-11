@@ -257,6 +257,7 @@ def test_embedding_model_cache_restore_is_non_blocking() -> None:
         assert step.get("uses") == "actions/cache@v5"
         assert step.get("continue-on-error") is True
         assert "github.event_name != 'workflow_dispatch'" in str(step.get("if"))
+        assert "rag-new-" not in str(step.get("if"))
 
 
 def test_embedding_model_setup_skips_non_embedding_chunking_shard() -> None:

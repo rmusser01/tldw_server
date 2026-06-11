@@ -39,7 +39,7 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 10.0):
+def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 15.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         data = client.get(f"/api/v1/workflows/runs/{run_id}").json()

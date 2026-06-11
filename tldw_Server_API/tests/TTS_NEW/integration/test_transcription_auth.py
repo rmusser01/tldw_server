@@ -64,23 +64,10 @@ def test_transcriptions_ok_with_override(monkeypatch, bypass_api_limits):
 
         app.dependency_overrides[get_request_user] = _override_user
 
-        # Patch the production function used by the endpoint (Whisper path)
-        def _fake_speech_to_text(*args, **kwargs):
-            # Endpoint expects a tuple (segments_list, detected_language) when return_language=True
-            segments = [
-                {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "stubbed transcript"}
-            ]
-            return (segments, "en")
-
-        monkeypatch.setattr(
-            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
-            _fake_speech_to_text,
-            raising=False,
-        )
-
         # Pretend the Whisper model is already available so the new
         # preflight check does not short-circuit with a 503.
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_provider_adapter
 
         def _always_available_status(model_name: str):
             return {
@@ -93,6 +80,37 @@ def test_transcriptions_ok_with_override(monkeypatch, bypass_api_limits):
             audio_files,
             "check_transcription_model_status",
             _always_available_status,
+            raising=True,
+        )
+
+        def _fake_transcribe_batch(
+            self,
+            audio_path,
+            *,
+            model=None,
+            language=None,
+            task="transcribe",
+            word_timestamps=False,
+            prompt=None,
+            hotwords=None,
+            base_dir=None,
+            cancel_check=None,
+        ):
+            return {
+                "text": "stubbed transcript",
+                "language": language or "en",
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "stubbed transcript"}
+                ],
+                "diarization": {"enabled": False, "speakers": None},
+                "usage": {"duration_ms": None, "tokens": None},
+                "metadata": {"provider": "faster-whisper", "model": model or "large-v3"},
+            }
+
+        monkeypatch.setattr(
+            stt_provider_adapter.FasterWhisperAdapter,
+            "transcribe_batch",
+            _fake_transcribe_batch,
             raising=True,
         )
 
@@ -134,22 +152,10 @@ def test_translations_ok_with_override(monkeypatch, bypass_api_limits):
 
         app.dependency_overrides[get_request_user] = _override_user
 
-        # Patch the production function used by the endpoint (Whisper path)
-        def _fake_speech_to_text(*args, **kwargs):
-            segments = [
-                {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "translated transcript"}
-            ]
-            return (segments, "en")
-
-        monkeypatch.setattr(
-            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
-            _fake_speech_to_text,
-            raising=False,
-        )
-
         # Pretend the Whisper model is already available so the preflight
         # check does not cause a 503 in tests.
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_provider_adapter
 
         def _always_available_status(model_name: str):
             return {
@@ -162,6 +168,37 @@ def test_translations_ok_with_override(monkeypatch, bypass_api_limits):
             audio_files,
             "check_transcription_model_status",
             _always_available_status,
+            raising=True,
+        )
+
+        def _fake_transcribe_batch(
+            self,
+            audio_path,
+            *,
+            model=None,
+            language=None,
+            task="transcribe",
+            word_timestamps=False,
+            prompt=None,
+            hotwords=None,
+            base_dir=None,
+            cancel_check=None,
+        ):
+            return {
+                "text": "translated transcript",
+                "language": language or "en",
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "translated transcript"}
+                ],
+                "diarization": {"enabled": False, "speakers": None},
+                "usage": {"duration_ms": None, "tokens": None},
+                "metadata": {"provider": "faster-whisper", "model": model or "large-v3"},
+            }
+
+        monkeypatch.setattr(
+            stt_provider_adapter.FasterWhisperAdapter,
+            "transcribe_batch",
+            _fake_transcribe_batch,
             raising=True,
         )
 

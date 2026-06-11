@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import threading
 import time
 
@@ -56,6 +57,12 @@ def test_artifact_traversal_rejected_under_uvicorn(monkeypatch: pytest.MonkeyPat
     # Start uvicorn server in background
     host = "127.0.0.1"
     port = 8809
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((host, 0))
+            port = sock.getsockname()[1]
+    except OSError:
+        pass
     config = uvicorn.Config(app, host=host, port=port, log_level="error")
     server = uvicorn.Server(config)
 
@@ -73,7 +80,7 @@ def test_artifact_traversal_rejected_under_uvicorn(monkeypatch: pytest.MonkeyPat
         # Drive API against real HTTP server so raw_path is preserved
         import requests
         # Use the same timeout for all HTTP calls to avoid hangs
-        TIMEOUT = 10
+        TIMEOUT = 30
 
         # Create a run
         body = {

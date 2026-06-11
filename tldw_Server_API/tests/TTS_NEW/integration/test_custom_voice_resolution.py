@@ -306,7 +306,8 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
         async def generate(self, request):
             voice_path = request.extra_params.get("pocket_tts_cpp_voice_path")
             assert voice_path is not None
-            assert voice_path.endswith("/voices/providers/pocket_tts_cpp/custom_voice-1.wav")
+            voice_posix = Path(voice_path).as_posix()
+            assert voice_posix.endswith("/voices/providers/pocket_tts_cpp/custom_voice-1.wav")
             assert Path(voice_path).exists()
             assert Path(voice_path).read_bytes()[:4] == b"RIFF"
             with wave.open(str(voice_path), "rb") as wav_file:
