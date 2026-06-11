@@ -89,12 +89,14 @@ class TestOpenAIAdapterInitialization:
         }
         adapter = OpenAITTSAdapter(config)
 
-        success = await adapter.initialize()
+        mock_response = MagicMock(status_code=200, content=b"ok")
+        mock_response.raise_for_status = MagicMock()
+        with patch.object(openai_mod, "apost", new=AsyncMock(return_value=mock_response)) as mock_apost:
+            success = await adapter.initialize()
 
         assert success is True
         assert adapter.status == adapter.status.AVAILABLE
-        # Verify that a single verification POST was issued
-        mock_client.post.assert_called()
+        mock_apost.assert_called_once()
 
     @pytest.mark.unit
     @pytest.mark.asyncio

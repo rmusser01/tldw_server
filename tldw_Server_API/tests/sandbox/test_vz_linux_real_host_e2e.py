@@ -392,6 +392,7 @@ def test_wait_for_helper_socket_unavailable_retries_socket_timeout(
                 raise socket.timeout("transient timeout")
             raise ConnectionRefusedError("helper socket unavailable")
 
+    monkeypatch.setattr(socket, "AF_UNIX", getattr(socket, "AF_UNIX", 1), raising=False)
     monkeypatch.setattr(socket, "socket", lambda *_args, **_kwargs: _FakeSocket())
 
     _wait_for_helper_socket_unavailable(socket_path, timeout_sec=1.0)

@@ -281,6 +281,7 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
 ):
     voices_root = tmp_path / "voices"
     expected_wav = _make_wav_bytes(b"\x02\x03" * 8)
+    expected_pcm = b"\x00\x01" * 8
     seen: dict[str, object] = {}
 
     class _FakeVoiceManager:
@@ -309,7 +310,7 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
             seen["voice_path"] = str(voice_path) if voice_path is not None else None
             seen["trust_token"] = bool(request.extra_params.get(PROVIDER_MANAGED_VOICE_TOKEN_KEY))
             seen["reference_text"] = request.extra_params.get("pocket_tts_cpp_reference_text")
-            return TTSResponse(audio_data=b"ok", format=request.format, sample_rate=24000)
+            return TTSResponse(audio_data=expected_pcm, format=request.format, sample_rate=24000)
 
     def _fake_get_voice_manager():
         return _FakeVoiceManager()
@@ -353,7 +354,7 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
             headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
         )
         assert r.status_code == 200, r.text
-        assert r.content == b"ok"
+        assert r.content == expected_pcm
         assert seen["voice_path"] is not None
         voice_path = Path(str(seen["voice_path"]))
         assert voice_path.name == "custom_voice-1.wav"

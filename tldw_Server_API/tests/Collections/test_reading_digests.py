@@ -395,7 +395,11 @@ def test_reading_digest_scheduler_claims_single_enqueue(client_with_user):
     asyncio.run(_runner())
 
     jm = JobManager()
-    jobs = jm.list_jobs(domain=READING_DIGEST_DOMAIN, job_type=READING_DIGEST_JOB_TYPE)
+    jobs = [
+        job
+        for job in jm.list_jobs(domain=READING_DIGEST_DOMAIN, job_type=READING_DIGEST_JOB_TYPE)
+        if (job.get("payload") or {}).get("schedule_id") == schedule_id
+    ]
     assert len(jobs) == 1
     updated = db.get_reading_digest_schedule(schedule_id)
     assert updated.next_run_at is not None
