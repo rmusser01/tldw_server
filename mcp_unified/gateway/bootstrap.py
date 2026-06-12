@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
 from mcp_unified.gateway.profiles import GatewayProfileManager, GatewayProfileStoreMetadata
 from mcp_unified.interfaces.storage import AuditStore, ProfileAssignmentStore, ProfileStore
+from mcp_unified.policy_grants import PolicyGrantStore
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.presets import duplicate_builtin_preset
 from mcp_unified.profiles.resolver import AssignmentBackedProfileResolver
@@ -41,6 +42,7 @@ class GatewayProfileBootstrap:
     external_runtime_lifecycle: GatewayExternalRuntimeLifecycleConfig | None = None
     credential_grant_manager: GatewayCredentialGrantManager | None = None
     admin_auth: GatewayAdminAuthConfig | None = None
+    policy_grant_store: PolicyGrantStore | None = None
 
 
 async def bootstrap_profile_gateway(
@@ -58,6 +60,7 @@ async def bootstrap_profile_gateway(
     external_runtime_lifecycle: GatewayExternalRuntimeLifecycleConfig | None = None,
     credential_grant_manager: GatewayCredentialGrantManager | None = None,
     admin_auth: GatewayAdminAuthConfig | None = None,
+    policy_grant_store: PolicyGrantStore | None = None,
 ) -> GatewayProfileBootstrap:
     """Seed profile data and return a profile-aware gateway runtime."""
 
@@ -99,6 +102,7 @@ async def bootstrap_profile_gateway(
     runtime = ProfileAwareGatewayRuntime(
         backend,
         profile_resolver=resolver,
+        policy_grant_store=policy_grant_store,
     )
     profile_manager = GatewayProfileManager(
         profile_store=store,
@@ -121,6 +125,7 @@ async def bootstrap_profile_gateway(
         external_runtime_lifecycle=external_runtime_lifecycle,
         credential_grant_manager=credential_grant_manager,
         admin_auth=admin_auth,
+        policy_grant_store=policy_grant_store,
     )
 
 

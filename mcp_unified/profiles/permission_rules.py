@@ -364,6 +364,12 @@ def _normalize_domain_pattern(pattern: str) -> str:
     return host
 
 
+def normalize_permission_subject_value(subject_type: PermissionRuleSubject, value: str) -> str:
+    """Normalize a requested subject value for permission matching and grants."""
+
+    return _normalize_subject_value(subject_type, value)
+
+
 def _normalize_subject_value(subject_type: PermissionRuleSubject, value: str) -> str:
     """Normalize a requested subject for permission matching."""
 

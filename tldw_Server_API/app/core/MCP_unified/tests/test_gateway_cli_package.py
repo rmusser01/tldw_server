@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -2727,3 +2728,112 @@ def _seed_sqlite_tool_use_events(
             await store.aclose()
 
     asyncio.run(_seed())
+
+
+def test_gateway_cli_approval_grant_lifecycle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke an approval grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-approval-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--subject-type",
+            "domain",
+            "--value",
+            "https://Example.com/private",
+            "--ttl-seconds",
+            "900",
+            "--granted-by",
+            "operator",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    grant_payload = created["grant"]
+    assert grant_payload["value"] == "example.com"
+    assert grant_payload["profile_id"] == "researcher"
+    grant_id = grant_payload["grant_id"]
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    )
+    revoked = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert revoked["grant"]["grant_id"] == grant_id
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["grants"] == []
+
+
+def test_gateway_cli_approval_grant_requires_configured_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail closed when no policy grant store is configured."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps({"store": {"kind": "memory"}}), encoding="utf-8")
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["reason_code"] == "policy_grant_store_unavailable"
+
+
+def test_gateway_cli_approval_grant_requires_persistent_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject CLI grant management against a process-local memory store."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {"kind": "memory"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["reason_code"] == "policy_grant_store_unavailable"
