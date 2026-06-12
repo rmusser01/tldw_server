@@ -331,3 +331,24 @@ def test_service_register_completed_sync_export_rejects_outside_path(tmp_path, m
             chatbook_name="Demo",
             output_path=outside,
         )
+
+
+@pytest.mark.unit
+def test_service_register_completed_sync_export_rejects_foreign_user(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+    from tldw_Server_API.app.core.Chatbooks.exceptions import ExportError
+
+    service = ChatbookService("1", FakeDB(), user_id_int=1)
+    archive = Path(service.export_dir) / "demo.zip"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_bytes(b"zip")
+
+    with pytest.raises(ExportError):
+        service.register_completed_sync_export(
+            user_id="2",
+            chatbook_name="Demo",
+            output_path=archive,
+        )

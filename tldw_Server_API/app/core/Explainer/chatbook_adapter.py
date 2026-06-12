@@ -548,6 +548,8 @@ def _apply_node_payload(
 
 def _first_root_payload(nodes_payload: list[Any]) -> dict[str, Any]:
     dict_nodes = [node for node in nodes_payload if isinstance(node, dict)]
+    if not dict_nodes:
+        raise ValueError("Explainer payload contains no node objects")
     for node in dict_nodes:
         if node.get("parentId") in (None, ""):
             return node

@@ -567,3 +567,50 @@ def test_job_status_returns_404_for_cross_user_job(explainer_client) -> None:
     response = client.get(f"/api/v1/explainer/jobs/{job['id']}")
 
     assert response.status_code == 404
+
+
+def test_list_sessions_maps_service_validation_errors_to_422(explainer_client, monkeypatch):
+    from tldw_Server_API.app.core.Explainer.service import (
+        ExplainerService,
+        ExplainerValidationError,
+    )
+
+    client, _db, _set_user = explainer_client
+
+    def _raise_validation(self, **kwargs):
+        raise ExplainerValidationError("bad listing request")
+
+    monkeypatch.setattr(ExplainerService, "list_session_summaries", _raise_validation)
+
+    response = client.get("/api/v1/explainer/sessions")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "bad listing request"
+
+
+def test_unexpected_service_errors_return_500_and_are_logged(explainer_client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import explainer as explainer_module
+    from tldw_Server_API.app.core.Explainer.service import ExplainerService
+
+    client, _db, _set_user = explainer_client
+    logged: list[str] = []
+
+    class _LoggerStub:
+        def exception(self, message, *args, **kwargs):
+            logged.append(str(message))
+
+        def __getattr__(self, _name):
+            return lambda *args, **kwargs: None
+
+    def _raise_unexpected(self, **kwargs):
+        raise RuntimeError("boom at /private/path")
+
+    monkeypatch.setattr(ExplainerService, "list_session_summaries", _raise_unexpected)
+    monkeypatch.setattr(explainer_module, "logger", _LoggerStub())
+
+    response = client.get("/api/v1/explainer/sessions")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Explainer service unavailable"
+    assert logged, "unexpected explainer errors must be logged"
+    assert "/private/path" not in str(response.json())

@@ -527,10 +527,12 @@ def _citation_matches_excerpt(citation: dict[str, Any], excerpt: dict[str, Any])
     if excerpt_hash is not None and str(citation_hash or "") != str(excerpt_hash):
         return False
     for field_name in ("start_offset", "end_offset"):
-        citation_offset = citation.get(field_name)
-        excerpt_offset = excerpt.get(field_name)
-        if excerpt_offset is not None and (
-            citation_offset is None or int(citation_offset) != int(excerpt_offset)
+        citation_offset = _coerce_offset(citation.get(field_name))
+        excerpt_offset = _coerce_offset(excerpt.get(field_name))
+        if excerpt.get(field_name) is not None and (
+            citation_offset is None
+            or excerpt_offset is None
+            or citation_offset != excerpt_offset
         ):
             return False
     citation_location = citation.get("location_label")
@@ -615,6 +617,16 @@ def _extract_json_object(content: str) -> str:
     if start < 0 or end < start:
         raise ValueError("Explainer generator response did not contain a JSON object")
     return text[start : end + 1]
+
+
+def _coerce_offset(value: Any) -> int | None:
+    """Coerce a citation offset; generator output may carry non-numeric junk."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_text(value: Any) -> str:

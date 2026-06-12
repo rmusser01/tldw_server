@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
@@ -60,6 +61,8 @@ def _citation_payloads(citations) -> list[dict]:
 
 def _raise_http(exc: Exception) -> None:
     status_code, detail = map_explainer_service_error(exc)
+    if status_code >= 500:
+        logger.exception("Unexpected Explainer service error; error_type={}", type(exc).__name__)
     raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
@@ -115,11 +118,14 @@ async def list_explainer_sessions(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ExplainerSessionListResponse:
-    summaries, total = _service(db).list_session_summaries(
-        owner_user_id=_owner_user_id(current_user),
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        summaries, total = _service(db).list_session_summaries(
+            owner_user_id=_owner_user_id(current_user),
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        _raise_http(exc)
     items = [ExplainerSessionSummaryResponse.from_domain(summary) for summary in summaries]
     return ExplainerSessionListResponse(items=items, total=total, limit=limit, offset=offset)
 

@@ -539,3 +539,10 @@ def test_list_sessions_returns_full_unarchived_sessions_most_recent_first(tmp_pa
     assert listed_second.nodes.keys() == expected_second.nodes.keys()
     child_id = expected_second.nodes[expected_second.root_node_ids[0]].child_node_ids[0]
     assert listed_second.nodes[child_id].citations[0].excerpt == "Cited text."
+
+
+def test_transaction_takes_write_lock_immediately(tmp_path):
+    db = ExplainerDatabase(tmp_path / "Explainer.db")
+
+    with db.transaction() as conn:
+        assert conn.in_transaction

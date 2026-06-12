@@ -2169,7 +2169,12 @@ class ChatbookService:
                 import_fn(*args, **kwargs)
                 imported_count = import_status.successful_items - before_successful
                 if imported_count > 0:
-                    imported_items[content_type.value] = imported_count
+                    # Aggregate: a content type can be imported via more than
+                    # one path (e.g. Explainer sessions via first-class items
+                    # and the generated-document fallback).
+                    imported_items[content_type.value] = (
+                        imported_items.get(content_type.value, 0) + imported_count
+                    )
 
             # Import characters first (they may be dependencies)
             if ContentType.CHARACTER in content_selections:
@@ -2452,8 +2457,15 @@ class ChatbookService:
 
         Validates the archive against the service export directory and returns
         (job_id, download_url, file_path, file_size). Raises ExportError when
-        the archive is invalid or job persistence fails.
+        the archive is invalid, the user does not match the service's bound
+        user, or job persistence fails.
         """
+        bound_user_ids = {str(self.user_id)}
+        if self.user_id_int is not None:
+            bound_user_ids.add(str(self.user_id_int))
+        if str(user_id) not in bound_user_ids:
+            raise ExportError("Export job user does not match service user")
+
         job_id = str(uuid4())
         file_path = Path(output_path).resolve()
         expected_base = Path(self.export_dir).resolve()
@@ -4041,28 +4053,31 @@ class ChatbookService:
         with self._explainer_repo_session() as repo:
             for session_id in session_ids:
                 session_id_text = str(session_id)
-                payload = build_explainer_chatbook_payload(
-                    repo=repo,
-                    session_id=session_id_text,
-                    owner_user_id=self.user_id,
-                )
-                session_data = payload["structured"]["session"]
-                session_file = sessions_dir / f"session_{session_id_text}.json"
-                with open(session_file, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, indent=2, ensure_ascii=False)
-
-                content.explainer_sessions[session_id_text] = payload
-                manifest.content_items.append(
-                    ContentItem(
-                        id=session_id_text,
-                        type=ContentType.EXPLAINER_SESSION,
-                        title=session_data.get("title") or "Explainer session",
-                        created_at=self._parse_timestamp(session_data.get("createdAt")),
-                        updated_at=self._parse_timestamp(session_data.get("updatedAt")),
-                        file_path=f"content/explainer_sessions/session_{session_id_text}.json",
-                        metadata={"format": EXPLAINER_CHATBOOK_FORMAT},
+                try:
+                    payload = build_explainer_chatbook_payload(
+                        repo=repo,
+                        session_id=session_id_text,
+                        owner_user_id=self.user_id,
                     )
-                )
+                    session_data = payload["structured"]["session"]
+                    session_file = sessions_dir / f"session_{session_id_text}.json"
+                    with open(session_file, "w", encoding="utf-8") as f:
+                        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+                    content.explainer_sessions[session_id_text] = payload
+                    manifest.content_items.append(
+                        ContentItem(
+                            id=session_id_text,
+                            type=ContentType.EXPLAINER_SESSION,
+                            title=session_data.get("title") or "Explainer session",
+                            created_at=self._parse_timestamp(session_data.get("createdAt")),
+                            updated_at=self._parse_timestamp(session_data.get("updatedAt")),
+                            file_path=f"content/explainer_sessions/session_{session_id_text}.json",
+                            metadata={"format": EXPLAINER_CHATBOOK_FORMAT},
+                        )
+                    )
+                except (LookupError, *_CHATBOOK_NONCRITICAL_EXCEPTIONS) as e:
+                    logger.warning(f"Failed to export Explainer session {session_id_text}: {e}")
 
     # Helper methods for importing content
 

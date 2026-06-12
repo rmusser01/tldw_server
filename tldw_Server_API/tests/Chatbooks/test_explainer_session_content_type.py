@@ -17,8 +17,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
-from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.Explainer.chatbook_adapter import build_explainer_chatbook_payload
 from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 
@@ -233,3 +233,98 @@ def test_import_generated_document_subtype_fallback_restores_explainer_session(c
     )
     [restored] = restored_repo.list_sessions(owner_user_id="8")
     assert restored.title == "Learn attention"
+
+
+@pytest.mark.asyncio
+async def test_export_isolates_per_session_failures(chatbook_env):
+    _db, _repo, session = _create_session_for_user(7)
+    service = _service(7)
+
+    success, message, archive_path = await service.create_chatbook(
+        name="Explainer Export",
+        description="One good, one missing",
+        content_selections={
+            ContentType.EXPLAINER_SESSION: [session.id, "exp_sess_does_not_exist"]
+        },
+        include_media=False,
+        include_embeddings=False,
+        include_generated_content=True,
+        async_mode=False,
+    )
+
+    assert success is True, message
+    assert archive_path is not None
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+    explainer_items = [
+        item for item in manifest["content_items"] if item["type"] == "explainer_session"
+    ]
+    assert [item["id"] for item in explainer_items] == [session.id]
+    assert manifest["statistics"]["total_explainer_sessions"] == 1
+
+
+@pytest.mark.asyncio
+async def test_import_counts_aggregate_across_first_class_and_fallback_paths(chatbook_env):
+    _db, repo, session = _create_session_for_user(7)
+    payload = build_explainer_chatbook_payload(
+        repo=repo,
+        session_id=session.id,
+        owner_user_id="7",
+    )
+    import_service = _service(8)
+    archive_path = Path(import_service.import_dir) / "dual-path.chatbook"
+    manifest = ChatbookManifest(
+        version=ChatbookVersion.V1,
+        name="Dual path",
+        description="First-class item plus generated-document fallback",
+        content_items=[
+            ContentItem(
+                id=session.id,
+                type=ContentType.EXPLAINER_SESSION,
+                title=session.title,
+                file_path=f"content/explainer_sessions/session_{session.id}.json",
+                metadata={"format": "tldw.explainer_session.v1"},
+            ),
+            ContentItem(
+                id=f"doc-{session.id}",
+                type=ContentType.GENERATED_DOCUMENT,
+                title=session.title,
+                file_path=f"content/generated_documents/document_doc-{session.id}.json",
+                metadata={
+                    "subtype": "explainer_session",
+                    "format": "tldw.explainer_session.v1",
+                },
+            ),
+        ],
+    )
+    generated_doc = {
+        "type": "generated_document",
+        "metadata": {"subtype": "explainer_session"},
+        "content": payload,
+    }
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest.to_dict()))
+        zf.writestr(
+            f"content/explainer_sessions/session_{session.id}.json", json.dumps(payload)
+        )
+        zf.writestr(
+            f"content/generated_documents/document_doc-{session.id}.json",
+            json.dumps(generated_doc),
+        )
+
+    success, message, details = import_service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=False,
+        import_embeddings=False,
+    )
+
+    assert success is True, message
+    assert details is not None
+    assert details["imported_items"]["explainer_session"] == 2
+    restored_repo = ExplainerRepository(
+        ExplainerDatabase(DatabasePaths.get_explainer_db_path(8), client_id="user-8")
+    )
+    assert len(restored_repo.list_sessions(owner_user_id="8")) == 2

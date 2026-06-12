@@ -417,3 +417,21 @@ def test_restore_failure_does_not_leave_partial_session(tmp_path):
         include_archived=True,
     )
     assert total == 0
+
+
+def test_restore_rejects_payload_with_no_dict_nodes(tmp_path):
+    target_repo = ExplainerRepository(ExplainerDatabase(tmp_path / "target.db"))
+    payload = {
+        "type": "explainer_session",
+        "structured": {
+            "session": {"title": "Broken"},
+            "nodes": ["not-a-node", 42],
+        },
+    }
+
+    with pytest.raises(ValueError):
+        restore_explainer_chatbook_payload(
+            repo=target_repo,
+            payload=payload,
+            owner_user_id="8",
+        )

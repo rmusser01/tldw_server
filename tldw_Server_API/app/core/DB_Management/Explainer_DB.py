@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
+    begin_immediate_if_needed,
     configure_sqlite_connection,
 )
 
@@ -94,8 +95,14 @@ class ExplainerDatabase:
 
     @contextmanager
     def transaction(self) -> Iterable[sqlite3.Connection]:
-        """Run operations in a SQLite transaction."""
+        """Run operations in a write transaction.
+
+        Takes the write lock up front (BEGIN IMMEDIATE) so read-then-write
+        sequences such as sibling-ordinal allocation are serialized across
+        writers instead of racing under SQLite's deferred default.
+        """
         conn = self.get_connection()
+        begin_immediate_if_needed(conn)
         try:
             yield conn
             conn.commit()

@@ -62,6 +62,8 @@ def test_persist_completed_sync_export_job_failure_logs_are_sanitized(monkeypatc
 
     class _FailingService:
         export_dir = tmp_path
+        user_id = "secret-user"
+        user_id_int = None
 
         # Exercise the real persistence/logging path that the endpoint delegates to.
         register_completed_sync_export = (

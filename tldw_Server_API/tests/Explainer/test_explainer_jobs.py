@@ -1043,3 +1043,25 @@ def test_service_update_node_rejects_unknown_update_fields(
             owner_user_id="7",
             updates={"bogus_field": "x"},
         )
+
+
+def test_citation_with_non_numeric_offset_is_mismatch_not_crash() -> None:
+    from tldw_Server_API.app.core.Explainer.jobs import _citation_matches_excerpt
+
+    citation = {
+        "source_id": "media-1",
+        "source_type": "media",
+        "excerpt": "Cited text.",
+        "start_offset": "not-a-number",
+    }
+    excerpt = {
+        "source_id": "media-1",
+        "source_type": "media",
+        "excerpt": "Cited text.",
+        "snapshot_hash": None,
+        "start_offset": 10,
+        "end_offset": None,
+        "location_label": None,
+    }
+
+    assert _citation_matches_excerpt(citation, excerpt) is False

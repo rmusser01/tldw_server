@@ -108,16 +108,23 @@ export const explainerApi = {
   searchSources: async (query: string): Promise<ExplainerSourceCandidate[]> => {
     const normalized = query.trim()
     if (!normalized) return []
-    const [mediaResponse, notesResponse] = await Promise.all([
+    // One failing backend must not blank out results from the other.
+    const [mediaResult, notesResult] = await Promise.allSettled([
       tldwClient.searchMedia({ query: normalized }, { page: 1, results_per_page: 8 }),
       tldwClient.searchNotes(normalized)
     ])
-    const media = toArray(mediaResponse)
-      .map(normalizeMediaCandidate)
-      .filter((item): item is ExplainerSourceCandidate => Boolean(item))
-    const notes = toArray(notesResponse)
-      .map(normalizeNoteCandidate)
-      .filter((item): item is ExplainerSourceCandidate => Boolean(item))
+    const media =
+      mediaResult.status === "fulfilled"
+        ? toArray(mediaResult.value)
+            .map(normalizeMediaCandidate)
+            .filter((item): item is ExplainerSourceCandidate => Boolean(item))
+        : []
+    const notes =
+      notesResult.status === "fulfilled"
+        ? toArray(notesResult.value)
+            .map(normalizeNoteCandidate)
+            .filter((item): item is ExplainerSourceCandidate => Boolean(item))
+        : []
     return [...media, ...notes].slice(0, 16)
   }
 }
