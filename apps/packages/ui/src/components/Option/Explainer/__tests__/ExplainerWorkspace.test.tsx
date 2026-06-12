@@ -199,3 +199,75 @@ describe("ExplainerWorkspace", () => {
     expect(await screen.findByText("Export job started: job-1")).toBeInTheDocument()
   })
 })
+
+describe("ExplainerWorkspace interactions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.listSessions.mockResolvedValue({
+      items: [
+        { ...sampleSession, nodeCount: 1, selectedSourceCount: 1 },
+        {
+          ...sampleSession,
+          id: "session-2",
+          title: "Second session",
+          nodeCount: 1,
+          selectedSourceCount: 0
+        }
+      ],
+      total: 2,
+      limit: 50,
+      offset: 0
+    })
+    api.getSession.mockImplementation(async (sessionId: string) =>
+      sessionId === "session-2"
+        ? { ...sampleSession, id: "session-2", title: "Second session" }
+        : sampleSession
+    )
+    api.searchSources.mockResolvedValue([])
+    api.expandNode.mockResolvedValue({
+      jobId: "job-9",
+      sessionId: "session-1",
+      nodeId: "root",
+      status: "queued"
+    })
+    api.getJob.mockResolvedValue({
+      jobId: "job-9",
+      sessionId: "session-1",
+      nodeId: "root",
+      status: "running",
+      progressMessage: "Generating expansion"
+    })
+  })
+
+  it("searches sources when pressing Enter in the query field", async () => {
+    renderWorkspace()
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Sources" }))
+    const input = screen.getByLabelText("Source search")
+    fireEvent.change(input, { target: { value: "attention" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+
+    await waitFor(() => {
+      expect(api.searchSources).toHaveBeenCalledWith("attention")
+    })
+  })
+
+  it("clears active job progress when switching sessions", async () => {
+    renderWorkspace()
+
+    const tree = await screen.findByRole("tree", { name: "Explainer outline" })
+    await within(tree).findByText("Explain transformer attention")
+    fireEvent.click(within(tree).getAllByRole("button", { name: "Expand" })[0])
+
+    expect(await screen.findByText("Generating expansion")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Saved Explainer sessions"), {
+      target: { value: "session-2" }
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText("Generating expansion")).not.toBeInTheDocument()
+    })
+    expect(screen.queryByText("Generation queued")).not.toBeInTheDocument()
+  })
+})

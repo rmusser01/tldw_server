@@ -103,6 +103,7 @@ export const ExplainerWorkspace = () => {
       })
       setSelectedSessionId(created.id)
       setSelectedNodeId(created.rootNodeIds[0] ?? null)
+      setActiveJobId(null)
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Explainer session creation failed")
     }
@@ -126,6 +127,7 @@ export const ExplainerWorkspace = () => {
       })
       setSelectedSessionId(created.id)
       setSelectedNodeId(created.rootNodeIds[0] ?? null)
+      setActiveJobId(null)
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Explainer session creation failed")
     }
@@ -199,6 +201,8 @@ export const ExplainerWorkspace = () => {
   const selectSession = (sessionId: string) => {
     setSelectedSessionId(sessionId || null)
     setSelectedNodeId(null)
+    // Job progress belongs to the previous session; never show it for another.
+    setActiveJobId(null)
     setExportMessage(null)
     setErrorMessage(null)
   }

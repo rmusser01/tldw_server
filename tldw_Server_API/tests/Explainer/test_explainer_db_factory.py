@@ -44,3 +44,27 @@ def test_open_explainer_db_closes_connection_on_exit(tmp_path):
 
     with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("SELECT 1")
+
+
+def test_close_all_connections_closes_every_thread_connection(tmp_path):
+    import threading
+
+    from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
+
+    db = ExplainerDatabase(tmp_path / "Explainer.db")
+    main_conn = db.get_connection()
+    other_conn_holder: dict[str, object] = {}
+
+    def _open_on_other_thread() -> None:
+        other_conn_holder["conn"] = db.get_connection()
+
+    worker = threading.Thread(target=_open_on_other_thread)
+    worker.start()
+    worker.join()
+
+    db.close_all_connections()
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        main_conn.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError):
+        other_conn_holder["conn"].execute("SELECT 1")

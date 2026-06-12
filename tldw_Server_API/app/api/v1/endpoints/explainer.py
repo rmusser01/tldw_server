@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from functools import partial
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.endpoints.chatbooks import get_chatbook_service
@@ -37,6 +41,11 @@ from tldw_Server_API.app.core.Explainer.service import (
     map_explainer_service_error,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+EXPLAINER_READ_RATE_LIMIT_RESOURCE = "explainer.read"
+EXPLAINER_WRITE_RATE_LIMIT_RESOURCE = "explainer.write"
+EXPLAINER_EXPAND_RATE_LIMIT_RESOURCE = "explainer.expand"
+EXPLAINER_EXPORT_RATE_LIMIT_RESOURCE = "explainer.export"
 
 router = APIRouter(prefix="/explainer", tags=["explainer"])
 
@@ -85,6 +94,7 @@ def _public_job_error(job: dict) -> str | None:
     response_model=ExplainerSessionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Explainer session",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def create_explainer_session(
     body: ExplainerSessionCreateRequest,
@@ -92,15 +102,18 @@ async def create_explainer_session(
     db: ExplainerDatabase = Depends(get_explainer_db),
 ) -> ExplainerSessionResponse:
     try:
-        session = _service(db).create_session(
-            owner_user_id=_owner_user_id(current_user),
-            title=body.title,
-            mode=body.mode,
-            output_intent=body.output_intent,
-            grounding=body.grounding,
-            depth_preset=body.depth_preset,
-            selected_sources=_source_payloads(body.selected_sources),
-            root_prompt=body.root_prompt,
+        session = await asyncio.to_thread(
+            partial(
+                _service(db).create_session,
+                owner_user_id=_owner_user_id(current_user),
+                title=body.title,
+                mode=body.mode,
+                output_intent=body.output_intent,
+                grounding=body.grounding,
+                depth_preset=body.depth_preset,
+                selected_sources=_source_payloads(body.selected_sources),
+                root_prompt=body.root_prompt,
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -111,6 +124,7 @@ async def create_explainer_session(
     "/sessions",
     response_model=ExplainerSessionListResponse,
     summary="List Explainer sessions",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_READ_RATE_LIMIT_RESOURCE))],
 )
 async def list_explainer_sessions(
     current_user: User = Depends(get_request_user),
@@ -119,10 +133,13 @@ async def list_explainer_sessions(
     offset: int = Query(default=0, ge=0),
 ) -> ExplainerSessionListResponse:
     try:
-        summaries, total = _service(db).list_session_summaries(
-            owner_user_id=_owner_user_id(current_user),
-            limit=limit,
-            offset=offset,
+        summaries, total = await asyncio.to_thread(
+            partial(
+                _service(db).list_session_summaries,
+                owner_user_id=_owner_user_id(current_user),
+                limit=limit,
+                offset=offset,
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -134,6 +151,7 @@ async def list_explainer_sessions(
     "/sessions/{session_id}",
     response_model=ExplainerSessionResponse,
     summary="Get Explainer session",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_READ_RATE_LIMIT_RESOURCE))],
 )
 async def get_explainer_session(
     session_id: str,
@@ -141,7 +159,9 @@ async def get_explainer_session(
     db: ExplainerDatabase = Depends(get_explainer_db),
 ) -> ExplainerSessionResponse:
     try:
-        session = _service(db).get_session(session_id, owner_user_id=_owner_user_id(current_user))
+        session = await asyncio.to_thread(
+            _service(db).get_session, session_id, owner_user_id=_owner_user_id(current_user)
+        )
     except Exception as exc:
         _raise_http(exc)
     return ExplainerSessionResponse.from_domain(session)
@@ -151,6 +171,7 @@ async def get_explainer_session(
     "/sessions/{session_id}/export-chatbook",
     response_model=CreateChatbookResponse,
     summary="Export an Explainer session as a Chatbook",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_EXPORT_RATE_LIMIT_RESOURCE))],
 )
 async def export_explainer_session_chatbook(
     session_id: str,
@@ -161,7 +182,9 @@ async def export_explainer_session_chatbook(
 ) -> CreateChatbookResponse:
     owner_user_id = _owner_user_id(current_user)
     try:
-        session = _service(db).get_session(session_id, owner_user_id=owner_user_id)
+        session = await asyncio.to_thread(
+            _service(db).get_session, session_id, owner_user_id=owner_user_id
+        )
     except Exception as exc:
         _raise_http(exc)
 
@@ -201,6 +224,7 @@ async def export_explainer_session_chatbook(
     "/sessions/{session_id}",
     response_model=ExplainerSessionResponse,
     summary="Update Explainer session",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def update_explainer_session(
     session_id: str,
@@ -214,14 +238,17 @@ async def update_explainer_session(
         else None
     )
     try:
-        session = _service(db).update_session(
-            session_id,
-            owner_user_id=_owner_user_id(current_user),
-            title=body.title,
-            output_intent=body.output_intent,
-            grounding=body.grounding,
-            depth_preset=body.depth_preset,
-            selected_sources=selected_sources,
+        session = await asyncio.to_thread(
+            partial(
+                _service(db).update_session,
+                session_id,
+                owner_user_id=_owner_user_id(current_user),
+                title=body.title,
+                output_intent=body.output_intent,
+                grounding=body.grounding,
+                depth_preset=body.depth_preset,
+                selected_sources=selected_sources,
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -232,6 +259,7 @@ async def update_explainer_session(
     "/sessions/{session_id}",
     response_model=ExplainerSessionResponse,
     summary="Archive Explainer session",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def archive_explainer_session(
     session_id: str,
@@ -239,7 +267,9 @@ async def archive_explainer_session(
     db: ExplainerDatabase = Depends(get_explainer_db),
 ) -> ExplainerSessionResponse:
     try:
-        session = _service(db).archive_session(session_id, owner_user_id=_owner_user_id(current_user))
+        session = await asyncio.to_thread(
+            _service(db).archive_session, session_id, owner_user_id=_owner_user_id(current_user)
+        )
     except Exception as exc:
         _raise_http(exc)
     return ExplainerSessionResponse.from_domain(session)
@@ -250,6 +280,7 @@ async def archive_explainer_session(
     response_model=ExplainerNodeResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Explainer node",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def create_explainer_node(
     session_id: str,
@@ -258,18 +289,21 @@ async def create_explainer_node(
     db: ExplainerDatabase = Depends(get_explainer_db),
 ) -> ExplainerNodeResponse:
     try:
-        node = _service(db).create_node(
-            session_id,
-            owner_user_id=_owner_user_id(current_user),
-            title=body.title,
-            parent_id=body.parent_id,
-            body=body.body,
-            kind=body.kind,
-            intent=body.intent,
-            status=body.status,
-            evidence_state=body.evidence_state,
-            outside_knowledge_used=body.outside_knowledge_used,
-            citations=_citation_payloads(body.citations),
+        node = await asyncio.to_thread(
+            partial(
+                _service(db).create_node,
+                session_id,
+                owner_user_id=_owner_user_id(current_user),
+                title=body.title,
+                parent_id=body.parent_id,
+                body=body.body,
+                kind=body.kind,
+                intent=body.intent,
+                status=body.status,
+                evidence_state=body.evidence_state,
+                outside_knowledge_used=body.outside_knowledge_used,
+                citations=_citation_payloads(body.citations),
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -280,6 +314,7 @@ async def create_explainer_node(
     "/sessions/{session_id}/nodes/{node_id}",
     response_model=ExplainerNodeResponse,
     summary="Update Explainer node",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def update_explainer_node(
     session_id: str,
@@ -290,11 +325,14 @@ async def update_explainer_node(
 ) -> ExplainerNodeResponse:
     updates = body.model_dump(exclude_unset=True, by_alias=False)
     try:
-        node = _service(db).update_node(
-            session_id,
-            node_id,
-            owner_user_id=_owner_user_id(current_user),
-            updates=updates,
+        node = await asyncio.to_thread(
+            partial(
+                _service(db).update_node,
+                session_id,
+                node_id,
+                owner_user_id=_owner_user_id(current_user),
+                updates=updates,
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -305,6 +343,7 @@ async def update_explainer_node(
     "/sessions/{session_id}/nodes/{node_id}",
     response_model=ExplainerDeleteNodeResponse,
     summary="Delete Explainer node",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def delete_explainer_node(
     session_id: str,
@@ -313,10 +352,13 @@ async def delete_explainer_node(
     db: ExplainerDatabase = Depends(get_explainer_db),
 ) -> ExplainerDeleteNodeResponse:
     try:
-        result = _service(db).delete_node(
-            session_id,
-            node_id,
-            owner_user_id=_owner_user_id(current_user),
+        result = await asyncio.to_thread(
+            partial(
+                _service(db).delete_node,
+                session_id,
+                node_id,
+                owner_user_id=_owner_user_id(current_user),
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -328,6 +370,7 @@ async def delete_explainer_node(
     response_model=ExplainerJobAcceptedResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Queue Explainer node expansion",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_EXPAND_RATE_LIMIT_RESOURCE))],
 )
 async def expand_explainer_node(
     session_id: str,
@@ -338,11 +381,14 @@ async def expand_explainer_node(
     jm: JobManager = Depends(get_job_manager),
 ) -> ExplainerJobAcceptedResponse:
     try:
-        accepted = _service(db, jm).enqueue_node_expansion(
-            session_id=session_id,
-            node_id=node_id,
-            owner_user_id=_owner_user_id(current_user),
-            intent=body.intent,
+        accepted = await asyncio.to_thread(
+            partial(
+                _service(db, jm).enqueue_node_expansion,
+                session_id=session_id,
+                node_id=node_id,
+                owner_user_id=_owner_user_id(current_user),
+                intent=body.intent,
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -353,6 +399,7 @@ async def expand_explainer_node(
     "/sessions/{session_id}/nodes/{node_id}/answer-question",
     response_model=ExplainerNodeResponse,
     summary="Persist an Explainer question answer",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_WRITE_RATE_LIMIT_RESOURCE))],
 )
 async def answer_explainer_question(
     session_id: str,
@@ -362,12 +409,15 @@ async def answer_explainer_question(
     db: ExplainerDatabase = Depends(get_explainer_db),
 ) -> ExplainerNodeResponse:
     try:
-        node = _service(db).answer_question(
-            session_id,
-            node_id,
-            owner_user_id=_owner_user_id(current_user),
-            selected_option_id=body.selected_option_id,
-            selected_custom_answer=body.selected_custom_answer,
+        node = await asyncio.to_thread(
+            partial(
+                _service(db).answer_question,
+                session_id,
+                node_id,
+                owner_user_id=_owner_user_id(current_user),
+                selected_option_id=body.selected_option_id,
+                selected_custom_answer=body.selected_custom_answer,
+            )
         )
     except Exception as exc:
         _raise_http(exc)
@@ -378,6 +428,7 @@ async def answer_explainer_question(
     "/jobs/{job_id}",
     response_model=ExplainerJobStatusResponse,
     summary="Get an ownership-scoped Explainer job",
+    dependencies=[Depends(rbac_rate_limit(EXPLAINER_READ_RATE_LIMIT_RESOURCE))],
 )
 async def get_explainer_job_status(
     job_id: int,

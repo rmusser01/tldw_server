@@ -64,6 +64,12 @@ export const ExplainerSourcePicker = ({
               className="h-10 min-w-0 flex-1 rounded-md border border-border bg-surface2 px-3 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus"
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && query.trim() && !isSearching) {
+                  event.preventDefault()
+                  onSearch()
+                }
+              }}
               placeholder="Search media and notes"
             />
             <button

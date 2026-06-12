@@ -51,12 +51,12 @@ def open_explainer_db(
     *,
     db_path: str | Path | None = None,
 ) -> Iterable[ExplainerDatabase]:
-    """Context-managed Explainer database that closes its connection on exit."""
+    """Context-managed Explainer database that closes its connections on exit."""
     db = explainer_db_for_user(user_id, db_path=db_path)
     try:
         yield db
     finally:
-        db.close_connection()
+        db.close_all_connections()
 
 
 class ExplainerDatabase:
@@ -73,6 +73,8 @@ class ExplainerDatabase:
         if self._db_path_str != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
+        self._connections_lock = threading.Lock()
+        self._connections: list[sqlite3.Connection] = []
         self._ensure_schema()
 
     def get_connection(self) -> sqlite3.Connection:
@@ -84,6 +86,8 @@ class ExplainerDatabase:
             configure_sqlite_connection(conn)
             conn.execute("PRAGMA foreign_keys = ON")
             self._local.connection = conn
+            with self._connections_lock:
+                self._connections.append(conn)
         return conn
 
     def close_connection(self) -> None:
@@ -92,6 +96,26 @@ class ExplainerDatabase:
         if conn is not None:
             conn.close()
             self._local.connection = None
+            with self._connections_lock:
+                if conn in self._connections:
+                    self._connections.remove(conn)
+
+    def close_all_connections(self) -> None:
+        """Close every connection this database has opened on any thread.
+
+        Endpoint work may run on threadpool workers, so cleanup paths
+        (cache eviction, shutdown) must close more than the caller's
+        thread-local connection.
+        """
+        with self._connections_lock:
+            connections = list(self._connections)
+            self._connections.clear()
+        for conn in connections:
+            try:
+                conn.close()
+            except sqlite3.Error:  # pragma: no cover - best-effort cleanup
+                pass
+        self._local = threading.local()
 
     @contextmanager
     def transaction(self) -> Iterable[sqlite3.Connection]:
