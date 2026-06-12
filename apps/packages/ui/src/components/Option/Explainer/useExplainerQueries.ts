@@ -99,6 +99,15 @@ export const useExplainerMutations = () => {
       }) => explainerApi.answerQuestion(sessionId, nodeId, payload),
       onSuccess: (_node, variables) => refreshSession(variables.sessionId)
     }),
+    archiveSession: useMutation({
+      mutationFn: (sessionId: string) => explainerApi.deleteSession(sessionId),
+      onSuccess: () => refreshSessions()
+    }),
+    deleteNode: useMutation({
+      mutationFn: ({ sessionId, nodeId }: { sessionId: string; nodeId: string }) =>
+        explainerApi.deleteNode(sessionId, nodeId),
+      onSuccess: (_result, variables) => refreshSession(variables.sessionId)
+    }),
     exportChatbook: useMutation({
       mutationFn: ({
         sessionId,

@@ -56,7 +56,7 @@ export class ExplainerPage {
   }
 
   async expandSelectedNode(): Promise<void> {
-    await this.detail.getByRole("button", { name: "Expand node" }).click()
+    await this.detail.getByRole("button", { name: "Break down", exact: true }).click()
   }
 
   async selectNode(title: string | RegExp): Promise<void> {

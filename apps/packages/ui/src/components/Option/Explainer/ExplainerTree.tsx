@@ -1,7 +1,10 @@
-import { ChevronRight, Plus } from "lucide-react"
+import { useRef } from "react"
+import { Sparkles } from "lucide-react"
 import type { ExplainerSession } from "./types"
 import {
   flattenExplainerTree,
+  getExplainerEvidenceChipClass,
+  getExplainerEvidenceDescription,
   getExplainerEvidenceLabel,
   getExplainerNodeStatusLabel
 } from "./tree"
@@ -9,26 +12,50 @@ import {
 type ExplainerTreeProps = {
   session: ExplainerSession | null
   selectedNodeId?: string | null
+  generatingNodeId?: string | null
   onSelectNode: (nodeId: string) => void
   onExpandNode: (nodeId: string) => void
-}
-
-const evidenceClass = (state: string): string => {
-  if (state === "supported") return "bg-success/10 text-success"
-  if (state === "partially_supported") return "bg-warn/10 text-warn"
-  if (state === "insufficient") return "bg-danger/10 text-danger"
-  return "bg-surface2 text-text-muted"
 }
 
 export const ExplainerTree = ({
   session,
   selectedNodeId,
+  generatingNodeId = null,
   onSelectNode,
   onExpandNode
 }: ExplainerTreeProps) => {
   const rows = session
     ? flattenExplainerTree(session.nodes, session.rootNodeIds)
     : []
+  const rowRefs = useRef<Array<HTMLButtonElement | null>>([])
+
+  const focusRow = (index: number) => {
+    const clamped = Math.max(0, Math.min(rows.length - 1, index))
+    rowRefs.current[clamped]?.focus()
+  }
+
+  const handleRowKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault()
+        focusRow(index + 1)
+        break
+      case "ArrowUp":
+        event.preventDefault()
+        focusRow(index - 1)
+        break
+      case "Home":
+        event.preventDefault()
+        focusRow(0)
+        break
+      case "End":
+        event.preventDefault()
+        focusRow(rows.length - 1)
+        break
+      default:
+        break
+    }
+  }
 
   return (
     <aside
@@ -46,11 +73,12 @@ export const ExplainerTree = ({
       >
         {rows.length === 0 ? (
           <p className="rounded-md bg-surface2 px-3 py-4 text-sm text-text-muted">
-            Start a goal or select sources to create the first node.
+            Set a goal or add sources to create the first topic.
           </p>
         ) : (
-          rows.map(({ node, depth }) => {
+          rows.map(({ node, depth }, index) => {
             const selected = node.id === selectedNodeId
+            const generating = node.id === generatingNodeId
             return (
               <div
                 key={node.id}
@@ -67,23 +95,34 @@ export const ExplainerTree = ({
               >
                 <button
                   type="button"
+                  ref={(element) => {
+                    rowRefs.current[index] = element
+                  }}
+                  tabIndex={selected || (!selectedNodeId && index === 0) ? 0 : -1}
                   className="flex w-full items-start gap-2 text-left"
                   onClick={() => onSelectNode(node.id)}
+                  onKeyDown={(event) => handleRowKeyDown(event, index)}
                 >
-                  <ChevronRight
-                    className="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
-                    aria-hidden="true"
-                  />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-text">
+                    <span
+                      className="block truncate text-sm font-medium text-text"
+                      title={node.title}
+                    >
                       {node.title}
                     </span>
                     <span className="mt-1 flex flex-wrap gap-1">
-                      <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
-                        {getExplainerNodeStatusLabel(node.status)}
-                      </span>
+                      {generating ? (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                          Generating
+                        </span>
+                      ) : node.status !== "complete" ? (
+                        <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
+                          {getExplainerNodeStatusLabel(node.status)}
+                        </span>
+                      ) : null}
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${evidenceClass(node.evidenceState)}`}
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${getExplainerEvidenceChipClass(node.evidenceState)}`}
+                        title={getExplainerEvidenceDescription(node.evidenceState)}
                       >
                         {getExplainerEvidenceLabel(node.evidenceState)}
                       </span>
@@ -92,11 +131,13 @@ export const ExplainerTree = ({
                 </button>
                 <button
                   type="button"
-                  className="mt-2 inline-flex h-7 items-center gap-1 rounded-md border border-border bg-surface px-2 text-xs font-medium text-text-muted transition-colors hover:bg-surface2 hover:text-text"
+                  aria-label={`Break down ${node.title}`}
+                  className="mt-2 inline-flex h-7 items-center gap-1 rounded-md border border-border bg-surface px-2 text-xs font-medium text-text-muted transition-colors hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={generating}
                   onClick={() => onExpandNode(node.id)}
                 >
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  Expand
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  Break down
                 </button>
               </div>
             )

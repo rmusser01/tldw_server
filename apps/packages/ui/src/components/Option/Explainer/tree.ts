@@ -123,3 +123,55 @@ export const getExplainerEvidenceLabel = (
   }
   return labels[evidenceState] ?? evidenceState
 }
+
+export const getExplainerEvidenceDescription = (
+  evidenceState: ExplainerEvidenceState | string
+): string => {
+  const descriptions: Record<string, string> = {
+    supported: "Every claim in this node is backed by a citation from the selected sources.",
+    partially_supported:
+      "Some claims carry citations; others rely on the model's own knowledge without a citation.",
+    uncited: "No citations were recorded for this node; treat its claims as unverified.",
+    insufficient:
+      "The selected sources did not contain enough cited evidence to answer this node."
+  }
+  return descriptions[evidenceState] ?? "Evidence state for this node."
+}
+
+// Shared evidence color treatment so the outline and the reading pane encode
+// the trust signal identically.
+export const getExplainerEvidenceChipClass = (
+  evidenceState: ExplainerEvidenceState | string
+): string => {
+  if (evidenceState === "supported") return "bg-success/10 text-success"
+  if (evidenceState === "partially_supported") return "bg-warn/10 text-warn"
+  if (evidenceState === "insufficient") return "bg-danger/10 text-danger"
+  return "bg-surface2 text-text-muted"
+}
+
+export const getExplainerIntentLabel = (intent: string): string => {
+  const labels: Record<string, string> = {
+    explain: "Explain",
+    plan: "Plan",
+    both: "Explain & plan"
+  }
+  return labels[intent] ?? intent
+}
+
+export const getExplainerGroundingLabel = (grounding: string): string => {
+  const labels: Record<string, string> = {
+    open: "Open",
+    source_led: "Source-led",
+    source_only: "Source-only"
+  }
+  return labels[grounding] ?? grounding
+}
+
+export const getExplainerDepthLabel = (depthPreset: string): string => {
+  const labels: Record<string, string> = {
+    quick: "Quick",
+    standard: "Standard",
+    deep: "Deep"
+  }
+  return labels[depthPreset] ?? depthPreset
+}

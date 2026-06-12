@@ -1,4 +1,4 @@
-import { Plus, Search, X } from "lucide-react"
+import { Check, Plus, Search, X } from "lucide-react"
 import type {
   ExplainerDepthPreset,
   ExplainerGrounding,
@@ -84,7 +84,12 @@ export const ExplainerSourcePicker = ({
           </div>
         </label>
 
-        <div className="grid max-h-40 min-w-0 gap-2 overflow-auto overflow-x-hidden" aria-live="polite">
+        {results.length > 0 ? (
+          <p className="text-xs text-text-muted">
+            {results.length === 1 ? "1 result" : `${results.length} results`}
+          </p>
+        ) : null}
+        <div className="grid max-h-64 min-w-0 gap-2 overflow-auto overflow-x-hidden" aria-live="polite">
           {results.map((source) => {
             const key = sourceKey(source)
             const isSelected = selectedKeys.has(key)
@@ -94,7 +99,9 @@ export const ExplainerSourcePicker = ({
                 className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-border bg-surface2 px-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-text">{source.title}</p>
+                  <p className="truncate text-sm font-medium text-text" title={source.title}>
+                    {source.title}
+                  </p>
                   <p className="truncate text-xs text-text-muted">
                     {source.sourceType}
                     {source.description ? ` · ${source.description}` : ""}
@@ -104,11 +111,15 @@ export const ExplainerSourcePicker = ({
                   type="button"
                   className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2 text-xs font-medium text-text transition-colors hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isSelected}
-                  aria-label={`Add ${source.title}`}
+                  aria-label={`${isSelected ? "Added" : "Add"} ${source.title}`}
                   onClick={() => onAddSource(source)}
                 >
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  Add
+                  {isSelected ? (
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  {isSelected ? "Added" : "Add"}
                 </button>
               </div>
             )
@@ -123,7 +134,9 @@ export const ExplainerSourcePicker = ({
         <div className="grid max-h-44 gap-2 overflow-auto rounded-md border border-border bg-surface2 p-2">
           {selectedSources.length === 0 ? (
             <p className="px-2 py-3 text-sm text-text-muted">
-              Select at least one source for source-only explanations.
+              {grounding === "source_only"
+                ? "Add at least one source — source-only grounding requires it."
+                : "Search and add sources to ground the explanation in your library."}
             </p>
           ) : (
             selectedSources.map((source) => (

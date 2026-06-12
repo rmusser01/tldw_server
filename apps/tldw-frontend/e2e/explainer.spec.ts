@@ -325,7 +325,7 @@ test.describe("Explainer workflow", () => {
 
     await expect(authedPage.getByText("Attention lets tokens route information to each other."))
       .toBeVisible()
-    await explainer.expectNodeStatus(/Complete/)
+    await explainer.expectNodeStatus(/Supported/)
 
     await explainer.expandSelectedNode()
     await expect(authedPage.getByText("Scaled dot-product attention")).toBeVisible()

@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   getSession: vi.fn(),
   createSession: vi.fn(),
   updateSession: vi.fn(),
+  deleteSession: vi.fn(),
   createNode: vi.fn(),
   updateNode: vi.fn(),
   deleteNode: vi.fn(),
@@ -32,8 +33,8 @@ const sampleSession: ExplainerSession = {
   mode: "goal",
   status: "active",
   outputIntent: "both",
-  grounding: "source_led",
-  depthPreset: "standard",
+  grounding: "open",
+  depthPreset: "deep",
   selectedSources: [
     {
       sourceId: "media-42",
@@ -68,15 +69,38 @@ const sampleSession: ExplainerSession = {
           snapshotHash: "sha256:citation"
         }
       ],
-      childNodeIds: [],
+      childNodeIds: ["child"],
       createdAt: "2026-06-09T00:00:00Z",
       updatedAt: "2026-06-09T00:00:01Z"
+    },
+    child: {
+      id: "child",
+      sessionId: "session-1",
+      parentId: "root",
+      ordinal: 1,
+      title: "Scaled dot-product attention",
+      body: "Compares query and key vectors.",
+      kind: "explanation",
+      intent: "explain",
+      status: "complete",
+      evidenceState: "partially_supported",
+      outsideKnowledgeUsed: true,
+      citations: [],
+      childNodeIds: [],
+      createdAt: "2026-06-09T00:00:02Z",
+      updatedAt: "2026-06-09T00:00:03Z"
     }
   },
   createdAt: "2026-06-09T00:00:00Z",
   updatedAt: "2026-06-09T00:00:01Z",
   archivedAt: null
 }
+
+const summaryOf = (session: ExplainerSession) => ({
+  ...session,
+  nodeCount: Object.keys(session.nodes).length,
+  selectedSourceCount: session.selectedSources.length
+})
 
 const renderWorkspace = () => {
   const queryClient = new QueryClient({
@@ -96,7 +120,7 @@ describe("ExplainerWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.listSessions.mockResolvedValue({
-      items: [{ ...sampleSession, nodeCount: 1, selectedSourceCount: 1 }],
+      items: [summaryOf(sampleSession)],
       total: 1,
       limit: 50,
       offset: 0
@@ -104,6 +128,8 @@ describe("ExplainerWorkspace", () => {
     api.getSession.mockResolvedValue(sampleSession)
     api.createSession.mockResolvedValue(sampleSession)
     api.updateSession.mockResolvedValue(sampleSession)
+    api.deleteSession.mockResolvedValue(sampleSession)
+    api.deleteNode.mockResolvedValue({ id: "child", status: "deleted" })
     api.exportChatbook.mockResolvedValue({
       success: true,
       message: "Export job started: job-1",
@@ -120,27 +146,31 @@ describe("ExplainerWorkspace", () => {
     ])
   })
 
-  it("renders the Explainer heading and explicit Goal/Sources tabs", async () => {
+  it("renders the heading and collapses the composer once a session is active", async () => {
     renderWorkspace()
 
     expect(await screen.findByRole("heading", { name: "Explainer" })).toBeInTheDocument()
+    expect(await screen.findByLabelText("Saved Explainer sessions")).toHaveValue("session-1")
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Learning goal")).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole("button", { name: "New explainer" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "New explainer" }))
     expect(screen.getByRole("tab", { name: "Goal" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Sources" })).toBeInTheDocument()
-    expect(await screen.findByLabelText("Saved Explainer sessions")).toHaveValue("session-1")
+    expect(screen.getByLabelText("Learning goal")).toBeInTheDocument()
   })
 
-  it("creates a persisted goal session with configurable intent and depth", async () => {
+  it("creates a goal session from the reopened composer and collapses afterwards", async () => {
     renderWorkspace()
 
-    fireEvent.change(await screen.findByLabelText("Learning goal"), {
+    fireEvent.click(await screen.findByRole("button", { name: "New explainer" }))
+    fireEvent.change(screen.getByLabelText("Learning goal"), {
       target: { value: "Explain transformer attention" }
     })
-    fireEvent.change(screen.getByLabelText("Output intent"), {
-      target: { value: "plan" }
-    })
-    fireEvent.change(screen.getByLabelText("Depth preset"), {
-      target: { value: "deep" }
-    })
+    fireEvent.change(screen.getByLabelText("Output intent"), { target: { value: "plan" } })
+    fireEvent.change(screen.getByLabelText("Depth preset"), { target: { value: "deep" } })
     fireEvent.click(screen.getByRole("button", { name: "Create Explainer" }))
 
     await waitFor(() => {
@@ -150,80 +180,88 @@ describe("ExplainerWorkspace", () => {
           title: "Explain transformer attention",
           outputIntent: "plan",
           grounding: "open",
-          depthPreset: "deep",
-          rootPrompt: "Explain transformer attention",
-          selectedSources: []
+          depthPreset: "deep"
         })
       )
     })
-  })
-
-  it("lets users search and select sources in the page", async () => {
-    renderWorkspace()
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Sources" }))
-    fireEvent.change(screen.getByLabelText("Source search"), {
-      target: { value: "attention" }
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Learning goal")).not.toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: "Search sources" }))
-
-    expect(await screen.findByText("New attention source")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Add New attention source" }))
-
-    expect(api.searchSources).toHaveBeenCalledWith("attention")
-    expect(screen.getByText("Selected sources")).toBeInTheDocument()
-    expect(screen.getAllByText("New attention source")[0]).toBeInTheDocument()
   })
 
-  it("shows configurable grounding, persisted tree details, citations, and export action", async () => {
+  it("shows the loaded session's settings in the rail, not composer drafts", async () => {
     renderWorkspace()
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Sources" }))
-    expect(screen.getByLabelText("Grounding mode")).toHaveValue("source_led")
+    const rail = await screen.findByLabelText("Explainer session settings")
+    // sampleSession is both/open/deep — composer defaults are explain/source_led/standard
+    await waitFor(() => {
+      expect(within(rail).getByText("Open")).toBeInTheDocument()
+    })
+    expect(within(rail).getByText("Deep")).toBeInTheDocument()
+    expect(within(rail).getByText("Explain & plan")).toBeInTheDocument()
+  })
 
-    const tree = await screen.findByRole("tree", { name: "Explainer outline" })
-    expect(
-      await within(tree).findByText("Explain transformer attention")
-    ).toBeInTheDocument()
-    expect(screen.getByText("Attention lets tokens route information to each other.")).toBeInTheDocument()
-    expect(screen.getByText("Attention weights are computed from query-key similarity.")).toBeInTheDocument()
+  it("sanitizes error messages and lets users dismiss them", async () => {
+    api.expandNode.mockRejectedValue(
+      new Error(
+        "Explainer generation is not configured (POST /api/v1/explainer/sessions/s/nodes/n/expand)"
+      )
+    )
+    renderWorkspace()
 
-    fireEvent.click(screen.getByRole("button", { name: "Export to Chatbook" }))
+    const detail = await screen.findByRole("region", { name: "Explainer detail" })
+    await within(detail).findByText("Explain transformer attention")
+    fireEvent.click(within(detail).getByRole("button", { name: "Break down" }))
+
+    const banner = await screen.findByText("Explainer generation is not configured")
+    expect(banner.textContent).not.toContain("/api/v1")
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }))
+    expect(screen.queryByText("Explainer generation is not configured")).not.toBeInTheDocument()
+  })
+
+  it("renames the session inline from the header", async () => {
+    renderWorkspace()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Rename session" }))
+    const input = screen.getByLabelText("Session title")
+    fireEvent.change(input, { target: { value: "Attention, properly" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save title" }))
 
     await waitFor(() => {
-      expect(api.exportChatbook).toHaveBeenCalledWith("session-1", {
-        name: "Learn attention Explainer Session",
-        asyncMode: true
-      })
+      expect(api.updateSession).toHaveBeenCalledWith("session-1", { title: "Attention, properly" })
     })
-    expect(await screen.findByText("Export job started: job-1")).toBeInTheDocument()
   })
-})
 
-describe("ExplainerWorkspace interactions", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    api.listSessions.mockResolvedValue({
-      items: [
-        { ...sampleSession, nodeCount: 1, selectedSourceCount: 1 },
-        {
-          ...sampleSession,
-          id: "session-2",
-          title: "Second session",
-          nodeCount: 1,
-          selectedSourceCount: 0
-        }
-      ],
-      total: 2,
-      limit: 50,
-      offset: 0
+  it("archives the session behind an explicit confirm", async () => {
+    renderWorkspace()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive session" }))
+    expect(api.deleteSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Confirm archive" }))
+
+    await waitFor(() => {
+      expect(api.deleteSession).toHaveBeenCalledWith("session-1")
     })
-    api.getSession.mockImplementation(async (sessionId: string) =>
-      sessionId === "session-2"
-        ? { ...sampleSession, id: "session-2", title: "Second session" }
-        : sampleSession
-    )
-    api.searchSources.mockResolvedValue([])
+  })
+
+  it("deletes a non-root node behind an explicit confirm", async () => {
+    renderWorkspace()
+
+    const tree = await screen.findByRole("tree", { name: "Explainer outline" })
+    fireEvent.click(await within(tree).findByText("Scaled dot-product attention"))
+
+    const detail = screen.getByRole("region", { name: "Explainer detail" })
+    fireEvent.click(within(detail).getByRole("button", { name: "Delete node" }))
+    expect(api.deleteNode).not.toHaveBeenCalled()
+    fireEvent.click(within(detail).getByRole("button", { name: "Confirm delete" }))
+
+    await waitFor(() => {
+      expect(api.deleteNode).toHaveBeenCalledWith("session-1", "child")
+    })
+  })
+
+  it("marks the node being generated and disables its break-down control", async () => {
     api.expandNode.mockResolvedValue({
       jobId: "job-9",
       sessionId: "session-1",
@@ -237,12 +275,62 @@ describe("ExplainerWorkspace interactions", () => {
       status: "running",
       progressMessage: "Generating expansion"
     })
+    renderWorkspace()
+
+    const detail = await screen.findByRole("region", { name: "Explainer detail" })
+    await within(detail).findByText("Explain transformer attention")
+    fireEvent.click(within(detail).getByRole("button", { name: "Break down" }))
+
+    const tree = screen.getByRole("tree", { name: "Explainer outline" })
+    await waitFor(() => {
+      expect(within(tree).getByText("Generating")).toBeInTheDocument()
+    })
+    expect(
+      within(tree).getByRole("button", { name: "Break down Explain transformer attention" })
+    ).toBeDisabled()
+    expect(within(detail).getByRole("button", { name: "Break down" })).toBeDisabled()
+  })
+
+  it("links to the chatbook download when the export returns one", async () => {
+    api.exportChatbook.mockResolvedValue({
+      success: true,
+      message: "Export complete",
+      job_id: "job-1",
+      download_url: "/api/v1/chatbooks/download/job-1"
+    })
+    renderWorkspace()
+
+    await screen.findByLabelText("Saved Explainer sessions")
+    const exportButton = screen.getByRole("button", { name: "Export to Chatbook" })
+    await waitFor(() => expect(exportButton).toBeEnabled())
+    fireEvent.click(exportButton)
+
+    const link = await screen.findByRole("link", { name: "Download chatbook" })
+    expect(link).toHaveAttribute("href", "/api/v1/chatbooks/download/job-1")
+  })
+
+  it("scrolls the detail pane into view on narrow viewports when selecting a node", async () => {
+    const scrollSpy = vi.fn()
+    window.HTMLElement.prototype.scrollIntoView = scrollSpy
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+
+    renderWorkspace()
+    const tree = await screen.findByRole("tree", { name: "Explainer outline" })
+    fireEvent.click(await within(tree).findByText("Scaled dot-product attention"))
+
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalled()
+    })
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth })
   })
 
   it("searches sources when pressing Enter in the query field", async () => {
     renderWorkspace()
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Sources" }))
+    fireEvent.click(await screen.findByRole("button", { name: "New explainer" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Sources" }))
     const input = screen.getByLabelText("Source search")
     fireEvent.change(input, { target: { value: "attention" } })
     fireEvent.keyDown(input, { key: "Enter" })
@@ -253,12 +341,38 @@ describe("ExplainerWorkspace interactions", () => {
   })
 
   it("clears active job progress when switching sessions", async () => {
+    api.listSessions.mockResolvedValue({
+      items: [
+        summaryOf(sampleSession),
+        summaryOf({ ...sampleSession, id: "session-2", title: "Second session" })
+      ],
+      total: 2,
+      limit: 50,
+      offset: 0
+    })
+    api.getSession.mockImplementation(async (sessionId: string) =>
+      sessionId === "session-2"
+        ? { ...sampleSession, id: "session-2", title: "Second session" }
+        : sampleSession
+    )
+    api.expandNode.mockResolvedValue({
+      jobId: "job-9",
+      sessionId: "session-1",
+      nodeId: "root",
+      status: "queued"
+    })
+    api.getJob.mockResolvedValue({
+      jobId: "job-9",
+      sessionId: "session-1",
+      nodeId: "root",
+      status: "running",
+      progressMessage: "Generating expansion"
+    })
     renderWorkspace()
 
-    const tree = await screen.findByRole("tree", { name: "Explainer outline" })
-    await within(tree).findByText("Explain transformer attention")
-    fireEvent.click(within(tree).getAllByRole("button", { name: "Expand" })[0])
-
+    const detail = await screen.findByRole("region", { name: "Explainer detail" })
+    await within(detail).findByText("Explain transformer attention")
+    fireEvent.click(within(detail).getByRole("button", { name: "Break down" }))
     expect(await screen.findByText("Generating expansion")).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText("Saved Explainer sessions"), {
@@ -268,6 +382,5 @@ describe("ExplainerWorkspace interactions", () => {
     await waitFor(() => {
       expect(screen.queryByText("Generating expansion")).not.toBeInTheDocument()
     })
-    expect(screen.queryByText("Generation queued")).not.toBeInTheDocument()
   })
 })

@@ -4,6 +4,7 @@ type ExplainerChatbookExportButtonProps = {
   disabled?: boolean
   isExporting?: boolean
   message?: string | null
+  downloadUrl?: string | null
   onExport: () => void
 }
 
@@ -11,6 +12,7 @@ export const ExplainerChatbookExportButton = ({
   disabled = false,
   isExporting = false,
   message,
+  downloadUrl,
   onExport
 }: ExplainerChatbookExportButtonProps) => (
   <div className="flex flex-wrap items-center gap-2">
@@ -27,6 +29,15 @@ export const ExplainerChatbookExportButton = ({
       <span role="status" className="text-xs font-medium text-text-muted">
         {message}
       </span>
+    ) : null}
+    {downloadUrl ? (
+      <a
+        href={downloadUrl}
+        className="text-xs font-medium text-primary underline underline-offset-2 hover:opacity-90"
+        download
+      >
+        Download chatbook
+      </a>
     ) : null}
   </div>
 )

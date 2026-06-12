@@ -1,7 +1,13 @@
-import { RotateCw } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Sparkles, Trash2 } from "lucide-react"
 import type { ExplainerNode, ExplainerSession } from "./types"
 import {
+  getExplainerDepthLabel,
+  getExplainerEvidenceChipClass,
+  getExplainerEvidenceDescription,
   getExplainerEvidenceLabel,
+  getExplainerGroundingLabel,
+  getExplainerIntentLabel,
   getExplainerNodeStatusLabel
 } from "./tree"
 
@@ -9,58 +15,83 @@ type ExplainerDetailPanelProps = {
   session: ExplainerSession | null
   node: ExplainerNode | null
   isExpanding?: boolean
+  generatingNodeId?: string | null
+  sectionRef?: React.Ref<HTMLElement>
   onExpand: (nodeId: string) => void
+  onDeleteNode?: (nodeId: string) => void
 }
 
 export const ExplainerDetailPanel = ({
   session,
   node,
   isExpanding = false,
-  onExpand
+  generatingNodeId = null,
+  sectionRef,
+  onExpand,
+  onDeleteNode
 }: ExplainerDetailPanelProps) => {
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  useEffect(() => {
+    setConfirmingDelete(false)
+  }, [node?.id])
+
   if (!session || !node) {
     return (
       <section
+        ref={sectionRef}
         aria-label="Explainer detail"
         className="flex min-h-0 flex-1 items-center justify-center bg-bg p-6"
       >
         <div className="max-w-md rounded-lg border border-border bg-surface px-5 py-6 text-center">
-          <h2 className="text-base font-semibold text-text">No explainer selected</h2>
+          <h2 className="text-base font-semibold text-text">No explainer yet</h2>
           <p className="mt-2 text-sm text-text-muted">
-            Create a goal session or select sources to begin a persisted explanation.
+            Set a learning goal or pick sources to build an explanation that is saved
+            automatically and backed by citations.
           </p>
         </div>
       </section>
     )
   }
 
+  const generating = node.id === generatingNodeId
+
   return (
     <section
+      ref={sectionRef}
       aria-label="Explainer detail"
       className="min-h-0 flex-1 overflow-auto bg-bg"
     >
       <article className="mx-auto flex max-w-3xl flex-col gap-5 px-6 py-6">
         <header className="border-b border-border pb-4">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full bg-surface px-2 py-1 font-medium text-text-muted">
-              {getExplainerNodeStatusLabel(node.status)}
-            </span>
-            <span className="rounded-full bg-accent/10 px-2 py-1 font-medium text-accent">
+            {generating ? (
+              <span className="rounded-full bg-primary/10 px-2 py-1 font-medium text-primary">
+                Generating
+              </span>
+            ) : node.status !== "complete" ? (
+              <span className="rounded-full bg-surface px-2 py-1 font-medium text-text-muted">
+                {getExplainerNodeStatusLabel(node.status)}
+              </span>
+            ) : null}
+            <span
+              className={`rounded-full px-2 py-1 font-medium ${getExplainerEvidenceChipClass(node.evidenceState)}`}
+              title={getExplainerEvidenceDescription(node.evidenceState)}
+            >
               {getExplainerEvidenceLabel(node.evidenceState)}
             </span>
             {node.outsideKnowledgeUsed ? (
-              <span className="rounded-full bg-warn/10 px-2 py-1 font-medium text-warn">
+              <span
+                className="rounded-full bg-warn/10 px-2 py-1 font-medium text-warn"
+                title="Parts of this node come from the model's own knowledge rather than the selected sources."
+              >
                 Outside knowledge used
               </span>
             ) : null}
           </div>
           <h2 className="text-2xl font-semibold leading-tight text-text">{node.title}</h2>
           <p className="mt-2 text-sm text-text-muted">
-            {session.outputIntent === "both" ? "Explain and plan" : session.outputIntent}
-            {" · "}
-            {session.grounding.replace("_", "-")}
-            {" · "}
-            {session.depthPreset}
+            {`Intent: ${getExplainerIntentLabel(session.outputIntent)} · Grounding: ${getExplainerGroundingLabel(session.grounding)} · Depth: ${getExplainerDepthLabel(session.depthPreset)}`}
           </p>
         </header>
 
@@ -133,12 +164,45 @@ export const ExplainerDetailPanel = ({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primaryStrong disabled:cursor-not-allowed disabled:bg-surface2 disabled:text-text-muted"
-            disabled={isExpanding}
+            disabled={isExpanding || generating}
             onClick={() => onExpand(node.id)}
           >
-            <RotateCw className="h-4 w-4" aria-hidden="true" />
-            Expand node
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+            Break down
           </button>
+          {onDeleteNode && node.parentId !== null ? (
+            confirmingDelete ? (
+              <>
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center gap-2 rounded-md bg-danger px-3 text-sm font-semibold text-white transition-colors hover:opacity-90"
+                  onClick={() => {
+                    setConfirmingDelete(false)
+                    onDeleteNode(node.id)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  Confirm delete
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium text-text transition-colors hover:bg-surface2"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm font-medium text-text-muted transition-colors hover:bg-surface2 hover:text-danger"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                Delete node
+              </button>
+            )
+          ) : null}
         </footer>
       </article>
     </section>

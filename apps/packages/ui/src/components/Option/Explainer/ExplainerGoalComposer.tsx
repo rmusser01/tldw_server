@@ -26,17 +26,23 @@ export const ExplainerGoalComposer = ({
     aria-label="Goal setup"
     className="grid gap-4 border-b border-border bg-surface px-4 py-4 lg:grid-cols-[minmax(280px,1fr)_220px_180px_auto]"
   >
-    <label className="grid gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        Learning goal
-      </span>
-      <textarea
-        className="min-h-[88px] rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-focus"
-        value={goal}
-        onChange={(event) => onGoalChange(event.target.value)}
-        placeholder="Explain transformer attention"
-      />
-    </label>
+    <div className="grid gap-2">
+      <label className="grid gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Learning goal
+        </span>
+        <textarea
+          className="min-h-[88px] rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-focus"
+          value={goal}
+          onChange={(event) => onGoalChange(event.target.value)}
+          placeholder="Explain transformer attention"
+        />
+      </label>
+      <p className="text-xs text-text-muted">
+        Goal sessions use open grounding: the model answers from its own knowledge, without
+        source citations. Use the Sources tab for cited explanations.
+      </p>
+    </div>
 
     <label className="grid gap-2">
       <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
