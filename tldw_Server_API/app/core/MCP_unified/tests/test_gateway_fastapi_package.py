@@ -5830,3 +5830,39 @@ def test_gateway_batch_omits_notification_runtime_errors() -> None:
 
     assert response.status_code == 200
     assert response.json() == [{"jsonrpc": "2.0", "result": {"pong": True}, "id": "ok"}]
+
+
+def test_gateway_profile_runtime_failing_grant_store_fails_closed_to_denial() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    class _FailingGrantStore:
+        def find_active_grant(self, **kwargs: Any) -> Any:
+            raise RuntimeError("grant store unavailable")
+
+    backend = _CustomToolListGatewayRuntime([_web_fetch_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "researcher",
+        allowed_tools=["web.fetch"],
+        permission_rules=[{"pattern": "WebFetch(example.com)", "outcome": "ask"}],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+        policy_grant_store=_FailingGrantStore(),
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "web.fetch",
+            {"url": "https://example.com/private", "query": "private"},
+            "ask-store-failure",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="ask-store-failure")
+    assert body["error"]["data"]["status"] == "approval_required"
+    assert backend.call_requests == []

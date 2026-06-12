@@ -114,7 +114,7 @@ class InMemoryPolicyGrantStore:
         """Return one active grant matching the normalized subject, if any."""
 
         try:
-            _, _, _, normalized_value = validate_grant_request(
+            normalized_profile_id, _, _, normalized_value = validate_grant_request(
                 profile_id=profile_id,
                 grant_type=grant_type,
                 subject_type=subject_type,
@@ -130,7 +130,7 @@ class InMemoryPolicyGrantStore:
                 if not grant.is_active(now):
                     continue
                 if (
-                    grant.profile_id != profile_id.strip()
+                    grant.profile_id != normalized_profile_id
                     or grant.grant_type != grant_type
                     or grant.subject_type != subject_type
                     or grant.value != normalized_value
@@ -146,13 +146,15 @@ class InMemoryPolicyGrantStore:
         self._operation_count += 1
         if self._operation_count % self._sweep_interval != 0 and len(self._grants) <= self._max_sweep_entries:
             return
-        expired = [
-            grant_id
-            for grant_id, grant in list(self._grants.items())[: self._max_sweep_entries]
-            if not grant.is_active(now)
-        ]
-        for grant_id in expired:
-            del self._grants[grant_id]
+        # Rotate visited entries to the end so successive bounded sweeps
+        # eventually visit every entry, not just the head of the dict.
+        for _ in range(min(self._max_sweep_entries, len(self._grants))):
+            grant_id, grant = next(iter(self._grants.items()))
+            if grant.is_active(now):
+                self._grants.pop(grant_id)
+                self._grants[grant_id] = grant
+            else:
+                del self._grants[grant_id]
 
 
 def create_policy_grant_store(settings: Mapping[str, Any] | None = None) -> PolicyGrantStore:

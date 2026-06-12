@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any, Protocol
+
+from loguru import logger
 
 from mcp_unified.interfaces.storage import ProfileStore
 from mcp_unified.policy_grants import PolicyGrantStore
@@ -519,14 +522,25 @@ class ProfileAwareGatewayRuntime:
                 policy_result,
                 message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
             )
-        approval_grant_markers = _enforce_permission_rules_for_tool_call(
-            profile,
-            name,
-            arguments,
-            self._compiled_permission_rules(profile, tool_name=name),
-            policy_grant_store=self._policy_grant_store,
-            session_id=_context_session_id(context),
-        )
+        compiled_rules = self._compiled_permission_rules(profile, tool_name=name)
+        if self._policy_grant_store is None:
+            approval_grant_markers = _enforce_permission_rules_for_tool_call(
+                profile,
+                name,
+                arguments,
+                compiled_rules,
+            )
+        else:
+            # Grant-store lookups may hit SQLite; keep them off the event loop.
+            approval_grant_markers = await asyncio.to_thread(
+                _enforce_permission_rules_for_tool_call,
+                profile,
+                name,
+                arguments,
+                compiled_rules,
+                policy_grant_store=self._policy_grant_store,
+                session_id=_context_session_id(context),
+            )
         delegated_context = _context_with_effective_policy(context, policy_result.policy)
         if approval_grant_markers:
             delegated_context = _context_with_metadata_value(
@@ -1166,6 +1180,12 @@ def _active_approval_lease_marker(
             session_id=session_id,
         )
     except Exception:  # noqa: BLE001 - store failures must fail closed to denial
+        logger.opt(exception=True).warning(
+            "Policy grant store lookup failed; treating ask decision as unapproved "
+            "(profile_id={profile_id}, subject_type={subject_type})",
+            profile_id=profile_id,
+            subject_type=subject_type,
+        )
         return None
     if lease is None:
         return None

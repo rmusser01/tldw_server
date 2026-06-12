@@ -414,3 +414,85 @@ def test_policy_grant_store_factory_backend_selection(tmp_path: Path) -> None:
         create_policy_grant_store({"grant_store_backend": "sqlite"})
     with pytest.raises(ValueError):
         create_policy_grant_store({"grant_store_backend": "redis"})
+
+
+def test_memory_store_sweep_eventually_removes_late_expired_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mcp_unified.policy_grants.memory as memory_grants
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    store = InMemoryPolicyGrantStore(sweep_interval=1, max_sweep_entries=2)
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_000.0)
+    for index in range(3):
+        store.create_grant(
+            profile_id=f"profile-{index}",
+            grant_type="approval",
+            subject_type="tool",
+            value="web.fetch",
+            ttl_seconds=10_000,
+        )
+    expiring = store.create_grant(
+        profile_id="expiring",
+        grant_type="approval",
+        subject_type="tool",
+        value="web.fetch",
+        ttl_seconds=10,
+    )
+
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_050.0)
+    for _ in range(4):
+        store.list_active_grants()
+
+    assert expiring.grant_id not in store._grants
+    assert len(store._grants) == 3
+
+
+def test_sqlite_store_read_paths_do_not_delete_expired_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mcp_unified.policy_grants.sqlite as sqlite_grants
+    from mcp_unified.policy_grants.sqlite import SQLitePolicyGrantStore
+    from sqlalchemy import func, select
+
+    store = SQLitePolicyGrantStore(tmp_path / "grants.db", cleanup_interval=1)
+
+    def _row_count() -> int:
+        with store._engine.begin() as connection:
+            return int(connection.execute(select(func.count()).select_from(store._table)).scalar_one())
+
+    try:
+        monkeypatch.setattr(sqlite_grants.time, "time", lambda: 1_000.0)
+        store.create_grant(
+            profile_id="researcher",
+            grant_type="approval",
+            subject_type="domain",
+            value="example.com",
+            ttl_seconds=10,
+        )
+
+        monkeypatch.setattr(sqlite_grants.time, "time", lambda: 1_050.0)
+        for _ in range(3):
+            assert store.list_active_grants(profile_id="researcher") == []
+        assert (
+            store.find_active_grant(
+                profile_id="researcher",
+                grant_type="approval",
+                subject_type="domain",
+                value="example.com",
+            )
+            is None
+        )
+        assert _row_count() == 1
+
+        store.create_grant(
+            profile_id="researcher",
+            grant_type="approval",
+            subject_type="tool",
+            value="web.fetch",
+            ttl_seconds=900,
+        )
+        assert _row_count() == 1
+    finally:
+        store.close()

@@ -44,7 +44,7 @@ class SQLitePolicyGrantStore:
         if raw_path == ":memory:":
             raise ValueError("SQLite policy grant store requires a file-backed database path")
 
-        db_path = Path(raw_path).expanduser()
+        db_path = Path(raw_path).expanduser().resolve()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.path = str(db_path)
         self._token_bytes = max(16, token_bytes)
@@ -159,8 +159,9 @@ class SQLitePolicyGrantStore:
             conditions.append(self._table.c.profile_id == profile_id)
         if grant_type is not None:
             conditions.append(self._table.c.grant_type == grant_type)
+        # Read paths never delete expired rows; cleanup runs on writes so
+        # read transactions keep shared locks under concurrent load.
         with self._engine.begin() as connection:
-            self._maybe_cleanup_expired(connection, now_us=now_us)
             rows = connection.execute(select(self._table).where(*conditions)).mappings().all()
         return [_grant_from_row(row) for row in rows]
 
@@ -169,6 +170,7 @@ class SQLitePolicyGrantStore:
 
         now_us = _now_us()
         with self._engine.begin() as connection:
+            self._maybe_cleanup_expired(connection, now_us=now_us)
             row = (
                 connection.execute(
                     select(self._table).where(self._table.c.grant_id == grant_id)
@@ -195,7 +197,7 @@ class SQLitePolicyGrantStore:
         """Return one active grant matching the normalized subject, if any."""
 
         try:
-            _, _, _, normalized_value = validate_grant_request(
+            normalized_profile_id, _, _, normalized_value = validate_grant_request(
                 profile_id=profile_id,
                 grant_type=grant_type,
                 subject_type=subject_type,
@@ -205,11 +207,10 @@ class SQLitePolicyGrantStore:
             return None
         now_us = _now_us()
         with self._engine.begin() as connection:
-            self._maybe_cleanup_expired(connection, now_us=now_us)
             rows = (
                 connection.execute(
                     select(self._table).where(
-                        self._table.c.profile_id == profile_id.strip(),
+                        self._table.c.profile_id == normalized_profile_id,
                         self._table.c.grant_type == grant_type,
                         self._table.c.subject_type == subject_type,
                         self._table.c.value == normalized_value,
