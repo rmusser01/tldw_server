@@ -522,6 +522,7 @@ class ProfileAwareGatewayRuntime:
                 policy_result,
                 message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
             )
+        session_id = _context_session_id(context)
         compiled_rules = self._compiled_permission_rules(profile, tool_name=name)
         if self._policy_grant_store is None:
             approval_grant_markers = _enforce_permission_rules_for_tool_call(
@@ -530,6 +531,7 @@ class ProfileAwareGatewayRuntime:
                 arguments,
                 compiled_rules,
             )
+            delegated_policy = policy_result.policy
         else:
             # Grant-store lookups may hit SQLite; keep them off the event loop.
             approval_grant_markers = await asyncio.to_thread(
@@ -539,9 +541,16 @@ class ProfileAwareGatewayRuntime:
                 arguments,
                 compiled_rules,
                 policy_grant_store=self._policy_grant_store,
-                session_id=_context_session_id(context),
+                session_id=session_id,
             )
-        delegated_context = _context_with_effective_policy(context, policy_result.policy)
+            delegated_policy = await asyncio.to_thread(
+                _policy_with_ttl_path_grants,
+                policy_result.policy,
+                self._policy_grant_store,
+                profile_id=profile.id,
+                session_id=session_id,
+            )
+        delegated_context = _context_with_effective_policy(context, delegated_policy)
         if approval_grant_markers:
             delegated_context = _context_with_metadata_value(
                 delegated_context,
@@ -893,6 +902,48 @@ def _context_with_effective_policy(
         client_id=context.client_id,
         user_id=context.user_id,
         metadata=metadata,
+    )
+
+
+def _policy_with_ttl_path_grants(
+    policy: Any,
+    policy_grant_store: PolicyGrantStore | None,
+    *,
+    profile_id: str,
+    session_id: str | None,
+) -> Any:
+    """Return the effective policy with active TTL path grants merged in."""
+
+    if policy is None or policy_grant_store is None or not hasattr(policy, "path_scopes"):
+        return policy
+    try:
+        grants = policy_grant_store.list_active_grants(
+            profile_id=profile_id,
+            grant_type="path",
+        )
+    except Exception:  # noqa: BLE001 - grant store failures must not alter base policy
+        logger.opt(exception=True).warning(
+            "Policy grant store listing failed; delegating base policy without "
+            "TTL path grants (profile_id={profile_id})",
+            profile_id=profile_id,
+        )
+        return policy
+    merged_scopes = [
+        {
+            "prefix": grant.value,
+            "actions": list(grant.actions),
+            "effect": grant.effect,
+            "source": "ttl_grant",
+            "grant_id": grant.grant_id,
+            "expires_at": grant.expires_at_iso(),
+        }
+        for grant in grants
+        if grant.matches_session(session_id)
+    ]
+    if not merged_scopes:
+        return policy
+    return policy.model_copy(
+        update={"path_scopes": [*(policy.path_scopes or []), *merged_scopes]}
     )
 
 

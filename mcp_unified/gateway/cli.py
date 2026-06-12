@@ -444,6 +444,46 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(create_approval_grant)
     create_approval_grant.set_defaults(handler=_handle_create_approval_grant)
 
+    create_path_grant = subparsers.add_parser(
+        "create-path-grant",
+        help="Create a TTL-bound temporary path grant for one profile.",
+    )
+    create_path_grant.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id the path grant applies to.",
+    )
+    create_path_grant.add_argument(
+        "--prefix",
+        required=True,
+        help="Workspace-relative path prefix to grant (normalized before storage).",
+    )
+    create_path_grant.add_argument(
+        "--actions",
+        required=True,
+        help="Comma-separated file policy actions the grant allows (e.g. read,write).",
+    )
+    create_path_grant.add_argument(
+        "--ttl-seconds",
+        type=int,
+        default=None,
+        help="Grant lifetime in seconds (clamped to safe bounds).",
+    )
+    create_path_grant.add_argument(
+        "--session-id",
+        help="Optional session id restricting where the grant applies.",
+    )
+    create_path_grant.add_argument(
+        "--granted-by",
+        help="Optional operator identity recorded with the grant.",
+    )
+    create_path_grant.add_argument(
+        "--reason",
+        help="Optional human-readable reason recorded with the grant.",
+    )
+    _add_profile_config_argument(create_path_grant)
+    create_path_grant.set_defaults(handler=_handle_create_path_grant)
+
     list_approval_grants = subparsers.add_parser(
         "list-approval-grants",
         help="List active policy grants from a configured grant store.",
@@ -451,6 +491,11 @@ def _build_parser() -> _JsonArgumentParser:
     list_approval_grants.add_argument(
         "--profile",
         help="Optional profile id filter.",
+    )
+    list_approval_grants.add_argument(
+        "--grant-type",
+        choices=("approval", "path"),
+        help="Optional grant type filter.",
     )
     _add_profile_config_argument(list_approval_grants)
     list_approval_grants.set_defaults(handler=_handle_list_approval_grants)
@@ -990,13 +1035,43 @@ def _handle_create_approval_grant(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_create_path_grant(args: argparse.Namespace) -> int:
+    """Create one TTL-bound path grant in a configured grant store."""
+
+    profile_id = _require_cli_text(args.profile, field="profile")
+    prefix = _require_cli_text(args.prefix, field="prefix")
+    raw_actions = _require_cli_text(args.actions, field="actions")
+    actions = tuple(action.strip() for action in raw_actions.split(",") if action.strip())
+    ttl_seconds = (
+        args.ttl_seconds
+        if args.ttl_seconds is not None
+        else APPROVAL_GRANT_DEFAULT_TTL_SECONDS
+    )
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    granted_by = _optional_cli_text(args.granted_by, field="granted_by")
+    reason = _optional_cli_text(args.reason, field="reason")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.grant_path(
+            profile_id=profile_id,
+            prefix=prefix,
+            actions=actions,
+            ttl_seconds=ttl_seconds,
+            session_id=session_id,
+            granted_by=granted_by,
+            reason=reason,
+        ),
+    )
+
+
 def _handle_list_approval_grants(args: argparse.Namespace) -> int:
     """List active policy grants from a configured grant store."""
 
     profile_id = _optional_cli_text(args.profile, field="profile")
+    grant_type = _optional_cli_text(args.grant_type, field="grant_type")
     return _handle_policy_grant_command(
         args,
-        lambda manager: manager.list_grants(profile_id=profile_id),
+        lambda manager: manager.list_grants(profile_id=profile_id, grant_type=grant_type),
     )
 
 

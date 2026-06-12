@@ -101,6 +101,44 @@ class GatewayPolicyGrantManager:
         )
         return {"grant": grant.safe_payload()}
 
+    async def grant_path(
+        self,
+        *,
+        profile_id: str,
+        prefix: str,
+        actions: tuple[str, ...],
+        ttl_seconds: int = APPROVAL_GRANT_DEFAULT_TTL_SECONDS,
+        session_id: str | None = None,
+        granted_by: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Create one TTL-bound path grant with clamped TTL and audit provenance."""
+
+        ttl = min(
+            APPROVAL_GRANT_MAX_TTL_SECONDS,
+            max(APPROVAL_GRANT_MIN_TTL_SECONDS, int(ttl_seconds)),
+        )
+        try:
+            grant = self.policy_grant_store.create_grant(
+                profile_id=profile_id,
+                grant_type="path",
+                subject_type="path",
+                value=prefix,
+                ttl_seconds=ttl,
+                actions=actions,
+                session_id=session_id,
+                granted_by=granted_by,
+                reason=reason,
+            )
+        except ValueError as exc:
+            raise GatewayPolicyGrantManagementError(
+                f"Invalid policy grant request: {exc}",
+                reason_code="invalid_policy_grant",
+                profile_id=profile_id if isinstance(profile_id, str) else None,
+            ) from exc
+        await self._append_audit_event("policy_grant.path.created", grant=grant)
+        return {"grant": grant.safe_payload()}
+
     async def list_grants(
         self,
         *,

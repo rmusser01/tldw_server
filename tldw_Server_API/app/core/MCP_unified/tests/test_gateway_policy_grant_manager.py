@@ -236,3 +236,65 @@ def test_bootstrap_profile_gateway_wires_policy_grant_store() -> None:
     result = asyncio.run(_exercise())
     assert result is not None
     assert backend.calls == ["web.fetch"]
+
+
+def test_policy_grant_manager_grant_path_lifecycle_with_audit() -> None:
+    from mcp_unified.gateway.policy_grants import GatewayPolicyGrantManager
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    audit_store = _RecordingAuditStore()
+    manager = GatewayPolicyGrantManager(
+        policy_grant_store=InMemoryPolicyGrantStore(),
+        audit_store=audit_store,
+    )
+
+    created = asyncio.run(
+        manager.grant_path(
+            profile_id="reviewer",
+            prefix="docs\\scratch/./sub",
+            actions=("read", "write"),
+            ttl_seconds=900,
+            session_id="session-1",
+            granted_by="operator",
+            reason="one-off scratch access",
+        )
+    )
+    grant_payload = created["grant"]
+    assert grant_payload["grant_type"] == "path"
+    assert grant_payload["value"] == "docs/scratch/sub"
+    assert grant_payload["actions"] == ["read", "write"]
+    assert grant_payload["session_id"] == "session-1"
+
+    listed = asyncio.run(manager.list_grants(profile_id="reviewer", grant_type="path"))
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_payload["grant_id"]]
+
+    assert "policy_grant.path.created" in [event.event_type for event in audit_store.events]
+
+
+def test_policy_grant_manager_grant_path_rejects_invalid_requests() -> None:
+    from mcp_unified.gateway.policy_grants import (
+        GatewayPolicyGrantManagementError,
+        GatewayPolicyGrantManager,
+    )
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    manager = GatewayPolicyGrantManager(policy_grant_store=InMemoryPolicyGrantStore())
+
+    with pytest.raises(GatewayPolicyGrantManagementError) as excinfo:
+        asyncio.run(
+            manager.grant_path(
+                profile_id="reviewer",
+                prefix="/etc/passwd",
+                actions=("read",),
+            )
+        )
+    assert excinfo.value.reason_code == "invalid_policy_grant"
+
+    with pytest.raises(GatewayPolicyGrantManagementError):
+        asyncio.run(
+            manager.grant_path(
+                profile_id="reviewer",
+                prefix="docs/scratch",
+                actions=("launch_missiles",),
+            )
+        )

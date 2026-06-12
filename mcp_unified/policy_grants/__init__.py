@@ -6,6 +6,8 @@ from .models import (
     POLICY_GRANT_TYPES,
     PolicyGrant,
     PolicyGrantStore,
+    validate_grant_actions,
+    validate_grant_effect,
     validate_grant_request,
 )
 
@@ -16,5 +18,7 @@ __all__ = [
     "PolicyGrant",
     "PolicyGrantStore",
     "create_policy_grant_store",
+    "validate_grant_actions",
+    "validate_grant_effect",
     "validate_grant_request",
 ]

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from mcp_unified.profiles.path_grants import PATH_GRANT_ACTIONS, normalize_path_grant_prefix
 from mcp_unified.profiles.permission_rules import normalize_permission_subject_value
 
 POLICY_GRANT_TYPES = frozenset({"approval", "path"})
@@ -132,10 +133,45 @@ def validate_grant_request(
     else:
         if subject_type != "path":
             raise ValueError("path policy grants require subject_type 'path'")
-        normalized_value = value.strip() if isinstance(value, str) else ""
-        if not normalized_value:
-            raise ValueError("policy grant requires a non-empty value")
+        normalized_prefix = normalize_path_grant_prefix(value)
+        if normalized_prefix is None:
+            raise ValueError(
+                "path policy grants require a workspace-relative prefix "
+                "without '..' or absolute segments"
+            )
+        normalized_value = normalized_prefix
     return normalized_profile_id, grant_type, subject_type, normalized_value
+
+
+def validate_grant_actions(grant_type: str, actions: tuple[str, ...]) -> tuple[str, ...]:
+    """Validate and normalize one grant request's action list."""
+
+    normalized = tuple(
+        str(action or "").strip().lower()
+        for action in actions or ()
+        if str(action or "").strip()
+    )
+    if grant_type != "path":
+        return normalized
+    if not normalized:
+        raise ValueError("path policy grants require at least one action")
+    invalid = sorted(action for action in normalized if action not in PATH_GRANT_ACTIONS)
+    if invalid:
+        raise ValueError(f"unsupported path grant actions: {', '.join(invalid)}")
+    return normalized
+
+
+def validate_grant_effect(effect: str) -> str:
+    """Validate and normalize one grant request's effect.
+
+    TTL-bound grants can only widen policy temporarily; deny effects belong
+    in the profile document, so anything except "allow" is rejected.
+    """
+
+    normalized = str(effect or "").strip().lower()
+    if normalized != "allow":
+        raise ValueError("policy grants only support effect 'allow'")
+    return normalized
 
 
 __all__ = [
@@ -143,5 +179,7 @@ __all__ = [
     "POLICY_GRANT_TYPES",
     "PolicyGrant",
     "PolicyGrantStore",
+    "validate_grant_actions",
+    "validate_grant_effect",
     "validate_grant_request",
 ]
