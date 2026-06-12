@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 import os
 import sys
@@ -1156,9 +1157,14 @@ def _handle_simulate_policy(args: argparse.Namespace) -> int:
         try:
             config = load_gateway_profile_bootstrap_config(config_path)
             profile_bundle = build_gateway_profile_storage(config.store)
-            for seeded_profile in config.profiles:
-                _run_async(profile_bundle.profile_store.upsert_profile(seeded_profile))
+            # Simulation is read-only: never write config profiles into the
+            # store; fall back to the config document in memory instead.
             profile = _run_async(profile_bundle.profile_store.get_profile(profile_id))
+            if profile is None:
+                for config_profile in config.profiles:
+                    if config_profile.id == profile_id:
+                        profile = config_profile.model_copy(deep=True)
+                        break
             if profile is None:
                 _emit_json(
                     {
@@ -1193,13 +1199,25 @@ def _handle_simulate_policy(args: argparse.Namespace) -> int:
     finally:
         if profile_bundle is not None:
             _run_async(_close_storage_bundle(profile_bundle))
-        close_grant_store = getattr(grant_store, "close", None)
-        if callable(close_grant_store):
-            close_grant_store()
+        _close_policy_grant_store(grant_store)
+
+
+def _close_policy_grant_store(grant_store: Any) -> None:
+    """Close a policy grant store, awaiting coroutine-style close methods."""
+
+    close_grant_store = getattr(grant_store, "close", None)
+    if not callable(close_grant_store):
+        return
+    result = close_grant_store()
+    if inspect.iscoroutine(result):
+        _run_async(result)
 
 
 def _simulation_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    """Build the simulated tool-call arguments from CLI flags."""
+    """Build the simulated tool-call arguments from CLI flags.
+
+    Explicit convenience flags override keys supplied via --arguments-json.
+    """
 
     arguments: dict[str, Any] = {}
     if args.arguments_json:
@@ -1212,16 +1230,16 @@ def _simulation_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
         arguments.update(parsed)
     paths = [path for path in (args.path or []) if path.strip()]
     if len(paths) == 1:
-        arguments.setdefault("path", paths[0])
+        arguments["path"] = paths[0]
     elif paths:
-        arguments.setdefault("paths", paths)
+        arguments["paths"] = paths
     urls = [url for url in (args.url or []) if url.strip()]
     if len(urls) == 1:
-        arguments.setdefault("url", urls[0])
+        arguments["url"] = urls[0]
     elif urls:
-        arguments.setdefault("urls", urls)
+        arguments["urls"] = urls
     if args.command and args.command.strip():
-        arguments.setdefault("command", args.command.strip())
+        arguments["command"] = args.command.strip()
     if args.argv_json:
         try:
             argv = json.loads(args.argv_json)
@@ -1229,7 +1247,7 @@ def _simulation_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError(f"argv-json is not valid JSON: {exc}") from exc
         if not isinstance(argv, list) or not all(isinstance(token, str) for token in argv):
             raise ValueError("argv-json must be a JSON array of strings")
-        arguments.setdefault("argv", argv)
+        arguments["argv"] = argv
     return arguments
 
 
@@ -1293,9 +1311,7 @@ def _handle_policy_grant_command(
     finally:
         if profile_bundle is not None:
             _run_async(_close_storage_bundle(profile_bundle))
-        close_grant_store = getattr(grant_store, "close", None)
-        if callable(close_grant_store):
-            close_grant_store()
+        _close_policy_grant_store(grant_store)
 
 
 def _handle_export_config(args: argparse.Namespace) -> int:

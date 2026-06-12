@@ -3029,3 +3029,103 @@ def test_gateway_cli_simulate_policy_unknown_profile_errors(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert json.loads(captured.err)["reason_code"] == "profile_not_found"
+
+
+def test_gateway_cli_simulate_policy_does_not_write_persistent_profile_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Simulation must stay read-only even against a persistent profile store."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "profiles.db")},
+                "profiles": [
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "policy_document": {"allowed_tools": ["web.fetch"]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://example.com/page",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "allowed"
+
+    exit_code = gateway_cli.main(
+        ["show-profile", "researcher", "--config", str(config_path)]
+    )
+    capsys.readouterr()
+    assert exit_code == 1
+
+
+def test_gateway_cli_simulate_policy_flags_override_arguments_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit convenience flags must win over --arguments-json keys."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "profiles": [
+                    {
+                        "id": "reviewer",
+                        "name": "Reviewer",
+                        "policy_document": {
+                            "allowed_tools": ["fs.read_text"],
+                            "permission_rules": [
+                                {
+                                    "pattern": "Read(docs/private/**)",
+                                    "outcome": "deny",
+                                    "reason_code": "private_docs_denied",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--tool",
+            "fs.read_text",
+            "--path",
+            "docs/private/secret.txt",
+            "--arguments-json",
+            json.dumps({"path": "docs/public/notes.txt"}),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "denied"
+    assert payload["overall"]["reason_code"] == "private_docs_denied"

@@ -146,7 +146,7 @@ def _subject_details(
                 "subject_type": subject_type,
                 "value": value,
                 "outcome": effective_outcome,
-                "reason_code": decision.reason_code,
+                "reason_code": decision.reason_code if decision.matched_rules else None,
                 "matched_rules": [
                     matched_rule.model_dump(mode="json", exclude_none=True)
                     for matched_rule in decision.matched_rules

@@ -266,3 +266,23 @@ def test_simulation_matches_runtime_outcomes() -> None:
             f"parity mismatch for {tool_name} {arguments}: "
             f"simulated={simulated['overall']['status']} runtime={runtime_status}"
         )
+
+
+def test_simulation_unmatched_subjects_report_no_reason_code() -> None:
+    from mcp_unified.gateway.policy_simulation import simulate_tool_call_policy
+
+    profile = _profile(
+        "reviewer",
+        allowed_tools=["fs.read_text"],
+        permission_rules=[{"pattern": "Read(docs/private/**)", "outcome": "deny"}],
+    )
+    result = simulate_tool_call_policy(
+        profile,
+        "fs.read_text",
+        {"path": "docs/public/notes.txt"},
+    )
+    assert result["overall"]["status"] == "allowed"
+    for subject in result["subjects"]:
+        assert subject["outcome"] == "allow"
+        assert subject["reason_code"] is None
+        assert subject["matched_rules"] == []
