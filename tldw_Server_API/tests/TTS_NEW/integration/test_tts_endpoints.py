@@ -1041,10 +1041,14 @@ class TestTTSStreamingEndpoint:
             assert response.headers.get("X-Audio-Sample-Rate") == "24000"
             assert "audio/L16; rate=24000; channels=1" in response.headers.get("content-type", "")
             assert b"".join(response.iter_bytes()) == b"chunk-achunk-b"
-            assert seen["voice_path"].endswith("/voices/providers/pocket_tts_cpp/custom_voice-1.wav")
+            seen_voice_path = Path(seen["voice_path"])
+            assert seen_voice_path.name == "custom_voice-1.wav"
+            assert seen_voice_path.parent.name == "pocket_tts_cpp"
+            assert seen_voice_path.parent.parent.name == "providers"
+            assert seen_voice_path.parent.parent.parent.name == "voices"
             assert seen["token"]
             with pytest.raises(ValueError):
-                resolve_provider_managed_voice_path(seen["token"], Path(seen["voice_path"]))
+                resolve_provider_managed_voice_path(seen["token"], seen_voice_path)
         finally:
             test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
 
