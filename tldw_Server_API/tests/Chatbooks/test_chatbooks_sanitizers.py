@@ -55,12 +55,18 @@ def test_safe_increment_metric_failure_log_is_sanitized(monkeypatch):
 
 def test_persist_completed_sync_export_job_failure_logs_are_sanitized(monkeypatch, tmp_path):
     from tldw_Server_API.app.api.v1.endpoints import chatbooks
+    from tldw_Server_API.app.core.Chatbooks import chatbook_service as chatbook_service_mod
 
     export_file = tmp_path / "secret-export.zip"
     export_file.write_bytes(b"zip")
 
     class _FailingService:
         export_dir = tmp_path
+
+        # Exercise the real persistence/logging path that the endpoint delegates to.
+        register_completed_sync_export = (
+            chatbook_service_mod.ChatbookService.register_completed_sync_export
+        )
 
         def _get_export_expiry(self, now):
             return now
@@ -78,7 +84,7 @@ def test_persist_completed_sync_export_job_failure_logs_are_sanitized(monkeypatc
         raise RuntimeError("cleanup leaked /private/secret-export.zip")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(chatbooks, "logger", logger_stub)
+    monkeypatch.setattr(chatbook_service_mod, "logger", logger_stub)
     monkeypatch.setattr(chatbooks.Path, "unlink", _failing_unlink)
 
     with pytest.raises(chatbooks.HTTPException) as exc_info:

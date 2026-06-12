@@ -50,6 +50,9 @@ async def shutdown_resource_cleanup(
     await _shutdown_prompts_resources(
         guard_exceptions=startup_guard_exceptions,
     )
+    await _shutdown_explainer_resources(
+        guard_exceptions=startup_guard_exceptions,
+    )
     await _shutdown_chat_workflows_resources(
         app=app,
         guard_exceptions=startup_guard_exceptions,
@@ -187,6 +190,21 @@ async def _shutdown_prompts_resources(
         logger.info("App Shutdown: Prompts DB resources cleaned up")
     except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down Prompts DB resources: {exc}")
+
+
+async def _shutdown_explainer_resources(
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    try:
+        from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import (
+            cleanup_explainer_db_cache,
+        )
+
+        cleanup_explainer_db_cache()
+        logger.info("App Shutdown: Explainer DB resources cleaned up")
+    except guard_exceptions as exc:
+        logger.exception(f"App Shutdown: Error shutting down Explainer DB resources: {exc}")
 
 
 async def _shutdown_chat_workflows_resources(

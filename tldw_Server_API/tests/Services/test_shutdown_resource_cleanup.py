@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -59,6 +58,10 @@ async def test_shutdown_resource_cleanup_runs_steps_in_order(
         assert guard_exceptions == (RuntimeError,)
         calls.append("prompts")
 
+    async def _record_explainer(*, guard_exceptions):
+        assert guard_exceptions == (RuntimeError,)
+        calls.append("explainer")
+
     async def _record_chat_workflows(*, app, guard_exceptions):
         assert guard_exceptions == (RuntimeError,)
         calls.append("chat-workflows")
@@ -84,6 +87,7 @@ async def test_shutdown_resource_cleanup_runs_steps_in_order(
     monkeypatch.setattr(shutdown_resources, "_shutdown_http_client", _record_http_client)
     monkeypatch.setattr(shutdown_resources, "_shutdown_chacha_resources", _record_chacha)
     monkeypatch.setattr(shutdown_resources, "_shutdown_prompts_resources", _record_prompts)
+    monkeypatch.setattr(shutdown_resources, "_shutdown_explainer_resources", _record_explainer)
     monkeypatch.setattr(shutdown_resources, "_shutdown_chat_workflows_resources", _record_chat_workflows)
     monkeypatch.setattr(shutdown_resources, "_shutdown_provider_manager", _record_provider_manager)
     monkeypatch.setattr(shutdown_resources, "_shutdown_request_queue", _record_request_queue)
@@ -108,11 +112,31 @@ async def test_shutdown_resource_cleanup_runs_steps_in_order(
         "http-client",
         "chacha",
         "prompts",
+        "explainer",
         "chat-workflows",
         "provider-manager",
         "request-queue",
         "local-llm",
     ]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_explainer_resources_closes_db_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_resources = _import_shutdown_resource_cleanup()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps.cleanup_explainer_db_cache",
+        lambda: calls.append("cleanup-explainer-db-cache"),
+    )
+
+    await shutdown_resources._shutdown_explainer_resources(
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert calls == ["cleanup-explainer-db-cache"]
 
 
 @pytest.mark.asyncio
