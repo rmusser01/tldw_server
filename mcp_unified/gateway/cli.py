@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 import os
 import sys
@@ -54,6 +55,7 @@ from .policy_grants import (
     GatewayPolicyGrantManagementError,
     GatewayPolicyGrantManager,
 )
+from .policy_simulation import simulate_tool_call_policy
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
 from .remote_admin import (
     RemoteGatewayAdminClient,
@@ -510,6 +512,53 @@ def _build_parser() -> _JsonArgumentParser:
     )
     _add_profile_config_argument(revoke_approval_grant)
     revoke_approval_grant.set_defaults(handler=_handle_revoke_approval_grant)
+
+    simulate_policy = subparsers.add_parser(
+        "simulate-policy",
+        help="Simulate one profile policy decision for a hypothetical tool call.",
+    )
+    simulate_policy.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id to simulate against.",
+    )
+    simulate_policy.add_argument(
+        "--tool",
+        required=True,
+        help="Tool name for the simulated call.",
+    )
+    simulate_policy.add_argument(
+        "--path",
+        action="append",
+        help="Path argument for the simulated call (repeatable).",
+    )
+    simulate_policy.add_argument(
+        "--url",
+        action="append",
+        help="URL argument for the simulated call (repeatable).",
+    )
+    simulate_policy.add_argument(
+        "--command",
+        help="Shell command string argument for the simulated call.",
+    )
+    simulate_policy.add_argument(
+        "--argv-json",
+        help="JSON array of argv tokens for the simulated call.",
+    )
+    simulate_policy.add_argument(
+        "--arguments-json",
+        help="JSON object of raw tool arguments (merged with convenience flags).",
+    )
+    simulate_policy.add_argument(
+        "--capability",
+        help="Optional advertised tool capability for capability-based profiles.",
+    )
+    simulate_policy.add_argument(
+        "--session-id",
+        help="Optional session id for session-scoped grants.",
+    )
+    _add_profile_config_argument(simulate_policy)
+    simulate_policy.set_defaults(handler=_handle_simulate_policy)
 
     export_config = subparsers.add_parser(
         "export-config",
@@ -1085,6 +1134,123 @@ def _handle_revoke_approval_grant(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_simulate_policy(args: argparse.Namespace) -> int:
+    """Simulate one profile policy decision for a hypothetical tool call."""
+
+    profile_id = _require_cli_text(args.profile, field="profile")
+    tool_name = _require_cli_text(args.tool, field="tool")
+    capability = _optional_cli_text(args.capability, field="capability")
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    try:
+        arguments = _simulation_arguments_from_args(args)
+    except ValueError as exc:
+        _emit_json(
+            {"ok": False, "error": str(exc), "reason_code": "invalid_simulation_arguments"},
+            sys.stderr,
+        )
+        return 1
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    grant_store: Any = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            # Simulation is read-only: never write config profiles into the
+            # store; fall back to the config document in memory instead.
+            profile = _run_async(profile_bundle.profile_store.get_profile(profile_id))
+            if profile is None:
+                for config_profile in config.profiles:
+                    if config_profile.id == profile_id:
+                        profile = config_profile.model_copy(deep=True)
+                        break
+            if profile is None:
+                _emit_json(
+                    {
+                        "ok": False,
+                        "error": f"Profile not found: {profile_id}",
+                        "reason_code": "profile_not_found",
+                        "profile_id": profile_id,
+                    },
+                    sys.stderr,
+                )
+                return 1
+            grant_store = build_gateway_policy_grant_store(config.policy_grants)
+        except _CliArgumentError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _emit_json(
+                {"error": str(exc), "ok": False, "path": str(config_path)},
+                sys.stderr,
+            )
+            return 1
+
+        payload = simulate_tool_call_policy(
+            profile,
+            tool_name,
+            arguments,
+            capability=capability,
+            policy_grant_store=grant_store,
+            session_id=session_id,
+        )
+        _emit_json(_cli_payload(payload), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        _close_policy_grant_store(grant_store)
+
+
+def _close_policy_grant_store(grant_store: Any) -> None:
+    """Close a policy grant store, awaiting coroutine-style close methods."""
+
+    close_grant_store = getattr(grant_store, "close", None)
+    if not callable(close_grant_store):
+        return
+    result = close_grant_store()
+    if inspect.iscoroutine(result):
+        _run_async(result)
+
+
+def _simulation_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Build the simulated tool-call arguments from CLI flags.
+
+    Explicit convenience flags override keys supplied via --arguments-json.
+    """
+
+    arguments: dict[str, Any] = {}
+    if args.arguments_json:
+        try:
+            parsed = json.loads(args.arguments_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"arguments-json is not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("arguments-json must be a JSON object")
+        arguments.update(parsed)
+    paths = [path for path in (args.path or []) if path.strip()]
+    if len(paths) == 1:
+        arguments["path"] = paths[0]
+    elif paths:
+        arguments["paths"] = paths
+    urls = [url for url in (args.url or []) if url.strip()]
+    if len(urls) == 1:
+        arguments["url"] = urls[0]
+    elif urls:
+        arguments["urls"] = urls
+    if args.command and args.command.strip():
+        arguments["command"] = args.command.strip()
+    if args.argv_json:
+        try:
+            argv = json.loads(args.argv_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"argv-json is not valid JSON: {exc}") from exc
+        if not isinstance(argv, list) or not all(isinstance(token, str) for token in argv):
+            raise ValueError("argv-json must be a JSON array of strings")
+        arguments["argv"] = argv
+    return arguments
+
+
 def _handle_policy_grant_command(
     args: argparse.Namespace,
     operation: Callable[[GatewayPolicyGrantManager], Coroutine[Any, Any, Any]],
@@ -1145,9 +1311,7 @@ def _handle_policy_grant_command(
     finally:
         if profile_bundle is not None:
             _run_async(_close_storage_bundle(profile_bundle))
-        close_grant_store = getattr(grant_store, "close", None)
-        if callable(close_grant_store):
-            close_grant_store()
+        _close_policy_grant_store(grant_store)
 
 
 def _handle_export_config(args: argparse.Namespace) -> int:

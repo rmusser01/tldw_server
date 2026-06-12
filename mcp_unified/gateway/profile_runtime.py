@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, Protocol
 
@@ -16,7 +16,6 @@ from mcp_unified.policy_grants import PolicyGrantStore
 from mcp_unified.profiles.decisions import PolicyDecisionRule
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.permission_rules import (
-    PermissionRuleSubject,
     compile_permission_rules,
     evaluate_permission_rule_decision,
 )
@@ -26,6 +25,10 @@ from mcp_unified.profiles.resolution import (
     build_effective_policy_result,
 )
 from mcp_unified.profiles.resolver import StoreBackedProfileResolver
+from mcp_unified.profiles.subjects import (
+    PermissionSubjectLimitError,
+    extract_permission_rule_subjects,
+)
 from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
@@ -64,30 +67,7 @@ _TOOL_CALL_ARGUMENT_KEYS = frozenset({"tool_id", "arguments"})
 _TOOL_SEARCH_ARGUMENT_KEYS = frozenset({"query", "category", "limit"})
 _TOOL_DESCRIBE_ARGUMENT_KEYS = frozenset({"tool_id"})
 _EMPTY_ARGUMENT_KEYS = frozenset()
-_PATH_ARGUMENT_KEYS = frozenset(
-    {
-        "path",
-        "file",
-        "file_path",
-        "filepath",
-        "filename",
-        "base_path",
-        "target_path",
-        "source_path",
-        "destination_path",
-        "new_path",
-        "old_path",
-    }
-)
-_PATH_ARGUMENT_LIST_KEYS = frozenset({"paths", "files", "file_paths"})
-_DOMAIN_ARGUMENT_KEYS = frozenset({"url", "uri", "domain", "host", "base_url"})
-_DOMAIN_ARGUMENT_LIST_KEYS = frozenset({"urls", "uris", "domains", "hosts"})
-_COMMAND_ARGUMENT_KEYS = frozenset({"command", "cmd", "shell_command"})
-_COMMAND_ARGV_KEYS = frozenset({"argv"})
 _PERMISSION_RULE_CACHE_MAX_ENTRIES = 64
-_MAX_PERMISSION_SUBJECTS = 128
-_MAX_SUBJECT_VALUE_LENGTH = 4096
-_MAX_COMMAND_ARGV_TOKENS = 256
 _BRIDGE_TOOL_DESCRIPTORS: dict[str, dict[str, Any]] = {
     _TOOL_CATEGORIES_LIST: {
         "name": _TOOL_CATEGORIES_LIST,
@@ -1114,14 +1094,6 @@ def _effective_policy_for_tool(
     )
 
 
-class _PermissionSubjectLimitError(Exception):
-    """Raised when one tool call exceeds permission-subject extraction limits."""
-
-    def __init__(self, limit: str) -> None:
-        super().__init__(limit)
-        self.limit = limit
-
-
 def _enforce_permission_rules_for_tool_call(
     profile: MCPProfile,
     tool_name: str,
@@ -1141,8 +1113,8 @@ def _enforce_permission_rules_for_tool_call(
 
     approval_grant_markers: list[str] = []
     try:
-        subjects = _permission_rule_subjects_for_tool_call(tool_name, arguments)
-    except _PermissionSubjectLimitError as exc:
+        subjects = extract_permission_rule_subjects(tool_name, arguments)
+    except PermissionSubjectLimitError as exc:
         raise GatewayPolicyDenied(
             "Gateway profile rejected oversized tool arguments for permission rules",
             reason_code="permission_subject_limits_exceeded",
@@ -1241,91 +1213,6 @@ def _active_approval_lease_marker(
     if lease is None:
         return None
     return hashlib.sha256(lease.grant_id.encode("utf-8")).hexdigest()[:16]
-
-
-def _permission_rule_subjects_for_tool_call(
-    tool_name: str,
-    arguments: dict[str, Any],
-) -> list[tuple[PermissionRuleSubject, str, Sequence[str] | None]]:
-    """Extract bounded permission-rule subjects from one gateway tool call."""
-
-    subjects: list[tuple[PermissionRuleSubject, str, Sequence[str] | None]] = []
-    _append_permission_subject(subjects, "tool", tool_name, None)
-    if tool_name.lower().startswith("mcp__"):
-        _append_permission_subject(subjects, "mcp", tool_name, None)
-    if not isinstance(arguments, Mapping):
-        return subjects
-
-    for key, value in arguments.items():
-        if not isinstance(key, str):
-            continue
-        normalized_key = key.strip().lower()
-        if normalized_key in _PATH_ARGUMENT_KEYS:
-            for item in _string_values(value):
-                _append_permission_subject(subjects, "path", item, None)
-        elif normalized_key in _PATH_ARGUMENT_LIST_KEYS:
-            for item in _nested_string_values(value):
-                _append_permission_subject(subjects, "path", item, None)
-        elif normalized_key in _DOMAIN_ARGUMENT_KEYS:
-            for item in _string_values(value):
-                _append_permission_subject(subjects, "domain", item, None)
-        elif normalized_key in _DOMAIN_ARGUMENT_LIST_KEYS:
-            for item in _nested_string_values(value):
-                _append_permission_subject(subjects, "domain", item, None)
-        elif normalized_key in _COMMAND_ARGUMENT_KEYS:
-            for item in _string_values(value):
-                _append_permission_subject(subjects, "command", item, None)
-        elif normalized_key in _COMMAND_ARGV_KEYS:
-            argv = _argv_argument(value)
-            if argv is not None:
-                if len(argv) > _MAX_COMMAND_ARGV_TOKENS:
-                    raise _PermissionSubjectLimitError("max_command_argv_tokens")
-                _append_permission_subject(subjects, "command", " ".join(argv), argv)
-    return subjects
-
-
-def _append_permission_subject(
-    subjects: list[tuple[PermissionRuleSubject, str, Sequence[str] | None]],
-    subject_type: PermissionRuleSubject,
-    value: str,
-    argv: Sequence[str] | None,
-) -> None:
-    """Append one extracted subject while enforcing extraction limits."""
-
-    if len(subjects) >= _MAX_PERMISSION_SUBJECTS:
-        raise _PermissionSubjectLimitError("max_permission_subjects")
-    if len(value) > _MAX_SUBJECT_VALUE_LENGTH:
-        raise _PermissionSubjectLimitError("max_subject_value_length")
-    subjects.append((subject_type, value, argv))
-
-
-def _string_values(value: Any) -> tuple[str, ...]:
-    """Return one non-empty string value or an empty tuple."""
-
-    if isinstance(value, str) and value.strip():
-        return (value.strip(),)
-    return ()
-
-
-def _nested_string_values(value: Any) -> tuple[str, ...]:
-    """Return non-empty string values from a scalar or shallow sequence."""
-
-    if isinstance(value, (str, bytes, Mapping)):
-        return _string_values(value)
-    if isinstance(value, Sequence):
-        return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
-    return ()
-
-
-def _argv_argument(value: Any) -> tuple[str, ...] | None:
-    """Return argv tokens when a tool call provides an argv-shaped argument."""
-
-    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, Sequence):
-        return None
-    argv = tuple(value)
-    if not argv or not all(isinstance(item, str) for item in argv):
-        return None
-    return argv
 
 
 def _primary_capability(tool: Any) -> str | None:
