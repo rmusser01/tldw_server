@@ -11,6 +11,20 @@ import {
   getExplainerNodeStatusLabel
 } from "./tree"
 
+// Media items use the library's established deep-link; notes have no
+// single-note URL yet, so fall back to the manager. External URLs win.
+const citationHref = (citation: { url?: string | null; sourceType: string; sourceId: string }): string => {
+  if (citation.url) return citation.url
+  if (citation.sourceType === "media") return `/media?id=${encodeURIComponent(citation.sourceId)}`
+  if (citation.sourceType === "note") return "/notes"
+  return "/media"
+}
+
+type ExplainerAnswerPayload = {
+  selectedOptionId?: string
+  selectedCustomAnswer?: string
+}
+
 type ExplainerDetailPanelProps = {
   session: ExplainerSession | null
   node: ExplainerNode | null
@@ -19,6 +33,7 @@ type ExplainerDetailPanelProps = {
   sectionRef?: React.Ref<HTMLElement>
   onExpand: (nodeId: string) => void
   onDeleteNode?: (nodeId: string) => void
+  onAnswerQuestion?: (nodeId: string, answer: ExplainerAnswerPayload) => void
 }
 
 export const ExplainerDetailPanel = ({
@@ -28,12 +43,15 @@ export const ExplainerDetailPanel = ({
   generatingNodeId = null,
   sectionRef,
   onExpand,
-  onDeleteNode
+  onDeleteNode,
+  onAnswerQuestion
 }: ExplainerDetailPanelProps) => {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [customAnswer, setCustomAnswer] = useState("")
 
   useEffect(() => {
     setConfirmingDelete(false)
+    setCustomAnswer("")
   }, [node?.id])
 
   if (!session || !node) {
@@ -106,29 +124,88 @@ export const ExplainerDetailPanel = ({
         </div>
 
         {node.questionOptions?.length ? (
-          <section aria-label="Clarifying answers" className="grid gap-2">
-            <h3 className="text-sm font-semibold text-text">Clarifying answers</h3>
-            <div className="flex flex-wrap gap-2">
-              {node.questionOptions.map((option) => {
-                const id = typeof option.id === "string" ? option.id : ""
-                const label = typeof option.label === "string" ? option.label : id
-                const selected = id && id === node.selectedOptionId
-                return (
-                  <span
-                    key={id || label}
-                    className={[
-                      "rounded-full border px-3 py-1 text-xs font-medium",
-                      selected
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-surface text-text-muted"
-                    ].join(" ")}
-                  >
-                    {label}
-                  </span>
-                )
-              })}
-            </div>
-          </section>
+          (() => {
+            const answered = Boolean(node.selectedOptionId || node.selectedCustomAnswer)
+            if (!answered && onAnswerQuestion) {
+              return (
+                <section aria-label="Clarifying question" className="grid gap-3 rounded-md border border-primary/40 bg-primary/5 px-4 py-4">
+                  <h3 className="text-sm font-semibold text-text">
+                    Answer to shape the next breakdown
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {node.questionOptions.map((option) => {
+                      const id = typeof option.id === "string" ? option.id : ""
+                      const label = typeof option.label === "string" ? option.label : id
+                      return (
+                        <button
+                          key={id || label}
+                          type="button"
+                          className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-text transition-colors hover:border-primary hover:text-primary"
+                          onClick={() => onAnswerQuestion(node.id, { selectedOptionId: id })}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      aria-label="Custom answer"
+                      className="h-9 min-w-[220px] flex-1 rounded-md border border-border bg-surface2 px-3 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus"
+                      placeholder="Or answer in your own words"
+                      value={customAnswer}
+                      onChange={(event) => setCustomAnswer(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && customAnswer.trim()) {
+                          onAnswerQuestion(node.id, { selectedCustomAnswer: customAnswer.trim() })
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primaryStrong disabled:cursor-not-allowed disabled:bg-surface2 disabled:text-text-muted"
+                      disabled={!customAnswer.trim()}
+                      onClick={() =>
+                        onAnswerQuestion(node.id, { selectedCustomAnswer: customAnswer.trim() })
+                      }
+                    >
+                      Submit answer
+                    </button>
+                  </div>
+                </section>
+              )
+            }
+            return (
+              <section aria-label="Clarifying answers" className="grid gap-2">
+                <h3 className="text-sm font-semibold text-text">Clarifying answers</h3>
+                <div className="flex flex-wrap gap-2">
+                  {node.questionOptions.map((option) => {
+                    const id = typeof option.id === "string" ? option.id : ""
+                    const label = typeof option.label === "string" ? option.label : id
+                    const selected = id && id === node.selectedOptionId
+                    return (
+                      <span
+                        key={id || label}
+                        className={[
+                          "rounded-full border px-3 py-1 text-xs font-medium",
+                          selected
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-surface text-text-muted"
+                        ].join(" ")}
+                      >
+                        {label}
+                      </span>
+                    )
+                  })}
+                  {node.selectedCustomAnswer ? (
+                    <span className="rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                      {node.selectedCustomAnswer}
+                    </span>
+                  ) : null}
+                </div>
+              </section>
+            )
+          })()
         ) : null}
 
         <section aria-label="Citations" className="grid gap-3">
@@ -155,6 +232,13 @@ export const ExplainerDetailPanel = ({
                 <blockquote className="text-sm leading-6 text-text-muted">
                   {citation.excerpt}
                 </blockquote>
+                <a
+                  href={citationHref(citation)}
+                  className="mt-2 inline-block text-xs font-medium text-primary underline underline-offset-2 hover:opacity-90"
+                  {...(citation.url ? { target: "_blank", rel: "noreferrer" } : {})}
+                >
+                  Open source
+                </a>
               </figure>
             ))
           )}

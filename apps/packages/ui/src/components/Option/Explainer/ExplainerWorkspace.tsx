@@ -255,6 +255,27 @@ export const ExplainerWorkspace = () => {
     }
   }
 
+  const answerQuestion = async (
+    nodeId: string,
+    answer: { selectedOptionId?: string; selectedCustomAnswer?: string }
+  ) => {
+    if (!session) return
+    setErrorMessage(null)
+    try {
+      await mutations.answerQuestion.mutateAsync({
+        sessionId: session.id,
+        nodeId,
+        payload: answer
+      })
+    } catch (error) {
+      setErrorMessage(
+        sanitizeErrorMessage(
+          error instanceof Error ? error.message : "Saving the answer failed"
+        )
+      )
+    }
+  }
+
   const renameSession = async () => {
     if (!session) return
     const title = renameDraft.trim()
@@ -531,6 +552,7 @@ export const ExplainerWorkspace = () => {
           sectionRef={detailSectionRef}
           onExpand={expandNode}
           onDeleteNode={deleteNode}
+          onAnswerQuestion={answerQuestion}
         />
         <aside
           aria-label="Explainer session settings"

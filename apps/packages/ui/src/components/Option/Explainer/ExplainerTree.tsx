@@ -126,6 +126,13 @@ export const ExplainerTree = ({
                       >
                         {getExplainerEvidenceLabel(node.evidenceState)}
                       </span>
+                      {node.childNodeIds.length > 0 ? (
+                        <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
+                          {node.childNodeIds.length === 1
+                            ? "1 subtopic"
+                            : `${node.childNodeIds.length} subtopics`}
+                        </span>
+                      ) : null}
                     </span>
                   </span>
                 </button>

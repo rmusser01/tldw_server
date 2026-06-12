@@ -384,3 +384,63 @@ describe("ExplainerWorkspace", () => {
     })
   })
 })
+
+describe("ExplainerWorkspace upgrades", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.getSession.mockResolvedValue(sampleSession)
+    api.createSession.mockResolvedValue(sampleSession)
+    api.answerQuestion.mockResolvedValue(sampleSession.nodes.child)
+    api.searchSources.mockResolvedValue([])
+    api.exportChatbook.mockResolvedValue({ success: true, message: "ok", job_id: "j" })
+  })
+
+  it("persists a clarifying answer through the API", async () => {
+    const questionSession: ExplainerSession = {
+      ...sampleSession,
+      nodes: {
+        ...sampleSession.nodes,
+        child: {
+          ...sampleSession.nodes.child,
+          kind: "question",
+          questionOptions: [{ id: "math", label: "Focus on math" }],
+          selectedOptionId: null,
+          selectedCustomAnswer: null
+        }
+      }
+    }
+    api.listSessions.mockResolvedValue({
+      items: [summaryOf(questionSession)],
+      total: 1,
+      limit: 50,
+      offset: 0
+    })
+    api.getSession.mockResolvedValue(questionSession)
+    renderWorkspace()
+
+    const tree = await screen.findByRole("tree", { name: "Explainer outline" })
+    fireEvent.click(await within(tree).findByText("Scaled dot-product attention"))
+    const detail = screen.getByRole("region", { name: "Explainer detail" })
+    fireEvent.click(within(detail).getByRole("button", { name: "Focus on math" }))
+
+    await waitFor(() => {
+      expect(api.answerQuestion).toHaveBeenCalledWith("session-1", "child", {
+        selectedOptionId: "math"
+      })
+    })
+  })
+
+  it("prefills the goal composer from a template card", async () => {
+    api.listSessions.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 })
+    renderWorkspace()
+
+    const gallery = await screen.findByRole("region", { name: "Explainer templates" })
+    fireEvent.click(within(gallery).getByRole("button", { name: /Prepare a study plan/ }))
+
+    expect((screen.getByLabelText("Learning goal") as HTMLTextAreaElement).value).toContain(
+      "study plan"
+    )
+    expect(screen.getByLabelText("Output intent")).toHaveValue("plan")
+    expect(screen.getByLabelText("Depth preset")).toHaveValue("deep")
+  })
+})

@@ -1,6 +1,45 @@
 import { Play } from "lucide-react"
 import type { ExplainerDepthPreset, ExplainerOutputIntent } from "./types"
 
+type ExplainerTemplate = {
+  name: string
+  description: string
+  goal: string
+  outputIntent: ExplainerOutputIntent
+  depthPreset: ExplainerDepthPreset
+}
+
+const TEMPLATES: ExplainerTemplate[] = [
+  {
+    name: "Explain to a newcomer",
+    description: "Plain-language walkthrough for someone new to the field.",
+    goal: "Explain <topic> to someone new to the field, using plain language and concrete examples.",
+    outputIntent: "explain",
+    depthPreset: "standard"
+  },
+  {
+    name: "Prepare a study plan",
+    description: "A sequenced plan with milestones and practice.",
+    goal: "Build a study plan for learning <topic>, with milestones and practice exercises.",
+    outputIntent: "plan",
+    depthPreset: "deep"
+  },
+  {
+    name: "Quick refresher",
+    description: "The essentials in a few minutes.",
+    goal: "Give me a quick refresher on <topic> — just the essentials I am likely to have forgotten.",
+    outputIntent: "explain",
+    depthPreset: "quick"
+  },
+  {
+    name: "Deep dive with practice",
+    description: "Full depth plus hands-on next steps.",
+    goal: "Explain <topic> in depth and give me hands-on practice steps to test my understanding.",
+    outputIntent: "both",
+    depthPreset: "deep"
+  }
+]
+
 type ExplainerGoalComposerProps = {
   goal: string
   outputIntent: ExplainerOutputIntent
@@ -24,8 +63,32 @@ export const ExplainerGoalComposer = ({
 }: ExplainerGoalComposerProps) => (
   <section
     aria-label="Goal setup"
-    className="grid gap-4 border-b border-border bg-surface px-4 py-4 lg:grid-cols-[minmax(280px,1fr)_220px_180px_auto]"
+    className="grid gap-4 border-b border-border bg-surface px-4 py-4"
   >
+    <section aria-label="Explainer templates" className="grid gap-2">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+        Start from a template
+      </h2>
+      <div className="flex flex-wrap gap-2">
+        {TEMPLATES.map((template) => (
+          <button
+            key={template.name}
+            type="button"
+            title={template.description}
+            className="inline-flex h-8 items-center rounded-full border border-border bg-surface2 px-3 text-xs font-medium text-text-muted transition-colors hover:border-primary hover:text-text"
+            onClick={() => {
+              onGoalChange(template.goal)
+              onOutputIntentChange(template.outputIntent)
+              onDepthPresetChange(template.depthPreset)
+            }}
+          >
+            {template.name}
+          </button>
+        ))}
+      </div>
+    </section>
+
+    <div className="grid gap-4 lg:grid-cols-[minmax(280px,1fr)_220px_180px_auto]">
     <div className="grid gap-2">
       <label className="grid gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -84,6 +147,7 @@ export const ExplainerGoalComposer = ({
         <Play className="h-4 w-4" aria-hidden="true" />
         Create Explainer
       </button>
+    </div>
     </div>
   </section>
 )

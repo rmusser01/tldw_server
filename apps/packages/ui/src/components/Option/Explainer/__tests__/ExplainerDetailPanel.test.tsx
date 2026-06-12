@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import type { ExplainerNode, ExplainerSession } from "../types"
@@ -82,5 +82,91 @@ describe("ExplainerDetailPanel", () => {
     renderPanel({ generatingNodeId: "child" })
 
     expect(screen.getByRole("button", { name: "Break down" })).toBeDisabled()
+  })
+})
+
+describe("ExplainerDetailPanel clarifying questions", () => {
+  const questionNode = {
+    ...baseNode,
+    kind: "question" as const,
+    questionOptions: [
+      { id: "math", label: "Focus on math" },
+      { id: "intuition", label: "Focus on intuition" }
+    ],
+    selectedOptionId: null,
+    selectedCustomAnswer: null
+  }
+
+  it("lets users answer an open question by picking an option", () => {
+    const onAnswerQuestion = vi.fn()
+    renderPanel({ node: questionNode, onAnswerQuestion })
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus on math" }))
+
+    expect(onAnswerQuestion).toHaveBeenCalledWith("child", { selectedOptionId: "math" })
+  })
+
+  it("lets users answer with a custom response", () => {
+    const onAnswerQuestion = vi.fn()
+    renderPanel({ node: questionNode, onAnswerQuestion })
+
+    fireEvent.change(screen.getByLabelText("Custom answer"), {
+      target: { value: "Both, but lead with intuition" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }))
+
+    expect(onAnswerQuestion).toHaveBeenCalledWith("child", {
+      selectedCustomAnswer: "Both, but lead with intuition"
+    })
+  })
+
+  it("shows answered questions read-only", () => {
+    const onAnswerQuestion = vi.fn()
+    renderPanel({
+      node: { ...questionNode, selectedOptionId: "math" },
+      onAnswerQuestion
+    })
+
+    expect(screen.queryByLabelText("Custom answer")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Focus on math" })).not.toBeInTheDocument()
+    expect(screen.getByText("Focus on math")).toBeInTheDocument()
+  })
+})
+
+describe("ExplainerDetailPanel citation links", () => {
+  const citation = {
+    id: "cite-1",
+    sourceId: "media-42",
+    sourceType: "media",
+    title: "Attention notes",
+    excerpt: "Attention weights are computed from query-key similarity.",
+    locationLabel: "chunk 3"
+  }
+
+  it("links external citations to their URL", () => {
+    renderPanel({
+      node: { ...baseNode, citations: [{ ...citation, url: "https://example.test/paper" }] }
+    })
+
+    const link = screen.getByRole("link", { name: "Open source" })
+    expect(link).toHaveAttribute("href", "https://example.test/paper")
+    expect(link).toHaveAttribute("target", "_blank")
+  })
+
+  it("links media citations to the media library item", () => {
+    renderPanel({ node: { ...baseNode, citations: [citation] } })
+
+    expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute(
+      "href",
+      "/media?id=media-42"
+    )
+  })
+
+  it("links note citations to the notes manager", () => {
+    renderPanel({
+      node: { ...baseNode, citations: [{ ...citation, sourceId: "note-7", sourceType: "note" }] }
+    })
+
+    expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute("href", "/notes")
   })
 })

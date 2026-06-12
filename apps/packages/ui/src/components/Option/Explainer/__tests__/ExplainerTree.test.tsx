@@ -109,3 +109,19 @@ describe("ExplainerTree", () => {
     expect(document.activeElement).toBe(rootRow)
   })
 })
+
+describe("ExplainerTree breadth signals", () => {
+  it("shows a subtopic count badge for nodes with children", () => {
+    renderTree()
+    const tree = screen.getByRole("tree", { name: "Explainer outline" })
+
+    expect(within(tree).getByText("1 subtopic")).toBeInTheDocument()
+  })
+
+  it("omits the badge for leaf nodes", () => {
+    renderTree()
+    const tree = screen.getByRole("tree", { name: "Explainer outline" })
+
+    expect(within(tree).queryByText("0 subtopics")).not.toBeInTheDocument()
+  })
+})
