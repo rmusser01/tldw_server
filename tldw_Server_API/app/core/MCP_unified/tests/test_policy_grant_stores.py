@@ -558,3 +558,44 @@ def test_memory_store_rejects_invalid_path_grant_actions() -> None:
             actions=(),
             ttl_seconds=900,
         )
+
+
+def test_memory_store_normalizes_action_case() -> None:
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    store = InMemoryPolicyGrantStore()
+    grant = store.create_grant(
+        profile_id="reviewer",
+        grant_type="path",
+        subject_type="path",
+        value="docs/scratch",
+        actions=("READ", " Write "),
+        ttl_seconds=900,
+    )
+    assert grant.actions == ("read", "write")
+
+
+def test_memory_store_rejects_non_allow_effects() -> None:
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    store = InMemoryPolicyGrantStore()
+    for invalid_effect in ("deny", "bogus", ""):
+        with pytest.raises(ValueError):
+            store.create_grant(
+                profile_id="reviewer",
+                grant_type="path",
+                subject_type="path",
+                value="docs/scratch",
+                actions=("read",),
+                effect=invalid_effect,
+                ttl_seconds=900,
+            )
+    allowed = store.create_grant(
+        profile_id="reviewer",
+        grant_type="approval",
+        subject_type="tool",
+        value="web.fetch",
+        effect="Allow",
+        ttl_seconds=900,
+    )
+    assert allowed.effect == "allow"

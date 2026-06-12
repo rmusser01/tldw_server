@@ -147,7 +147,9 @@ def validate_grant_actions(grant_type: str, actions: tuple[str, ...]) -> tuple[s
     """Validate and normalize one grant request's action list."""
 
     normalized = tuple(
-        str(action or "").strip() for action in actions or () if str(action or "").strip()
+        str(action or "").strip().lower()
+        for action in actions or ()
+        if str(action or "").strip()
     )
     if grant_type != "path":
         return normalized
@@ -159,11 +161,25 @@ def validate_grant_actions(grant_type: str, actions: tuple[str, ...]) -> tuple[s
     return normalized
 
 
+def validate_grant_effect(effect: str) -> str:
+    """Validate and normalize one grant request's effect.
+
+    TTL-bound grants can only widen policy temporarily; deny effects belong
+    in the profile document, so anything except "allow" is rejected.
+    """
+
+    normalized = str(effect or "").strip().lower()
+    if normalized != "allow":
+        raise ValueError("policy grants only support effect 'allow'")
+    return normalized
+
+
 __all__ = [
     "APPROVAL_SUBJECT_TYPES",
     "POLICY_GRANT_TYPES",
     "PolicyGrant",
     "PolicyGrantStore",
     "validate_grant_actions",
+    "validate_grant_effect",
     "validate_grant_request",
 ]

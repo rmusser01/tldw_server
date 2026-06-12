@@ -5872,6 +5872,8 @@ def test_gateway_profile_runtime_failing_grant_store_fails_closed_to_denial() ->
 
 
 def _path_grant_runtime(profile_path_scopes: list[dict[str, Any]] | None = None) -> tuple[Any, Any, Any]:
+    """Build a grant-store-backed runtime around one fs.read_text reviewer profile."""
+
     from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
     from mcp_unified.policy_grants import InMemoryPolicyGrantStore
     from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
@@ -5895,6 +5897,8 @@ def _path_grant_runtime(profile_path_scopes: list[dict[str, Any]] | None = None)
 
 
 def _delegated_path_scopes(backend: Any) -> list[dict[str, Any]]:
+    """Return the path scopes from the last delegated call's effective policy."""
+
     from mcp_unified.gateway.profile_runtime import EFFECTIVE_POLICY_METADATA_KEY
 
     delegated_context = backend.call_requests[-1][2]

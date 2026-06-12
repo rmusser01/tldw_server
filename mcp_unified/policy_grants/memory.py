@@ -12,6 +12,7 @@ from .models import (
     PolicyGrant,
     PolicyGrantStore,
     validate_grant_actions,
+    validate_grant_effect,
     validate_grant_request,
 )
 
@@ -57,6 +58,7 @@ class InMemoryPolicyGrantStore:
             value=value,
         )
         normalized_actions = validate_grant_actions(grant_type, actions)
+        normalized_effect = validate_grant_effect(effect)
         now = time.time()
         ttl = max(1, int(ttl_seconds))
         grant = PolicyGrant(
@@ -68,7 +70,7 @@ class InMemoryPolicyGrantStore:
             expires_at=now + ttl,
             ttl_seconds=ttl,
             actions=normalized_actions,
-            effect=effect,
+            effect=normalized_effect,
             session_id=session_id,
             user_id=user_id,
             granted_by=granted_by,

@@ -914,7 +914,7 @@ def _policy_with_ttl_path_grants(
 ) -> Any:
     """Return the effective policy with active TTL path grants merged in."""
 
-    if policy is None or policy_grant_store is None:
+    if policy is None or policy_grant_store is None or not hasattr(policy, "path_scopes"):
         return policy
     try:
         grants = policy_grant_store.list_active_grants(
@@ -922,6 +922,11 @@ def _policy_with_ttl_path_grants(
             grant_type="path",
         )
     except Exception:  # noqa: BLE001 - grant store failures must not alter base policy
+        logger.opt(exception=True).warning(
+            "Policy grant store listing failed; delegating base policy without "
+            "TTL path grants (profile_id={profile_id})",
+            profile_id=profile_id,
+        )
         return policy
     merged_scopes = [
         {
