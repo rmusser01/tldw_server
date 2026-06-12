@@ -2700,6 +2700,323 @@ def test_gateway_profile_runtime_blocks_matching_mcp_permission_rule() -> None:
     assert backend.call_requests == []
 
 
+def _read_text_tool_descriptor() -> dict[str, Any]:
+    return {
+        "name": "fs.read_text",
+        "description": "Read a text file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        "metadata": {"category": "filesystem", "capability": "filesystem.read"},
+    }
+
+
+def _post_tool_call(client: Any, name: str, arguments: dict[str, Any], request_id: str) -> Any:
+    return client.post(
+        "/mcp/request",
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+            "id": request_id,
+        },
+    )
+
+
+def test_gateway_profile_runtime_caches_compiled_permission_rules(monkeypatch) -> None:
+    from mcp_unified.gateway import profile_runtime as profile_runtime_module
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "reviewer",
+        allowed_tools=["fs.read_text"],
+        permission_rules=[{"pattern": "Read(docs/private/**)", "outcome": "deny"}],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    compile_calls: list[Any] = []
+    real_compile = profile_runtime_module.compile_permission_rules
+
+    def _counting_compile(*args: Any, **kwargs: Any) -> Any:
+        compile_calls.append(args)
+        return real_compile(*args, **kwargs)
+
+    monkeypatch.setattr(profile_runtime_module, "compile_permission_rules", _counting_compile)
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        for request_id in ("cache-first", "cache-second"):
+            allowed = _post_tool_call(
+                client,
+                "fs.read_text",
+                {"path": "docs/public/notes.txt", "query": "notes"},
+                request_id,
+            )
+            assert allowed.json().get("error") is None
+
+    assert len(backend.call_requests) == 2
+    assert len(compile_calls) == 1
+
+
+def test_gateway_profile_runtime_recompiles_permission_rules_when_profile_updated() -> None:
+    import asyncio
+    from datetime import datetime, timezone
+
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    first_version = MCPProfile(
+        id="reviewer",
+        name="Profile reviewer",
+        policy_document=ProfilePolicy(
+            allowed_tools=["fs.read_text"],
+            permission_rules=[{"pattern": "Read(docs/private/**)", "outcome": "deny"}],
+        ),
+        updated_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    store = InMemoryProfileStore([first_version])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=store,
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        allowed = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"path": "docs/public/notes.txt", "query": "notes"},
+            "before-update",
+        )
+        assert allowed.json().get("error") is None
+
+        second_version = first_version.model_copy(
+            update={
+                "policy_document": ProfilePolicy(
+                    allowed_tools=["fs.read_text"],
+                    permission_rules=[
+                        {
+                            "pattern": "Read(docs/public/**)",
+                            "outcome": "deny",
+                            "reason_code": "public_docs_denied",
+                        }
+                    ],
+                ),
+                "updated_at": datetime(2026, 6, 2, tzinfo=timezone.utc),
+            }
+        )
+        asyncio.run(store.upsert_profile(second_version))
+
+        denied = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"path": "docs/public/notes.txt", "query": "notes"},
+            "after-update",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="after-update")
+    assert body["error"]["data"]["reason_code"] == "public_docs_denied"
+    assert len(backend.call_requests) == 1
+
+
+def test_gateway_profile_runtime_permission_rule_cache_stays_bounded() -> None:
+    from mcp_unified.gateway.profile_runtime import (
+        _PERMISSION_RULE_CACHE_MAX_ENTRIES,
+        ProfileAwareGatewayRuntime,
+    )
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    placeholder = _profile_with_allowed_tools("reviewer", ["fs.read_text"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([placeholder]),
+        default_profile_id="reviewer",
+    )
+
+    for index in range(_PERMISSION_RULE_CACHE_MAX_ENTRIES + 16):
+        profile = _profile_with_allowed_tools_and_permission_rules(
+            f"profile-{index}",
+            allowed_tools=["fs.read_text"],
+            permission_rules=[{"pattern": "Read(docs/private/**)", "outcome": "deny"}],
+        )
+        assert runtime._compiled_permission_rules(profile)
+
+    assert len(runtime._permission_rule_cache) == _PERMISSION_RULE_CACHE_MAX_ENTRIES
+
+
+def test_gateway_profile_runtime_skips_permission_rules_for_missing_policy_document() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.models import MCPProfile
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    placeholder = _profile_with_allowed_tools("reviewer", ["fs.read_text"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([placeholder]),
+        default_profile_id="reviewer",
+    )
+    unvalidated = MCPProfile.model_construct(
+        id="reviewer",
+        name="Profile reviewer",
+        policy_document=None,
+    )
+
+    assert runtime._compiled_permission_rules(unvalidated) == ()
+    assert runtime._compiled_permission_rules(None) == ()
+
+
+def test_gateway_profile_runtime_denies_oversized_permission_subject_count() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "reviewer",
+        allowed_tools=["fs.read_text"],
+        permission_rules=[{"pattern": "Read(docs/private/**)", "outcome": "deny"}],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"paths": [f"docs/public/file-{index}.txt" for index in range(200)], "query": "files"},
+            "subject-count-limit",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="subject-count-limit")
+    error_data = body["error"]["data"]
+    assert error_data["reason_code"] == "permission_subject_limits_exceeded"
+    assert error_data["status"] == "denied"
+    assert error_data["provenance"]["tool_name"] == "fs.read_text"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_denies_oversized_permission_subject_value() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "reviewer",
+        allowed_tools=["fs.read_text"],
+        permission_rules=[{"pattern": "Read(docs/private/**)", "outcome": "deny"}],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+    oversized_path = "docs/public/" + ("a" * 5000)
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"path": oversized_path, "query": "oversized"},
+            "subject-value-limit",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="subject-value-limit")
+    error_data = body["error"]["data"]
+    assert error_data["reason_code"] == "permission_subject_limits_exceeded"
+    assert error_data["status"] == "denied"
+    assert oversized_path not in json.dumps(error_data)
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_denies_oversized_permission_argv() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            {
+                "name": "shell.run",
+                "description": "Run a governed shell command.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"argv": {"type": "array"}},
+                },
+                "metadata": {"category": "shell", "capability": "shell.execute"},
+            }
+        ]
+    )
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "operator",
+        allowed_tools=["shell.run"],
+        permission_rules=[{"pattern": "Bash(rm *)", "outcome": "deny"}],
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="operator",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "shell.run",
+            {"argv": ["echo"] * 300, "query": "argv"},
+            "argv-token-limit",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="argv-token-limit")
+    error_data = body["error"]["data"]
+    assert error_data["reason_code"] == "permission_subject_limits_exceeded"
+    assert error_data["status"] == "denied"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_allows_oversized_arguments_without_permission_rules() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    profile = _profile_with_allowed_tools("reviewer", ["fs.read_text"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        allowed = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"paths": [f"docs/public/file-{index}.txt" for index in range(200)], "query": "files"},
+            "rule-free-oversized",
+        )
+
+    assert allowed.json().get("error") is None
+    assert len(backend.call_requests) == 1
+
+
 def test_gateway_profile_runtime_denies_explicit_tool_before_backend_discovery() -> None:
     from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
     from mcp_unified.profiles.store import InMemoryProfileStore
