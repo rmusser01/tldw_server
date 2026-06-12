@@ -5840,6 +5840,9 @@ def test_gateway_profile_runtime_failing_grant_store_fails_closed_to_denial() ->
         def find_active_grant(self, **kwargs: Any) -> Any:
             raise RuntimeError("grant store unavailable")
 
+        def list_active_grants(self, **kwargs: Any) -> Any:
+            raise RuntimeError("grant store unavailable")
+
     backend = _CustomToolListGatewayRuntime([_web_fetch_tool_descriptor()])
     profile = _profile_with_allowed_tools_and_permission_rules(
         "researcher",
@@ -5866,3 +5869,108 @@ def test_gateway_profile_runtime_failing_grant_store_fails_closed_to_denial() ->
     _assert_jsonrpc_error(body, code=-32001, request_id="ask-store-failure")
     assert body["error"]["data"]["status"] == "approval_required"
     assert backend.call_requests == []
+
+
+def _path_grant_runtime(profile_path_scopes: list[dict[str, Any]] | None = None) -> tuple[Any, Any, Any]:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+    from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    profile = MCPProfile(
+        id="reviewer",
+        name="Profile reviewer",
+        policy_document=ProfilePolicy(allowed_tools=["fs.read_text"]),
+        path_scopes=profile_path_scopes or [],
+    )
+    grant_store = InMemoryPolicyGrantStore()
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+        policy_grant_store=grant_store,
+    )
+    return runtime, backend, grant_store
+
+
+def _delegated_path_scopes(backend: Any) -> list[dict[str, Any]]:
+    from mcp_unified.gateway.profile_runtime import EFFECTIVE_POLICY_METADATA_KEY
+
+    delegated_context = backend.call_requests[-1][2]
+    effective_policy = delegated_context.metadata[EFFECTIVE_POLICY_METADATA_KEY]
+    return effective_policy["path_scopes"]
+
+
+def test_gateway_profile_runtime_merges_ttl_path_grants_into_effective_policy() -> None:
+    runtime, backend, grant_store = _path_grant_runtime(
+        profile_path_scopes=[{"prefix": "docs/manuals", "actions": ["read"], "effect": "allow"}]
+    )
+    grant = grant_store.create_grant(
+        profile_id="reviewer",
+        grant_type="path",
+        subject_type="path",
+        value="docs/scratch",
+        actions=("read", "write"),
+        ttl_seconds=900,
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        allowed = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"path": "docs/scratch/notes.txt", "query": "notes"},
+            "ttl-path-grant-merged",
+        )
+
+    assert allowed.json().get("error") is None
+    path_scopes = _delegated_path_scopes(backend)
+    assert {"prefix": "docs/manuals", "actions": ["read"], "effect": "allow"} in path_scopes
+    merged = [scope for scope in path_scopes if scope.get("source") == "ttl_grant"]
+    assert len(merged) == 1
+    assert merged[0]["prefix"] == "docs/scratch"
+    assert merged[0]["actions"] == ["read", "write"]
+    assert merged[0]["effect"] == "allow"
+    assert merged[0]["grant_id"] == grant.grant_id
+    assert merged[0]["expires_at"] == grant.expires_at_iso()
+
+
+def test_gateway_profile_runtime_skips_inapplicable_ttl_path_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mcp_unified.policy_grants.memory as memory_grants
+
+    runtime, backend, grant_store = _path_grant_runtime()
+    grant_store.create_grant(
+        profile_id="reviewer",
+        grant_type="path",
+        subject_type="path",
+        value="docs/other-session",
+        actions=("read",),
+        ttl_seconds=900,
+        session_id="session-1",
+    )
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_000.0)
+    grant_store.create_grant(
+        profile_id="reviewer",
+        grant_type="path",
+        subject_type="path",
+        value="docs/expired",
+        actions=("read",),
+        ttl_seconds=10,
+    )
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_011.0)
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        allowed = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"path": "docs/anything.txt", "query": "notes"},
+            "ttl-path-grant-skipped",
+        )
+
+    assert allowed.json().get("error") is None
+    path_scopes = _delegated_path_scopes(backend)
+    assert [scope for scope in path_scopes if scope.get("source") == "ttl_grant"] == []

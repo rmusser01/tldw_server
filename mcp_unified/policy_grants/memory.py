@@ -8,7 +8,12 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from .models import PolicyGrant, PolicyGrantStore, validate_grant_request
+from .models import (
+    PolicyGrant,
+    PolicyGrantStore,
+    validate_grant_actions,
+    validate_grant_request,
+)
 
 
 class InMemoryPolicyGrantStore:
@@ -51,6 +56,7 @@ class InMemoryPolicyGrantStore:
             subject_type=subject_type,
             value=value,
         )
+        normalized_actions = validate_grant_actions(grant_type, actions)
         now = time.time()
         ttl = max(1, int(ttl_seconds))
         grant = PolicyGrant(
@@ -61,7 +67,7 @@ class InMemoryPolicyGrantStore:
             value=normalized_value,
             expires_at=now + ttl,
             ttl_seconds=ttl,
-            actions=tuple(actions),
+            actions=normalized_actions,
             effect=effect,
             session_id=session_id,
             user_id=user_id,

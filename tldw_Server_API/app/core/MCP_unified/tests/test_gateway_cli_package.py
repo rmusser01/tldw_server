@@ -2837,3 +2837,106 @@ def test_gateway_cli_approval_grant_requires_persistent_store(
     assert exit_code == 1
     payload = json.loads(captured.err)
     assert payload["reason_code"] == "policy_grant_store_unavailable"
+
+
+def test_gateway_cli_path_grant_lifecycle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke a TTL path grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-path-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--prefix",
+            "docs\\scratch/./sub",
+            "--actions",
+            "read,write",
+            "--ttl-seconds",
+            "900",
+            "--session-id",
+            "session-1",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    grant_payload = created["grant"]
+    assert grant_payload["grant_type"] == "path"
+    assert grant_payload["value"] == "docs/scratch/sub"
+    assert grant_payload["actions"] == ["read", "write"]
+    grant_id = grant_payload["grant_id"]
+
+    exit_code = gateway_cli.main(
+        [
+            "list-approval-grants",
+            "--config",
+            str(config_path),
+            "--grant-type",
+            "path",
+        ]
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+
+
+def test_gateway_cli_path_grant_rejects_invalid_actions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail closed on invalid path grant actions."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-path-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--prefix",
+            "docs/scratch",
+            "--actions",
+            "read,launch_missiles",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert json.loads(captured.err)["reason_code"] == "invalid_policy_grant"

@@ -23,7 +23,7 @@ from sqlalchemy import (
     select,
 )
 
-from .models import PolicyGrant, validate_grant_request
+from .models import PolicyGrant, validate_grant_actions, validate_grant_request
 
 
 class SQLitePolicyGrantStore:
@@ -106,6 +106,7 @@ class SQLitePolicyGrantStore:
             subject_type=subject_type,
             value=value,
         )
+        normalized_actions = validate_grant_actions(grant_type, actions)
         now_us = _now_us()
         ttl = max(1, int(ttl_seconds))
         grant = PolicyGrant(
@@ -116,7 +117,7 @@ class SQLitePolicyGrantStore:
             value=normalized_value,
             expires_at=(now_us + ttl * 1_000_000) / 1_000_000,
             ttl_seconds=ttl,
-            actions=tuple(actions),
+            actions=normalized_actions,
             effect=effect,
             session_id=session_id,
             user_id=user_id,
