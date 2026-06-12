@@ -2940,3 +2940,92 @@ def test_gateway_cli_path_grant_rejects_invalid_actions(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert json.loads(captured.err)["reason_code"] == "invalid_policy_grant"
+
+
+def test_gateway_cli_simulate_policy_reports_decision(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Simulate a profile policy decision for one hypothetical tool call."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "profiles": [
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "policy_document": {
+                            "allowed_tools": ["web.fetch"],
+                            "permission_rules": [
+                                {"pattern": "WebFetch(example.com)", "outcome": "ask"}
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://example.com/private",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "approval_required"
+    assert payload["profile_id"] == "researcher"
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://other.example.org/page",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "allowed"
+
+
+def test_gateway_cli_simulate_policy_unknown_profile_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report a JSON error payload for an unknown profile id."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps({"store": {"kind": "memory"}}), encoding="utf-8")
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "missing",
+            "--tool",
+            "web.fetch",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert json.loads(captured.err)["reason_code"] == "profile_not_found"
