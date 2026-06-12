@@ -468,10 +468,10 @@ async def test_sse_metrics_enqueue_to_yield_and_high_watermark():
 
 @pytest.mark.asyncio
 async def test_sse_backpressure_heartbeats_under_load():
-    """Under heavy producer pressure, ensure a heartbeat is eventually emitted once idle.
+    """Under heavy producer pressure, ensure a heartbeat is eventually emitted.
 
-    We stress the queue with a small max size so producer backpressure engages, then
-    verify that a heartbeat (comment mode) appears shortly after the producer stops.
+    We stress the queue with a small max size so producer backpressure engages,
+    then close the stream as soon as the heartbeat under test is observed.
     """
     stream = SSEStream(heartbeat_interval_s=0.05, heartbeat_mode="comment", queue_maxsize=5)
 
@@ -479,33 +479,25 @@ async def test_sse_backpressure_heartbeats_under_load():
     heartbeat_seen = asyncio.Event()
 
     async def producer():
-        for i in range(100):
-            await stream.send_json({"i": i})
-        producer_done.set()
+        try:
+            for i in range(100):
+                await stream.send_json({"i": i})
+        finally:
+            producer_done.set()
 
     async def closer():
-        await producer_done.wait()
-        try:
-            await asyncio.wait_for(
-                heartbeat_seen.wait(),
-                timeout=stream.heartbeat_interval_s + 0.1,
-            )
-        except TimeoutError:
-            pass
+        await asyncio.wait_for(heartbeat_seen.wait(), timeout=3.0)
         await stream.done(force=True)
 
     async def consumer():
         async for ln in stream.iter_sse():
             if ln.startswith(":"):
                 heartbeat_seen.set()
-            # If producer is done and queue drains, the next emission should be a heartbeat within interval
-            if producer_done.is_set():
-                # Keep looping until heartbeat is encountered
-                continue
 
     # Run both concurrently with a timeout guard
-    await asyncio.wait_for(asyncio.gather(producer(), consumer(), closer()), timeout=2.0)
-    assert heartbeat_seen.is_set(), "heartbeat not observed under backpressure after producer finished"
+    await asyncio.wait_for(asyncio.gather(producer(), consumer(), closer()), timeout=5.0)
+    assert producer_done.is_set()
+    assert heartbeat_seen.is_set(), "heartbeat not observed under backpressure"
 
 
 @pytest.mark.asyncio

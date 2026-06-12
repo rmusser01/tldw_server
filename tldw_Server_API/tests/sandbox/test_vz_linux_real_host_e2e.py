@@ -425,6 +425,7 @@ def test_restart_helper_for_drill_skips_when_pid_exits_before_signal(
         _restart_helper_for_drill(lease, process_lookup=lambda _pid: str(helper))
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="helper restart drill uses POSIX process semantics")
 def test_restart_helper_for_drill_replaces_pid_file_and_stops_old_helper(tmp_path: Path) -> None:
     helper = tmp_path / "macos-vz-helper"
     helper.write_text(

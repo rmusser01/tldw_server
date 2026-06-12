@@ -198,10 +198,13 @@ modified_files:
 - tldw_Server_API/tests/TTS/test_phoneme_overrides.py
 - tldw_Server_API/tests/TTS/test_tts_adapters_comprehensive.py
 - tldw_Server_API/tests/Audio/test_audio_tts_oauth_retry_unit.py
+- tldw_Server_API/app/core/TTS/adapters/pocket_tts_cpp_runtime.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_custom_voice_resolution.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_transcription_auth.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py
+- tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_runtime.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_openai_adapter.py
+- tldw_Server_API/tests/Streaming/test_streams.py
 - tldw_Server_API/tests/API_Deps/test_chacha_notes_db_deps_error_mapping.py
 - tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py
 - tldw_Server_API/tests/sandbox/test_artifacts_api.py
@@ -220,6 +223,7 @@ modified_files:
 - tldw_Server_API/tests/sandbox/test_workspace_diagnostics.py
 - tldw_Server_API/tests/sandbox/test_ws_connection_quotas.py
 - tldw_Server_API/tests/sandbox/test_ws_heartbeat_seq.py
+- tldw_Server_API/tests/sandbox/test_ws_resume_url_exposure.py
 - tldw_Server_API/tests/Workflows/test_workflows_api.py
 - tldw_Server_API/tests/Workflows/test_engine_step_types.py
 - tldw_Server_API/tests/Workflows/test_runs_cursor_pagination.py
@@ -822,6 +826,14 @@ Post-push run `27362793115` on `7458013ea7` exposed Ubuntu/Python 3.12 `ai-embed
 Final drain of run `27362793115` completed with no queued or running jobs and exposed additional actionable shard failures. Windows/macOS `db-privileges` failed privilege snapshot retention because the SQLite weekly-retention bucket used a rough day-of-year division instead of ISO week semantics; SQLite retention now anchors dates to the ISO-week Thursday before partitioning, and the regression test chooses same-ISO-week timestamps that cross the former rough-bucket boundary. Media-audio shards failed Qwen3 TTS initialization when prior tests left a partial fake `torch` module without dtype attributes; Qwen3 dtype resolution now uses guarded `getattr()` and falls back to the configured dtype string, with a focused regression. macOS `product-claims-core` exposed an order-sensitive claims clustering fixture; the test now binds the stub Chroma collection directly to the stub manager and restores mutated settings even when the original value was absent. Windows `platform-sandbox-runtimes` was enforcing POSIX owner-only mode bits on Windows; that assertion is now POSIX-only while preserving regular-file and PID validation. macOS `platform-sandbox-ws-streams` created fake Docker sandbox runs while still depending on host Docker preflight; the websocket multi-subscriber test now stubs Docker preflight as mocked/available. Ubuntu `product-notes-persona` timed out waiting for a circuit-open notice under full-shard load; that specific notice helper call now uses a five-second budget while preserving the exact event/reason assertions.
 
 Non-actionable rows in `27362793115` were aggregate full-suite summary gates, canceled shards after the run was already failing, and Ubuntu/Python 3.12 plus 3.13 `llm-local-backends` runner-shutdown rows with no pytest assertion summary. Verification for the complete local patch: exact failed-regression bundle passed (`7 passed`), expanded touched-file run passed (`68 passed, 5 skipped`), `ci.yml` parsed with PyYAML, compileall passed for touched Python files, `git diff --check` passed, Bandit on touched production files reported no findings, and the broader Bandit touched-scope report contained only existing low-severity test-file baseline findings (`B101` asserts plus one existing `B112` test helper pattern).
+
+Post-push run `27379033480` on `7f4cff594f` exposed three actionable Windows shard failures before the run finished draining. Windows/Python 3.12 `media-audio` failed the PocketTTS.cpp custom-voice endpoint after materializing the voice reference because `_write_runtime_file_sync()` attempted a directory `fsync` by opening the runtime directory directly, which can raise `PermissionError` on Windows. The file write still uses atomic replace plus file fsync, and the follow-up now treats the directory fsync as best effort with a sanitized debug message when the platform rejects it. Windows/Python 3.12 `chat-core` failed `test_sse_backpressure_heartbeats_under_load` because the closer waited for a 100-message producer to finish before closing the stream; under bounded-queue backpressure that could consume the whole test timeout despite the heartbeat being emitted. The test now waits for the heartbeat under test and then force-closes the stream. Windows/Python 3.12 `platform-sandbox-runtimes` failed `test_restart_helper_for_drill_replaces_pid_file_and_stops_old_helper` because the drill launches a POSIX shebang helper script directly; the test is now skipped on Windows as a POSIX process-semantics drill.
+
+The same run currently has Ubuntu/Python 3.12 and 3.13 `llm-local-backends` rows plus several media/workflow cancellation rows with only GitHub runner cancellation output and no pytest assertion summaries. Aggregate full-suite rows are summary gates over failed shards, not separate test roots. Verification for the latest local patch: the PocketTTS directory-fsync regression reproduced red locally before the production fix and passed after it; the focused TTS/custom-voice/SSE bundle passed (`3 passed`); the sandbox helper drill passed locally on macOS and will skip on Windows; the broader touched-file run passed (`60 passed, 5 skipped`); compileall passed for the touched Python files; `git diff --check` passed; Bandit on the touched production file reported no findings; and broader Bandit on the touched production/test scope reported only existing test-file baseline findings (`B101` asserts plus existing `B108` temp-dir usage).
+
+While run `27379033480` continued draining, macOS/Python 3.12 `platform-sandbox-ws-streams` failed `test_post_runs_exposes_resume_from_seq_in_url` because the fake/no-execution Docker run still depended on host Docker runtime preflight under `TLDW_TEST_NO_DOCKER=1`. The resume-url exposure test now stubs Docker preflight availability with the same mocked result used by adjacent WebSocket sandbox tests. Verification: the exact failed regression passed locally under `TLDW_TEST_NO_DOCKER=1` (`1 passed`), the expanded touched-test bundle passed (`61 passed, 5 skipped`), compileall passed for the new sandbox test file, `git diff --check` passed, production Bandit on `pocket_tts_cpp_runtime.py` reported `errors=[]` and `results=[]`, and broader touched-scope Bandit reported only test-file baseline assertions/temp-path findings.
+
+Final drain of run `27379033480` completed with no queued or running jobs. The late macOS/Python 3.12 `Full Suite` failure was an aggregate summary row over the already-classified `platform-sandbox-ws-streams` failure, not an additional pytest root. Final local verification before commit: no active jobs remained in the run, compileall passed for the touched Python scope, and `git diff --check` passed.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
